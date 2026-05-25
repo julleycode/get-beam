@@ -3,10 +3,14 @@ from celery.schedules import crontab
 
 from apps.api.config import settings
 
+# Use broker URL if set, otherwise use in-memory transport (no-op for web-only deploy)
+broker_url = settings.celery_broker_url or "memory://"
+backend_url = settings.celery_result_backend or "cache+memory://"
+
 celery_app = Celery(
     "retarget_agent",
-    broker=settings.celery_broker_url,
-    backend=settings.celery_result_backend,
+    broker=broker_url,
+    backend=backend_url,
 )
 
 celery_app.conf.update(
