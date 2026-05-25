@@ -1,0 +1,10 @@
+{
+  "include": ["apps/api"],
+  "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv",
+  "pythonPlatform": "Linux",
+  "typeCheckingMode": "basic",
+  "reportMissingImports": true,
+  "reportMissingModuleSource": false
+}

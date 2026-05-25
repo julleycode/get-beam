@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pixel-test",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "apps/pixel", "-l", "8888", "--no-clipboard"],
+      "port": 8888
+    }
+  ]
+}

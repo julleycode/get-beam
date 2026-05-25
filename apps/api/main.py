@@ -1,0 +1,67 @@
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+
+import structlog
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+
+from apps.api.config import settings
+from apps.api.models.database import engine, Base
+from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
+
+logger = structlog.get_logger()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    logger.info("starting_up", env=settings.app_env)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    await engine.dispose()
+    logger.info("shut_down")
+
+
+app = FastAPI(
+    title="ReTargetAgent API",
+    version="0.1.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
+app.include_router(events.router, prefix="/api/v1/events", tags=["events"])
+app.include_router(sites.router, prefix="/api/v1/sites", tags=["sites"])
+app.include_router(visitors.router, prefix="/api/v1/visitors", tags=["visitors"])
+app.include_router(segments.router, prefix="/api/v1/segments", tags=["segments"])
+app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaigns"])
+app.include_router(exports.router, prefix="/api/v1/exports", tags=["exports"])
+app.include_router(api_keys.router, prefix="/api/v1/api-keys", tags=["api-keys"])
+
+
+@app.get("/health")
+async def health_check() -> dict[str, str]:
+    return {"status": "ok", "env": settings.app_env}
+
+
+@app.get("/pixel/tracker.js")
+async def serve_pixel() -> Response:
+    import pathlib
+    pixel_path = pathlib.Path(__file__).parent.parent / "pixel" / "src" / "tracker.js"
+    if pixel_path.exists():
+        content = pixel_path.read_text()
+    else:
+        content = "// pixel not found"
+    return Response(
+        content=content,
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*"},
+    )

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Pixel Test - thaibaotran-growth.com simulation</title>
+  <script
+    src="https://tear-cho-duo-shorter.trycloudflare.com/pixel/tracker.js"
+    data-site="site_thaibaotran01"
+    data-api="https://tear-cho-duo-shorter.trycloudflare.com"
+    defer></script>
+</head>
+<body style="font-family: sans-serif; padding: 40px; max-width: 800px; margin: 0 auto;">
+  <h1>ReTargetAgent Pixel Test Page</h1>
+  <p>This page simulates <strong>thaibaotran-growth.com</strong> with the tracking pixel installed.</p>
+
+  <h2>Test Actions:</h2>
+  <ul>
+    <li>Page view is tracked automatically on load</li>
+    <li>Scroll down to trigger scroll tracking (25%, 50%, 75%, 100%)</li>
+    <li>Click buttons below to trigger click tracking</li>
+    <li>Stay on page 15+ seconds for time-on-page tracking</li>
+  </ul>
+
+  <div style="margin: 20px 0;">
+    <a href="#section1" style="padding: 10px 20px; background: #0070f3; color: white; text-decoration: none; border-radius: 5px; margin-right: 10px;">Learn More</a>
+    <button onclick="alert('CTA clicked!')" style="padding: 10px 20px; background: #10b981; color: white; border: none; border-radius: 5px; cursor: pointer;">Get Started</button>
+    <a href="https://www.thaibaotran-growth.com" role="button" style="padding: 10px 20px; background: #8b5cf6; color: white; text-decoration: none; border-radius: 5px; margin-left: 10px;">Visit Real Site</a>
+  </div>
+
+  <div style="height: 200vh; padding-top: 50px;" id="section1">
+    <h2>Section 1 - Scroll Test</h2>
+    <p>Keep scrolling to trigger scroll depth tracking...</p>
+    <div style="height: 50vh; background: #f0f0f0; margin: 20px 0; display: flex; align-items: center; justify-content: center;">
+      <p>25% scroll zone</p>
+    </div>
+    <div style="height: 50vh; background: #e0e0e0; display: flex; align-items: center; justify-content: center;">
+      <p>50% scroll zone</p>
+    </div>
+    <div style="height: 50vh; background: #d0d0d0; display: flex; align-items: center; justify-content: center;">
+      <p>75% scroll zone</p>
+    </div>
+    <div style="height: 50vh; background: #c0c0c0; display: flex; align-items: center; justify-content: center;">
+      <p>100% scroll zone</p>
+    </div>
+  </div>
+
+  <div id="status" style="position: fixed; bottom: 10px; right: 10px; background: #333; color: #0f0; padding: 10px 15px; border-radius: 8px; font-family: monospace; font-size: 12px;">
+    Pixel: loading...
+  </div>
+  <script>
+    // Check if pixel loaded
+    setTimeout(function() {
+      var el = document.getElementById('status');
+      var cookie = document.cookie.match(/_rta_vid=([^;]+)/);
+      if (cookie) {
+        el.textContent = 'Pixel OK | Visitor: ' + cookie[1].substring(0, 8) + '...';
+        el.style.background = '#065f46';
+      } else {
+        el.textContent = 'Pixel: NOT loaded';
+        el.style.background = '#991b1b';
+      }
+    }, 3000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp ~/Projects/social-agent/.env.example ~/Projects/social-agent/.env)",
+      "Bash(docker --version)",
+      "Bash(docker compose *)",
+      "Bash(open -a Docker)",
+      "Bash(docker info *)",
+      "Bash(break)",
+      "Bash(npx --version)",
+      "Bash(npx create-next-app@14 web --typescript --tailwind --eslint --app --src-dir --no-import-alias --use-npm)",
+      "Bash(cat /tmp/twitter_browser_error_*.png)",
+      "Bash(ls /tmp/twitter_browser_error_*.png)",
+      "Bash(grep -i \"twitter_browser\\\\|twitter_api_reply\\\\|browser_reply\\\\|send_draft\" /tmp/*.log 2>/dev/null | tail -30; ps aux | grep uvicorn | grep -v grep | head -3)",
+      "Bash(xargs kill -9)",
+      "Bash(npm run *)",
+      "Bash(curl -s http://localhost:3000)",
+      "Bash(PYTHONPATH=/Users/apple/Projects/social-agent .venv/bin/python -c ' *)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(curl -s http://localhost:8000/api/auth/login -X POST -H \"Content-Type: application/json\" -d '{\"email\":\"test@test.com\",\"password\":\"test1234\"}')",
+      "Bash(curl -s http://localhost:8000/api/auth/login -X POST -H \"Content-Type: application/json\" -d '{\"email\":\"julley@test.com\",\"password\":\"test1234\"}')",
+      "Bash(docker exec *)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "mcp__Claude_in_Chrome__browser_batch",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__find",
+      "mcp__Claude_in_Chrome__computer",
+      "Bash(.venv/bin/python -c ' *)"
+    ]
+  }
+}
