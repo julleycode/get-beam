@@ -46,7 +46,7 @@ async def ingest_events(
             element_text=event.element_text or "",
             element_href=event.element_href or "",
             ip_address=ip_address,
-            created_at=event.ts,
+            created_at=event.ts.replace(tzinfo=None) if event.ts.tzinfo else event.ts,
         ))
 
     await db.commit()
