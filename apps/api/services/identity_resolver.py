@@ -23,7 +23,7 @@ class IdentityResolver:
         self.redis = redis_client
 
     async def check_daily_budget(self, site_id: str) -> bool:
-        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
         result = await self.db.execute(
             select(func.count()).select_from(ResolutionLog).where(
                 ResolutionLog.site_id == site_id,
