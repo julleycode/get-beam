@@ -14,6 +14,7 @@ from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.routers.auth import get_current_user
 from apps.api.schemas.visitors import VisitorDetailOut, VisitorListResponse, VisitorOut
 from apps.api.services.enricher import Enricher
+from apps.api.services.identity_resolver import IdentityResolver
 
 logger = structlog.get_logger()
 
@@ -224,3 +225,49 @@ async def enrich_visitor(
             "status": "partial",
             "message": "Could not enrich further. Ensure Tier 1 enrichment has run first.",
         }
+
+
+@router.post("/{site_id}/resolve")
+async def resolve_site_visitors(
+    site_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Trigger identity resolution + Tier 1 enrichment for all eligible visitors."""
+    await _verify_site_access(db, site_id, user)
+
+    # Find anonymous visitors with intent >= 40
+    result = await db.execute(
+        select(Visitor).where(
+            Visitor.site_id == site_id,
+            Visitor.identity_status == "anonymous",
+            Visitor.intent_score >= 40,
+        ).order_by(Visitor.intent_score.desc()).limit(50)
+    )
+    visitors = list(result.scalars().all())
+
+    if not visitors:
+        return {"status": "no_eligible", "message": "No visitors with intent >= 40 to resolve."}
+
+    resolver = IdentityResolver(db)
+    enricher = Enricher(db)
+    resolved = 0
+    enriched = 0
+
+    for visitor in visitors:
+        try:
+            identified = await resolver.resolve(visitor)
+            if identified:
+                resolved += 1
+                profile = await enricher.enrich_tier1(visitor, identified)
+                if profile:
+                    enriched += 1
+        except Exception as e:
+            logger.warning("resolve_visitor_error", visitor_id=visitor.visitor_id, error=str(e))
+
+    return {
+        "status": "completed",
+        "processed": len(visitors),
+        "resolved": resolved,
+        "enriched": enriched,
+    }
