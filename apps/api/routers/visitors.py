@@ -230,11 +230,27 @@ async def enrich_visitor(
 @router.post("/{site_id}/resolve")
 async def resolve_site_visitors(
     site_id: str,
+    reset: bool = Query(False, description="Reset unresolvable visitors back to anonymous for re-processing"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Trigger identity resolution + Tier 1 enrichment for all eligible visitors."""
+    from apps.api.models.visitor import IdentifiedVisitor as IdentVisitor
+    from sqlalchemy import text as sql_text
+
     await _verify_site_access(db, site_id, user)
+
+    # Reset unresolvable visitors if requested
+    if reset:
+        await db.execute(
+            sql_text("UPDATE visitors SET identity_status = 'anonymous' WHERE site_id = :sid AND identity_status = 'unresolvable'"),
+            {"sid": site_id},
+        )
+        await db.execute(
+            sql_text("DELETE FROM resolution_logs WHERE site_id = :sid"),
+            {"sid": site_id},
+        )
+        await db.commit()
 
     # Find anonymous visitors with intent >= 40
     result = await db.execute(

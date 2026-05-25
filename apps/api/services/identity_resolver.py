@@ -153,8 +153,8 @@ class IdentityResolver:
         return None
 
     def _mock_pdl_response(self, visitor: Visitor) -> dict | None:
-        # ~12% match rate in mock mode
-        if random.random() > 0.12:
+        # ~60% match rate in mock mode for better testing
+        if random.random() > 0.60:
             return None
         first_names = ["John", "Sarah", "Mike", "Emma", "Alex", "Lisa", "David", "Rachel"]
         last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Davis", "Miller", "Wilson"]
