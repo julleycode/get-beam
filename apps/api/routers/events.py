@@ -1,11 +1,12 @@
+import asyncio
 import json
 
 import structlog
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, Request, Response
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.models.database import get_db
+from apps.api.models.database import get_db, async_session
 from apps.api.schemas.events import EventBatch
 from apps.api.services.clickhouse_client import get_clickhouse_client
 
@@ -76,14 +77,21 @@ async def ingest_events(
         count=len(batch.events),
     )
 
-    # Auto-aggregate this visitor after ingestion
-    try:
-        from apps.api.services.visitor_aggregator import aggregate_visitors_for_site
-        await aggregate_visitors_for_site(db, batch.site_id)
-    except Exception as e:
-        logger.warning("auto_aggregate_failed", error=str(e), site_id=batch.site_id)
+    # Run aggregation in background so we don't block the 204 response
+    site_id = batch.site_id
+    asyncio.create_task(_background_aggregate(site_id))
 
     return Response(status_code=204)
+
+
+async def _background_aggregate(site_id: str) -> None:
+    """Run visitor aggregation in a background task with its own DB session."""
+    try:
+        from apps.api.services.visitor_aggregator import aggregate_visitors_for_site
+        async with async_session() as db:
+            await aggregate_visitors_for_site(db, site_id)
+    except Exception as e:
+        logger.warning("background_aggregate_failed", error=str(e), site_id=site_id)
 
 
 async def _fallback_pg_insert(
