@@ -1,4 +1,3 @@
-import json
 import math
 from datetime import datetime, timedelta, timezone
 
@@ -8,7 +7,6 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.visitor import Visitor
-from apps.api.services.clickhouse_client import get_clickhouse_client
 
 logger = structlog.get_logger()
 
@@ -124,13 +122,13 @@ async def _upsert_visitor(
     await db.execute(stmt)
 
 
-async def _aggregate_from_pg_fallback(db: AsyncSession, site_id: str) -> int:
-    """Aggregate visitors from the events_fallback Postgres table."""
+async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
+    """Aggregate visitors from the PostgreSQL events table."""
     since = datetime.utcnow() - timedelta(hours=2)
 
-    # Check if events_fallback table exists
+    # Check if events table exists
     check = await db.execute(text(
-        "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'events_fallback')"
+        "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'events')"
     ))
     if not check.scalar():
         return 0
@@ -138,18 +136,18 @@ async def _aggregate_from_pg_fallback(db: AsyncSession, site_id: str) -> int:
     result = await db.execute(text("""
         SELECT
             visitor_id,
-            MIN((event_data->>'created_at')::timestamp) AS first_seen,
-            MAX((event_data->>'created_at')::timestamp) AS last_seen,
-            COUNT(*) FILTER (WHERE event_data->>'event_type' = 'pageview') AS total_pageviews,
-            COALESCE(MAX((event_data->>'scroll_depth')::int), 0) AS max_scroll_depth,
-            COALESCE(AVG((event_data->>'time_on_page')::float) FILTER (WHERE (event_data->>'time_on_page')::float > 0), 0) AS avg_time_on_page,
-            ARRAY_AGG(DISTINCT event_data->>'url') FILTER (WHERE event_data->>'event_type' = 'pageview' AND event_data->>'url' != '') AS pages_visited,
-            MAX(event_data->>'referrer') FILTER (WHERE event_data->>'referrer' != '') AS top_referrer,
-            MAX(event_data->>'utm_source') FILTER (WHERE event_data->>'utm_source' != '') AS utm_source,
-            MAX(event_data->>'utm_medium') FILTER (WHERE event_data->>'utm_medium' != '') AS utm_medium,
-            MAX(event_data->>'country_code') FILTER (WHERE event_data->>'country_code' != '') AS country_code,
-            MAX(event_data->>'device_type') FILTER (WHERE event_data->>'device_type' != '') AS device_type
-        FROM events_fallback
+            MIN(created_at) AS first_seen,
+            MAX(created_at) AS last_seen,
+            COUNT(*) FILTER (WHERE event_type = 'pageview') AS total_pageviews,
+            COALESCE(MAX(scroll_depth), 0) AS max_scroll_depth,
+            COALESCE(AVG(time_on_page) FILTER (WHERE time_on_page > 0), 0) AS avg_time_on_page,
+            ARRAY_AGG(DISTINCT url) FILTER (WHERE event_type = 'pageview' AND url != '') AS pages_visited,
+            MAX(referrer) FILTER (WHERE referrer != '') AS top_referrer,
+            MAX(utm_source) FILTER (WHERE utm_source != '') AS utm_source,
+            MAX(utm_medium) FILTER (WHERE utm_medium != '') AS utm_medium,
+            MAX(country_code) FILTER (WHERE country_code != '') AS country_code,
+            MAX(device_type) FILTER (WHERE device_type != '') AS device_type
+        FROM events
         WHERE site_id = :site_id AND created_at >= :since
         GROUP BY visitor_id
     """), {"site_id": site_id, "since": since})
@@ -171,58 +169,6 @@ async def _aggregate_from_pg_fallback(db: AsyncSession, site_id: str) -> int:
             avg_time_on_page or 0.0,
             pages_visited or [],
             top_referrer, utm_source, utm_medium, country_code, device_type,
-        )
-        count += 1
-
-    await db.commit()
-    logger.info("visitors_aggregated_pg_fallback", site_id=site_id, count=count)
-    return count
-
-
-async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
-    ch = get_clickhouse_client()
-    if ch is None:
-        # Use Postgres fallback instead of skipping
-        return await _aggregate_from_pg_fallback(db, site_id)
-
-    since = datetime.utcnow() - timedelta(hours=2)
-
-    rows = ch.query(
-        """
-        SELECT
-            visitor_id,
-            min(created_at) AS first_seen,
-            max(created_at) AS last_seen,
-            countIf(event_type = 'pageview') AS total_pageviews,
-            max(scroll_depth) AS max_scroll_depth,
-            avgIf(time_on_page, time_on_page > 0) AS avg_time_on_page,
-            groupUniqArrayIf(url, event_type = 'pageview') AS pages_visited,
-            anyIf(referrer, referrer != '') AS top_referrer,
-            anyIf(utm_source, utm_source != '') AS utm_source,
-            anyIf(utm_medium, utm_medium != '') AS utm_medium,
-            anyIf(country_code, country_code != '') AS country_code,
-            anyIf(device_type, device_type != '') AS device_type
-        FROM events
-        WHERE site_id = %(site_id)s AND created_at >= %(since)s
-        GROUP BY visitor_id
-        """,
-        parameters={"site_id": site_id, "since": since},
-    )
-
-    count = 0
-    for row in rows.result_rows:
-        (
-            visitor_id, first_seen, last_seen, total_pageviews,
-            max_scroll_depth, avg_time_on_page, pages_visited,
-            top_referrer, utm_source, utm_medium, country_code, device_type,
-        ) = row
-
-        await _upsert_visitor(
-            db, site_id, visitor_id,
-            first_seen, last_seen, total_pageviews or 0,
-            max_scroll_depth or 0, avg_time_on_page or 0.0,
-            pages_visited or [], top_referrer, utm_source, utm_medium,
-            country_code, device_type,
         )
         count += 1
 
