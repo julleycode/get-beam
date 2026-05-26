@@ -121,6 +121,71 @@ async def get_visitor_stats(
     }
 
 
+@router.delete("/{site_id}/cleanup-test")
+async def cleanup_test_visitors(
+    site_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Delete test/debug visitors and their events from a site."""
+    from sqlalchemy import or_
+    from apps.api.models.event import Event
+
+    await _verify_site_access(db, site_id, user)
+
+    test_patterns = [
+        "test%", "pg-%", "chrome-test-%", "auto-agg-%",
+        "mobile-test-%", "real-browser-%", "test-tz-%", "bounce-visitor-%",
+    ]
+
+    pattern_conditions = [Visitor.visitor_id.like(p) for p in test_patterns]
+
+    # Get visitor_ids to delete their events too
+    vid_result = await db.execute(
+        select(Visitor.visitor_id).where(
+            Visitor.site_id == site_id,
+            or_(*pattern_conditions),
+        )
+    )
+    test_vids = [row[0] for row in vid_result.all()]
+
+    if not test_vids:
+        return {"status": "clean", "visitors_deleted": 0, "events_deleted": 0}
+
+    # Delete events for these visitors
+    event_del = await db.execute(
+        Event.__table__.delete().where(
+            Event.site_id == site_id,
+            Event.visitor_id.in_(test_vids),
+        )
+    )
+    events_deleted = event_del.rowcount
+
+    # Delete the visitors
+    visitor_del = await db.execute(
+        Visitor.__table__.delete().where(
+            Visitor.site_id == site_id,
+            or_(*pattern_conditions),
+        )
+    )
+    visitors_deleted = visitor_del.rowcount
+
+    await db.commit()
+
+    logger.info(
+        "test_data_cleaned",
+        site_id=site_id,
+        visitors_deleted=visitors_deleted,
+        events_deleted=events_deleted,
+    )
+
+    return {
+        "status": "cleaned",
+        "visitors_deleted": visitors_deleted,
+        "events_deleted": events_deleted,
+    }
+
+
 @router.get("/{site_id}/{visitor_id}", response_model=VisitorDetailOut)
 async def get_visitor_detail(
     site_id: str,
@@ -289,77 +354,3 @@ async def resolve_site_visitors(
     }
 
 
-@router.delete("/{site_id}/cleanup-test")
-async def cleanup_test_visitors(
-    site_id: str,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Delete test/debug visitors and their events from a site."""
-    await _verify_site_access(db, site_id, user)
-
-    test_patterns = [
-        "test%", "pg-%", "chrome-test-%", "auto-agg-%",
-        "mobile-test-%", "real-browser-%", "test-tz-%", "bounce-visitor-%",
-    ]
-
-    # Build OR condition for all test patterns
-    from sqlalchemy import or_, text as sql_text_fn
-    pattern_conditions = [
-        Visitor.visitor_id.like(p) for p in test_patterns
-    ]
-
-    # Count before delete
-    count_result = await db.execute(
-        select(func.count()).select_from(Visitor).where(
-            Visitor.site_id == site_id,
-            or_(*pattern_conditions),
-        )
-    )
-    visitor_count = count_result.scalar() or 0
-
-    if visitor_count == 0:
-        return {"status": "clean", "visitors_deleted": 0, "events_deleted": 0}
-
-    # Get visitor_ids to delete their events too
-    vid_result = await db.execute(
-        select(Visitor.visitor_id).where(
-            Visitor.site_id == site_id,
-            or_(*pattern_conditions),
-        )
-    )
-    test_vids = [row[0] for row in vid_result.all()]
-
-    # Delete events for these visitors
-    from apps.api.models.event import Event
-    event_del = await db.execute(
-        Event.__table__.delete().where(
-            Event.site_id == site_id,
-            Event.visitor_id.in_(test_vids),
-        )
-    )
-    events_deleted = event_del.rowcount
-
-    # Delete the visitors
-    visitor_del = await db.execute(
-        Visitor.__table__.delete().where(
-            Visitor.site_id == site_id,
-            or_(*pattern_conditions),
-        )
-    )
-    visitors_deleted = visitor_del.rowcount
-
-    await db.commit()
-
-    logger.info(
-        "test_data_cleaned",
-        site_id=site_id,
-        visitors_deleted=visitors_deleted,
-        events_deleted=events_deleted,
-    )
-
-    return {
-        "status": "cleaned",
-        "visitors_deleted": visitors_deleted,
-        "events_deleted": events_deleted,
-    }
