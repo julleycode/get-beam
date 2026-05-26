@@ -8,7 +8,7 @@ from apps.api.models.campaign import Campaign
 from apps.api.models.database import get_db
 from apps.api.models.site import Site
 from apps.api.models.user import User
-from apps.api.routers.auth import get_current_user
+from apps.api.dependencies import get_current_user
 from apps.api.schemas.campaigns import CampaignListResponse, CampaignOut, CampaignStatusUpdate
 
 router = APIRouter()

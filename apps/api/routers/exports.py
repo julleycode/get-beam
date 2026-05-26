@@ -7,7 +7,7 @@ from apps.api.models.database import get_db
 from apps.api.models.segment import Segment
 from apps.api.models.site import Site
 from apps.api.models.user import User
-from apps.api.routers.auth import get_current_user
+from apps.api.dependencies import get_current_user
 from apps.api.services.csv_exporter import export_google_csv, export_linkedin_csv, export_meta_csv
 
 router = APIRouter()

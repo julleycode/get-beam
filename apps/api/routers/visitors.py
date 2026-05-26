@@ -11,7 +11,7 @@ from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.site import Site
 from apps.api.models.user import User
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
-from apps.api.routers.auth import get_current_user
+from apps.api.dependencies import get_current_user
 from apps.api.schemas.visitors import VisitorDetailOut, VisitorListResponse, VisitorOut
 from apps.api.services.enricher import Enricher
 from apps.api.services.identity_resolver import IdentityResolver

@@ -12,11 +12,16 @@ structlog==24.4.0
 python-multipart==0.0.12
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-anthropic==0.37.1
+anthropic==0.43.0
 resend>=2.0.0
 clickhouse-connect==0.8.3
 maxminddb==2.6.2
 geoip2==4.8.1
+cryptography==44.0.0
+apscheduler==3.10.4
+slowapi==0.1.9
+tenacity==9.1.2
+pyjwt[crypto]==2.9.0
 pytest==8.3.3
 pytest-asyncio==0.24.0
 pytest-httpx==0.32.0

@@ -8,7 +8,7 @@ from apps.api.models.segment import Segment
 from apps.api.models.site import Site
 from apps.api.models.user import User
 from apps.api.models.visitor import Visitor
-from apps.api.routers.auth import get_current_user
+from apps.api.dependencies import get_current_user
 from apps.api.schemas.segments import SegmentListResponse, SegmentOut
 from apps.api.agents.segmenter import run_segmentation
 

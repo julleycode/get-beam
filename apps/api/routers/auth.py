@@ -1,7 +1,12 @@
+"""Legacy auth router — kept for backward compatibility.
+
+New code should use apps.api.dependencies.get_current_user which
+supports both Clerk (RS256) and legacy HS256 tokens.
+"""
+
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.database import get_db
@@ -10,29 +15,12 @@ from apps.api.schemas.auth import LoginRequest, Token, UserCreate, UserOut
 from apps.api.services.auth import (
     authenticate_user,
     create_access_token,
-    decode_token,
     get_user_by_email,
     hash_password,
 )
+from apps.api.dependencies import get_current_user
 
 router = APIRouter()
-security = HTTPBearer()
-
-
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    user_id = decode_token(credentials.credentials)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    from sqlalchemy import select
-
-    result = await db.execute(select(User).where(User.id == user_id))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-    return user
 
 
 @router.post("/signup", response_model=Token)

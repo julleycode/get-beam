@@ -10,7 +10,16 @@ from apps.api.config import settings
 from apps.api.models.database import engine, Base
 from apps.api.models.api_key import UserApiKey  # noqa: F401 — register for create_all
 from apps.api.models.event import Event as EventModel  # noqa: F401 — register for create_all
+from apps.api.models.social_account import SocialAccount  # noqa: F401
+from apps.api.models.post import Post  # noqa: F401
+from apps.api.models.message import Message  # noqa: F401
+from apps.api.models.draft import Draft  # noqa: F401
+from apps.api.models.voice_example import VoiceExample  # noqa: F401
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
+from apps.api.routers import social_auth, drafts, feed, social_accounts
+from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 logger = structlog.get_logger()
 
@@ -32,7 +41,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 await conn.execute(__import__("sqlalchemy").text(stmt))
             except Exception as e:
                 logger.debug("migration_skipped", stmt=stmt[:60], reason=str(e))
+    # Start background feed-sync scheduler
+    start_scheduler()
+    logger.info("scheduler_started")
+
     yield
+
+    stop_scheduler()
     await engine.dispose()
     logger.info("shut_down")
 
@@ -42,6 +57,10 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+# Wire up slowapi rate limiter from social_auth router
+app.state.limiter = social_auth.limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 _cors_origins = [
     settings.frontend_url,  # e.g. https://retarget-agent.vercel.app
@@ -64,6 +83,12 @@ app.include_router(segments.router, prefix="/api/v1/segments", tags=["segments"]
 app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaigns"])
 app.include_router(exports.router, prefix="/api/v1/exports", tags=["exports"])
 app.include_router(api_keys.router, prefix="/api/v1/api-keys", tags=["api-keys"])
+
+# ── EasyEngage routers ──────────────────────────────────
+app.include_router(social_auth.router, prefix="/api/v1/social", tags=["social-auth"])
+app.include_router(social_accounts.router, prefix="/api/v1/social", tags=["social-accounts"])
+app.include_router(drafts.router, prefix="/api/v1/drafts", tags=["drafts"])
+app.include_router(feed.router, prefix="/api/v1/feed", tags=["feed"])
 
 
 @app.get("/health")
