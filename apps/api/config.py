@@ -12,7 +12,13 @@ class Settings(BaseSettings):
                 "FATAL: APP_SECRET_KEY is still the default value in production. "
                 "Set a strong random secret via environment variable."
             )
-        if self.app_env == "production" and self.jwt_secret == "change-me-in-production":
+        # Only enforce JWT_SECRET in production if Clerk is NOT configured
+        # (when Clerk handles auth, legacy HS256 JWT is unused)
+        if (
+            self.app_env == "production"
+            and self.jwt_secret == "change-me-in-production"
+            and not self.clerk_secret_key
+        ):
             raise RuntimeError(
                 "FATAL: JWT_SECRET is still the default value in production. "
                 "Set a strong random secret via environment variable."
