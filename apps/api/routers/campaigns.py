@@ -140,7 +140,9 @@ async def get_campaign(
     if not site_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Site not found")
 
-    result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
+    result = await db.execute(
+        select(Campaign).where(Campaign.id == campaign_id, Campaign.site_id == site_id)
+    )
     campaign = result.scalar_one_or_none()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
@@ -161,7 +163,9 @@ async def update_campaign_status(
     if not site_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Site not found")
 
-    result = await db.execute(select(Campaign).where(Campaign.id == campaign_id))
+    result = await db.execute(
+        select(Campaign).where(Campaign.id == campaign_id, Campaign.site_id == site_id)
+    )
     campaign = result.scalar_one_or_none()
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")

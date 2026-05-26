@@ -32,7 +32,7 @@ _LI_API = "https://api.linkedin.com/v2"
 
 
 class LinkedInService(PlatformService):
-    def get_auth_url(self, state: str) -> str:
+    async def get_auth_url(self, state: str) -> str:
         params = {
             "response_type": "code",
             "client_id": settings.linkedin_client_id,

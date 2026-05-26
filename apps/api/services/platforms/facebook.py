@@ -33,7 +33,7 @@ _FB_API = "https://graph.facebook.com/v19.0"
 
 
 class FacebookService(PlatformService):
-    def get_auth_url(self, state: str) -> str:
+    async def get_auth_url(self, state: str) -> str:
         params = {
             "client_id": settings.facebook_app_id,
             "redirect_uri": settings.facebook_redirect_uri,

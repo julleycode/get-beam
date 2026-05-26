@@ -50,6 +50,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     stop_scheduler()
+    from apps.api.services.redis_client import close_redis
+    await close_redis()
     await engine.dispose()
     logger.info("shut_down")
 

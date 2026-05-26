@@ -151,8 +151,18 @@ async def get_current_user(
             return user
 
         except JWTError:
-            # Not a valid Clerk token -- fall through to legacy verification
-            pass
+            # Check if the token was intended for Clerk (RS256 header).
+            # If so, don't fall through to legacy HS256 — it's a bad Clerk token.
+            try:
+                header = jwt.get_unverified_header(token)
+                if header.get("alg") == "RS256":
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Invalid or expired Clerk token",
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+            except JWTError:
+                pass  # Can't parse header — fall through to legacy
         except HTTPException:
             raise
         except Exception:

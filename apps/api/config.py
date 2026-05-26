@@ -6,10 +6,15 @@ class Settings(BaseSettings):
     app_secret_key: str = "change-me-in-production"
 
     def validate_secret_key(self) -> None:
-        """Fail loudly if the default secret key is used in production."""
+        """Fail loudly if default secret keys are used in production."""
         if self.app_env == "production" and self.app_secret_key == "change-me-in-production":
             raise RuntimeError(
                 "FATAL: APP_SECRET_KEY is still the default value in production. "
+                "Set a strong random secret via environment variable."
+            )
+        if self.app_env == "production" and self.jwt_secret == "change-me-in-production":
+            raise RuntimeError(
+                "FATAL: JWT_SECRET is still the default value in production. "
                 "Set a strong random secret via environment variable."
             )
 

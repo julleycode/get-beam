@@ -37,10 +37,10 @@ _TT_API = "https://open.tiktokapis.com/v2"
 
 
 class TikTokService(PlatformService):
-    def get_auth_url(self, state: str) -> str:
+    async def get_auth_url(self, state: str) -> str:
         code_verifier = generate_code_verifier()
         code_challenge = generate_code_challenge(code_verifier)
-        store_code_verifier(state, code_verifier)
+        await store_code_verifier(state, code_verifier)
 
         params = {
             "client_key": settings.tiktok_client_key,
@@ -58,7 +58,7 @@ class TikTokService(PlatformService):
             return self._mock_tokens()
 
         # Retrieve the code_verifier stored during get_auth_url
-        code_verifier = get_code_verifier(state) if state else None
+        code_verifier = await get_code_verifier(state) if state else None
         if not code_verifier:
             raise ValueError(
                 "PKCE code_verifier not found for this OAuth state. "

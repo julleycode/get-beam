@@ -45,7 +45,7 @@ class PlatformService(ABC):
 
     # ── OAuth ────────────────────────────────────────────
     @abstractmethod
-    def get_auth_url(self, state: str) -> str:
+    async def get_auth_url(self, state: str) -> str:
         """Return the URL to redirect the user to for OAuth consent."""
         ...
 

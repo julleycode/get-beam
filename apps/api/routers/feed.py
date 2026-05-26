@@ -40,6 +40,9 @@ async def get_feed(
     )
     account_ids = [row[0] for row in acct_result.all()]
 
+    if not account_ids:
+        return PostListResponse(posts=[], total=0, page=page, per_page=per_page)
+
     query = select(Post).where(Post.social_account_id.in_(account_ids))
     count_query = select(func.count(Post.id)).where(Post.social_account_id.in_(account_ids))
 

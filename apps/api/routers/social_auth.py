@@ -141,9 +141,9 @@ async def connect_platform(
     state = uuid.uuid4().hex
 
     # Store state with user_id for CSRF validation on callback
-    store_oauth_state(state, str(current_user.id))
+    await store_oauth_state(state, str(current_user.id))
 
-    auth_url = service.get_auth_url(state)
+    auth_url = await service.get_auth_url(state)
     return ConnectResponse(auth_url=auth_url)
 
 
@@ -170,7 +170,7 @@ async def oauth_callback(
         return RedirectResponse(f"{frontend_url}/dashboard/social-accounts/callback?{params}")
 
     # Validate OAuth state (CSRF protection) and retrieve the user who started the flow
-    user_id_str = validate_oauth_state(state)
+    user_id_str = await validate_oauth_state(state)
     if not user_id_str:
         logger.warning("oauth_state_invalid", platform=platform.value, state=state)
         params = urlencode({
@@ -190,8 +190,11 @@ async def oauth_callback(
     try:
         tokens = await service.exchange_code(code, state=state)
     except Exception as e:
-        logger.exception("oauth_exchange_failed", platform=platform.value)
-        params = urlencode({"error": str(e), "platform": platform.value})
+        logger.exception("oauth_exchange_failed", platform=platform.value, error=str(e))
+        params = urlencode({
+            "error": f"Failed to connect {platform.value}. Please try again.",
+            "platform": platform.value,
+        })
         return RedirectResponse(f"{frontend_url}/dashboard/social-accounts/callback?{params}")
 
     # Encrypt tokens before storing

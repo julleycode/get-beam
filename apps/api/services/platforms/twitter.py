@@ -40,10 +40,10 @@ _TWITTER_API = "https://api.twitter.com/2"
 
 class TwitterService(PlatformService):
     # ── OAuth (PKCE with S256) ───────────────────────────
-    def get_auth_url(self, state: str) -> str:
+    async def get_auth_url(self, state: str) -> str:
         code_verifier = generate_code_verifier()
         code_challenge = generate_code_challenge(code_verifier)
-        store_code_verifier(state, code_verifier)
+        await store_code_verifier(state, code_verifier)
 
         params = {
             "response_type": "code",
@@ -61,7 +61,7 @@ class TwitterService(PlatformService):
             return self._mock_tokens()
 
         # Retrieve the code_verifier stored during get_auth_url
-        code_verifier = get_code_verifier(state) if state else None
+        code_verifier = await get_code_verifier(state) if state else None
         if not code_verifier:
             raise ValueError(
                 "PKCE code_verifier not found for this OAuth state. "
