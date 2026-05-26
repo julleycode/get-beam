@@ -222,7 +222,7 @@ class Enricher:
                         "industry": p.get("industry"),
                         "seniority_level": p.get("job_title_role"),
                         "linkedin_url": p.get("linkedin_url"),
-                        "twitter_handle": (p.get("twitter_url", "") or "").split("/")[-1] or None,
+                        "twitter_handle": (p.get("twitter_url", "") or "").rstrip("/").split("/")[-1] or None,
                         "github_url": p.get("github_url"),
                     }
             except httpx.HTTPError as e:

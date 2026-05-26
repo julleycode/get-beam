@@ -1,7 +1,7 @@
 import random
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import httpx
 import structlog
@@ -34,7 +34,7 @@ class IdentityResolver:
         return count < settings.default_daily_resolution_budget
 
     async def was_recently_attempted(self, site_id: str, visitor_id: str) -> bool:
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - __import__("datetime").timedelta(days=30)
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
         result = await self.db.execute(
             select(ResolutionLog).where(
                 ResolutionLog.site_id == site_id,

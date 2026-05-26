@@ -113,7 +113,7 @@ async def _upsert_visitor(
             "total_pageviews": Visitor.total_pageviews + total_pageviews,
             "total_sessions": Visitor.total_sessions + 1,
             "avg_time_on_page": avg_time_on_page,
-            "max_scroll_depth": text(f"GREATEST(visitors.max_scroll_depth, {max_scroll_depth})"),
+            "max_scroll_depth": text("GREATEST(visitors.max_scroll_depth, :new_scroll)").bindparams(new_scroll=max_scroll_depth),
             "pages_visited": pages_visited or [],
             "intent_score": intent,
             "updated_at": datetime.utcnow(),

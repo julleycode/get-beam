@@ -17,6 +17,7 @@ logger = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    settings.validate_secret_key()
     logger.info("starting_up", env=settings.app_env)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -29,8 +30,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         ]:
             try:
                 await conn.execute(__import__("sqlalchemy").text(stmt))
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("migration_skipped", stmt=stmt[:60], reason=str(e))
     yield
     await engine.dispose()
     logger.info("shut_down")
@@ -42,9 +43,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+_cors_origins = [
+    settings.frontend_url,  # e.g. https://retarget-agent.vercel.app
+    "http://localhost:3000",
+    "http://localhost:3001",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -65,16 +71,18 @@ async def health_check() -> dict[str, str]:
     return {"status": "ok", "env": settings.app_env}
 
 
+_pixel_js_cache: str | None = None
+
+
 @app.get("/pixel/tracker.js")
 async def serve_pixel() -> Response:
-    import pathlib
-    pixel_path = pathlib.Path(__file__).parent.parent / "pixel" / "src" / "tracker.js"
-    if pixel_path.exists():
-        content = pixel_path.read_text()
-    else:
-        content = "// pixel not found"
+    global _pixel_js_cache
+    if _pixel_js_cache is None:
+        import pathlib
+        pixel_path = pathlib.Path(__file__).parent.parent / "pixel" / "src" / "tracker.js"
+        _pixel_js_cache = pixel_path.read_text() if pixel_path.exists() else "// pixel not found"
     return Response(
-        content=content,
+        content=_pixel_js_cache,
         media_type="application/javascript",
         headers={"Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*"},
     )

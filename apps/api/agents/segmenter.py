@@ -58,26 +58,30 @@ Analyze these visitors and group them into 2 to 5 actionable segments. Each segm
 async def build_visitor_profiles(
     db: AsyncSession, site_id: str, visitors: list[Visitor]
 ) -> list[dict]:
+    from sqlalchemy import select
+
+    visitor_ids = [v.visitor_id for v in visitors]
+
+    # Batch-fetch all identified visitors in one query (fixes N+1)
+    id_result = await db.execute(
+        select(IdentifiedVisitor).where(
+            IdentifiedVisitor.site_id == site_id,
+            IdentifiedVisitor.visitor_id.in_(visitor_ids),
+        )
+    )
+    id_map = {iv.visitor_id: iv for iv in id_result.scalars().all()}
+
+    # Batch-fetch all enrichment profiles in one query (fixes N+1)
+    enrich_result = await db.execute(
+        select(EnrichmentProfile).where(
+            EnrichmentProfile.site_id == site_id,
+            EnrichmentProfile.visitor_id.in_(visitor_ids),
+        )
+    )
+    enrich_map = {ep.visitor_id: ep for ep in enrich_result.scalars().all()}
+
     profiles = []
     for v in visitors:
-        from sqlalchemy import select
-
-        id_result = await db.execute(
-            select(IdentifiedVisitor).where(
-                IdentifiedVisitor.site_id == site_id,
-                IdentifiedVisitor.visitor_id == v.visitor_id,
-            )
-        )
-        identified = id_result.scalar_one_or_none()
-
-        enrich_result = await db.execute(
-            select(EnrichmentProfile).where(
-                EnrichmentProfile.site_id == site_id,
-                EnrichmentProfile.visitor_id == v.visitor_id,
-            )
-        )
-        enriched = enrich_result.scalar_one_or_none()
-
         profile: dict = {
             "visitor_id": v.visitor_id,
             "intent_score": v.intent_score,
@@ -87,11 +91,14 @@ async def build_visitor_profiles(
             "device_type": v.device_type,
             "country_code": v.country_code,
         }
+        identified = id_map.get(v.visitor_id)
         if identified:
             profile["email"] = identified.email
             profile["full_name"] = identified.full_name
             profile["city"] = identified.city
             profile["country"] = identified.country
+
+        enriched = enrich_map.get(v.visitor_id)
         if enriched:
             profile["job_title"] = enriched.job_title
             profile["company_name"] = enriched.company_name
@@ -126,8 +133,8 @@ async def run_segmentation(
     if settings.mock_external_apis:
         result = _mock_segmentation(profiles)
     else:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        message = client.messages.create(
+        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        message = await client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
