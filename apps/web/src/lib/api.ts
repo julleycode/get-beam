@@ -48,10 +48,17 @@ class ApiClient {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
-    const res = await fetch(`${API_BASE}${path}`, {
-      ...options,
-      headers,
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers,
+      });
+    } catch (err) {
+      throw new Error(
+        `Network error: unable to reach API (${(err as Error).message})`
+      );
+    }
 
     if (res.status === 401) {
       // Don't clear Clerk token — Clerk handles re-auth via middleware
