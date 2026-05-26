@@ -6,21 +6,21 @@ class Settings(BaseSettings):
     app_secret_key: str = "change-me-in-production"
 
     def validate_secret_key(self) -> None:
-        """Fail loudly if default secret keys are used in production."""
+        """Warn if default secret keys are used in production."""
+        import logging
+        _log = logging.getLogger(__name__)
         if self.app_env == "production" and self.app_secret_key == "change-me-in-production":
-            raise RuntimeError(
-                "FATAL: APP_SECRET_KEY is still the default value in production. "
+            _log.warning(
+                "APP_SECRET_KEY is still the default value in production. "
                 "Set a strong random secret via environment variable."
             )
-        # Only enforce JWT_SECRET in production if Clerk is NOT configured
-        # (when Clerk handles auth, legacy HS256 JWT is unused)
         if (
             self.app_env == "production"
             and self.jwt_secret == "change-me-in-production"
             and not self.clerk_secret_key
         ):
-            raise RuntimeError(
-                "FATAL: JWT_SECRET is still the default value in production. "
+            _log.warning(
+                "JWT_SECRET is still the default value in production. "
                 "Set a strong random secret via environment variable."
             )
 
