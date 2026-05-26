@@ -36,7 +36,7 @@ from apps.api.services.ai_reply import (
 )
 from apps.api.services.sender import send_draft
 
-router = APIRouter(prefix="/drafts", tags=["drafts"])
+router = APIRouter(tags=["drafts"])
 
 
 def _draft_to_response(

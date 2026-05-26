@@ -17,7 +17,7 @@ from apps.api.models.user import User
 from apps.api.schemas.posts import ImportPostRequest, PostListResponse, PostResponse
 from apps.api.services.sync import sync_user_accounts
 
-router = APIRouter(prefix="/feed", tags=["feed"])
+router = APIRouter(tags=["feed"])
 
 
 @router.get("", response_model=PostListResponse)
