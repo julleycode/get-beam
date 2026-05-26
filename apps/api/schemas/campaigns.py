@@ -9,6 +9,8 @@ class CampaignOut(BaseModel):
     site_id: str
     segment_id: uuid.UUID | None
     name: str
+    campaign_type: str = "email"
+    platform: str | None = None
     status: str
     plan: dict
     created_at: datetime

@@ -1,11 +1,19 @@
+import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, Integer, ForeignKey, func
+from sqlalchemy import String, DateTime, Integer, Enum, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apps.api.models.database import Base
+
+
+class CampaignType(str, enum.Enum):
+    email = "email"
+    social_reply = "social_reply"
+    social_dm = "social_dm"
+    paid_ads = "paid_ads"
 
 
 class Campaign(Base):
@@ -15,6 +23,8 @@ class Campaign(Base):
     site_id: Mapped[str] = mapped_column(String(50), nullable=False)
     segment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("segments.id"))
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    campaign_type: Mapped[str] = mapped_column(String(20), default="email")
+    platform: Mapped[str | None] = mapped_column(String(20), nullable=True)  # twitter, linkedin, etc.
     status: Mapped[str] = mapped_column(String(20), default="draft")
     plan: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

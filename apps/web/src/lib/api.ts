@@ -365,6 +365,14 @@ class ApiClient {
     );
   }
 
+  // ── EasyTrack + EasyEngage: Campaign creation from segment ─
+  async createCampaignFromSegment(siteId: string, segmentId: string) {
+    return this.request<Campaign>(
+      `/api/v1/campaigns/${siteId}/create/${segmentId}`,
+      { method: "POST" }
+    );
+  }
+
   async editDraft(draftId: string, editedContent: string) {
     return this.request<SocialDraft>(`/api/v1/drafts/${draftId}/edit`, {
       method: "PUT",
@@ -456,6 +464,8 @@ export interface Campaign {
   site_id: string;
   segment_id: string | null;
   name: string;
+  campaign_type: string;
+  platform: string | null;
   status: string;
   plan: Record<string, unknown>;
   created_at: string;
