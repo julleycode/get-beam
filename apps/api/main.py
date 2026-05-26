@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
@@ -92,6 +92,32 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Open CORS for pixel ingest (runs from any customer domain) ─────
+@app.middleware("http")
+async def pixel_cors_middleware(request: Request, call_next):
+    """Allow cross-origin requests to /api/v1/events/ingest from any origin.
+
+    The tracking pixel is embedded on customer websites, so it must be able
+    to POST events from any domain.  The CORSMiddleware above only allows
+    the dashboard origin, so we intercept the pixel path here.
+    """
+    if request.url.path == "/api/v1/events/ingest":
+        if request.method == "OPTIONS":
+            return Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                    "Access-Control-Max-Age": "86400",
+                },
+            )
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        return response
+    return await call_next(request)
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(events.router, prefix="/api/v1/events", tags=["events"])

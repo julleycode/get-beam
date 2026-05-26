@@ -11,20 +11,6 @@ from apps.api.schemas.events import EventBatch
 router = APIRouter()
 logger = structlog.get_logger()
 
-# Pixel fires from any customer domain — needs open CORS on /ingest
-_PIXEL_CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-    "Access-Control-Max-Age": "86400",
-}
-
-
-@router.options("/ingest")
-async def ingest_preflight() -> Response:
-    """Handle CORS preflight for the pixel ingest endpoint."""
-    return Response(status_code=200, headers=_PIXEL_CORS_HEADERS)
-
 # Keep strong references to background tasks so they aren't GC'd
 _background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
 
@@ -50,7 +36,7 @@ async def ingest_events(
         select(Site.site_id).where(Site.site_id == batch.site_id).limit(1)
     )
     if not site_check.scalar_one_or_none():
-        return Response(status_code=403, headers=_PIXEL_CORS_HEADERS)
+        return Response(status_code=403)
 
     ip_address = _extract_ip(request)
 
@@ -98,7 +84,7 @@ async def ingest_events(
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
-    return Response(status_code=204, headers=_PIXEL_CORS_HEADERS)
+    return Response(status_code=204)
 
 
 async def _background_aggregate(site_id: str) -> None:
