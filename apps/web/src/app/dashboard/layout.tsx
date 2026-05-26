@@ -58,8 +58,7 @@ function NavLink({
  * Isolated in its own component so useAuth() is always called (no conditional hooks).
  */
 function ClerkSignOutButton() {
-  // Safe to import and use here — this component only mounts when HAS_CLERK is true
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { useAuth } = require("@clerk/nextjs");
   const { signOut } = useAuth();
   return (
@@ -98,7 +97,7 @@ function LegacySignOutButton() {
  * Only rendered when Clerk is configured.
  */
 function ClerkAuthGuard() {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { useAuth } = require("@clerk/nextjs");
   const { isSignedIn } = useAuth();
   const router = useRouter();

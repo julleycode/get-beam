@@ -6,8 +6,7 @@ import type { NextRequest } from "next/server";
 let middleware: (req: NextRequest) => NextResponse | Promise<NextResponse>;
 
 if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
-  // Dynamic import at module level isn't possible, so we use require
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { clerkMiddleware, createRouteMatcher } = require("@clerk/nextjs/server");
   const isPublicRoute = createRouteMatcher([
     "/login(.*)",
