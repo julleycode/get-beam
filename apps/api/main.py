@@ -38,6 +38,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "ALTER TABLE segment_members ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMP DEFAULT NOW()",
             "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS campaign_type VARCHAR(20) DEFAULT 'email'",
             "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS platform VARCHAR(20)",
+            # EasyEngage: User model new columns
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS clerk_user_id VARCHAR(255) UNIQUE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS tone_preference VARCHAR(50) DEFAULT 'casual'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(200)",
         ]:
             try:
                 await conn.execute(__import__("sqlalchemy").text(stmt))
