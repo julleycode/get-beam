@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
+import { ClerkTokenSync } from "@/components/clerk-token-sync";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
@@ -16,10 +18,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
-      <body className={cn(inter.variable, "font-sans antialiased")}>
-        {children}
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang="en" className="dark">
+        <body className={cn(inter.variable, "font-sans antialiased")}>
+          <ClerkTokenSync />
+          {children}
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }
