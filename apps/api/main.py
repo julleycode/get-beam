@@ -8,6 +8,7 @@ from fastapi.responses import Response
 
 from apps.api.config import settings
 from apps.api.models.database import engine, Base
+from apps.api.models.api_key import UserApiKey  # noqa: F401 — register for create_all
 from apps.api.models.event import Event as EventModel  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 
