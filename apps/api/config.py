@@ -4,6 +4,14 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     app_env: str = "development"
     app_secret_key: str = "change-me-in-production"
+
+    def validate_secret_key(self) -> None:
+        """Fail loudly if the default secret key is used in production."""
+        if self.app_env == "production" and self.app_secret_key == "change-me-in-production":
+            raise RuntimeError(
+                "FATAL: APP_SECRET_KEY is still the default value in production. "
+                "Set a strong random secret via environment variable."
+            )
     api_base_url: str = "http://localhost:8000"
     frontend_url: str = "http://localhost:3000"
 

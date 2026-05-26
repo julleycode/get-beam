@@ -11,6 +11,9 @@ from apps.api.schemas.events import EventBatch
 router = APIRouter()
 logger = structlog.get_logger()
 
+# Keep strong references to background tasks so they aren't GC'd
+_background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
 
 def _extract_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for")
@@ -25,10 +28,20 @@ def _extract_ip(request: Request) -> str:
 async def ingest_events(
     batch: EventBatch, request: Request, db: AsyncSession = Depends(get_db)
 ) -> Response:
+    # Validate site_id exists to prevent arbitrary data injection
+    from sqlalchemy import select
+    from apps.api.models.site import Site
+
+    site_check = await db.execute(
+        select(Site.site_id).where(Site.site_id == batch.site_id).limit(1)
+    )
+    if not site_check.scalar_one_or_none():
+        return Response(status_code=403)
+
     ip_address = _extract_ip(request)
 
-    for event in batch.events:
-        db.add(Event(
+    event_rows = [
+        Event(
             site_id=batch.site_id,
             visitor_id=batch.visitor_id,
             event_type=event.type,
@@ -47,8 +60,10 @@ async def ingest_events(
             element_href=event.element_href or "",
             ip_address=ip_address,
             created_at=event.ts.replace(tzinfo=None) if event.ts.tzinfo else event.ts,
-        ))
-
+        )
+        for event in batch.events
+    ]
+    db.add_all(event_rows)
     await db.commit()
 
     logger.info(
@@ -60,7 +75,9 @@ async def ingest_events(
 
     # Run aggregation in background so we don't block the 204 response
     site_id = batch.site_id
-    asyncio.create_task(_background_aggregate(site_id))
+    task = asyncio.create_task(_background_aggregate(site_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
 
     return Response(status_code=204)
 
