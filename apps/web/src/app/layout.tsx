@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { cn } from "@/lib/utils";
 import { ClerkTokenSync } from "@/components/clerk-token-sync";
+import { Providers } from "./providers";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
@@ -17,14 +18,19 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
-    <ClerkProvider>
-      <html lang="en" className="dark">
-        <body className={cn(inter.variable, "font-sans antialiased")}>
-          <ClerkTokenSync />
-          {children}
-        </body>
-      </html>
-    </ClerkProvider>
+  const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+  const content = (
+    <html lang="en" className="dark">
+      <body className={cn(inter.variable, "font-sans antialiased")}>
+        {hasClerk && <ClerkTokenSync />}
+        <Providers>{children}</Providers>
+      </body>
+    </html>
   );
+
+  if (hasClerk) {
+    return <ClerkProvider>{content}</ClerkProvider>;
+  }
+  return content;
 }

@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+
+const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 const EASYTRACK_ITEMS = [
   { href: "/dashboard", label: "Overview" },
@@ -52,6 +53,65 @@ function NavLink({
   );
 }
 
+/**
+ * Clerk-aware sign-out button. Only rendered when Clerk is configured.
+ * Isolated in its own component so useAuth() is always called (no conditional hooks).
+ */
+function ClerkSignOutButton() {
+  // Safe to import and use here — this component only mounts when HAS_CLERK is true
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { useAuth } = require("@clerk/nextjs");
+  const { signOut } = useAuth();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => {
+        api.clearToken();
+        signOut({ redirectUrl: "/login" });
+      }}
+    >
+      Sign out
+    </Button>
+  );
+}
+
+/** Fallback sign-out button when Clerk is not configured. */
+function LegacySignOutButton() {
+  const router = useRouter();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => {
+        api.clearToken();
+        router.replace("/login");
+      }}
+    >
+      Sign out
+    </Button>
+  );
+}
+
+/**
+ * Clerk auth guard — redirects if not signed in.
+ * Only rendered when Clerk is configured.
+ */
+function ClerkAuthGuard() {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { useAuth } = require("@clerk/nextjs");
+  const { isSignedIn } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (isSignedIn === false) {
+      router.replace("/login");
+    }
+  }, [isSignedIn, router]);
+
+  return null;
+}
+
 export default function DashboardLayout({
   children,
 }: {
@@ -59,12 +119,12 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { signOut, isSignedIn } = useAuth();
   const [userEmail, setUserEmail] = useState("");
 
   useEffect(() => {
     const token = api.getToken();
-    if (!token && !isSignedIn) {
+    // Without Clerk, require a legacy token
+    if (!HAS_CLERK && !token) {
       router.replace("/login");
       return;
     }
@@ -72,24 +132,18 @@ export default function DashboardLayout({
       .getMe()
       .then((u) => setUserEmail(u.email))
       .catch(() => {
-        if (!isSignedIn) {
+        if (!HAS_CLERK) {
           api.clearToken();
           router.replace("/login");
         }
       });
-  }, [router, isSignedIn]);
-
-  function handleLogout() {
-    api.clearToken();
-    if (isSignedIn) {
-      signOut({ redirectUrl: "/login" });
-    } else {
-      router.replace("/login");
-    }
-  }
+  }, [router]);
 
   return (
     <div className="flex min-h-screen">
+      {/* Clerk auth guard (only when Clerk is active) */}
+      {HAS_CLERK && <ClerkAuthGuard />}
+
       <aside className="w-56 border-r bg-card p-4 flex flex-col">
         <div className="mb-6">
           <h1 className="text-lg font-bold">ReTargetAgent</h1>
@@ -119,9 +173,7 @@ export default function DashboardLayout({
           ))}
         </nav>
         <Separator className="my-2" />
-        <Button variant="ghost" size="sm" onClick={handleLogout}>
-          Sign out
-        </Button>
+        {HAS_CLERK ? <ClerkSignOutButton /> : <LegacySignOutButton />}
       </aside>
       <main className="flex-1 p-6 overflow-auto">{children}</main>
     </div>

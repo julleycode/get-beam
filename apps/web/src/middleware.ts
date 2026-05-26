@@ -1,16 +1,29 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
-const isPublicRoute = createRouteMatcher([
-  "/login(.*)",
-  "/sign-in(.*)",
-  "/sign-up(.*)",
-]);
+// Clerk middleware is only active when NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set.
+// Without it, all routes are publicly accessible (local dev without Clerk).
+let middleware: (req: NextRequest) => NextResponse | Promise<NextResponse>;
 
-export default clerkMiddleware((auth, request) => {
-  if (!isPublicRoute(request)) {
-    auth().protect();
-  }
-});
+if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+  // Dynamic import at module level isn't possible, so we use require
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { clerkMiddleware, createRouteMatcher } = require("@clerk/nextjs/server");
+  const isPublicRoute = createRouteMatcher([
+    "/login(.*)",
+    "/sign-in(.*)",
+    "/sign-up(.*)",
+  ]);
+  middleware = clerkMiddleware((auth: () => { protect: () => void }, request: NextRequest) => {
+    if (!isPublicRoute(request)) {
+      auth().protect();
+    }
+  });
+} else {
+  middleware = () => NextResponse.next();
+}
+
+export default middleware;
 
 export const config = {
   matcher: [
