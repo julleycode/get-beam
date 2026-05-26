@@ -1,7 +1,9 @@
 import asyncio
+import json
 
 import structlog
 from fastapi import APIRouter, Depends, Request, Response
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.database import get_db, async_session
@@ -24,10 +26,31 @@ def _extract_ip(request: Request) -> str:
     return ""
 
 
+async def _parse_event_batch(request: Request) -> EventBatch:
+    """Parse EventBatch from request body.
+
+    Accepts both application/json and text/plain content types.
+    The pixel uses text/plain with sendBeacon to avoid CORS preflight.
+    """
+    body = await request.body()
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise ValidationError.from_exception_data(
+            title="EventBatch",
+            line_errors=[],
+        )
+    return EventBatch(**data)
+
+
 @router.post("/ingest", status_code=204)
 async def ingest_events(
-    batch: EventBatch, request: Request, db: AsyncSession = Depends(get_db)
+    request: Request, db: AsyncSession = Depends(get_db)
 ) -> Response:
+    try:
+        batch = await _parse_event_batch(request)
+    except Exception:
+        return Response(status_code=400)
     # Validate site_id exists to prevent arbitrary data injection
     from sqlalchemy import select
     from apps.api.models.site import Site

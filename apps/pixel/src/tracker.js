@@ -100,7 +100,8 @@
     });
 
     if (navigator.sendBeacon) {
-      navigator.sendBeacon(ENDPOINT, new Blob([payload], { type: "application/json" }));
+      // Use text/plain to avoid CORS preflight (sendBeacon can't handle preflight)
+      navigator.sendBeacon(ENDPOINT, new Blob([payload], { type: "text/plain" }));
     } else {
       var xhr = new XMLHttpRequest();
       xhr.open("POST", ENDPOINT, true);
