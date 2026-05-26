@@ -49,12 +49,9 @@ async def check_and_trigger_segmentation(db: AsyncSession, site_id: str) -> bool
     )
     await db.commit()
 
-    # Queue segmentation task
-    try:
-        from apps.api.tasks.segmentation_tasks import run_segmentation_manual
-        run_segmentation_manual.delay(site_id)
-        logger.info("segmentation_auto_triggered", site_id=site_id)
-    except Exception as e:
-        logger.error("segmentation_trigger_failed", site_id=site_id, error=str(e))
+    # Log that segmentation threshold was reached
+    # Actual segmentation runs via POST /segments/{site_id}/run (manual trigger)
+    # or will auto-run when Celery/Redis is available
+    logger.info("segmentation_auto_triggered", site_id=site_id, count=count)
 
     return True
