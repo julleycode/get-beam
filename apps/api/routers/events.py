@@ -64,7 +64,12 @@ async def ingest_events(
         for event in batch.events
     ]
     db.add_all(event_rows)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception as exc:
+        logger.exception("event_commit_failed", error=str(exc))
+        await db.rollback()
+        raise
 
     logger.info(
         "events_ingested",
