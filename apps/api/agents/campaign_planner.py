@@ -31,6 +31,17 @@ Messaging Angle: {messaging_angle}
 - Twitter/X (organic: reply/mention, or export for X Ads)
 - Meta Ads (export CSV for Custom Audiences)
 - Google Ads (export CSV for Customer Match)
+- Social Reply (reply to visitor's recent posts via EasyEngage — requires connected social account)
+- Social DM (direct message on Twitter/LinkedIn via EasyEngage — requires connected social account)
+
+## Connected Social Accounts
+{connected_accounts_info}
+
+## Social Engagement Note
+If a visitor has a linkedin_url or twitter_handle, and the user has a connected
+social account on that platform, prefer organic social outreach (reply or DM)
+over cold email — it feels more personal and gets higher response rates.
+Use the GBrain AI to generate personalized replies in the user's voice.
 
 ## Your Task
 Create a campaign plan with:
@@ -64,6 +75,15 @@ Create a campaign plan with:
     }},
     {{
       "order": 3,
+      "channel": "social_reply",
+      "delay_hours_from_start": 24,
+      "platform": "twitter",
+      "reply_strategy": "conversational",
+      "context": "What to look for in their recent posts to reply to",
+      "personalization_fields": ["first_name", "industry"]
+    }},
+    {{
+      "order": 4,
       "channel": "meta_ads",
       "delay_hours_from_start": 0,
       "ad_headline": "Ad headline",
@@ -81,7 +101,16 @@ async def plan_campaign(
     db: AsyncSession,
     segment: Segment,
     visitor_profiles: list[dict],
+    connected_accounts: list[dict] | None = None,
 ) -> Campaign:
+    # Build connected accounts info for the prompt
+    if connected_accounts:
+        accounts_info = ", ".join(
+            f"{a['platform']} (@{a['username']})" for a in connected_accounts
+        )
+    else:
+        accounts_info = "None — social reply/DM channels are not available"
+
     prompt = CAMPAIGN_PLANNING_PROMPT.format(
         segment_name=segment.name,
         segment_description=segment.description or "",
@@ -91,6 +120,7 @@ async def plan_campaign(
         messaging_angle=segment.messaging_angle or "",
         visitor_profiles_json=json.dumps(visitor_profiles, indent=2, default=str),
         segment_id=str(segment.id),
+        connected_accounts_info=accounts_info,
     )
 
     if settings.mock_external_apis:
@@ -122,50 +152,73 @@ async def plan_campaign(
 
 
 def _mock_campaign_plan(segment: Segment, profiles: list[dict]) -> dict:
+    # Check if any profiles have social handles
+    has_twitter = any(p.get("twitter_handle") for p in profiles)
+    has_linkedin = any(p.get("linkedin_url") for p in profiles)
+
+    touchpoints = [
+        {
+            "order": 1,
+            "channel": "email",
+            "delay_hours_from_start": 0,
+            "subject": "Quick question about your visit, {{first_name}}",
+            "body": (
+                "Hi {{first_name}},\n\n"
+                "I noticed you checked out our site recently. "
+                "I'd love to understand what brought you there and if there's anything I can help with.\n\n"
+                "Are you currently looking to solve {{pain_point}}?\n\n"
+                "Happy to chat if you're interested.\n\n"
+                "Best,\nThe Team"
+            ),
+            "personalization_fields": ["first_name", "pain_point"],
+            "cta": "Reply to start a conversation",
+        },
+    ]
+
+    order = 2
+    if has_twitter:
+        touchpoints.append({
+            "order": order,
+            "channel": "social_reply",
+            "platform": "twitter",
+            "delay_hours_from_start": 24,
+            "reply_strategy": "conversational",
+            "context": "Look for their recent tweets about industry topics and add thoughtful replies",
+            "personalization_fields": ["first_name", "industry"],
+        })
+        order += 1
+
+    if has_linkedin:
+        touchpoints.append({
+            "order": order,
+            "channel": "linkedin",
+            "delay_hours_from_start": 48,
+            "connection_note": (
+                "Hi {{first_name}}, I saw you're working on interesting things at {{company_name}}. "
+                "Would love to connect!"
+            ),
+            "followup_message": (
+                "Thanks for connecting! I noticed you visited our site. "
+                "Happy to share some resources that might help with {{industry}} challenges."
+            ),
+            "personalization_fields": ["first_name", "company_name", "industry"],
+        })
+        order += 1
+
+    touchpoints.append({
+        "order": order,
+        "channel": "meta_ads",
+        "delay_hours_from_start": 0,
+        "ad_headline": "Still exploring solutions?",
+        "ad_body": "Join thousands of teams who already simplified their workflow. Start free today.",
+        "audience_description": "Custom audience from email list of identified visitors in this segment",
+    })
+
     return {
         "campaign_name": f"Re-engage {segment.name}",
         "segment_id": str(segment.id),
-        "total_touchpoints": 3,
-        "touchpoints": [
-            {
-                "order": 1,
-                "channel": "email",
-                "delay_hours_from_start": 0,
-                "subject": "Quick question about your visit, {{first_name}}",
-                "body": (
-                    "Hi {{first_name}},\n\n"
-                    "I noticed you checked out our site recently. "
-                    "I'd love to understand what brought you there and if there's anything I can help with.\n\n"
-                    "Are you currently looking to solve {{pain_point}}?\n\n"
-                    "Happy to chat if you're interested.\n\n"
-                    "Best,\nThe Team"
-                ),
-                "personalization_fields": ["first_name", "pain_point"],
-                "cta": "Reply to start a conversation",
-            },
-            {
-                "order": 2,
-                "channel": "linkedin",
-                "delay_hours_from_start": 48,
-                "connection_note": (
-                    "Hi {{first_name}}, I saw you're working on interesting things at {{company_name}}. "
-                    "Would love to connect!"
-                ),
-                "followup_message": (
-                    "Thanks for connecting! I noticed you visited our site. "
-                    "Happy to share some resources that might help with {{industry}} challenges."
-                ),
-                "personalization_fields": ["first_name", "company_name", "industry"],
-            },
-            {
-                "order": 3,
-                "channel": "meta_ads",
-                "delay_hours_from_start": 0,
-                "ad_headline": "Still exploring solutions?",
-                "ad_body": "Join thousands of teams who already simplified their workflow. Start free today.",
-                "audience_description": "Custom audience from email list of identified visitors in this segment",
-            },
-        ],
-        "success_metric": "At least 1 email reply or 2 LinkedIn connections within 7 days",
-        "estimated_reach": f"~{len(profiles)} people via email, broader via paid ads",
+        "total_touchpoints": len(touchpoints),
+        "touchpoints": touchpoints,
+        "success_metric": "At least 1 email reply, 1 social engagement, or 2 LinkedIn connections within 7 days",
+        "estimated_reach": f"~{len(profiles)} people via email + social, broader via paid ads",
     }

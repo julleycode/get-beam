@@ -2,7 +2,14 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 class ApiClient {
   private token: string | null = null;
+  private clerkToken: string | null = null;
 
+  // ── Clerk token (primary, set by ClerkTokenSync) ────
+  setClerkToken(token: string | null) {
+    this.clerkToken = token;
+  }
+
+  // ── Legacy token (localStorage fallback) ────────────
   setToken(token: string) {
     this.token = token;
     if (typeof window !== "undefined") {
@@ -11,6 +18,8 @@ class ApiClient {
   }
 
   getToken(): string | null {
+    // Prefer Clerk token over legacy
+    if (this.clerkToken) return this.clerkToken;
     if (this.token) return this.token;
     if (typeof window !== "undefined") {
       this.token = localStorage.getItem("auth_token");
@@ -20,6 +29,7 @@ class ApiClient {
 
   clearToken() {
     this.token = null;
+    this.clerkToken = null;
     if (typeof window !== "undefined") {
       localStorage.removeItem("auth_token");
     }
@@ -44,9 +54,12 @@ class ApiClient {
     });
 
     if (res.status === 401) {
-      this.clearToken();
-      if (typeof window !== "undefined") {
-        window.location.href = "/login";
+      // Don't clear Clerk token — Clerk handles re-auth via middleware
+      if (!this.clerkToken) {
+        this.clearToken();
+        if (typeof window !== "undefined") {
+          window.location.href = "/login";
+        }
       }
       throw new Error("Unauthorized");
     }
@@ -266,6 +279,106 @@ class ApiClient {
       method: "POST",
     });
   }
+
+  // ── EasyEngage: Social Accounts ────────────────────
+  async getSocialAccounts() {
+    return this.request<SocialAccount[]>("/api/v1/social/accounts/");
+  }
+
+  async connectPlatform(platform: Platform) {
+    return this.request<{ auth_url: string }>(
+      `/api/v1/social/connect/${platform}`
+    );
+  }
+
+  async disconnectAccount(accountId: string) {
+    return this.request<{ message: string }>(
+      `/api/v1/social/accounts/${accountId}`,
+      { method: "DELETE" }
+    );
+  }
+
+  // ── EasyEngage: Feed ───────────────────────────────
+  async getFeed(
+    page = 1,
+    platform?: Platform,
+    dateFrom?: string,
+    dateTo?: string
+  ) {
+    const params = new URLSearchParams({ page: String(page), per_page: "20" });
+    if (platform) params.set("platform", platform);
+    if (dateFrom) params.set("date_from", dateFrom);
+    if (dateTo) params.set("date_to", dateTo);
+    return this.request<FeedResponse>(`/api/v1/feed?${params}`);
+  }
+
+  async triggerSync() {
+    return this.request<{ message: string; breakdown: Record<string, number> }>(
+      "/api/v1/feed/sync",
+      { method: "POST" }
+    );
+  }
+
+  async importPost(data: {
+    url: string;
+    platform: Platform;
+    content: string;
+    author_name: string;
+    author_username: string;
+  }) {
+    return this.request<SocialPost>("/api/v1/feed/import", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // ── EasyEngage: Drafts ─────────────────────────────
+  async getDrafts(status?: DraftStatus) {
+    const params = status ? `?status=${status}` : "";
+    return this.request<DraftListResponse>(`/api/v1/drafts${params}`);
+  }
+
+  async generateDraft(postId: string) {
+    return this.request<GenerateMultiDraftResponse>("/api/v1/drafts/generate", {
+      method: "POST",
+      body: JSON.stringify({ post_id: postId }),
+    });
+  }
+
+  async approveDraft(draftId: string) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 90_000);
+    try {
+      return await this.request<{ id: string; status: DraftStatus; message: string }>(
+        `/api/v1/drafts/${draftId}/approve`,
+        { method: "POST", signal: controller.signal }
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  async rejectDraft(draftId: string) {
+    return this.request<{ id: string; status: DraftStatus; message: string }>(
+      `/api/v1/drafts/${draftId}/reject`,
+      { method: "POST" }
+    );
+  }
+
+  // ── EasyTrack + EasyEngage: Campaign creation from segment ─
+  async createCampaignFromSegment(siteId: string, segmentId: string) {
+    return this.request<Campaign>(
+      `/api/v1/campaigns/${siteId}/create/${segmentId}`,
+      { method: "POST" }
+    );
+  }
+
+  async editDraft(draftId: string, editedContent: string) {
+    return this.request<SocialDraft>(`/api/v1/drafts/${draftId}/edit`, {
+      method: "PUT",
+      body: JSON.stringify({ edited_content: editedContent }),
+    });
+  }
 }
 
 export const api = new ApiClient();
@@ -351,6 +464,8 @@ export interface Campaign {
   site_id: string;
   segment_id: string | null;
   name: string;
+  campaign_type: string;
+  platform: string | null;
   status: string;
   plan: Record<string, unknown>;
   created_at: string;
@@ -375,4 +490,66 @@ export interface ApiKeyInfo {
   key_hint: string;
   is_valid: boolean;
   created_at: string;
+}
+
+// ── EasyEngage types ──────────────────────────────────
+
+export type Platform = "facebook" | "instagram" | "linkedin" | "twitter" | "tiktok";
+export type DraftStatus = "pending" | "approved" | "rejected" | "sent" | "failed";
+
+export interface SocialAccount {
+  id: string;
+  platform: Platform;
+  username: string;
+  platform_user_id: string;
+  is_active: boolean;
+  token_expires_at: string | null;
+  created_at: string;
+}
+
+export interface SocialPost {
+  id: string;
+  platform: Platform;
+  author_name: string;
+  author_username: string;
+  author_avatar_url: string | null;
+  content: string | null;
+  media_urls: string[] | null;
+  post_url: string | null;
+  commented: boolean;
+  posted_at: string;
+  created_at: string;
+}
+
+export interface FeedResponse {
+  posts: SocialPost[];
+  total: number;
+  page: number;
+  per_page: number;
+}
+
+export interface SocialDraft {
+  id: string;
+  type: "reply" | "comment";
+  platform: Platform;
+  ai_content: string;
+  edited_content: string | null;
+  status: DraftStatus;
+  strategy: string | null;
+  strategy_label: string | null;
+  sent_at: string | null;
+  created_at: string;
+  original_content: string | null;
+  original_author: string | null;
+}
+
+export interface DraftListResponse {
+  drafts: SocialDraft[];
+  total: number;
+}
+
+export interface GenerateMultiDraftResponse {
+  mode: "learning" | "confident";
+  drafts: SocialDraft[];
+  voice_example_count: number;
 }
