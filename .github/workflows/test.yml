@@ -82,6 +82,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install pytest pytest-asyncio httpx fakeredis
           pip install fastapi uvicorn sqlalchemy[asyncio] asyncpg pydantic pydantic-settings structlog httpx python-jose[cryptography] passlib[bcrypt] slowapi redis
+          pip install anthropic tenacity celery bcrypt cryptography
 
       - name: Run integration tests
         env:
@@ -136,6 +137,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install fastapi uvicorn sqlalchemy[asyncio] asyncpg pydantic pydantic-settings structlog httpx python-jose[cryptography] "passlib[bcrypt]" slowapi redis apscheduler cryptography bcrypt
+          pip install anthropic tenacity celery
 
       - name: Install Node dependencies
         working-directory: apps/web

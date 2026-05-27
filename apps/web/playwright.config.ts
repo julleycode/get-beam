@@ -35,8 +35,9 @@ export default defineConfig({
   /* Reuse already-running dev servers */
   webServer: [
     {
-      command:
-        'cd ../.. && source .venv/bin/activate && PYTHONPATH=. python -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000',
+      command: process.env.CI
+        ? 'cd ../.. && PYTHONPATH=. python -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000'
+        : 'cd ../.. && source .venv/bin/activate && PYTHONPATH=. python -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000',
       port: 8000,
       timeout: 30_000,
       reuseExistingServer: true,
