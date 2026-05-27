@@ -164,7 +164,7 @@ jobs:
                   exists = await db.execute(select(User).where(User.email == 'demo@retargetagent.com'))
                   if not exists.scalar_one_or_none():
                       pw = bcrypt.hashpw(b'demo1234', bcrypt.gensalt()).decode()
-                      db.add(User(email='demo@retargetagent.com', password_hash=pw, full_name='Demo User'))
+                      db.add(User(email='demo@retargetagent.com', hashed_password=pw, full_name='Demo User'))
                       await db.commit()
           asyncio.run(seed())
           "

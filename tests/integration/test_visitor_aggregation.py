@@ -4,48 +4,44 @@ Requires: PostgreSQL running locally.
 Tests verify that the window-function-based session counting works correctly.
 """
 
+import uuid
+
 import pytest
 import pytest_asyncio
 from datetime import datetime, timedelta
-from sqlalchemy import text
 
 pytestmark = pytest.mark.integration
 
 
 @pytest_asyncio.fixture
 async def seeded_events(test_db):
-    """Seed test events for aggregation testing.
+    """Seed test events for aggregation testing using ORM models.
 
     Creates events that span multiple sessions:
     - Session 1: 3 pageviews within 5 minutes
     - Session 2: 2 pageviews 2 hours later
     """
-    from sqlalchemy import text
+    from apps.api.models.user import User
+    from apps.api.models.site import Site
+    from apps.api.models.event import Event
+    from sqlalchemy import select
 
     site_id = "test_site_aggregation"
     visitor_id = "test_visitor_sessions"
 
-    # Ensure test user exists
-    await test_db.execute(text("""
-        INSERT INTO users (id, email, password_hash, full_name)
-        VALUES (gen_random_uuid(), 'test-aggregation@test.com', 'fakehash', 'Test User')
-        ON CONFLICT (email) DO NOTHING
-    """))
+    # Ensure test user exists (use ORM, not raw SQL)
+    result = await test_db.execute(select(User).where(User.email == "test-agg@test.com"))
+    user = result.scalar_one_or_none()
+    if not user:
+        user = User(email="test-agg@test.com", full_name="Test User")
+        test_db.add(user)
+        await test_db.flush()
 
     # Ensure test site exists
-    await test_db.execute(text("""
-        INSERT INTO sites (id, site_id, user_id, name, url)
-        VALUES (gen_random_uuid(), :site_id, (SELECT id FROM users LIMIT 1), 'Test Site', 'https://test.com')
-        ON CONFLICT (site_id) DO NOTHING
-    """), {"site_id": site_id})
-
-    # Clean previous test data
-    await test_db.execute(text(
-        "DELETE FROM events WHERE site_id = :site_id AND visitor_id = :vid"
-    ), {"site_id": site_id, "vid": visitor_id})
-    await test_db.execute(text(
-        "DELETE FROM visitors WHERE site_id = :site_id AND visitor_id = :vid"
-    ), {"site_id": site_id, "vid": visitor_id})
+    result = await test_db.execute(select(Site).where(Site.site_id == site_id))
+    if not result.scalar_one_or_none():
+        test_db.add(Site(site_id=site_id, user_id=user.id, name="Test Site", url="https://test.com"))
+        await test_db.flush()
 
     now = datetime.utcnow()
 
@@ -60,22 +56,24 @@ async def seeded_events(test_db):
     ]
 
     for ts, url, ip in events_data:
-        await test_db.execute(text("""
-            INSERT INTO events (site_id, visitor_id, event_type, url, ip_address, created_at, page_path)
-            VALUES (:site_id, :vid, 'pageview', :url, :ip, :ts, :url)
-        """), {"site_id": site_id, "vid": visitor_id, "url": url, "ip": ip, "ts": ts})
+        test_db.add(Event(
+            site_id=site_id,
+            visitor_id=visitor_id,
+            event_type="pageview",
+            url=url,
+            ip_address=ip,
+            created_at=ts,
+            page_path=url,
+        ))
 
     await test_db.commit()
 
     yield {"site_id": site_id, "visitor_id": visitor_id}
 
-    # Cleanup
-    await test_db.execute(text(
-        "DELETE FROM events WHERE site_id = :site_id AND visitor_id = :vid"
-    ), {"site_id": site_id, "vid": visitor_id})
-    await test_db.execute(text(
-        "DELETE FROM visitors WHERE site_id = :site_id AND visitor_id = :vid"
-    ), {"site_id": site_id, "vid": visitor_id})
+    # Cleanup via raw SQL (safe for DELETE)
+    from sqlalchemy import text
+    await test_db.execute(text("DELETE FROM events WHERE site_id = :sid"), {"sid": site_id})
+    await test_db.execute(text("DELETE FROM visitors WHERE site_id = :sid"), {"sid": site_id})
     await test_db.commit()
 
 
