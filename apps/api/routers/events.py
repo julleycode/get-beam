@@ -3,7 +3,6 @@ import json
 
 import structlog
 from fastapi import APIRouter, Depends, Request, Response
-from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.database import get_db, async_session
@@ -37,10 +36,7 @@ async def _parse_event_batch(request: Request) -> EventBatch:
     try:
         data = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        raise ValidationError.from_exception_data(
-            title="EventBatch",
-            line_errors=[],
-        )
+        raise ValueError("Invalid JSON body")
     return EventBatch(**data)
 
 

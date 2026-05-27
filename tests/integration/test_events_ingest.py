@@ -65,7 +65,7 @@ class TestEventIngestion:
         assert resp.status_code == 204
 
     @pytest.mark.asyncio
-    async def test_bot_ua_returns_204_silently(self, test_client):
+    async def test_bot_ua_returns_204_silently(self, test_client, test_site_id):
         """Bot user-agents should be silently discarded (not 400/403)."""
         payload = {
             "site_id": "any-site",
@@ -89,7 +89,7 @@ class TestEventIngestion:
         assert resp.status_code == 204
 
     @pytest.mark.asyncio
-    async def test_invalid_site_returns_403(self, test_client):
+    async def test_invalid_site_returns_403(self, test_client, test_site_id):
         """Non-existent site_id should return 403."""
         payload = {
             "site_id": "nonexistent_site_12345",
@@ -110,7 +110,7 @@ class TestEventIngestion:
         assert resp.status_code == 403
 
     @pytest.mark.asyncio
-    async def test_malformed_json_returns_400(self, test_client):
+    async def test_malformed_json_returns_400(self, test_client, test_site_id):
         """Malformed JSON should return 400."""
         resp = await test_client.post(
             "/api/v1/events/ingest",
