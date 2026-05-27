@@ -31,10 +31,10 @@ from apps.api.services.platforms.twitter_scraper import (
 logger = structlog.get_logger()
 
 
-# ── Token decryption helper ──
+# ── Token helpers ──
 
 def _decrypt_access_token(account: SocialAccount) -> str | None:
-    """Decrypt the OAuth access token from a social account."""
+    """Decrypt the OAuth access token from a social account (no refresh)."""
     if not account.access_token:
         return None
     try:
@@ -43,6 +43,18 @@ def _decrypt_access_token(account: SocialAccount) -> str | None:
     except Exception:
         logger.warning("decrypt_token_failed", account=account.username)
         return None
+
+
+async def _get_fresh_token(db: AsyncSession, account: SocialAccount) -> str | None:
+    """Get a valid access token, refreshing if expired."""
+    if not account.access_token:
+        return None
+    try:
+        from apps.api.services.sender import _refresh_if_expired
+        return await _refresh_if_expired(db, account)
+    except Exception:
+        logger.warning("token_refresh_failed_in_sync", account=account.username)
+        return _decrypt_access_token(account)
 
 
 # ── Playwright helpers (lazy import, graceful if unavailable) ──
@@ -139,7 +151,7 @@ async def sync_following_feed(
     feed_posts: list = []
 
     # 1. Try OAuth: get following list → scrape each handle via syndication
-    token = _decrypt_access_token(account)
+    token = await _get_fresh_token(db, account)
     if token and account.platform_user_id:
         following_users = await fetch_following_list_oauth(
             access_token=token,
@@ -198,8 +210,8 @@ async def sync_my_posts(
 
     feed_posts: list = []
 
-    # 1. Try OAuth API (best — uses the user's own token)
-    token = _decrypt_access_token(account)
+    # 1. Try OAuth API (best — uses the user's own token, auto-refreshed)
+    token = await _get_fresh_token(db, account)
     if token and account.platform_user_id:
         try:
             feed_posts = await fetch_own_tweets_oauth(
