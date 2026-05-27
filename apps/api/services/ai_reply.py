@@ -427,6 +427,14 @@ async def generate_multi_drafts(
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# Fallback chain: try these models in order if the primary fails
+_FREE_MODEL_FALLBACKS: list[str] = [
+    "meta-llama/llama-4-scout:free",
+    "qwen/qwen3-8b:free",
+    "google/gemma-3-1b-it:free",
+    "microsoft/phi-4-mini-instruct:free",
+]
+
 
 async def _call_openrouter(
     api_key: str,
@@ -434,28 +442,58 @@ async def _call_openrouter(
     system_prompt: str,
     user_prompt: str,
 ) -> str:
-    """Call OpenRouter's OpenAI-compatible chat API."""
+    """Call OpenRouter's OpenAI-compatible chat API with fallback models."""
+    # Build model chain: primary model first, then fallbacks (deduplicated)
+    models_to_try = [model] + [m for m in _FREE_MODEL_FALLBACKS if m != model]
+
+    last_error: Exception | None = None
     async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            OPENROUTER_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": settings.frontend_url,
-                "X-Title": "RetargetAgent EasyEngage",
-            },
-            json={
-                "model": model,
-                "max_tokens": 300,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            },
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
+        for try_model in models_to_try:
+            try:
+                resp = await client.post(
+                    OPENROUTER_URL,
+                    headers={
+                        "Authorization": f"Bearer {api_key}",
+                        "Content-Type": "application/json",
+                        "HTTP-Referer": settings.frontend_url,
+                        "X-Title": "RetargetAgent EasyEngage",
+                    },
+                    json={
+                        "model": try_model,
+                        "max_tokens": 300,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                    },
+                )
+
+                if resp.status_code != 200:
+                    body = resp.text[:500]
+                    logger.warning(
+                        "openrouter_model_failed",
+                        model=try_model,
+                        status=resp.status_code,
+                        body=body,
+                    )
+                    last_error = httpx.HTTPStatusError(
+                        f"{resp.status_code}", request=resp.request, response=resp
+                    )
+                    continue
+
+                data = resp.json()
+                content = data["choices"][0]["message"]["content"].strip()
+                if try_model != model:
+                    logger.info("openrouter_fallback_used", primary=model, used=try_model)
+                return content
+
+            except httpx.HTTPError as e:
+                logger.warning("openrouter_request_error", model=try_model, error=str(e))
+                last_error = e
+                continue
+
+    # All models failed
+    raise last_error or RuntimeError("All OpenRouter models failed")
 
 
 async def _resolve_ai_key(
