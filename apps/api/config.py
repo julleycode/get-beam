@@ -52,10 +52,15 @@ class Settings(BaseSettings):
 
     # ─── External APIs (EasyTrack) ───
     people_data_labs_api_key: str = ""
-    fullcontact_api_key: str = ""
+    fullcontact_api_key: str = ""  # deprecated — FullContact moved to B2B enterprise
     proxycurl_api_key: str = ""
     anthropic_api_key: str = ""
     resend_api_key: str = ""
+
+    # ─── Waterfall enrichment providers ───
+    ipinfo_token: str = ""          # IP → company/geolocation (50K free/month)
+    hunter_api_key: str = ""        # Domain → employee emails (25 free/month)
+    apollo_api_key: str = ""        # Contact database + email finder (10K credits free/month)
 
     # Shopify
     shopify_api_key: str = ""
