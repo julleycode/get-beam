@@ -12,6 +12,7 @@ logger = structlog.get_logger()
 
 HIGH_INTENT_KEYWORDS: list[str] = [
     "pricing", "checkout", "signup", "demo", "contact", "buy", "subscribe", "plan",
+    "enterprise", "book", "plans", "quote",
 ]
 
 
@@ -66,6 +67,7 @@ async def _upsert_visitor(
     first_seen: datetime,
     last_seen: datetime,
     total_pageviews: int,
+    total_sessions: int,
     max_scroll_depth: int,
     avg_time_on_page: float,
     pages_visited: list[str],
@@ -74,6 +76,7 @@ async def _upsert_visitor(
     utm_medium: str | None,
     country_code: str | None,
     device_type: str | None,
+    ip_address: str | None,
 ) -> None:
     """Upsert a single visitor row into the visitors table."""
     if avg_time_on_page is None or (isinstance(avg_time_on_page, float) and math.isnan(avg_time_on_page)):
@@ -81,7 +84,7 @@ async def _upsert_visitor(
 
     intent = calculate_intent_score(
         last_seen=last_seen.replace(tzinfo=timezone.utc) if last_seen.tzinfo is None else last_seen,
-        total_sessions=1,
+        total_sessions=total_sessions,
         max_scroll_depth=max_scroll_depth,
         avg_time_on_page=avg_time_on_page,
         pages_visited=pages_visited or [],
@@ -96,7 +99,7 @@ async def _upsert_visitor(
         first_seen=first_seen,
         last_seen=last_seen,
         total_pageviews=total_pageviews,
-        total_sessions=1,
+        total_sessions=total_sessions,
         avg_time_on_page=avg_time_on_page,
         max_scroll_depth=max_scroll_depth,
         pages_visited=pages_visited or [],
@@ -105,16 +108,18 @@ async def _upsert_visitor(
         utm_medium=utm_medium or None,
         country_code=country_code or None,
         device_type=device_type or None,
+        ip_address=ip_address or None,
         intent_score=intent,
     ).on_conflict_do_update(
         index_elements=["site_id", "visitor_id"],
         set_={
             "last_seen": last_seen,
             "total_pageviews": Visitor.total_pageviews + total_pageviews,
-            "total_sessions": Visitor.total_sessions + 1,
+            "total_sessions": Visitor.total_sessions + total_sessions,
             "avg_time_on_page": avg_time_on_page,
             "max_scroll_depth": text("GREATEST(visitors.max_scroll_depth, :new_scroll)").bindparams(new_scroll=max_scroll_depth),
             "pages_visited": pages_visited or [],
+            "ip_address": ip_address or Visitor.ip_address,
             "intent_score": intent,
             "updated_at": datetime.utcnow(),
         },
@@ -123,7 +128,11 @@ async def _upsert_visitor(
 
 
 async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
-    """Aggregate visitors from the PostgreSQL events table."""
+    """Aggregate visitors from the PostgreSQL events table.
+
+    Uses window functions to detect real session boundaries:
+    a new session starts when there is a gap > 30 minutes between consecutive events.
+    """
     since = datetime.utcnow() - timedelta(hours=2)
 
     # Check if events table exists
@@ -133,12 +142,38 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
     if not check.scalar():
         return 0
 
+    # Session-aware aggregation using window functions:
+    # 1. Detect session boundaries (gap > 30 min between events)
+    # 2. Count distinct sessions per visitor
+    # 3. Extract latest IP address
     result = await db.execute(text("""
+        WITH session_boundaries AS (
+            SELECT
+                visitor_id, created_at, event_type, url, referrer,
+                utm_source, utm_medium, country_code, device_type,
+                scroll_depth, time_on_page, ip_address,
+                CASE
+                    WHEN created_at - LAG(created_at) OVER (
+                        PARTITION BY visitor_id ORDER BY created_at
+                    ) > INTERVAL '30 minutes' THEN 1
+                    ELSE 0
+                END AS is_new_session
+            FROM events
+            WHERE site_id = :site_id AND created_at >= :since
+        ),
+        session_numbered AS (
+            SELECT *,
+                SUM(is_new_session) OVER (
+                    PARTITION BY visitor_id ORDER BY created_at
+                ) + 1 AS session_num
+            FROM session_boundaries
+        )
         SELECT
             visitor_id,
             MIN(created_at) AS first_seen,
             MAX(created_at) AS last_seen,
             COUNT(*) FILTER (WHERE event_type = 'pageview') AS total_pageviews,
+            MAX(session_num) AS total_sessions,
             COALESCE(MAX(scroll_depth), 0) AS max_scroll_depth,
             COALESCE(AVG(time_on_page) FILTER (WHERE time_on_page > 0), 0) AS avg_time_on_page,
             ARRAY_AGG(DISTINCT url) FILTER (WHERE event_type = 'pageview' AND url != '') AS pages_visited,
@@ -146,9 +181,9 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
             MAX(utm_source) FILTER (WHERE utm_source != '') AS utm_source,
             MAX(utm_medium) FILTER (WHERE utm_medium != '') AS utm_medium,
             MAX(country_code) FILTER (WHERE country_code != '') AS country_code,
-            MAX(device_type) FILTER (WHERE device_type != '') AS device_type
-        FROM events
-        WHERE site_id = :site_id AND created_at >= :since
+            MAX(device_type) FILTER (WHERE device_type != '') AS device_type,
+            (ARRAY_AGG(ip_address ORDER BY created_at DESC) FILTER (WHERE ip_address != ''))[1] AS latest_ip
+        FROM session_numbered
         GROUP BY visitor_id
     """), {"site_id": site_id, "since": since})
 
@@ -156,8 +191,9 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
     for row in result.fetchall():
         (
             visitor_id, first_seen, last_seen, total_pageviews,
-            max_scroll_depth, avg_time_on_page, pages_visited,
+            total_sessions, max_scroll_depth, avg_time_on_page, pages_visited,
             top_referrer, utm_source, utm_medium, country_code, device_type,
+            latest_ip,
         ) = row
 
         await _upsert_visitor(
@@ -165,10 +201,12 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
             first_seen or datetime.utcnow(),
             last_seen or datetime.utcnow(),
             total_pageviews or 0,
+            total_sessions or 1,
             max_scroll_depth or 0,
             avg_time_on_page or 0.0,
             pages_visited or [],
             top_referrer, utm_source, utm_medium, country_code, device_type,
+            latest_ip,
         )
         count += 1
 

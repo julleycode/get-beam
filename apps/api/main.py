@@ -52,11 +52,34 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "ALTER TABLE enrichment_profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
             "ALTER TABLE user_api_keys ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
             "ALTER TABLE campaign_touchpoints ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
+            # Phase 1A: IP address on visitors for identity resolution
+            "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45)",
+            "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS company_domain VARCHAR(253)",
+            # Phase 2A: New event columns for bot filtering and tracking accuracy
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS user_agent VARCHAR(500) DEFAULT ''",
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS page_title VARCHAR(500) DEFAULT ''",
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS page_path VARCHAR(2000) DEFAULT ''",
         ]:
             try:
                 await conn.execute(__import__("sqlalchemy").text(stmt))
             except Exception as e:
                 logger.debug("migration_skipped", stmt=stmt[:60], reason=str(e))
+        # Backfill IP addresses on existing visitors from their latest event
+        try:
+            await conn.execute(__import__("sqlalchemy").text("""
+                UPDATE visitors v SET ip_address = sub.ip
+                FROM (
+                    SELECT DISTINCT ON (visitor_id, site_id) visitor_id, site_id, ip_address AS ip
+                    FROM events
+                    WHERE ip_address != '' AND ip_address IS NOT NULL
+                    ORDER BY visitor_id, site_id, created_at DESC
+                ) sub
+                WHERE v.visitor_id = sub.visitor_id AND v.site_id = sub.site_id
+                  AND v.ip_address IS NULL
+            """))
+        except Exception as e:
+            logger.debug("ip_backfill_skipped", reason=str(e))
+
     # Start background feed-sync scheduler
     start_scheduler()
     logger.info("scheduler_started")

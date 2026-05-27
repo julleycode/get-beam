@@ -1,6 +1,9 @@
 (function() {
   "use strict";
 
+  // Abort if this is a bot/automated browser
+  if (navigator.webdriver === true) return;
+
   var script = document.currentScript;
   if (!script) return;
 
@@ -16,8 +19,7 @@
     try { API_URL = new URL(script.src).origin; } catch(e) { API_URL = "http://localhost:8000"; }
   }
   var ENDPOINT = API_URL + "/api/v1/events/ingest";
-  var BATCH_INTERVAL = 10000;
-  var TIME_PING_INTERVAL = 15000;
+  var BATCH_INTERVAL = 5000;
   var COOKIE_NAME = "_rta_vid";
   var COOKIE_DAYS = 365;
 
@@ -80,9 +82,6 @@
 
   var visitorId = getVisitorId();
   var queue = [];
-  var scrollThresholds = { 25: false, 50: false, 75: false, 100: false };
-  var pageStartTime = Date.now();
-  var isVisible = true;
 
   // --- Event Queueing ---
 
@@ -112,88 +111,54 @@
 
   // --- Pageview ---
 
-  pushEvent({
-    type: "pageview",
-    url: window.location.href,
-    referrer: document.referrer || null,
-    utm: getUTM(),
-    viewport: { w: window.innerWidth, h: window.innerHeight },
-    device: getDevice(),
-    lang: navigator.language || null,
-    ts: now()
-  });
-
-  // --- Scroll Tracking ---
-
-  function getScrollPercent() {
-    var docHeight = Math.max(
-      document.body.scrollHeight,
-      document.documentElement.scrollHeight
-    );
-    var winHeight = window.innerHeight;
-    if (docHeight <= winHeight) return 100;
-    return Math.round((window.scrollY / (docHeight - winHeight)) * 100);
+  function trackPageview() {
+    pushEvent({
+      type: "pageview",
+      url: window.location.href,
+      page_path: window.location.pathname,
+      page_title: document.title,
+      referrer: document.referrer || null,
+      utm: getUTM(),
+      device: getDevice(),
+      lang: navigator.language || null,
+      user_agent: navigator.userAgent || null,
+      ts: now()
+    });
   }
 
-  function onScroll() {
-    var pct = getScrollPercent();
-    var thresholds = [25, 50, 75, 100];
-    for (var i = 0; i < thresholds.length; i++) {
-      var t = thresholds[i];
-      if (pct >= t && !scrollThresholds[t]) {
-        scrollThresholds[t] = true;
-        pushEvent({
-          type: "scroll",
-          depth: t,
-          url: window.location.href,
-          ts: now()
-        });
-      }
+  // Track initial pageview
+  trackPageview();
+
+  // --- SPA Navigation Tracking ---
+
+  var lastUrl = window.location.href;
+
+  function onNavigation() {
+    var currentUrl = window.location.href;
+    if (currentUrl !== lastUrl) {
+      lastUrl = currentUrl;
+      trackPageview();
     }
   }
 
-  window.addEventListener("scroll", onScroll, { passive: true });
+  // Intercept History API for SPA frameworks
+  var origPushState = history.pushState;
+  if (origPushState) {
+    history.pushState = function() {
+      origPushState.apply(this, arguments);
+      onNavigation();
+    };
+  }
 
-  // --- Time on Page ---
+  var origReplaceState = history.replaceState;
+  if (origReplaceState) {
+    history.replaceState = function() {
+      origReplaceState.apply(this, arguments);
+      onNavigation();
+    };
+  }
 
-  setInterval(function() {
-    if (!isVisible) return;
-    var seconds = Math.round((Date.now() - pageStartTime) / 1000);
-    pushEvent({
-      type: "time_on_page",
-      seconds: seconds,
-      url: window.location.href,
-      ts: now()
-    });
-  }, TIME_PING_INTERVAL);
-
-  // --- Click Tracking ---
-
-  document.addEventListener("click", function(e) {
-    var target = e.target;
-    var el = target.closest("a, button, [role='button']");
-    if (!el) return;
-
-    pushEvent({
-      type: "click",
-      element_text: (el.textContent || "").trim().substring(0, 200),
-      element_href: el.href || null,
-      url: window.location.href,
-      ts: now()
-    });
-  }, true);
-
-  // --- Visibility ---
-
-  document.addEventListener("visibilitychange", function() {
-    isVisible = !document.hidden;
-    pushEvent({
-      type: "visibility",
-      visible: isVisible,
-      url: window.location.href,
-      ts: now()
-    });
-  });
+  window.addEventListener("popstate", onNavigation);
 
   // --- Flush on interval and unload ---
 

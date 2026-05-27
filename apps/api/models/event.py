@@ -29,6 +29,9 @@ class Event(Base):
     element_text: str = Column(String(500), default="")
     element_href: str = Column(Text, default="")
     ip_address: str = Column(String(45), default="")
+    user_agent: str = Column(String(500), default="")
+    page_title: str = Column(String(500), default="")
+    page_path: str = Column(String(2000), default="")
     created_at: datetime = Column(DateTime, default=func.now(), nullable=False)
 
     __table_args__ = (

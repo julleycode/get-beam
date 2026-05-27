@@ -45,6 +45,11 @@ class IdentityResolver:
         return result.scalar_one_or_none() is not None
 
     async def resolve(self, visitor: Visitor) -> IdentifiedVisitor | None:
+        # Must have a real IP address (not the cookie UUID)
+        if not getattr(visitor, "ip_address", None):
+            logger.info("resolution_skipped_no_ip", visitor_id=visitor.visitor_id[:8])
+            return None
+
         if await self.was_recently_attempted(visitor.site_id, visitor.visitor_id):
             logger.info("resolution_skipped_recent_attempt", visitor_id=visitor.visitor_id[:8])
             return None
@@ -112,7 +117,7 @@ class IdentityResolver:
                 resp = await client.get(
                     "https://api.peopledatalabs.com/v5/person/identify",
                     headers={"X-Api-Key": settings.people_data_labs_api_key},
-                    params={"ip": visitor.visitor_id},
+                    params={"ip": visitor.ip_address},
                 )
                 if resp.status_code == 200:
                     body = resp.json()
@@ -136,7 +141,7 @@ class IdentityResolver:
                 resp = await client.post(
                     "https://api.fullcontact.com/v3/person.enrich",
                     headers={"Authorization": f"Bearer {settings.fullcontact_api_key}"},
-                    json={"ip": visitor.visitor_id},
+                    json={"ip": visitor.ip_address},
                 )
                 if resp.status_code == 200:
                     body = resp.json()

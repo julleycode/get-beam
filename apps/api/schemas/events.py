@@ -29,6 +29,9 @@ class Event(BaseModel):
     element_text: str | None = None
     element_href: str | None = None
     visible: bool | None = None
+    user_agent: str | None = None
+    page_title: str | None = None
+    page_path: str | None = None
     ts: datetime
 
 

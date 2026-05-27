@@ -31,6 +31,8 @@ class Visitor(Base):
     utm_medium: Mapped[str | None] = mapped_column(String(200))
     country_code: Mapped[str | None] = mapped_column(String(5))
     device_type: Mapped[str | None] = mapped_column(String(20))
+    ip_address: Mapped[str | None] = mapped_column(String(45))
+    company_domain: Mapped[str | None] = mapped_column(String(253))
     intent_score: Mapped[float] = mapped_column(Float, default=0.0)
     identity_status: Mapped[str] = mapped_column(String(20), default="anonymous")
     enrichment_status: Mapped[str] = mapped_column(String(20), default="pending")
