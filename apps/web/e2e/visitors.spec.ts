@@ -14,20 +14,20 @@ test.describe("Visitors Page", () => {
   });
 
   test("shows visitor list or empty state", async ({ page }) => {
-    // Auto-wait for visitor-related content to appear
+    // Auto-wait for visitor-related content. Use .first() to avoid strict
+    // mode violation when "Visitor" matches both nav link + page heading.
     await expect(
       page
-        .locator("text=Visitor")
-        .or(page.locator("text=visitor"))
+        .locator("h2:has-text('Visitor')")
         .or(page.locator("text=No visitors"))
         .or(page.locator("text=anonymous"))
+        .first()
     ).toBeVisible({ timeout: 15_000 });
   });
 
   test("has search or filter controls", async ({ page }) => {
     // Verify the page renders — auto-wait
     await expect(page.locator("body")).not.toBeEmpty();
-    // Soft check: page loaded without crashing
     await page.waitForLoadState("networkidle");
     const pageContent = await page.textContent("body");
     expect(pageContent).toBeTruthy();

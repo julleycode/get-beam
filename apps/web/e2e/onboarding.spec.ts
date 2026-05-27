@@ -289,11 +289,12 @@ test.describe("Settings Page — Pixel Management", () => {
 
     await page.goto(`/dashboard/settings?site=${testSiteId}`);
 
-    // Wait for site data to load — "Verify Now" or "Verified" appears in Site Details
+    // Wait for site data to load — "Verify Now" or "Verified" appears in Site Details.
+    // Use .first() because .or() can match multiple elements (strict mode violation).
     await expect(
       page.locator('button:has-text("Verify Now")').or(
         page.locator("text=Verified")
-      )
+      ).first()
     ).toBeVisible({ timeout: 15_000 });
   });
 

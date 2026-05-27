@@ -13,8 +13,8 @@ test.describe("Dashboard — Main Page", () => {
   });
 
   test("shows site selector or onboarding prompt", async ({ page }) => {
-    // Use Playwright auto-waiting instead of waitForTimeout + isVisible.
-    // The dashboard always shows at least one of these within 15s.
+    // Use Playwright auto-waiting. .first() avoids strict mode violation
+    // when .or() matches multiple elements.
     await expect(
       page
         .locator('[data-testid="site-selector"], select, [role="combobox"]')
@@ -23,13 +23,14 @@ test.describe("Dashboard — Main Page", () => {
         .or(page.locator('a[href*="onboarding"]'))
         .or(page.locator('text=Dashboard'))
         .or(page.locator('text=Overview'))
+        .first()
     ).toBeVisible({ timeout: 15_000 });
   });
 
   test("navigation sidebar is visible", async ({ page }) => {
     // Check that key navigation items exist
     await expect(
-      page.locator('a[href*="visitors"], nav >> text=Visitors')
+      page.locator('a[href*="visitors"], nav >> text=Visitors').first()
     ).toBeVisible({ timeout: 10_000 });
   });
 });
@@ -40,7 +41,8 @@ test.describe("Dashboard — Stats Cards", () => {
   }) => {
     await page.goto("/dashboard");
 
-    // Auto-wait for dashboard to render metric labels or empty state
+    // Auto-wait for dashboard to render metric labels or empty state.
+    // .first() avoids strict mode violation.
     await expect(
       page
         .locator("text=Visitors")
@@ -48,6 +50,7 @@ test.describe("Dashboard — Stats Cards", () => {
         .or(page.locator("text=Sessions"))
         .or(page.locator("text=No data"))
         .or(page.locator("text=Add site"))
+        .first()
     ).toBeVisible({ timeout: 15_000 });
   });
 });

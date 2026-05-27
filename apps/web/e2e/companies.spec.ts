@@ -38,7 +38,7 @@ test.describe("Companies Page (IP-to-Company Resolution)", () => {
     // The companies feature may not have a dedicated nav link yet.
     // Just verify the dashboard rendered without errors.
     await expect(
-      page.locator("text=Dashboard").or(page.locator("text=Overview"))
+      page.locator("text=Dashboard").or(page.locator("text=Overview")).first()
     ).toBeVisible({ timeout: 15_000 });
   });
 });
