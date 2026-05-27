@@ -211,5 +211,78 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
         count += 1
 
     await db.commit()
+
+    # Phase 4: Resolve IP → company domain for visitors that don't have one yet
+    await _resolve_companies(db, site_id)
+
     logger.info("visitors_aggregated", site_id=site_id, count=count)
     return count
+
+
+async def _resolve_companies(db: AsyncSession, site_id: str) -> None:
+    """Resolve company domains from IP for visitors missing company_domain."""
+    try:
+        from apps.api.services.company_resolver import resolve_company_cached
+
+        # Get visitors with IP but no company_domain (limit 20 per run to avoid slowdowns)
+        result = await db.execute(
+            select(Visitor).where(
+                Visitor.site_id == site_id,
+                Visitor.ip_address.isnot(None),
+                Visitor.ip_address != "",
+                (Visitor.company_domain.is_(None)) | (Visitor.company_domain == ""),
+            ).limit(20)
+        )
+        visitors = result.scalars().all()
+
+        if not visitors:
+            return
+
+        resolved = 0
+        for visitor in visitors:
+            domain = await resolve_company_cached(visitor.ip_address)
+            if domain:
+                visitor.company_domain = domain
+                resolved += 1
+
+                # Upsert into companies table
+                await _upsert_company(db, site_id, domain, visitor)
+
+        if resolved:
+            await db.commit()
+            logger.info("companies_resolved", site_id=site_id, resolved=resolved, total=len(visitors))
+
+    except Exception as e:
+        logger.warning("company_resolution_failed", site_id=site_id, error=str(e))
+
+
+async def _upsert_company(
+    db: AsyncSession,
+    site_id: str,
+    domain: str,
+    visitor: Visitor,
+) -> None:
+    """Upsert a company row from a resolved visitor."""
+    from apps.api.models.company import Company
+
+    stmt = pg_insert(Company).values(
+        site_id=site_id,
+        domain=domain,
+        total_visitors=1,
+        total_sessions=visitor.total_sessions or 1,
+        total_pageviews=visitor.total_pageviews or 0,
+        intent_score=visitor.intent_score or 0.0,
+        first_seen=visitor.first_seen or datetime.utcnow(),
+        last_seen=visitor.last_seen or datetime.utcnow(),
+    ).on_conflict_do_update(
+        index_elements=["site_id", "domain"],
+        set_={
+            "total_visitors": text("companies.total_visitors + 1"),
+            "total_sessions": text("companies.total_sessions + EXCLUDED.total_sessions"),
+            "total_pageviews": text("companies.total_pageviews + EXCLUDED.total_pageviews"),
+            "intent_score": text("GREATEST(companies.intent_score, EXCLUDED.intent_score)"),
+            "last_seen": text("GREATEST(companies.last_seen, EXCLUDED.last_seen)"),
+            "updated_at": datetime.utcnow(),
+        },
+    )
+    await db.execute(stmt)
