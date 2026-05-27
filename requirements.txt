@@ -1,0 +1,43 @@
+# Core web framework
+fastapi
+uvicorn[standard]
+starlette
+
+# Database
+sqlalchemy[asyncio]
+asyncpg
+
+# Validation & settings
+pydantic
+pydantic-settings
+email-validator
+
+# Auth
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt
+cryptography
+
+# HTTP client
+httpx
+
+# Redis & rate limiting
+redis
+slowapi
+
+# AI
+anthropic
+
+# Task queue
+celery
+apscheduler
+
+# Enrichment / external
+tenacity
+resend
+
+# Logging
+structlog
+
+# Analytics DB (optional, fails gracefully)
+clickhouse-connect
