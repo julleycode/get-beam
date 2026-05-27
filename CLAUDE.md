@@ -134,3 +134,51 @@ All external API services (People Data Labs, FullContact, Proxycurl, Resend) mus
 - Demo mode for potential customers
 
 Toggle via env var: `MOCK_EXTERNAL_APIS=true`
+
+## Playwright E2E Testing Rules (LEARNED THE HARD WAY)
+
+These rules were learned from repeated CI failures. Follow them EXACTLY when writing or modifying E2E tests.
+
+### 1. NEVER use `waitForTimeout()` + `isVisible()` — this is the #1 flaky test anti-pattern
+```typescript
+// ❌ BAD — checks once at an arbitrary moment, fails if page is still loading
+await page.waitForTimeout(3000);
+const hasX = await page.locator("text=X").isVisible();
+
+// ✅ GOOD — auto-retries until element appears or timeout expires
+await expect(page.locator("text=X")).toBeVisible({ timeout: 15_000 });
+```
+
+### 2. ALWAYS add `.first()` when using `.or()` with `toBeVisible()`
+Playwright strict mode requires locators to resolve to exactly 1 element.
+`.or()` often matches multiple (e.g. "Visitors" in both nav sidebar AND page heading).
+```typescript
+// ❌ BAD — strict mode violation: "resolved to 3 elements"
+await expect(
+  page.locator("text=Visitors").or(page.locator("text=Overview"))
+).toBeVisible();
+
+// ✅ GOOD — .first() resolves to exactly 1 element
+await expect(
+  page.locator("text=Visitors").or(page.locator("text=Overview")).first()
+).toBeVisible({ timeout: 15_000 });
+```
+
+### 3. Use specific selectors to avoid ambiguous matches
+```typescript
+// ❌ BAD — "Draft" matches nav link, heading, button text, etc.
+page.locator("text=Draft")
+
+// ✅ GOOD — h2 heading is unambiguous
+page.locator("h2:has-text('Drafts')")
+```
+
+### 4. Always READ actual source before writing tests
+Never assume what text, selectors, or data a page renders. Read the actual component file first.
+
+### 5. Backend test gotchas
+- `is_bot("")` returns True — tests without User-Agent header get silently 204'd
+- `ASGITransport` in httpx does NOT run ASGI lifespan — test fixtures must create tables
+- User model column is `hashed_password` NOT `password_hash`
+- All Python deps must be in `requirements.txt` for CI — don't play whack-a-mole with pip install
+- `source .venv/bin/activate` fails in CI — use `process.env.CI` conditional in playwright.config.ts
