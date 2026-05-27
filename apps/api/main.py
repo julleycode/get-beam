@@ -67,6 +67,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # Cleanup: remove mock posts from DB now that real APIs are active
             "DELETE FROM drafts WHERE post_id IN (SELECT id FROM posts WHERE platform_post_id LIKE 'mock_%' OR platform_post_id LIKE 'visitor_tweet_%')",
             "DELETE FROM posts WHERE platform_post_id LIKE 'mock_%' OR platform_post_id LIKE 'visitor_tweet_%'",
+            # Cleanup: remove visitor-source posts that came from mock enrichment handles
+            # These are real tweets from strangers scraped because mock enrichment generated fake handles
+            "DELETE FROM drafts WHERE post_id IN (SELECT id FROM posts WHERE source = 'visitors')",
+            "DELETE FROM posts WHERE source = 'visitors'",
+            # Cleanup: remove mock enrichment profiles (fake twitter handles, fake job titles)
+            "DELETE FROM enrichment_profiles WHERE twitter_handle IN ('sarahdavis', 'megantaylor', 'davidjones', 'meganthomas', 'lisajones', 'racheldavis', 'johnsmith')",
         ]:
             try:
                 await conn.execute(__import__("sqlalchemy").text(stmt))

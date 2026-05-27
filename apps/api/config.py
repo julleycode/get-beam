@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     proxycurl_api_key: str = ""
     anthropic_api_key: str = ""  # legacy — use OpenRouter instead
     openrouter_api_key: str = ""  # OpenRouter.ai — single key for 100+ models
-    default_ai_model: str = "meta-llama/llama-4-maverick"  # cheap & good for social replies
+    default_ai_model: str = "meta-llama/llama-4-scout:free"  # free tier — good for social replies
     resend_api_key: str = ""
 
     # ─── Waterfall enrichment providers ───
