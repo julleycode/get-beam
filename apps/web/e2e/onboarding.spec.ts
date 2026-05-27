@@ -270,18 +270,33 @@ test.describe("Settings Page — Pixel Management", () => {
 
     await page.goto(`/dashboard/settings?site=${testSiteId}`);
 
-    // Wait for settings page to load — either shows site details or settings layout
+    // Wait for settings page to load
     await page.waitForTimeout(3000);
 
-    // Should show some settings content
-    const hasSettings = await page
+    // The h2 "Settings" heading is always visible on this page
+    const hasSettingsHeading = await page
+      .locator("h2:has-text('Settings')")
+      .isVisible()
+      .catch(() => false);
+    // "Site Details" card appears once site data loads
+    const hasSiteDetails = await page
       .locator("text=Site Details")
-      .or(page.locator("text=Settings"))
-      .or(page.locator("text=Pixel"))
+      .isVisible()
+      .catch(() => false);
+    // "API Keys" card is always visible
+    const hasApiKeys = await page
+      .locator("text=API Keys")
+      .isVisible()
+      .catch(() => false);
+    // "Budget Controls" card appears once site data loads
+    const hasBudget = await page
+      .locator("text=Budget Controls")
       .isVisible()
       .catch(() => false);
 
-    expect(hasSettings).toBeTruthy();
+    expect(
+      hasSettingsHeading || hasSiteDetails || hasApiKeys || hasBudget
+    ).toBeTruthy();
   });
 
   test("Verify button on settings page", async ({ page }) => {
