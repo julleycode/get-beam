@@ -43,6 +43,24 @@ class TwitterBrowserPoster:
             os.path.expanduser(settings.twitter_browser_cookie_path)
         )
         self._headless = settings.twitter_browser_headless
+        # Hydrate cookies from env var (for Railway/Docker)
+        self._hydrate_cookies_from_env()
+
+    def _hydrate_cookies_from_env(self) -> None:
+        """Write cookies from TWITTER_BROWSER_COOKIES_B64 env var to disk."""
+        if self._cookie_path.exists():
+            return
+        b64_data = settings.twitter_browser_cookies_b64
+        if not b64_data:
+            return
+        import base64
+        try:
+            raw = base64.b64decode(b64_data)
+            self._cookie_path.parent.mkdir(parents=True, exist_ok=True)
+            self._cookie_path.write_bytes(raw)
+            logger.info("twitter_browser_cookies_hydrated_from_env", path=str(self._cookie_path))
+        except Exception:
+            logger.exception("twitter_browser_cookies_hydration_failed")
 
     # ── Public API ──────────────────────────────────────
 

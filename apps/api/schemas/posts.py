@@ -15,6 +15,7 @@ class PostResponse(BaseModel):
     content: Optional[str] = None
     media_urls: Optional[list[str]] = None
     post_url: Optional[str] = None
+    source: str = "following"
     commented: bool
     posted_at: datetime
     created_at: datetime

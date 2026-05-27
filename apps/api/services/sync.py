@@ -1,4 +1,15 @@
-"""Sync service: fetches new posts/messages from all connected platforms."""
+"""Sync service: fetches posts for the engagement feed.
+
+Waterfall strategy:
+1. **OAuth API** — uses the user's own Twitter access token (best for own tweets)
+2. **Syndication scraper** — public endpoint, no auth, fast (for public profiles)
+3. **Playwright fallback** — browser scraping with saved cookies (if available)
+
+Feed sources:
+- **visitors**: tweets from people identified by EasyTrack (enrichment → twitter_handle)
+- **following**: tweets from people the user follows (Playwright only — needs cookies)
+- **my_posts**: the user's own tweets
+"""
 
 import uuid
 from datetime import datetime, timezone
@@ -7,41 +18,199 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.post import Post
-from apps.api.models.social_account import SocialAccount
-from apps.api.services.encryption import decrypt_token
-from apps.api.services.platforms import get_platform_service
+from apps.api.models.social_account import Platform, SocialAccount
+from apps.api.services.platforms.twitter_scraper import (
+    fetch_user_tweets,
+    fetch_multiple_users_tweets,
+    fetch_own_tweets_oauth,
+)
 
 logger = structlog.get_logger()
 
 
-async def sync_account_feed(
+# ── Token decryption helper ──
+
+def _decrypt_access_token(account: SocialAccount) -> str | None:
+    """Decrypt the OAuth access token from a social account."""
+    if not account.access_token:
+        return None
+    try:
+        from apps.api.services.encryption import decrypt_token
+        return decrypt_token(account.access_token)
+    except Exception:
+        logger.warning("decrypt_token_failed", account=account.username)
+        return None
+
+
+# ── Playwright helpers (lazy import, graceful if unavailable) ──
+
+async def _playwright_fetch_timeline(limit: int = 20):
+    """Try Playwright browser scraping. Returns posts or empty list."""
+    try:
+        from apps.api.services.platforms.twitter_browser import (
+            TwitterBrowserPoster,
+            TwitterBrowserError,
+        )
+        poster = TwitterBrowserPoster()
+        posts = await poster.fetch_timeline(limit=limit)
+        logger.info("playwright_timeline_ok", count=len(posts))
+        return posts
+    except ImportError:
+        logger.debug("playwright_not_installed")
+        return []
+    except Exception as exc:
+        logger.warning("playwright_timeline_failed", error=str(exc))
+        return []
+
+
+async def _playwright_fetch_user_tweets(username: str, limit: int = 20):
+    """Fallback: use Playwright to scrape a specific user's profile page."""
+    try:
+        from apps.api.services.platforms.twitter_browser import (
+            TwitterBrowserPoster,
+            TwitterBrowserError,
+        )
+        poster = TwitterBrowserPoster()
+        # Playwright fetches /home timeline, not a specific user.
+        # For user-specific, syndication is better. Only use Playwright
+        # as timeline fallback.
+        return []
+    except Exception:
+        return []
+
+
+# ── Visitor posts: tweets from enriched visitors ──────────
+
+async def sync_visitor_posts(
     db: AsyncSession, account: SocialAccount
 ) -> int:
-    """Fetch new feed posts for a single social account.
+    """Fetch recent tweets from identified visitors' Twitter handles.
 
-    Returns the number of new posts added.
+    Waterfall: syndication scraper (per handle) → done.
+    Playwright can't search by handle, so no fallback here.
     """
-    service = get_platform_service(account.platform)
-    new_count = 0
-
-    # Decrypt the stored token before using it
-    access_token = decrypt_token(account.access_token)
-
-    try:
-        feed_posts = await service.fetch_feed(access_token, limit=20)
-    except Exception:
-        logger.exception(
-            "sync_feed_failed",
-            platform=account.platform.value,
-            account_id=str(account.id),
-        )
+    if account.platform != Platform.twitter:
         return 0
 
+    result = await db.execute(
+        select(EnrichmentProfile.twitter_handle).where(
+            EnrichmentProfile.twitter_handle.isnot(None),
+            EnrichmentProfile.twitter_handle != "",
+        ).limit(50)
+    )
+    handles = [row[0] for row in result.all() if row[0]]
+
+    if not handles:
+        logger.info("sync_visitor_posts_no_handles", account=account.username)
+        return 0
+
+    try:
+        feed_posts = await fetch_multiple_users_tweets(
+            handles, limit_per_user=5, total_limit=30
+        )
+    except Exception:
+        logger.exception("sync_visitor_posts_failed", handles_count=len(handles))
+        return 0
+
+    return await _save_posts(db, account, feed_posts, source="visitors")
+
+
+# ── Following feed: tweets from people the user follows ───
+
+async def sync_following_feed(
+    db: AsyncSession, account: SocialAccount
+) -> int:
+    """Fetch tweets from Following timeline.
+
+    Playwright only — syndication can't access Following feed (needs auth).
+    If no cookies available, returns 0 silently.
+    """
+    if account.platform != Platform.twitter:
+        return 0
+
+    feed_posts = await _playwright_fetch_timeline(limit=20)
     if not feed_posts:
         return 0
 
-    # Batch-check which posts already exist instead of N individual SELECTs
+    # Filter out own tweets — those go to my_posts
+    own_username = (account.username or "").lower()
+    following_posts = [
+        fp for fp in feed_posts
+        if fp.author_username.lower() != own_username
+    ]
+
+    return await _save_posts(db, account, following_posts, source="following")
+
+
+# ── My posts: the user's own tweets ──────────────────────
+
+async def sync_my_posts(
+    db: AsyncSession, account: SocialAccount
+) -> int:
+    """Fetch the user's own tweets.
+
+    Waterfall:
+    1. OAuth API (user's own access token — works on Free tier for own tweets)
+    2. Syndication scraper (public endpoint — works for large/public accounts)
+    3. Playwright fallback (browser scraping — needs cookies)
+    """
+    if account.platform != Platform.twitter:
+        return 0
+
+    own_username = account.username or ""
+    if not own_username:
+        return 0
+
+    feed_posts: list = []
+
+    # 1. Try OAuth API (best — uses the user's own token)
+    token = _decrypt_access_token(account)
+    if token and account.platform_user_id:
+        try:
+            feed_posts = await fetch_own_tweets_oauth(
+                access_token=token,
+                platform_user_id=account.platform_user_id,
+                username=own_username,
+                limit=20,
+            )
+        except Exception:
+            logger.warning("sync_my_posts_oauth_failed", account=own_username)
+            feed_posts = []
+
+    # 2. Fallback: syndication scraper (fast, no auth, public profiles only)
+    if not feed_posts:
+        try:
+            feed_posts = await fetch_user_tweets(own_username, limit=20)
+        except Exception:
+            logger.warning("sync_my_posts_scraper_failed", account=own_username)
+            feed_posts = []
+
+    # 3. Fallback: Playwright (slower, needs cookies)
+    if not feed_posts:
+        logger.info("sync_my_posts_trying_playwright", account=own_username)
+        all_timeline = await _playwright_fetch_timeline(limit=30)
+        feed_posts = [
+            fp for fp in all_timeline
+            if fp.author_username.lower() == own_username.lower()
+        ]
+
+    return await _save_posts(db, account, feed_posts, source="my_posts")
+
+
+# ── Shared helpers ────────────────────────────────────────
+
+async def _save_posts(
+    db: AsyncSession,
+    account: SocialAccount,
+    feed_posts: list,
+    source: str,
+) -> int:
+    """Deduplicate and save posts to DB. Returns count of new posts."""
+    if not feed_posts:
+        return 0
+
     incoming_ids = [fp.platform_post_id for fp in feed_posts]
     existing_result = await db.execute(
         select(Post.platform_post_id).where(
@@ -50,6 +219,7 @@ async def sync_account_feed(
     )
     existing_ids = set(existing_result.scalars().all())
 
+    new_count = 0
     for fp in feed_posts:
         if fp.platform_post_id in existing_ids:
             continue
@@ -65,6 +235,7 @@ async def sync_account_feed(
             content=fp.content,
             media_urls=fp.media_urls or None,
             post_url=fp.post_url,
+            source=source,
             posted_at=fp.posted_at,
         )
         db.add(post)
@@ -73,18 +244,37 @@ async def sync_account_feed(
     if new_count > 0:
         await db.commit()
         logger.info(
-            "sync_feed_complete",
+            "sync_posts_saved",
             platform=account.platform.value,
+            source=source,
             new_posts=new_count,
         )
 
     return new_count
 
 
+async def sync_account_feed(
+    db: AsyncSession, account: SocialAccount
+) -> int:
+    """Sync all feed sources for one account."""
+    total = 0
+
+    # 1. Visitor posts (syndication scraper)
+    total += await sync_visitor_posts(db, account)
+
+    # 2. Following feed (Playwright only — if cookies available)
+    total += await sync_following_feed(db, account)
+
+    # 3. Own posts (syndication → Playwright fallback)
+    total += await sync_my_posts(db, account)
+
+    return total
+
+
 async def sync_user_accounts(
     db: AsyncSession, user_id: uuid.UUID
 ) -> dict[str, int]:
-    """Sync feed for a specific user's active accounts. Returns counts per platform."""
+    """Sync feed for a specific user's active accounts."""
     result = await db.execute(
         select(SocialAccount).where(
             SocialAccount.user_id == user_id,
@@ -100,7 +290,6 @@ async def sync_user_accounts(
             key = f"{account.platform.value}:{account.username}"
             counts[key] = n
         except Exception:
-            # Error isolation: one account failure doesn't crash the rest
             logger.exception(
                 "sync_account_error",
                 platform=account.platform.value,
@@ -112,10 +301,7 @@ async def sync_user_accounts(
 
 
 async def sync_all_accounts(db: AsyncSession) -> dict[str, int]:
-    """Sync feed for every active social account. Returns counts per platform.
-
-    Used by the background scheduler — syncs all users.
-    """
+    """Sync feed for every active social account (background scheduler)."""
     result = await db.execute(
         select(SocialAccount).where(SocialAccount.is_active.is_(True))
     )
@@ -128,7 +314,6 @@ async def sync_all_accounts(db: AsyncSession) -> dict[str, int]:
             key = f"{account.platform.value}:{account.username}"
             counts[key] = n
         except Exception:
-            # Error isolation: one account failure doesn't crash the rest
             logger.exception(
                 "sync_account_error",
                 platform=account.platform.value,

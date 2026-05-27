@@ -15,6 +15,13 @@ const PLATFORMS: (Platform | "all")[] = [
   "tiktok",
 ];
 
+const SOURCES = [
+  { value: "", label: "All Posts" },
+  { value: "visitors", label: "🎯 Visitors" },
+  { value: "following", label: "👥 Following" },
+  { value: "my_posts", label: "📝 My Posts" },
+] as const;
+
 export default function FeedPage() {
   const [page, setPage] = useState(1);
   const [platform, setPlatform] = useState<Platform | "all">("all");
@@ -29,6 +36,7 @@ export default function FeedPage() {
   const [importUrl, setImportUrl] = useState("");
   const [importContent, setImportContent] = useState("");
   const [importAuthor, setImportAuthor] = useState("");
+  const [source, setSource] = useState("");
   const [toast, setToast] = useState<{
     message: string;
     type: "success" | "error";
@@ -44,13 +52,14 @@ export default function FeedPage() {
   const filterPlatform = platform === "all" ? undefined : platform;
 
   const { data, isLoading } = useQuery({
-    queryKey: ["feed", page, filterPlatform, dateFrom, dateTo],
+    queryKey: ["feed", page, filterPlatform, dateFrom, dateTo, source],
     queryFn: () =>
       api.getFeed(
         page,
         filterPlatform,
         dateFrom || undefined,
-        dateTo || undefined
+        dateTo || undefined,
+        source || undefined,
       ),
   });
 
@@ -283,6 +292,24 @@ export default function FeedPage() {
       )}
 
       <div className="space-y-3">
+        {/* Source tabs */}
+        <div className="flex gap-2">
+          {SOURCES.map((s) => (
+            <button
+              key={s.value}
+              onClick={() => { setSource(s.value); setPage(1); }}
+              className={`text-sm px-4 py-2 rounded-lg font-medium transition-colors ${
+                source === s.value
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Platform filter */}
         <div className="flex gap-2">
           {PLATFORMS.map((p) => (
             <button

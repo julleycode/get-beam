@@ -33,6 +33,10 @@ _IG_API = "https://graph.facebook.com/v19.0"
 
 class InstagramService(PlatformService):
     async def get_auth_url(self, state: str) -> str:
+        if settings.mock_social_oauth:
+            params = urlencode({"code": f"mock_code_{state[:8]}", "state": state})
+            return f"{settings.api_base_url}/api/v1/social/callback/instagram?{params}"
+
         params = {
             "client_id": settings.facebook_app_id,
             "redirect_uri": settings.instagram_redirect_uri,

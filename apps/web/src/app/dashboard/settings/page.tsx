@@ -16,6 +16,13 @@ import { Separator } from "@/components/ui/separator";
 
 const PROVIDERS = [
   {
+    id: "openrouter",
+    name: "OpenRouter",
+    description: "AI replies — 100+ models (Grok, Llama, GPT-4o-mini, etc.)",
+    docsUrl: "https://openrouter.ai/keys",
+    color: "text-purple-400",
+  },
+  {
     id: "proxycurl",
     name: "Proxycurl",
     description: "LinkedIn profile enrichment",
@@ -134,8 +141,8 @@ export default function SettingsPage() {
         <CardHeader>
           <CardTitle className="text-base">API Keys (BYOK)</CardTitle>
           <CardDescription>
-            Add your own API keys to unlock deep enrichment (LinkedIn details,
-            Twitter bio). Keys are encrypted at rest.
+            Add your API keys to power AI replies (OpenRouter) and deep
+            enrichment (LinkedIn, Twitter). Keys are encrypted at rest.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

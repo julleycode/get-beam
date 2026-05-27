@@ -54,7 +54,9 @@ class Settings(BaseSettings):
     people_data_labs_api_key: str = ""
     fullcontact_api_key: str = ""  # deprecated — FullContact moved to B2B enterprise
     proxycurl_api_key: str = ""
-    anthropic_api_key: str = ""
+    anthropic_api_key: str = ""  # legacy — use OpenRouter instead
+    openrouter_api_key: str = ""  # OpenRouter.ai — single key for 100+ models
+    default_ai_model: str = "meta-llama/llama-4-maverick"  # cheap & good for social replies
     resend_api_key: str = ""
 
     # ─── Waterfall enrichment providers ───
@@ -69,22 +71,25 @@ class Settings(BaseSettings):
     # ─── OAuth Credentials (EasyEngage) ───
     twitter_client_id: str = ""
     twitter_client_secret: str = ""
-    twitter_redirect_uri: str = "http://localhost:8000/api/v1/social/twitter/callback"
+    twitter_redirect_uri: str = "http://localhost:8000/api/v1/social/callback/twitter"
     twitter_bearer_token: str = ""
+    twitter_browser_cookie_path: str = "~/.retarget/twitter_cookies.json"
+    twitter_browser_headless: bool = True
+    twitter_browser_cookies_b64: str = ""  # Base64-encoded cookies JSON (for Railway/Docker)
 
     facebook_app_id: str = ""
     facebook_app_secret: str = ""
-    facebook_redirect_uri: str = "http://localhost:8000/api/v1/social/facebook/callback"
+    facebook_redirect_uri: str = "http://localhost:8000/api/v1/social/callback/facebook"
 
-    instagram_redirect_uri: str = "http://localhost:8000/api/v1/social/instagram/callback"
+    instagram_redirect_uri: str = "http://localhost:8000/api/v1/social/callback/instagram"
 
     linkedin_client_id: str = ""
     linkedin_client_secret: str = ""
-    linkedin_redirect_uri: str = "http://localhost:8000/api/v1/social/linkedin/callback"
+    linkedin_redirect_uri: str = "http://localhost:8000/api/v1/social/callback/linkedin"
 
     tiktok_client_key: str = ""
     tiktok_client_secret: str = ""
-    tiktok_redirect_uri: str = "http://localhost:8000/api/v1/social/tiktok/callback"
+    tiktok_redirect_uri: str = "http://localhost:8000/api/v1/social/callback/tiktok"
 
     # ─── Encryption ───
     encryption_key: str = ""  # Fernet key for BYOK API keys (strict)

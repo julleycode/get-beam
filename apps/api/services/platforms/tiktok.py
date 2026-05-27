@@ -38,6 +38,10 @@ _TT_API = "https://open.tiktokapis.com/v2"
 
 class TikTokService(PlatformService):
     async def get_auth_url(self, state: str) -> str:
+        if settings.mock_social_oauth:
+            params = urlencode({"code": f"mock_code_{state[:8]}", "state": state})
+            return f"{settings.api_base_url}/api/v1/social/callback/tiktok?{params}"
+
         code_verifier = generate_code_verifier()
         code_challenge = generate_code_challenge(code_verifier)
         await store_code_verifier(state, code_verifier)

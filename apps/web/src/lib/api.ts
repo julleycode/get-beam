@@ -310,12 +310,14 @@ class ApiClient {
     page = 1,
     platform?: Platform,
     dateFrom?: string,
-    dateTo?: string
+    dateTo?: string,
+    source?: string,
   ) {
     const params = new URLSearchParams({ page: String(page), per_page: "20" });
     if (platform) params.set("platform", platform);
     if (dateFrom) params.set("date_from", dateFrom);
     if (dateTo) params.set("date_to", dateTo);
+    if (source) params.set("source", source);
     return this.request<FeedResponse>(`/api/v1/feed?${params}`);
   }
 

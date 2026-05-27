@@ -37,6 +37,10 @@ class Post(Base):
         ARRAY(String), nullable=True
     )
     post_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(
+        String(20), default="following",
+        doc="Where this post came from: 'visitors', 'following', 'my_posts'",
+    )
     commented: Mapped[bool] = mapped_column(Boolean, default=False)
     posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(

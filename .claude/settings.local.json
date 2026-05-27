@@ -25,7 +25,19 @@
       "mcp__Claude_in_Chrome__navigate",
       "mcp__Claude_in_Chrome__find",
       "mcp__Claude_in_Chrome__computer",
-      "Bash(.venv/bin/python -c ' *)"
+      "Bash(.venv/bin/python -c ' *)",
+      "mcp__f9339aa3-533a-4b80-8038-b34247fa60b2__list_teams",
+      "mcp__f9339aa3-533a-4b80-8038-b34247fa60b2__get_deployment",
+      "mcp__f9339aa3-533a-4b80-8038-b34247fa60b2__get_deployment_build_logs",
+      "Bash(npx next *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "mcp__f9339aa3-533a-4b80-8038-b34247fa60b2__list_deployments",
+      "Bash(cat next.config.mjs)",
+      "Bash(cat next.config.js)",
+      "Bash(cat next.config.ts)",
+      "Bash(nimble search *)"
     ]
   }
 }

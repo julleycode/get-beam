@@ -3,11 +3,11 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
-ALLOWED_PROVIDERS = {"proxycurl", "twitter"}
+ALLOWED_PROVIDERS = {"proxycurl", "twitter", "openrouter"}
 
 
 class ApiKeyCreate(BaseModel):
-    provider: str = Field(..., description="API provider: 'proxycurl' or 'twitter'")
+    provider: str = Field(..., description="API provider: 'proxycurl', 'twitter', or 'openrouter'")
     api_key: str = Field(..., min_length=1, description="The API key value")
 
 

@@ -1,6 +1,8 @@
-"""AI-powered reply/comment draft generation using Claude.
+"""AI-powered reply/comment draft generation via OpenRouter.
 
 Supports:
+- OpenRouter (100+ models: Grok, Llama, Mistral, GPT-4o-mini, Claude, etc.)
+- BYOK: users bring their own OpenRouter key + pick their model
 - Platform-specific tone/style defaults (Twitter ≠ LinkedIn ≠ TikTok)
 - Multiple draft strategies (direct, conversational, thought-provoking)
 - Adaptive mode: multi-draft learning → single-draft confident → staleness re-check
@@ -10,7 +12,7 @@ import re
 import uuid
 from typing import Optional
 
-import anthropic
+import httpx
 import structlog
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -365,23 +367,20 @@ async def generate_draft(
         )
     user_prompt += "\nReply with ONLY the comment text, nothing else."
 
-    if settings.mock_external_apis:
+    # Resolve API key: user's BYOK OpenRouter key → app default → mock
+    api_key = await _resolve_ai_key(db, user_id)
+
+    if settings.mock_external_apis or not api_key:
         return _mock_draft(platform, original_content, tone, strategy)
 
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    model = settings.default_ai_model
     try:
-        response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=300,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        draft = response.content[0].text.strip()
+        draft = await _call_openrouter(api_key, model, system_prompt, user_prompt)
         if len(draft) > char_limit:
             draft = draft[: char_limit - 3] + "..."
         return draft
     except Exception:
-        logger.exception("ai_draft_generation_failed")
+        logger.exception("ai_draft_generation_failed", model=model)
         raise
 
 
@@ -422,6 +421,72 @@ async def generate_multi_drafts(
         except Exception:
             logger.exception("multi_draft_strategy_failed", strategy=key)
     return results
+
+
+# ── OpenRouter API call ───────────────────────────────
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+
+async def _call_openrouter(
+    api_key: str,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+) -> str:
+    """Call OpenRouter's OpenAI-compatible chat API."""
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        resp = await client.post(
+            OPENROUTER_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": settings.frontend_url,
+                "X-Title": "RetargetAgent EasyEngage",
+            },
+            json={
+                "model": model,
+                "max_tokens": 300,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"].strip()
+
+
+async def _resolve_ai_key(
+    db: Optional["AsyncSession"],
+    user_id: Optional[uuid.UUID],
+) -> Optional[str]:
+    """Resolve the OpenRouter API key: user BYOK → app default."""
+    # 1. Try user's BYOK OpenRouter key
+    if db and user_id:
+        try:
+            from apps.api.models.api_key import UserApiKey
+            from apps.api.services.key_vault import decrypt_key
+
+            result = await db.execute(
+                select(UserApiKey).where(
+                    UserApiKey.user_id == user_id,
+                    UserApiKey.provider == "openrouter",
+                    UserApiKey.is_valid.is_(True),
+                )
+            )
+            key_record = result.scalar_one_or_none()
+            if key_record:
+                return decrypt_key(key_record.encrypted_key)
+        except Exception:
+            logger.exception("byok_key_resolve_failed")
+
+    # 2. Fall back to app-level key
+    if settings.openrouter_api_key:
+        return settings.openrouter_api_key
+
+    return None
 
 
 # ── Mock data ──────────────────────────────────────────

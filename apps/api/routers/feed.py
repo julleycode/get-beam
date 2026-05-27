@@ -23,6 +23,7 @@ router = APIRouter(tags=["feed"])
 @router.get("", response_model=PostListResponse)
 async def get_feed(
     platform: Optional[Platform] = None,
+    source: Optional[str] = Query(None, description="Filter by source: 'visitors', 'following', 'my_posts'"),
     date_from: Optional[date] = Query(None, description="Filter posts from this date (inclusive)"),
     date_to: Optional[date] = Query(None, description="Filter posts up to this date (inclusive)"),
     page: int = Query(1, ge=1),
@@ -49,6 +50,10 @@ async def get_feed(
     if platform:
         query = query.where(Post.platform == platform)
         count_query = count_query.where(Post.platform == platform)
+
+    if source and source in ("visitors", "following", "my_posts"):
+        query = query.where(Post.source == source)
+        count_query = count_query.where(Post.source == source)
 
     # Date range filter (inclusive on both ends)
     if date_from:
@@ -81,6 +86,7 @@ async def get_feed(
                 content=p.content,
                 media_urls=p.media_urls,
                 post_url=p.post_url,
+                source=p.source or "following",
                 commented=p.commented,
                 posted_at=p.posted_at,
                 created_at=p.created_at,

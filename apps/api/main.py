@@ -62,6 +62,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "ALTER TABLE events ADD COLUMN IF NOT EXISTS page_path VARCHAR(2000) DEFAULT ''",
             # Enrichment: add facebook_url column
             "ALTER TABLE enrichment_profiles ADD COLUMN IF NOT EXISTS facebook_url VARCHAR(500)",
+            # Feed: track post source (visitors / following / my_posts)
+            "ALTER TABLE posts ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'following'",
+            # Cleanup: remove mock posts from DB now that real APIs are active
+            "DELETE FROM drafts WHERE post_id IN (SELECT id FROM posts WHERE platform_post_id LIKE 'mock_%' OR platform_post_id LIKE 'visitor_tweet_%')",
+            "DELETE FROM posts WHERE platform_post_id LIKE 'mock_%' OR platform_post_id LIKE 'visitor_tweet_%'",
         ]:
             try:
                 await conn.execute(__import__("sqlalchemy").text(stmt))

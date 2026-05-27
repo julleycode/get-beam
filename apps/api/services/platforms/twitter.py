@@ -41,6 +41,14 @@ _TWITTER_API = "https://api.twitter.com/2"
 class TwitterService(PlatformService):
     # ── OAuth (PKCE with S256) ───────────────────────────
     async def get_auth_url(self, state: str) -> str:
+        if settings.mock_social_oauth:
+            # In mock mode, redirect straight to our callback with a fake code
+            params = urlencode({
+                "code": f"mock_code_{uuid.uuid4().hex[:8]}",
+                "state": state,
+            })
+            return f"{settings.api_base_url}/api/v1/social/callback/twitter?{params}"
+
         code_verifier = generate_code_verifier()
         code_challenge = generate_code_challenge(code_verifier)
         await store_code_verifier(state, code_verifier)
@@ -283,6 +291,80 @@ class TwitterService(PlatformService):
 
             resp.raise_for_status()
             return resp.json()["data"]["id"]
+
+    # ── Search by handles (for visitor engagement) ──────
+    async def search_by_handles(
+        self, access_token: str, handles: list[str], *, limit: int = 20
+    ) -> list[FeedPost]:
+        """Search recent tweets FROM specific Twitter handles.
+
+        Used to populate the Feed with posts from identified visitors
+        (EasyTrack → enrichment → twitter_handle → fetch their tweets).
+        """
+        if not handles:
+            return []
+
+        if settings.mock_social_oauth:
+            return self._mock_visitor_feed(handles, limit)
+
+        # Build query: "from:handle1 OR from:handle2 OR ..."
+        # Twitter search supports up to ~512 chars in query
+        query_parts = [f"from:{h.lstrip('@')}" for h in handles[:15]]  # max 15 handles
+        query = " OR ".join(query_parts) + " -is:retweet"
+
+        headers = {"Authorization": f"Bearer {access_token}"}
+        posts: list[FeedPost] = []
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            try:
+                resp = await client.get(
+                    f"{_TWITTER_API}/tweets/search/recent",
+                    headers=headers,
+                    params={
+                        "query": query,
+                        "max_results": min(max(limit, 10), 100),
+                        "tweet.fields": "created_at,author_id,text",
+                        "expansions": "author_id",
+                        "user.fields": "name,username,profile_image_url",
+                    },
+                )
+                resp.raise_for_status()
+                posts = self._parse_tweets(resp.json())
+                logger.info("twitter_visitor_search_ok", handles=len(handles), results=len(posts))
+            except httpx.HTTPStatusError as e:
+                logger.warning("twitter_visitor_search_failed", status=e.response.status_code, detail=e.response.text[:200])
+
+        return posts[:limit]
+
+    @staticmethod
+    def _mock_visitor_feed(handles: list[str], limit: int) -> list[FeedPost]:
+        """Mock tweets from identified visitors for dev/demo."""
+        import random
+        now = datetime.now(timezone.utc)
+        samples = [
+            "Just launched our new product! Check it out 🚀",
+            "Great insights from today's conference on AI and SaaS",
+            "Looking for feedback on our landing page redesign",
+            "Hiring a senior engineer — remote friendly! DM me",
+            "Our Q2 growth numbers are insane. Thread 🧵",
+            "Been exploring new marketing channels this week",
+            "Love what @competitor is doing but we're taking a different approach",
+            "Who else is building in public? Share your journey!",
+        ]
+        posts: list[FeedPost] = []
+        for i, handle in enumerate(handles[:limit]):
+            clean = handle.lstrip("@")
+            posts.append(
+                FeedPost(
+                    platform_post_id=f"visitor_tweet_{clean}_{i}",
+                    author_name=clean.replace("_", " ").title(),
+                    author_username=clean,
+                    content=random.choice(samples),
+                    post_url=f"https://x.com/{clean}/status/mock_visitor_{i}",
+                    posted_at=now - timedelta(hours=random.randint(1, 72)),
+                )
+            )
+        return posts
 
     # ── Helpers ──────────────────────────────────────────
     async def _get_me(self, access_token: str) -> dict:

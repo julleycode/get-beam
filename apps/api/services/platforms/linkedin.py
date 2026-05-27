@@ -33,6 +33,10 @@ _LI_API = "https://api.linkedin.com/v2"
 
 class LinkedInService(PlatformService):
     async def get_auth_url(self, state: str) -> str:
+        if settings.mock_social_oauth:
+            params = urlencode({"code": f"mock_code_{state[:8]}", "state": state})
+            return f"{settings.api_base_url}/api/v1/social/callback/linkedin?{params}"
+
         params = {
             "response_type": "code",
             "client_id": settings.linkedin_client_id,

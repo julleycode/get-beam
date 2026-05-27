@@ -146,6 +146,13 @@ async def _test_key(provider: str, api_key: str) -> bool:
                 # 200 = valid, 401 = invalid, 403 = valid but restricted
                 return resp.status_code in (200, 403)
 
+            elif provider == "openrouter":
+                resp = await client.get(
+                    "https://openrouter.ai/api/v1/auth/key",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
+                return resp.status_code == 200
+
     except httpx.HTTPError as e:
         logger.warning("api_key_test_failed", provider=provider, error=str(e))
     return False
