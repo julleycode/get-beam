@@ -28,7 +28,7 @@ logger = structlog.get_logger()
 # All enrichment fields — used for completeness scoring
 ENRICHMENT_FIELDS: list[str] = [
     "job_title", "company_name", "industry",
-    "linkedin_url", "twitter_handle",
+    "linkedin_url", "twitter_handle", "facebook_url",
     "linkedin_headline", "linkedin_summary",
     "twitter_bio", "twitter_follower_count",
 ]
@@ -190,7 +190,7 @@ class Enricher:
         pdl_fields = [
             "job_title", "company_name", "company_size", "industry",
             "seniority_level", "linkedin_url", "twitter_handle",
-            "github_url", "personal_website",
+            "facebook_url", "github_url", "personal_website",
         ]
         if existing:
             for field in pdl_fields:
@@ -265,6 +265,7 @@ class Enricher:
                         "seniority_level": p.get("job_title_role"),
                         "linkedin_url": p.get("linkedin_url"),
                         "twitter_handle": (p.get("twitter_url", "") or "").rstrip("/").split("/")[-1] or None,
+                        "facebook_url": p.get("facebook_url"),
                         "github_url": p.get("github_url"),
                     }
             except httpx.HTTPError as e:
@@ -328,6 +329,7 @@ class Enricher:
             "seniority_level": random.choice(["senior", "executive", "manager", "entry"]),
             "linkedin_url": f"https://linkedin.com/in/{email.split('@')[0]}",
             "twitter_handle": email.split("@")[0].replace(".", ""),
+            "facebook_url": f"https://facebook.com/{email.split('@')[0].replace('.', '')}" if random.random() > 0.4 else None,
             "github_url": f"https://github.com/{email.split('@')[0].replace('.', '')}" if random.random() > 0.5 else None,
         }
 

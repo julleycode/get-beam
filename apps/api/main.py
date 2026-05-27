@@ -60,6 +60,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "ALTER TABLE events ADD COLUMN IF NOT EXISTS user_agent VARCHAR(500) DEFAULT ''",
             "ALTER TABLE events ADD COLUMN IF NOT EXISTS page_title VARCHAR(500) DEFAULT ''",
             "ALTER TABLE events ADD COLUMN IF NOT EXISTS page_path VARCHAR(2000) DEFAULT ''",
+            # Enrichment: add facebook_url column
+            "ALTER TABLE enrichment_profiles ADD COLUMN IF NOT EXISTS facebook_url VARCHAR(500)",
         ]:
             try:
                 await conn.execute(__import__("sqlalchemy").text(stmt))

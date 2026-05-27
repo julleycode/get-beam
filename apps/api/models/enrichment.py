@@ -28,6 +28,7 @@ class EnrichmentProfile(Base):
     # Social
     linkedin_url: Mapped[str | None] = mapped_column(String(500))
     twitter_handle: Mapped[str | None] = mapped_column(String(100))
+    facebook_url: Mapped[str | None] = mapped_column(String(500))
     github_url: Mapped[str | None] = mapped_column(String(500))
     personal_website: Mapped[str | None] = mapped_column(String(500))
 

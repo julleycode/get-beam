@@ -45,15 +45,10 @@ class IdentityResolver:
         return result.scalar_one_or_none() is not None
 
     async def resolve(self, visitor: Visitor) -> IdentifiedVisitor | None:
-        """Waterfall identity resolution: try multiple signals and providers.
+        """Identity resolution via People Data Labs (IP → person).
 
-        Resolution order (Clay-style cascade):
-        1. IP → PDL identify
-        2. IP → FullContact
-        3. (Future: email from form capture, UTM signals, etc.)
-
-        Each step's output feeds the next — e.g. if PDL returns a partial
-        match with email, FullContact can verify it.
+        PDL covers: email, full name, location, social profiles.
+        Budget-capped and 30-day cooldown per visitor.
         """
         if await self.was_recently_attempted(visitor.site_id, visitor.visitor_id):
             logger.info("resolution_skipped_recent_attempt", visitor_id=visitor.visitor_id[:8])
@@ -63,27 +58,18 @@ class IdentityResolver:
             logger.warning("resolution_budget_exhausted", site_id=visitor.site_id)
             return None
 
-        # Must have a real IP address (not the cookie UUID)
-        has_ip = bool(getattr(visitor, "ip_address", None))
-        if not has_ip:
+        if not getattr(visitor, "ip_address", None):
             logger.info("resolution_skipped_no_ip", visitor_id=visitor.visitor_id[:8])
             visitor.identity_status = "unresolvable"
             await self.db.commit()
             return None
 
-        # ── Waterfall: try providers in order, stop on first match ──
-
-        # Step 1: People Data Labs (IP-based)
+        # People Data Labs (IP → person)
         result = await self._try_people_data_labs(visitor)
         if result:
             return result
 
-        # Step 2: FullContact (IP-based fallback)
-        result = await self._try_fullcontact(visitor)
-        if result:
-            return result
-
-        # Mark as unresolvable (will not retry for 30 days)
+        # No match — mark as unresolvable (will not retry for 30 days)
         visitor.identity_status = "unresolvable"
         await self.db.commit()
         return None
@@ -105,25 +91,6 @@ class IdentityResolver:
 
         if data:
             return await self._save_identified(visitor, data, "people_data_labs")
-        return None
-
-    async def _try_fullcontact(self, visitor: Visitor) -> IdentifiedVisitor | None:
-        start = time.monotonic()
-
-        if settings.mock_external_apis:
-            data = self._mock_fullcontact_response(visitor)
-            success = data is not None
-        else:
-            data = await self._call_fullcontact_api(visitor)
-            success = data is not None
-
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        cost = 0.02 if not settings.mock_external_apis else 0.0
-
-        await self._log_resolution(visitor, "fullcontact", success, cost, elapsed_ms)
-
-        if data:
-            return await self._save_identified(visitor, data, "fullcontact")
         return None
 
     async def _call_pdl_api(self, visitor: Visitor) -> dict | None:
@@ -150,28 +117,6 @@ class IdentityResolver:
                 logger.error("pdl_api_error", error=str(e))
         return None
 
-    async def _call_fullcontact_api(self, visitor: Visitor) -> dict | None:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                resp = await client.post(
-                    "https://api.fullcontact.com/v3/person.enrich",
-                    headers={"Authorization": f"Bearer {settings.fullcontact_api_key}"},
-                    json={"ip": visitor.ip_address},
-                )
-                if resp.status_code == 200:
-                    body = resp.json()
-                    return {
-                        "email": body.get("email"),
-                        "full_name": body.get("fullName"),
-                        "city": body.get("location", {}).get("city"),
-                        "region": body.get("location", {}).get("region"),
-                        "country": body.get("location", {}).get("country"),
-                        "confidence_score": body.get("likelihood", 0.4),
-                    }
-            except httpx.HTTPError as e:
-                logger.error("fullcontact_api_error", error=str(e))
-        return None
-
     def _mock_pdl_response(self, visitor: Visitor) -> dict | None:
         # ~60% match rate in mock mode for better testing
         if random.random() > 0.60:
@@ -187,22 +132,6 @@ class IdentityResolver:
             "region": random.choice(["CA", "NY", "TX", "WA", "CO"]),
             "country": "US",
             "confidence_score": round(random.uniform(0.5, 0.95), 2),
-        }
-
-    def _mock_fullcontact_response(self, visitor: Visitor) -> dict | None:
-        if random.random() > 0.08:
-            return None
-        first_names = ["Tom", "Anna", "Chris", "Megan", "James", "Olivia"]
-        last_names = ["Taylor", "Anderson", "Thomas", "Jackson", "White", "Harris"]
-        fn = random.choice(first_names)
-        ln = random.choice(last_names)
-        return {
-            "email": f"{fn.lower()}.{ln.lower()}@example.com",
-            "full_name": f"{fn} {ln}",
-            "city": random.choice(["Chicago", "Boston", "Portland", "Miami"]),
-            "region": random.choice(["IL", "MA", "OR", "FL"]),
-            "country": "US",
-            "confidence_score": round(random.uniform(0.4, 0.8), 2),
         }
 
     async def _save_identified(
