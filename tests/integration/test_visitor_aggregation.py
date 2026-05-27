@@ -7,24 +7,13 @@ Tests verify that the window-function-based session counting works correctly.
 import pytest
 import pytest_asyncio
 from datetime import datetime, timedelta
+from sqlalchemy import text
 
 pytestmark = pytest.mark.integration
 
 
 @pytest_asyncio.fixture
-async def db_session():
-    """Get a database session for testing."""
-    try:
-        from apps.api.models.database import async_session
-        async with async_session() as session:
-            yield session
-            await session.rollback()
-    except Exception as e:
-        pytest.skip(f"Cannot connect to database: {e}")
-
-
-@pytest_asyncio.fixture
-async def seeded_events(db_session):
+async def seeded_events(test_db):
     """Seed test events for aggregation testing.
 
     Creates events that span multiple sessions:
@@ -36,18 +25,25 @@ async def seeded_events(db_session):
     site_id = "test_site_aggregation"
     visitor_id = "test_visitor_sessions"
 
+    # Ensure test user exists
+    await test_db.execute(text("""
+        INSERT INTO users (id, email, password_hash, full_name)
+        VALUES (gen_random_uuid(), 'test-aggregation@test.com', 'fakehash', 'Test User')
+        ON CONFLICT (email) DO NOTHING
+    """))
+
     # Ensure test site exists
-    await db_session.execute(text("""
+    await test_db.execute(text("""
         INSERT INTO sites (id, site_id, user_id, name, url)
         VALUES (gen_random_uuid(), :site_id, (SELECT id FROM users LIMIT 1), 'Test Site', 'https://test.com')
         ON CONFLICT (site_id) DO NOTHING
     """), {"site_id": site_id})
 
     # Clean previous test data
-    await db_session.execute(text(
+    await test_db.execute(text(
         "DELETE FROM events WHERE site_id = :site_id AND visitor_id = :vid"
     ), {"site_id": site_id, "vid": visitor_id})
-    await db_session.execute(text(
+    await test_db.execute(text(
         "DELETE FROM visitors WHERE site_id = :site_id AND visitor_id = :vid"
     ), {"site_id": site_id, "vid": visitor_id})
 
@@ -64,39 +60,39 @@ async def seeded_events(db_session):
     ]
 
     for ts, url, ip in events_data:
-        await db_session.execute(text("""
+        await test_db.execute(text("""
             INSERT INTO events (site_id, visitor_id, event_type, url, ip_address, created_at, page_path)
             VALUES (:site_id, :vid, 'pageview', :url, :ip, :ts, :url)
         """), {"site_id": site_id, "vid": visitor_id, "url": url, "ip": ip, "ts": ts})
 
-    await db_session.commit()
+    await test_db.commit()
 
     yield {"site_id": site_id, "visitor_id": visitor_id}
 
     # Cleanup
-    await db_session.execute(text(
+    await test_db.execute(text(
         "DELETE FROM events WHERE site_id = :site_id AND visitor_id = :vid"
     ), {"site_id": site_id, "vid": visitor_id})
-    await db_session.execute(text(
+    await test_db.execute(text(
         "DELETE FROM visitors WHERE site_id = :site_id AND visitor_id = :vid"
     ), {"site_id": site_id, "vid": visitor_id})
-    await db_session.commit()
+    await test_db.commit()
 
 
 class TestSessionCounting:
     """Verify window-function session detection."""
 
     @pytest.mark.asyncio
-    async def test_detects_two_sessions(self, db_session, seeded_events):
+    async def test_detects_two_sessions(self, test_db, seeded_events):
         """Events with 30+ min gap should be counted as separate sessions."""
         from apps.api.services.visitor_aggregator import aggregate_visitors_for_site
 
-        count = await aggregate_visitors_for_site(db_session, seeded_events["site_id"])
+        count = await aggregate_visitors_for_site(test_db, seeded_events["site_id"])
         assert count >= 1
 
         # Check the visitor was created with correct session count
         from sqlalchemy import text
-        result = await db_session.execute(text(
+        result = await test_db.execute(text(
             "SELECT total_sessions, total_pageviews, ip_address FROM visitors WHERE site_id = :sid AND visitor_id = :vid"
         ), {"sid": seeded_events["site_id"], "vid": seeded_events["visitor_id"]})
         row = result.fetchone()
@@ -106,14 +102,14 @@ class TestSessionCounting:
         assert row[2] == "203.0.113.50", f"Expected IP propagation, got {row[2]}"
 
     @pytest.mark.asyncio
-    async def test_intent_score_calculated(self, db_session, seeded_events):
+    async def test_intent_score_calculated(self, test_db, seeded_events):
         """Aggregation should calculate a non-zero intent score."""
         from apps.api.services.visitor_aggregator import aggregate_visitors_for_site
 
-        await aggregate_visitors_for_site(db_session, seeded_events["site_id"])
+        await aggregate_visitors_for_site(test_db, seeded_events["site_id"])
 
         from sqlalchemy import text
-        result = await db_session.execute(text(
+        result = await test_db.execute(text(
             "SELECT intent_score FROM visitors WHERE site_id = :sid AND visitor_id = :vid"
         ), {"sid": seeded_events["site_id"], "vid": seeded_events["visitor_id"]})
         row = result.fetchone()

@@ -139,7 +139,7 @@ jobs:
 
       - name: Install Node dependencies
         working-directory: apps/web
-        run: npm ci
+        run: npm install --no-audit
 
       - name: Install Playwright browsers
         working-directory: apps/web
