@@ -125,7 +125,7 @@ async def connect_platform(
     current_user: User = Depends(get_current_user),
 ):
     # Validate credentials are configured before sending user to OAuth
-    if not settings.mock_external_apis:
+    if not settings.mock_social_oauth:
         required_fields = _PLATFORM_CREDENTIALS.get(platform, ())
         missing = [f for f in required_fields if not getattr(settings, f, "")]
         if missing:

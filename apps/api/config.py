@@ -91,7 +91,8 @@ class Settings(BaseSettings):
     token_encryption_key: str = ""  # Fernet key for OAuth tokens (graceful)
 
     # ─── Feature flags ───
-    mock_external_apis: bool = True
+    mock_external_apis: bool = True          # Enrichment/identity APIs (PDL, IPinfo, etc.)
+    mock_social_oauth: bool = True           # Social OAuth (Twitter, Facebook, etc.)
     sync_interval_minutes: int = 60
 
     # ─── Rate limits ───

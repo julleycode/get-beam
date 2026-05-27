@@ -43,7 +43,7 @@ class InstagramService(PlatformService):
         return f"{_IG_AUTH_URL}?{urlencode(params)}"
 
     async def exchange_code(self, code: str, state: str = "") -> OAuthTokens:
-        if settings.mock_external_apis:
+        if settings.mock_social_oauth:
             return self._mock_tokens()
 
         async with httpx.AsyncClient(timeout=10) as client:
@@ -69,14 +69,14 @@ class InstagramService(PlatformService):
         )
 
     async def refresh_tokens(self, refresh_token: str) -> OAuthTokens:
-        if settings.mock_external_apis:
+        if settings.mock_social_oauth:
             return self._mock_tokens()
         raise NotImplementedError("IG uses long-lived tokens via Facebook")
 
     async def fetch_feed(
         self, access_token: str, *, limit: int = 20
     ) -> list[FeedPost]:
-        if settings.mock_external_apis:
+        if settings.mock_social_oauth:
             return self._mock_feed(limit)
 
         # IG Graph API: fetch recent media with comments enabled
@@ -119,7 +119,7 @@ class InstagramService(PlatformService):
     async def post_comment(
         self, access_token: str, platform_post_id: str, text: str
     ) -> str:
-        if settings.mock_external_apis:
+        if settings.mock_social_oauth:
             mock_id = f"mock_ig_comment_{uuid.uuid4().hex[:8]}"
             logger.info("mock_ig_comment", post_id=platform_post_id, comment_id=mock_id)
             return mock_id
