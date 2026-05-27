@@ -1,0 +1,186 @@
+name: Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "20"
+
+jobs:
+  # ─── Backend Unit Tests (no DB needed) ────────────────────
+  backend-unit:
+    name: Backend Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt 2>/dev/null || true
+          pip install pytest pytest-asyncio httpx fakeredis
+          pip install -e ".[test]" 2>/dev/null || true
+          # Install app dependencies
+          pip install fastapi uvicorn sqlalchemy[asyncio] asyncpg pydantic pydantic-settings structlog httpx python-jose[cryptography] passlib[bcrypt] slowapi redis
+
+      - name: Run unit tests
+        env:
+          APP_ENV: test
+          MOCK_EXTERNAL_APIS: "true"
+          DATABASE_URL: "postgresql+asyncpg://localhost/test"
+          REDIS_URL: "redis://localhost:6379/15"
+        run: |
+          PYTHONPATH=. python -m pytest tests/unit/ -v --tb=short
+
+  # ─── Backend Integration Tests (with PostgreSQL + Redis) ──
+  backend-integration:
+    name: Backend Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: retarget
+          POSTGRES_PASSWORD: retarget_dev
+          POSTGRES_DB: retarget_agent_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest pytest-asyncio httpx fakeredis
+          pip install fastapi uvicorn sqlalchemy[asyncio] asyncpg pydantic pydantic-settings structlog httpx python-jose[cryptography] passlib[bcrypt] slowapi redis
+
+      - name: Run integration tests
+        env:
+          APP_ENV: test
+          MOCK_EXTERNAL_APIS: "true"
+          DATABASE_URL: "postgresql+asyncpg://retarget:retarget_dev@localhost:5432/retarget_agent_test"
+          REDIS_URL: "redis://localhost:6379/15"
+        run: |
+          PYTHONPATH=. python -m pytest tests/integration/ -v --tb=short -m integration
+
+  # ─── Frontend E2E Tests (Playwright) ──────────────────────
+  e2e:
+    name: E2E Tests (Playwright)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: retarget
+          POSTGRES_PASSWORD: retarget_dev
+          POSTGRES_DB: retarget_agent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install fastapi uvicorn sqlalchemy[asyncio] asyncpg pydantic pydantic-settings structlog httpx python-jose[cryptography] passlib[bcrypt] slowapi redis apscheduler cryptography
+
+      - name: Install Node dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Seed test user
+        env:
+          DATABASE_URL: "postgresql+asyncpg://retarget:retarget_dev@localhost:5432/retarget_agent"
+          REDIS_URL: "redis://localhost:6379/0"
+          APP_ENV: test
+        run: |
+          PYTHONPATH=. python -c "
+          import asyncio
+          from apps.api.models.database import engine, Base, async_session
+          from apps.api.models.user import User
+          from passlib.hash import bcrypt
+          async def seed():
+              async with engine.begin() as conn:
+                  await conn.run_sync(Base.metadata.create_all)
+              async with async_session() as db:
+                  from sqlalchemy import select
+                  exists = await db.execute(select(User).where(User.email == 'demo@retargetagent.com'))
+                  if not exists.scalar_one_or_none():
+                      db.add(User(email='demo@retargetagent.com', password_hash=bcrypt.hash('demo1234'), full_name='Demo User'))
+                      await db.commit()
+          asyncio.run(seed())
+          "
+
+      - name: Run Playwright tests
+        working-directory: apps/web
+        env:
+          DATABASE_URL: "postgresql+asyncpg://retarget:retarget_dev@localhost:5432/retarget_agent"
+          REDIS_URL: "redis://localhost:6379/0"
+          APP_ENV: test
+          MOCK_EXTERNAL_APIS: "true"
+        run: npx playwright test
+
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report/
+          retention-days: 7

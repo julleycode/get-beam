@@ -31,8 +31,10 @@ _PRIVATE_RE = re.compile(
     r"^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|0\.|169\.254\.|::1|fe80:)"
 )
 
-# ISP / residential patterns — rDNS hostnames that indicate home internet
-_ISP_PATTERNS: set[str] = {
+# Domain-level patterns — match against the extracted domain (e.g. "comcast.net")
+# These are ISPs, VPNs, and cloud providers whose domain IS the pattern.
+_DOMAIN_PATTERNS: set[str] = {
+    # ISPs
     "comcast", "xfinity", "verizon", "fios", "att.net", "sbcglobal",
     "charter", "spectrum", "cox", "centurylink", "lumen", "frontier",
     "windstream", "mediacom", "suddenlink", "optimum", "cablevision",
@@ -40,36 +42,38 @@ _ISP_PATTERNS: set[str] = {
     "t-mobile", "tmobile", "sprint", "boost", "metro-pcs",
     "vodafone", "bt.com", "sky.com", "talktalk", "virgin",
     "telstra", "optus", "tpg", "bigpond",
-    "dsl", "dial", "cable", "broadband", "dynamic", "dhcp",
-    "pool", "residential", "consumer", "home", "mobile",
-    "hsd1", "res", "myvzw", "mycingular",
     "fpt.vn", "vnpt", "viettel", "mobifone", "vinaphone",
-}
-
-# VPN / proxy patterns
-_VPN_PATTERNS: set[str] = {
-    "nordvpn", "expressvpn", "surfshark", "cyberghost", "pia",
+    # VPNs
+    "nordvpn", "expressvpn", "surfshark", "cyberghost",
     "privateinternetaccess", "mullvad", "protonvpn", "ipvanish",
     "tunnelbear", "hotspotshield", "windscribe", "torproject",
-    "tor-exit", "tor-relay", "vpn", "proxy",
-}
-
-# Cloud / datacenter / hosting patterns (not a real company visiting)
-_CLOUD_PATTERNS: set[str] = {
-    "amazonaws", "aws", "googlecloud", "cloud.google",
-    "azure", "microsoft.com", "digitalocean", "linode", "akamai",
+    # Cloud / datacenter
+    "amazonaws", "googlecloud", "digitalocean", "linode", "akamai",
     "vultr", "hetzner", "ovh", "scaleway", "contabo",
     "cloudflare", "fastly", "vercel", "netlify", "railway",
-    "heroku", "render", "fly.io",
-    "datacenter", "hosting", "dedicated", "colo", "server",
+    "heroku", "render",
+}
+
+# Hostname-level patterns — match against the FULL hostname to catch residential indicators
+_HOSTNAME_PATTERNS: set[str] = {
+    "dsl", "dial", "cable", "broadband", "dynamic", "dhcp",
+    "pool", "residential", "consumer", "hsd1", "myvzw", "mycingular",
+    "datacenter", "hosting", "dedicated", "colo",
+    "tor-exit", "tor-relay",
 }
 
 
 @lru_cache(maxsize=1)
-def _build_filter_regex() -> re.Pattern[str]:
-    """Build a single compiled regex from all filter patterns."""
-    all_patterns = _ISP_PATTERNS | _VPN_PATTERNS | _CLOUD_PATTERNS
-    pattern = "|".join(re.escape(p) for p in sorted(all_patterns, key=len, reverse=True))
+def _build_domain_filter_regex() -> re.Pattern[str]:
+    """Build regex for domain-level filtering (checked against extracted domain)."""
+    pattern = "|".join(re.escape(p) for p in sorted(_DOMAIN_PATTERNS, key=len, reverse=True))
+    return re.compile(pattern, re.IGNORECASE)
+
+
+@lru_cache(maxsize=1)
+def _build_hostname_filter_regex() -> re.Pattern[str]:
+    """Build regex for hostname-level filtering (checked against full rDNS hostname)."""
+    pattern = "|".join(re.escape(p) for p in sorted(_HOSTNAME_PATTERNS, key=len, reverse=True))
     return re.compile(pattern, re.IGNORECASE)
 
 
@@ -83,11 +87,6 @@ def _extract_domain(hostname: str) -> str | None:
     """
     if not hostname or hostname.replace(".", "").isdigit():
         return None  # IP address, not a hostname
-
-    # Filter known ISP/VPN/cloud patterns
-    filter_re = _build_filter_regex()
-    if filter_re.search(hostname):
-        return None
 
     # Extract last 2 parts (or 3 for country-code TLDs like .co.uk, .com.au)
     parts = hostname.rstrip(".").split(".")
@@ -103,7 +102,17 @@ def _extract_domain(hostname: str) -> str | None:
                 return f"{parts[-3]}.{parts[-2]}.{parts[-1]}"
             return None
 
-    return f"{parts[-2]}.{parts[-1]}"
+    domain = f"{parts[-2]}.{parts[-1]}"
+
+    # Check domain against ISP/VPN/cloud patterns
+    if _build_domain_filter_regex().search(domain):
+        return None
+
+    # Check full hostname for residential/dynamic indicators
+    if _build_hostname_filter_regex().search(hostname):
+        return None
+
+    return domain
 
 
 async def resolve_company_from_ip(ip: str) -> str | None:
