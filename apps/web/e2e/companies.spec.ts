@@ -4,7 +4,7 @@ test.describe("Companies Page (IP-to-Company Resolution)", () => {
   test("companies API returns valid response", async ({ page }) => {
     // Navigate first so localStorage is accessible (avoid SecurityError on about:blank)
     await page.goto("/dashboard");
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState("networkidle");
 
     const token = await page.evaluate(() => localStorage.getItem("auth_token"));
 
@@ -32,20 +32,13 @@ test.describe("Companies Page (IP-to-Company Resolution)", () => {
 
   test("companies list shows domain and intent score", async ({ page }) => {
     await page.goto("/dashboard");
-    await page.waitForTimeout(2000);
 
-    // Check if there's a companies section or link in the navigation
-    const hasCompaniesLink = await page
-      .locator('a[href*="companies"], nav >> text=Companies')
-      .isVisible()
-      .catch(() => false);
-
-    // This is a new feature — the frontend might not have a companies page yet
-    // Just verify the page loaded without errors
-    if (!hasCompaniesLink) {
-      // Verify the dashboard loaded successfully
-      const pageContent = await page.textContent("body");
-      expect(pageContent).toBeTruthy();
-    }
+    // Verify the dashboard loaded — auto-wait for any content
+    await expect(page.locator("body")).not.toBeEmpty();
+    // The companies feature may not have a dedicated nav link yet.
+    // Just verify the dashboard rendered without errors.
+    await expect(
+      page.locator("text=Dashboard").or(page.locator("text=Overview"))
+    ).toBeVisible({ timeout: 15_000 });
   });
 });

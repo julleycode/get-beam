@@ -14,33 +14,21 @@ test.describe("Visitors Page", () => {
   });
 
   test("shows visitor list or empty state", async ({ page }) => {
-    // Wait for page to load
-    await page.waitForTimeout(3000);
-
-    const pageContent = await page.textContent("body");
-    // Either shows a list of visitors or an empty state message
-    const hasVisitors =
-      pageContent?.includes("visitor") ||
-      pageContent?.includes("Visitor") ||
-      pageContent?.includes("No visitors") ||
-      pageContent?.includes("anonymous");
-
-    expect(hasVisitors).toBeTruthy();
+    // Auto-wait for visitor-related content to appear
+    await expect(
+      page
+        .locator("text=Visitor")
+        .or(page.locator("text=visitor"))
+        .or(page.locator("text=No visitors"))
+        .or(page.locator("text=anonymous"))
+    ).toBeVisible({ timeout: 15_000 });
   });
 
   test("has search or filter controls", async ({ page }) => {
-    // Check for search input or filter buttons
-    const hasSearch = await page
-      .locator('input[placeholder*="search" i], input[placeholder*="filter" i], input[type="search"]')
-      .isVisible()
-      .catch(() => false);
-    const hasFilter = await page
-      .locator('button:has-text("Filter"), [data-testid="filter"]')
-      .isVisible()
-      .catch(() => false);
-
-    // At least one filtering mechanism should exist (or page is loading)
-    // This is a soft check — it's okay if the page has a different UX
+    // Verify the page renders — auto-wait
+    await expect(page.locator("body")).not.toBeEmpty();
+    // Soft check: page loaded without crashing
+    await page.waitForLoadState("networkidle");
     const pageContent = await page.textContent("body");
     expect(pageContent).toBeTruthy();
   });
@@ -50,9 +38,9 @@ test.describe("Visitor Detail Page", () => {
   test("shows 404 or redirect for invalid visitor ID", async ({ page }) => {
     await page.goto("/dashboard/visitors/nonexistent-visitor-id");
 
-    await page.waitForTimeout(3000);
-
-    // Should either show an error, redirect, or empty state
+    // Auto-wait for the page to render something
+    await expect(page.locator("body")).not.toBeEmpty();
+    await page.waitForLoadState("networkidle");
     const pageContent = await page.textContent("body");
     expect(pageContent).toBeTruthy();
   });

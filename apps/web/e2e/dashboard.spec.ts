@@ -13,29 +13,17 @@ test.describe("Dashboard — Main Page", () => {
   });
 
   test("shows site selector or onboarding prompt", async ({ page }) => {
-    // Wait for page to fully render
-    await page.waitForTimeout(3000);
-
-    // Either a site selector, onboarding CTA, or dashboard content should be visible
-    const hasSiteSelector = await page
-      .locator('[data-testid="site-selector"], select, [role="combobox"]')
-      .isVisible()
-      .catch(() => false);
-    const hasOnboarding = await page
-      .locator('text=Add your website')
-      .or(page.locator('text=Get started'))
-      .or(page.locator('a[href*="onboarding"]'))
-      .isVisible()
-      .catch(() => false);
-    // Dashboard might show content directly without explicit selector
-    const hasDashboardContent = await page
-      .locator('text=Visitors')
-      .or(page.locator('text=Dashboard'))
-      .or(page.locator('text=Overview'))
-      .isVisible()
-      .catch(() => false);
-    const hasContent = hasSiteSelector || hasOnboarding || hasDashboardContent;
-    expect(hasContent).toBeTruthy();
+    // Use Playwright auto-waiting instead of waitForTimeout + isVisible.
+    // The dashboard always shows at least one of these within 15s.
+    await expect(
+      page
+        .locator('[data-testid="site-selector"], select, [role="combobox"]')
+        .or(page.locator('text=Add your website'))
+        .or(page.locator('text=Get started'))
+        .or(page.locator('a[href*="onboarding"]'))
+        .or(page.locator('text=Dashboard'))
+        .or(page.locator('text=Overview'))
+    ).toBeVisible({ timeout: 15_000 });
   });
 
   test("navigation sidebar is visible", async ({ page }) => {
@@ -52,17 +40,14 @@ test.describe("Dashboard — Stats Cards", () => {
   }) => {
     await page.goto("/dashboard");
 
-    // Wait for data to load (either stats cards or empty state)
-    await page.waitForTimeout(3000);
-
-    // Check for stats-related text (numbers, metric labels)
-    const pageContent = await page.textContent("body");
-    const hasMetrics =
-      pageContent?.includes("Visitors") ||
-      pageContent?.includes("Pageviews") ||
-      pageContent?.includes("Sessions") ||
-      pageContent?.includes("No data");
-
-    expect(hasMetrics).toBeTruthy();
+    // Auto-wait for dashboard to render metric labels or empty state
+    await expect(
+      page
+        .locator("text=Visitors")
+        .or(page.locator("text=Pageviews"))
+        .or(page.locator("text=Sessions"))
+        .or(page.locator("text=No data"))
+        .or(page.locator("text=Add site"))
+    ).toBeVisible({ timeout: 15_000 });
   });
 });

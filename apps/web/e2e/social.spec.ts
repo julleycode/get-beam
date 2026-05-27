@@ -3,47 +3,43 @@ import { test, expect } from "@playwright/test";
 test.describe("EasyEngage — Social Accounts", () => {
   test("social accounts page loads", async ({ page }) => {
     await page.goto("/dashboard/social-accounts");
-    await page.waitForTimeout(2000);
 
-    const pageContent = await page.textContent("body");
-    // Should show social account connection options or empty state
-    const hasSocialContent =
-      pageContent?.includes("Connect") ||
-      pageContent?.includes("Social") ||
-      pageContent?.includes("Account") ||
-      pageContent?.includes("Twitter") ||
-      pageContent?.includes("LinkedIn") ||
-      pageContent?.includes("Facebook");
-
-    expect(hasSocialContent).toBeTruthy();
+    // Auto-wait for page content — no waitForTimeout
+    await expect(page.locator("body")).not.toBeEmpty();
+    await expect(
+      page
+        .locator("text=Connect")
+        .or(page.locator("text=Social"))
+        .or(page.locator("text=Account"))
+    ).toBeVisible({ timeout: 15_000 });
   });
 });
 
 test.describe("EasyEngage — Drafts", () => {
   test("drafts page loads", async ({ page }) => {
     await page.goto("/dashboard/drafts");
-    await page.waitForTimeout(2000);
 
-    const pageContent = await page.textContent("body");
-    // Should show drafts list or empty state
-    const hasDraftsContent =
-      pageContent?.includes("Draft") ||
-      pageContent?.includes("draft") ||
-      pageContent?.includes("Generate") ||
-      pageContent?.includes("No drafts") ||
-      pageContent?.includes("Create");
-
-    expect(hasDraftsContent).toBeTruthy();
+    // Auto-wait for page content
+    await expect(page.locator("body")).not.toBeEmpty();
+    await expect(
+      page
+        .locator("text=Draft")
+        .or(page.locator("text=Generate"))
+        .or(page.locator("text=Create"))
+        .or(page.locator("text=No drafts"))
+    ).toBeVisible({ timeout: 15_000 });
   });
 });
 
 test.describe("EasyEngage — Feed", () => {
   test("feed page loads", async ({ page }) => {
     await page.goto("/dashboard/feed");
-    await page.waitForTimeout(2000);
 
+    // Auto-wait for any meaningful content to render
+    await expect(page.locator("body")).not.toBeEmpty();
+    // Verify page has rendered something beyond just the shell
+    await page.waitForLoadState("networkidle");
     const pageContent = await page.textContent("body");
-    // Should show feed content or empty state
     expect(pageContent).toBeTruthy();
     expect(pageContent!.length).toBeGreaterThan(10);
   });

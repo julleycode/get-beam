@@ -270,54 +270,31 @@ test.describe("Settings Page — Pixel Management", () => {
 
     await page.goto(`/dashboard/settings?site=${testSiteId}`);
 
-    // Wait for settings page to load
-    await page.waitForTimeout(3000);
+    // Use Playwright auto-waiting (NOT waitForTimeout + isVisible).
+    // expect().toBeVisible() retries until timeout — robust against slow renders.
+    // The "Settings" h2 is rendered immediately, before any API call resolves.
+    await expect(page.locator("h2")).toContainText("Settings", {
+      timeout: 15_000,
+    });
 
-    // The h2 "Settings" heading is always visible on this page
-    const hasSettingsHeading = await page
-      .locator("h2:has-text('Settings')")
-      .isVisible()
-      .catch(() => false);
-    // "Site Details" card appears once site data loads
-    const hasSiteDetails = await page
-      .locator("text=Site Details")
-      .isVisible()
-      .catch(() => false);
-    // "API Keys" card is always visible
-    const hasApiKeys = await page
-      .locator("text=API Keys")
-      .isVisible()
-      .catch(() => false);
-    // "Budget Controls" card appears once site data loads
-    const hasBudget = await page
-      .locator("text=Budget Controls")
-      .isVisible()
-      .catch(() => false);
-
-    expect(
-      hasSettingsHeading || hasSiteDetails || hasApiKeys || hasBudget
-    ).toBeTruthy();
+    // "Site Details" card appears once api.getSite() resolves.
+    // This proves the site was created in beforeAll AND the API works.
+    await expect(page.locator("text=Site Details")).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("Verify button on settings page", async ({ page }) => {
     test.skip(!testSiteId, "Could not create test site");
 
     await page.goto(`/dashboard/settings?site=${testSiteId}`);
-    await page.waitForTimeout(3000);
 
-    // Check for verify button, verified status, or any settings content
-    const verifyBtn = page.locator('button:has-text("Verify")');
-    const verifiedLabel = page.locator("text=Verified");
-    const settingsContent = page
-      .locator("text=Pixel")
-      .or(page.locator("text=Settings"))
-      .or(page.locator("text=Site Details"));
-
-    const hasVerify = await verifyBtn.isVisible().catch(() => false);
-    const hasVerified = await verifiedLabel.isVisible().catch(() => false);
-    const hasContent = await settingsContent.isVisible().catch(() => false);
-
-    expect(hasVerify || hasVerified || hasContent).toBeTruthy();
+    // Wait for site data to load — "Verify Now" or "Verified" appears in Site Details
+    await expect(
+      page.locator('button:has-text("Verify Now")').or(
+        page.locator("text=Verified")
+      )
+    ).toBeVisible({ timeout: 15_000 });
   });
 
   test.afterAll(async ({ browser }) => {
