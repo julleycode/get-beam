@@ -108,7 +108,11 @@ _cors_origins = [
     settings.frontend_url,  # e.g. https://retarget-agent.vercel.app
     "http://localhost:3000",
     "http://localhost:3001",
+    "https://retarget-agent.vercel.app",
+    "https://retarget-agent-git-main-tranthaiwork-droids-projects.vercel.app",
 ]
+# De-duplicate and drop empty strings (settings.frontend_url may be unset)
+_cors_origins = [o for o in dict.fromkeys(_cors_origins) if o]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
