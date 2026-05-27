@@ -135,7 +135,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install fastapi uvicorn sqlalchemy[asyncio] asyncpg pydantic pydantic-settings structlog httpx python-jose[cryptography] passlib[bcrypt] slowapi redis apscheduler cryptography
+          pip install fastapi uvicorn sqlalchemy[asyncio] asyncpg pydantic pydantic-settings structlog httpx python-jose[cryptography] "passlib[bcrypt]" slowapi redis apscheduler cryptography bcrypt
 
       - name: Install Node dependencies
         working-directory: apps/web
@@ -152,11 +152,10 @@ jobs:
           APP_ENV: test
         run: |
           PYTHONPATH=. python -c "
-          import asyncio
+          import asyncio, bcrypt
           from apps.api.models.database import engine, Base, async_session
           from apps.api.models.user import User
           from apps.api.models import social_account, post, message, campaign, draft, enrichment, segment, voice_example  # noqa
-          from passlib.hash import bcrypt
           async def seed():
               async with engine.begin() as conn:
                   await conn.run_sync(Base.metadata.create_all)
@@ -164,7 +163,8 @@ jobs:
                   from sqlalchemy import select
                   exists = await db.execute(select(User).where(User.email == 'demo@retargetagent.com'))
                   if not exists.scalar_one_or_none():
-                      db.add(User(email='demo@retargetagent.com', password_hash=bcrypt.hash('demo1234'), full_name='Demo User'))
+                      pw = bcrypt.hashpw(b'demo1234', bcrypt.gensalt()).decode()
+                      db.add(User(email='demo@retargetagent.com', password_hash=pw, full_name='Demo User'))
                       await db.commit()
           asyncio.run(seed())
           "

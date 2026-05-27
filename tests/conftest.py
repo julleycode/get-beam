@@ -48,7 +48,7 @@ async def test_engine():
     from apps.api.models.message import Message  # noqa: F401
     from apps.api.models.campaign import Campaign  # noqa: F401
     from apps.api.models.draft import Draft  # noqa: F401
-    from apps.api.models.enrichment import Enrichment  # noqa: F401
+    from apps.api.models.enrichment import EnrichmentProfile  # noqa: F401
     from apps.api.models.segment import Segment  # noqa: F401
     from apps.api.models.voice_example import VoiceExample  # noqa: F401
 
