@@ -23,7 +23,7 @@ os.environ.setdefault(
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")  # Use DB 15 for tests
 
 
-@pytest_asyncio.fixture(scope="session")
+@pytest_asyncio.fixture
 async def test_engine():
     """Create a test database engine (requires local postgres running)."""
     from apps.api.config import settings
@@ -36,13 +36,21 @@ async def test_engine():
 
     # Create all tables
     from apps.api.models.database import Base
-    # Import all models to register them
+    # Import ALL models to register them (avoids relationship resolution errors)
     from apps.api.models.event import Event  # noqa: F401
     from apps.api.models.visitor import Visitor  # noqa: F401
     from apps.api.models.site import Site  # noqa: F401
     from apps.api.models.company import Company  # noqa: F401
     from apps.api.models.user import User  # noqa: F401
     from apps.api.models.api_key import UserApiKey  # noqa: F401
+    from apps.api.models.social_account import SocialAccount  # noqa: F401
+    from apps.api.models.post import Post  # noqa: F401
+    from apps.api.models.message import Message  # noqa: F401
+    from apps.api.models.campaign import Campaign  # noqa: F401
+    from apps.api.models.draft import Draft  # noqa: F401
+    from apps.api.models.enrichment import Enrichment  # noqa: F401
+    from apps.api.models.segment import Segment  # noqa: F401
+    from apps.api.models.voice_example import VoiceExample  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
