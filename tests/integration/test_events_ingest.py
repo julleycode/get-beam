@@ -10,6 +10,9 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+# Realistic browser UA to avoid bot filter (is_bot returns True for empty UA)
+_BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+
 pytestmark = pytest.mark.integration
 
 
@@ -105,7 +108,7 @@ class TestEventIngestion:
         resp = await test_client.post(
             "/api/v1/events/ingest",
             content=json.dumps(payload),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA},
         )
         assert resp.status_code == 403
 
@@ -115,7 +118,7 @@ class TestEventIngestion:
         resp = await test_client.post(
             "/api/v1/events/ingest",
             content="not-json{{{",
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA},
         )
         assert resp.status_code == 400
 
