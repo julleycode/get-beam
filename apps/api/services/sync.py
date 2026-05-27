@@ -25,6 +25,7 @@ from apps.api.services.platforms.twitter_scraper import (
     fetch_user_tweets,
     fetch_multiple_users_tweets,
     fetch_own_tweets_oauth,
+    fetch_following_list_oauth,
 )
 
 logger = structlog.get_logger()
@@ -122,20 +123,52 @@ async def sync_visitor_posts(
 async def sync_following_feed(
     db: AsyncSession, account: SocialAccount
 ) -> int:
-    """Fetch tweets from Following timeline.
+    """Fetch tweets from accounts the user follows.
 
-    Playwright only — syndication can't access Following feed (needs auth).
-    If no cookies available, returns 0 silently.
+    Waterfall:
+    1. OAuth API to get following list → syndication scraper for each handle
+    2. Playwright timeline fallback (if cookies available)
+
+    The OAuth approach works on Basic tier ($100/mo). On Free tier,
+    /following endpoint may return 403 — falls through to Playwright.
     """
     if account.platform != Platform.twitter:
         return 0
 
-    feed_posts = await _playwright_fetch_timeline(limit=20)
+    own_username = (account.username or "").lower()
+    feed_posts: list = []
+
+    # 1. Try OAuth: get following list → scrape each handle via syndication
+    token = _decrypt_access_token(account)
+    if token and account.platform_user_id:
+        following_users = await fetch_following_list_oauth(
+            access_token=token,
+            platform_user_id=account.platform_user_id,
+            limit=30,  # top 30 accounts user follows
+        )
+        if following_users:
+            handles = [u["username"] for u in following_users if u.get("username")]
+            logger.info(
+                "sync_following_handles",
+                count=len(handles),
+                sample=handles[:5],
+            )
+            try:
+                feed_posts = await fetch_multiple_users_tweets(
+                    handles, limit_per_user=3, total_limit=50
+                )
+            except Exception:
+                logger.exception("sync_following_scrape_failed")
+                feed_posts = []
+
+    # 2. Fallback: Playwright timeline (needs browser cookies)
+    if not feed_posts:
+        feed_posts = await _playwright_fetch_timeline(limit=20)
+
     if not feed_posts:
         return 0
 
     # Filter out own tweets — those go to my_posts
-    own_username = (account.username or "").lower()
     following_posts = [
         fp for fp in feed_posts
         if fp.author_username.lower() != own_username

@@ -236,3 +236,65 @@ async def fetch_own_tweets_oauth(
     except httpx.HTTPError as e:
         logger.warning("twitter_oauth_network_error", error=str(e))
         return []
+
+
+# ── OAuth: fetch list of accounts the user follows ──
+
+async def fetch_following_list_oauth(
+    access_token: str, platform_user_id: str, *, limit: int = 50
+) -> list[dict]:
+    """Fetch the list of accounts the authenticated user follows via Twitter API v2.
+
+    Twitter Free tier: GET /2/users/:id/following may be restricted.
+    Twitter Basic ($100/mo) tier: allowed.
+
+    Returns:
+        List of dicts with 'id', 'name', 'username' for each followed account.
+    """
+    if not access_token or not platform_user_id:
+        return []
+
+    url = f"https://api.twitter.com/2/users/{platform_user_id}/following"
+    params = {
+        "max_results": min(limit, 1000),
+        "user.fields": "name,username,profile_image_url",
+    }
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers, params=params)
+
+            if resp.status_code == 403:
+                logger.warning(
+                    "twitter_following_list_forbidden",
+                    hint="Free tier may not support /following endpoint",
+                )
+                return []
+
+            resp.raise_for_status()
+            data = resp.json()
+
+        users = data.get("data", [])
+        logger.info("twitter_following_list_ok", count=len(users))
+        return [
+            {
+                "id": u.get("id", ""),
+                "name": u.get("name", ""),
+                "username": u.get("username", ""),
+                "profile_image_url": u.get("profile_image_url", ""),
+            }
+            for u in users
+        ]
+
+    except httpx.HTTPStatusError as e:
+        logger.warning(
+            "twitter_following_list_http_error",
+            status=e.response.status_code,
+        )
+        return []
+    except httpx.HTTPError as e:
+        logger.warning("twitter_following_list_network_error", error=str(e))
+        return []

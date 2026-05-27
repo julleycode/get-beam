@@ -73,6 +73,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "DELETE FROM posts WHERE source = 'visitors'",
             # Cleanup: remove mock enrichment profiles (fake twitter handles, fake job titles)
             "DELETE FROM enrichment_profiles WHERE twitter_handle IN ('sarahdavis', 'megantaylor', 'davidjones', 'meganthomas', 'lisajones', 'racheldavis', 'johnsmith')",
+            # Fix source: user's own tweets should be 'my_posts', not default 'following'
+            """UPDATE posts SET source = 'my_posts'
+               WHERE source = 'following'
+                 AND author_username = (
+                     SELECT sa.username FROM social_accounts sa
+                     WHERE sa.id = posts.social_account_id
+                 )""",
         ]:
             try:
                 await conn.execute(__import__("sqlalchemy").text(stmt))
