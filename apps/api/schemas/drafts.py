@@ -17,7 +17,7 @@ class DraftResponse(BaseModel):
     strategy: Optional[str] = None
     strategy_label: Optional[str] = None
     sent_at: Optional[datetime] = None
-    created_at: datetime
+    created_at: Optional[datetime] = None
 
     # Inline context so the user knows what this draft is for
     original_content: Optional[str] = None

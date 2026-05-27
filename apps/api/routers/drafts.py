@@ -48,6 +48,7 @@ def _draft_to_response(
     strategy_label = None
     if d.strategy and d.strategy in DRAFT_STRATEGIES:
         strategy_label = DRAFT_STRATEGIES[d.strategy]["label"]
+    from datetime import datetime, timezone
     return DraftResponse(
         id=str(d.id),
         type=d.type,
@@ -58,7 +59,7 @@ def _draft_to_response(
         strategy=d.strategy,
         strategy_label=strategy_label,
         sent_at=d.sent_at,
-        created_at=d.created_at,
+        created_at=d.created_at or datetime.now(timezone.utc),
         original_content=original_content,
         original_author=original_author,
     )
