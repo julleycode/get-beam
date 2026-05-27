@@ -429,10 +429,10 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 # Fallback chain: try these models in order if the primary fails
 _FREE_MODEL_FALLBACKS: list[str] = [
-    "meta-llama/llama-4-scout:free",
-    "qwen/qwen3-8b:free",
-    "google/gemma-3-1b-it:free",
-    "microsoft/phi-4-mini-instruct:free",
+    "deepseek/deepseek-v4-flash:free",
+    "openai/gpt-oss-120b:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
+    "nvidia/nemotron-nano-9b-v2:free",
 ]
 
 
