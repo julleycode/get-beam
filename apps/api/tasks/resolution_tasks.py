@@ -62,7 +62,7 @@ async def _process_site(db, site_id: str) -> tuple[int, int]:
         identified = await resolver.resolve(visitor)
         if identified:
             resolved += 1
-            # Tier 1 enrichment (PDL only, auto)
+            # Cascade enrichment: PDL → Proxycurl → Twitter (auto)
             profile = await enricher.enrich_tier1(visitor, identified)
             if profile:
                 enriched += 1

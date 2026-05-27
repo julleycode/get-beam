@@ -1,10 +1,13 @@
-"""2-Tier enrichment service.
+"""Clay-style cascade enrichment service.
 
-Tier 1 (PDL) — auto-runs after identity resolution. Provides: job title,
-company, industry, LinkedIn URL, Twitter handle.
+Waterfall enrichment — output of provider A becomes input for provider B:
 
-Tier 2 (Proxycurl + Twitter) — on-demand, uses user's BYOK API keys.
-Provides: LinkedIn headline/summary/followers, Twitter bio/followers/topics.
+1. PDL Enrich (email → job title, company, LinkedIn URL, Twitter handle)
+2. Proxycurl (LinkedIn URL from step 1 → headline, summary, followers)
+3. Twitter (handle from step 1 → bio, followers, topics)
+
+System-level API keys (PDL, Proxycurl) are used automatically.
+BYOK keys (user-provided) extend coverage when system keys are absent.
 """
 
 import random
@@ -22,85 +25,89 @@ from apps.api.services.key_vault import decrypt_key
 
 logger = structlog.get_logger()
 
-# Tier 1 fields (PDL) — max completeness = 0.6
-TIER1_FIELDS: list[str] = [
+# All enrichment fields — used for completeness scoring
+ENRICHMENT_FIELDS: list[str] = [
     "job_title", "company_name", "industry",
     "linkedin_url", "twitter_handle",
-]
-
-# Tier 2 fields (Proxycurl + Twitter) — pushes completeness up to 1.0
-TIER2_FIELDS: list[str] = [
     "linkedin_headline", "linkedin_summary",
     "twitter_bio", "twitter_follower_count",
 ]
 
-ALL_ENRICHMENT_FIELDS = TIER1_FIELDS + TIER2_FIELDS
-
 
 def calculate_completeness(profile: dict) -> float:
     """Calculate enrichment completeness as a fraction of all fields filled."""
-    filled = sum(1 for f in ALL_ENRICHMENT_FIELDS if profile.get(f))
-    return round(filled / len(ALL_ENRICHMENT_FIELDS), 2)
+    filled = sum(1 for f in ENRICHMENT_FIELDS if profile.get(f))
+    return round(filled / len(ENRICHMENT_FIELDS), 2)
 
 
 class Enricher:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    # ──────────────────────── Tier 1: PDL (auto) ────────────────────────
+    # ──────────────── Cascade Enrichment (Clay-style) ─────────────────
 
     async def enrich_tier1(
         self, visitor: Visitor, identified: IdentifiedVisitor
     ) -> EnrichmentProfile | None:
-        """Run Tier 1 enrichment (PDL only). Auto-triggered after identity resolution."""
+        """Run full cascade enrichment after identity resolution.
+
+        Clay-style waterfall:
+        1. PDL Enrich (email → professional data + social URLs)
+        2. Proxycurl (linkedin_url from step 1 → headline, summary, followers)
+        3. Twitter (handle from step 1 → bio, followers, topics)
+
+        Uses system API keys first, falls back to BYOK if available.
+        """
         if not identified.email:
             logger.info("enrichment_skipped_no_email", visitor_id=visitor.visitor_id[:8])
             return None
 
+        # ── Step 1: PDL Enrich (email → professional data) ──
         pdl_data = await self._enrich_pdl(identified.email)
         if not pdl_data:
             visitor.enrichment_status = "failed"
             await self.db.commit()
             return None
 
-        merged = {**pdl_data, "email": identified.email, "full_name": identified.full_name}
-        completeness = calculate_completeness(merged)
+        # Upsert enrichment profile with PDL data
+        profile = await self._upsert_profile(visitor, pdl_data)
 
-        # Check if profile already exists (upsert)
-        existing = await self._get_existing_profile(visitor)
-        if existing:
-            # Update existing profile with Tier 1 data
-            for field in ["job_title", "company_name", "company_size", "industry",
-                          "seniority_level", "linkedin_url", "twitter_handle",
-                          "github_url", "personal_website"]:
-                if pdl_data.get(field) is not None:
-                    setattr(existing, field, pdl_data[field])
-            existing.enrichment_completeness = completeness
-            profile = existing
-        else:
-            profile = EnrichmentProfile(
-                visitor_id=visitor.visitor_id,
-                site_id=visitor.site_id,
-                job_title=pdl_data.get("job_title"),
-                company_name=pdl_data.get("company_name"),
-                company_size=pdl_data.get("company_size"),
-                industry=pdl_data.get("industry"),
-                seniority_level=pdl_data.get("seniority_level"),
-                linkedin_url=pdl_data.get("linkedin_url"),
-                twitter_handle=pdl_data.get("twitter_handle"),
-                github_url=pdl_data.get("github_url"),
-                personal_website=pdl_data.get("personal_website"),
-                enrichment_completeness=completeness,
-            )
-            self.db.add(profile)
+        # ── Step 2: Cascade — Proxycurl (linkedin_url → details) ──
+        linkedin_url = pdl_data.get("linkedin_url") or (profile.linkedin_url if profile else None)
+        if linkedin_url:
+            proxycurl_key = self._get_system_proxycurl_key()
+            if proxycurl_key:
+                proxycurl_data = await self._enrich_proxycurl(linkedin_url, api_key=proxycurl_key)
+                if proxycurl_data:
+                    profile.linkedin_headline = proxycurl_data.get("linkedin_headline")
+                    profile.linkedin_summary = proxycurl_data.get("linkedin_summary")
+                    profile.linkedin_follower_count = proxycurl_data.get("linkedin_follower_count")
+                    logger.info("cascade_proxycurl_ok", visitor_id=visitor.visitor_id[:8])
 
+        # ── Step 3: Cascade — Twitter (handle → bio/followers) ──
+        twitter_handle = pdl_data.get("twitter_handle") or (profile.twitter_handle if profile else None)
+        if twitter_handle:
+            twitter_key = self._get_system_twitter_key()
+            if twitter_key:
+                twitter_data = await self._enrich_twitter(twitter_handle, api_key=twitter_key)
+                if twitter_data:
+                    profile.twitter_bio = twitter_data.get("twitter_bio")
+                    profile.twitter_follower_count = twitter_data.get("twitter_follower_count")
+                    profile.twitter_recent_topics = twitter_data.get("twitter_recent_topics", [])
+                    logger.info("cascade_twitter_ok", visitor_id=visitor.visitor_id[:8])
+
+        # ── Final: recalculate completeness with all cascade data ──
+        completeness = self._profile_completeness(profile)
+        profile.enrichment_completeness = completeness
         visitor.enrichment_status = "enriched" if completeness >= 0.3 else "partial"
         await self.db.commit()
 
         logger.info(
-            "tier1_enriched",
+            "cascade_enrichment_complete",
             visitor_id=visitor.visitor_id[:8],
             completeness=completeness,
+            has_linkedin=bool(profile.linkedin_headline),
+            has_twitter=bool(profile.twitter_bio),
         )
         return profile
 
@@ -111,10 +118,14 @@ class Enricher:
         visitor: Visitor,
         user_id: str,
     ) -> EnrichmentProfile | None:
-        """Run Tier 2 enrichment (Proxycurl + Twitter) using user's BYOK keys."""
+        """Run BYOK enrichment using user's own API keys.
+
+        Fills gaps left by cascade enrichment (e.g. if system has no
+        Proxycurl key, user can provide their own).
+        """
         profile = await self._get_existing_profile(visitor)
         if not profile:
-            logger.warning("tier2_no_tier1_profile", visitor_id=visitor.visitor_id[:8])
+            logger.warning("tier2_no_profile", visitor_id=visitor.visitor_id[:8])
             return None
 
         # Fetch user's BYOK keys
@@ -125,8 +136,8 @@ class Enricher:
 
         updated = False
 
-        # Proxycurl enrichment (if key available and LinkedIn URL exists)
-        if "proxycurl" in keys and profile.linkedin_url:
+        # Proxycurl (fill if cascade didn't run or returned nothing)
+        if "proxycurl" in keys and profile.linkedin_url and not profile.linkedin_headline:
             proxycurl_data = await self._enrich_proxycurl(
                 profile.linkedin_url, api_key=keys["proxycurl"]
             )
@@ -136,8 +147,8 @@ class Enricher:
                 profile.linkedin_follower_count = proxycurl_data.get("linkedin_follower_count")
                 updated = True
 
-        # Twitter enrichment (if key available and handle exists)
-        if "twitter" in keys and profile.twitter_handle:
+        # Twitter (fill if cascade didn't run or returned nothing)
+        if "twitter" in keys and profile.twitter_handle and not profile.twitter_bio:
             twitter_data = await self._enrich_twitter(
                 profile.twitter_handle, api_key=keys["twitter"]
             )
@@ -148,19 +159,7 @@ class Enricher:
                 updated = True
 
         if updated:
-            # Recalculate completeness with all fields
-            merged = {
-                "job_title": profile.job_title,
-                "company_name": profile.company_name,
-                "industry": profile.industry,
-                "linkedin_url": profile.linkedin_url,
-                "twitter_handle": profile.twitter_handle,
-                "linkedin_headline": profile.linkedin_headline,
-                "linkedin_summary": profile.linkedin_summary,
-                "twitter_bio": profile.twitter_bio,
-                "twitter_follower_count": profile.twitter_follower_count,
-            }
-            profile.enrichment_completeness = calculate_completeness(merged)
+            profile.enrichment_completeness = self._profile_completeness(profile)
             visitor.enrichment_status = "enriched"
             await self.db.commit()
 
@@ -182,6 +181,49 @@ class Enricher:
             )
         )
         return result.scalar_one_or_none()
+
+    async def _upsert_profile(
+        self, visitor: Visitor, pdl_data: dict
+    ) -> EnrichmentProfile:
+        """Create or update enrichment profile with PDL data."""
+        existing = await self._get_existing_profile(visitor)
+        pdl_fields = [
+            "job_title", "company_name", "company_size", "industry",
+            "seniority_level", "linkedin_url", "twitter_handle",
+            "github_url", "personal_website",
+        ]
+        if existing:
+            for field in pdl_fields:
+                val = pdl_data.get(field)
+                if val is not None:
+                    setattr(existing, field, val)
+            return existing
+
+        profile = EnrichmentProfile(
+            visitor_id=visitor.visitor_id,
+            site_id=visitor.site_id,
+            **{f: pdl_data.get(f) for f in pdl_fields},
+            enrichment_completeness=0.0,
+        )
+        self.db.add(profile)
+        return profile
+
+    def _profile_completeness(self, profile: EnrichmentProfile) -> float:
+        """Calculate completeness from a live profile object."""
+        filled = sum(1 for f in ENRICHMENT_FIELDS if getattr(profile, f, None))
+        return round(filled / len(ENRICHMENT_FIELDS), 2)
+
+    @staticmethod
+    def _get_system_proxycurl_key() -> str | None:
+        """Return system-level Proxycurl API key (if configured)."""
+        key = settings.proxycurl_api_key
+        return key if key else None
+
+    @staticmethod
+    def _get_system_twitter_key() -> str | None:
+        """Return system-level Twitter bearer token (if configured)."""
+        key = settings.twitter_bearer_token
+        return key if key else None
 
     async def _get_user_keys(self, user_id: str) -> dict[str, str]:
         """Fetch and decrypt user's BYOK API keys. Returns {provider: plaintext_key}."""

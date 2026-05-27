@@ -45,11 +45,16 @@ class IdentityResolver:
         return result.scalar_one_or_none() is not None
 
     async def resolve(self, visitor: Visitor) -> IdentifiedVisitor | None:
-        # Must have a real IP address (not the cookie UUID)
-        if not getattr(visitor, "ip_address", None):
-            logger.info("resolution_skipped_no_ip", visitor_id=visitor.visitor_id[:8])
-            return None
+        """Waterfall identity resolution: try multiple signals and providers.
 
+        Resolution order (Clay-style cascade):
+        1. IP → PDL identify
+        2. IP → FullContact
+        3. (Future: email from form capture, UTM signals, etc.)
+
+        Each step's output feeds the next — e.g. if PDL returns a partial
+        match with email, FullContact can verify it.
+        """
         if await self.was_recently_attempted(visitor.site_id, visitor.visitor_id):
             logger.info("resolution_skipped_recent_attempt", visitor_id=visitor.visitor_id[:8])
             return None
@@ -58,17 +63,27 @@ class IdentityResolver:
             logger.warning("resolution_budget_exhausted", site_id=visitor.site_id)
             return None
 
-        # Step 1: People Data Labs
+        # Must have a real IP address (not the cookie UUID)
+        has_ip = bool(getattr(visitor, "ip_address", None))
+        if not has_ip:
+            logger.info("resolution_skipped_no_ip", visitor_id=visitor.visitor_id[:8])
+            visitor.identity_status = "unresolvable"
+            await self.db.commit()
+            return None
+
+        # ── Waterfall: try providers in order, stop on first match ──
+
+        # Step 1: People Data Labs (IP-based)
         result = await self._try_people_data_labs(visitor)
         if result:
             return result
 
-        # Step 2: FullContact fallback
+        # Step 2: FullContact (IP-based fallback)
         result = await self._try_fullcontact(visitor)
         if result:
             return result
 
-        # Mark as unresolvable
+        # Mark as unresolvable (will not retry for 30 days)
         visitor.identity_status = "unresolvable"
         await self.db.commit()
         return None
