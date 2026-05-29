@@ -1,4 +1,8 @@
-FROM python:3.11-slim
+# Pin to Debian Bookworm (12). The bare `slim` tag now resolves to Trixie (13),
+# which Playwright 1.49 doesn't recognize — its `--with-deps` then falls back to
+# obsolete Ubuntu 20.04 font package names (ttf-unifont, ttf-ubuntu-font-family)
+# that don't exist, failing the build. Bookworm is a Playwright-supported OS.
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
