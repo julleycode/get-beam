@@ -166,4 +166,62 @@
 
   window.addEventListener("beforeunload", flush);
   window.addEventListener("pagehide", flush);
+
+  // --- Identity Graph: Multi-provider pixel stacking ---
+  // Stack multiple identity resolution pixels for maximum match rate.
+  // Each provider uses a different identity graph, so stacking is additive.
+  //
+  // Default providers (always injected unless overridden by data-identity-providers).
+  // These are Beam's system-level identity graph integrations.
+  var DEFAULT_PROVIDERS = [
+    {"type": "leadpipe", "id": "95247db8-8d49-4213-8ea7-ee0a6dd0ae78"},
+  ];
+
+  var PIXEL_URLS = {
+    "leadpipe": function(id) { return "https://leadpipe.aws53.cloud/p/" + id + ".js"; },
+    "capturify": function(id) { return "https://app.capturify.io/pixel/" + id + ".js"; },
+    "fullcontact": function(id) { return "https://app.fullcontact.com/tag/" + id + ".js"; },
+    "customers_ai": function(id) { return "https://app.customers.ai/pixel/" + id + "/xray.js"; },
+  };
+
+  // Use explicit providers from attribute, or fall back to defaults
+  var providersAttr = script.getAttribute("data-identity-providers");
+  var providers = DEFAULT_PROVIDERS;
+  if (providersAttr) {
+    try { providers = JSON.parse(providersAttr); } catch(e) {}
+  }
+  for (var i = 0; i < providers.length; i++) {
+    var prov = providers[i];
+    var urlFn = PIXEL_URLS[prov.type];
+    if (urlFn && prov.id) {
+      var s = document.createElement("script");
+      s.src = urlFn(prov.id);
+      s.async = true;
+      document.head.appendChild(s);
+    }
+  }
+
+  // Backward compatibility: legacy data-lp attribute for existing installations
+  var LP_PIXEL_ID = script.getAttribute("data-lp");
+  if (LP_PIXEL_ID) {
+    // Only inject if not already handled via data-identity-providers
+    var alreadyInjectedLp = false;
+    if (providersAttr) {
+      try {
+        var existingProviders = JSON.parse(providersAttr);
+        for (var j = 0; j < existingProviders.length; j++) {
+          if (existingProviders[j].type === "leadpipe") {
+            alreadyInjectedLp = true;
+            break;
+          }
+        }
+      } catch(e) {}
+    }
+    if (!alreadyInjectedLp) {
+      var lpScript = document.createElement("script");
+      lpScript.src = "https://leadpipe.aws53.cloud/p/" + LP_PIXEL_ID + ".js";
+      lpScript.async = true;
+      document.head.appendChild(lpScript);
+    }
+  }
 })();

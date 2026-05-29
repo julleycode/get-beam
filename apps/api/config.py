@@ -59,6 +59,15 @@ class Settings(BaseSettings):
     default_ai_model: str = "deepseek/deepseek-v4-flash:free"  # free tier — good for social replies
     resend_api_key: str = ""
 
+    # ─── Identity Graph (person-level from IP) ───
+    rb2b_api_key: str = ""          # RB2B API Suite — IP → hashed email → person (US traffic)
+    leadpipe_api_key: str = ""      # Leadpipe — pixel-based identity graph (500 free IDs)
+    leadpipe_default_pixel_id: str = ""  # Default Leadpipe pixel ID for all sites
+    capturify_api_key: str = ""           # Capturify — identity graph (500 free leads)
+    capturify_pixel_id: str = ""          # Capturify pixel ID
+    fullcontact_pixel_id: str = ""        # FullContact Acumen webtag ID
+    customers_ai_pixel_id: str = ""       # Customers.ai X-Ray pixel ID
+
     # ─── Waterfall enrichment providers ───
     ipinfo_token: str = ""          # IP → company/geolocation (50K free/month)
     hunter_api_key: str = ""        # Domain → employee emails (25 free/month)
@@ -86,10 +95,16 @@ class Settings(BaseSettings):
     linkedin_client_id: str = ""
     linkedin_client_secret: str = ""
     linkedin_redirect_uri: str = "http://localhost:8000/api/v1/social/callback/linkedin"
+    linkedin_browser_cookie_path: str = "~/.retarget/linkedin_cookies.json"
+    linkedin_browser_headless: bool = True
+    linkedin_browser_cookies_b64: str = ""
 
     tiktok_client_key: str = ""
     tiktok_client_secret: str = ""
     tiktok_redirect_uri: str = "http://localhost:8000/api/v1/social/callback/tiktok"
+    tiktok_browser_cookie_path: str = "~/.retarget/tiktok_cookies.json"
+    tiktok_browser_headless: bool = True
+    tiktok_browser_cookies_b64: str = ""
 
     # ─── Encryption ───
     encryption_key: str = ""  # Fernet key for BYOK API keys (strict)
