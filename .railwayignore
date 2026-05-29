@@ -1,0 +1,11 @@
+.vibecode-backup/
+.agents/
+.claude/
+.codex/
+node_modules/
+.venv/
+.git/
+apps/web/node_modules/
+apps/web/.next/
+process/
+*.log
