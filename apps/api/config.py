@@ -5,24 +5,48 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_secret_key: str = "change-me-in-production"
 
+    def validate_production(self) -> None:
+        """Fail fast on startup if any critical config is unsafe in production.
+
+        Collects ALL violations and raises a single RuntimeError so the operator
+        sees every problem at once rather than one-at-a-time.
+        """
+        if self.app_env != "production":
+            return
+
+        violations: list[str] = []
+
+        if self.app_secret_key == "change-me-in-production":
+            violations.append("APP_SECRET_KEY is still the insecure default — set a strong random value")
+
+        if self.jwt_secret == "change-me-in-production" and not self.clerk_secret_key:
+            violations.append(
+                "JWT_SECRET is still the insecure default and no CLERK_SECRET_KEY is set — "
+                "set one of these to secure authentication"
+            )
+
+        if self.mock_external_apis:
+            violations.append("MOCK_EXTERNAL_APIS=true in production — enrichment/identity data will be fake")
+
+        if self.mock_social_oauth:
+            violations.append("MOCK_SOCIAL_OAUTH=true in production — social OAuth flows will be mocked")
+
+        if not self.token_encryption_key:
+            violations.append("TOKEN_ENCRYPTION_KEY is empty — OAuth tokens cannot be encrypted at rest")
+
+        if not self.encryption_key:
+            violations.append("ENCRYPTION_KEY is empty — BYOK API keys cannot be encrypted at rest")
+
+        if violations:
+            bullet_list = "\n  - ".join(violations)
+            raise RuntimeError(
+                f"PRODUCTION CONFIG ERROR: startup blocked due to {len(violations)} unsafe setting(s):\n"
+                f"  - {bullet_list}"
+            )
+
     def validate_secret_key(self) -> None:
-        """Warn if default secret keys are used in production."""
-        import logging
-        _log = logging.getLogger(__name__)
-        if self.app_env == "production" and self.app_secret_key == "change-me-in-production":
-            _log.warning(
-                "APP_SECRET_KEY is still the default value in production. "
-                "Set a strong random secret via environment variable."
-            )
-        if (
-            self.app_env == "production"
-            and self.jwt_secret == "change-me-in-production"
-            and not self.clerk_secret_key
-        ):
-            _log.warning(
-                "JWT_SECRET is still the default value in production. "
-                "Set a strong random secret via environment variable."
-            )
+        """Alias for validate_production() — kept for backward compatibility."""
+        self.validate_production()
 
     api_base_url: str = "http://localhost:8000"
     frontend_url: str = "http://localhost:3000"

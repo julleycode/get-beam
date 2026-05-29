@@ -114,8 +114,9 @@ async def _upsert_visitor(
         index_elements=["site_id", "visitor_id"],
         set_={
             "last_seen": last_seen,
-            "total_pageviews": Visitor.total_pageviews + total_pageviews,
-            "total_sessions": Visitor.total_sessions + total_sessions,
+            # Full recompute each run → SET totals (not increment) to avoid double-counting.
+            "total_pageviews": total_pageviews,
+            "total_sessions": total_sessions,
             "avg_time_on_page": avg_time_on_page,
             "max_scroll_depth": text("GREATEST(visitors.max_scroll_depth, :new_scroll)").bindparams(new_scroll=max_scroll_depth),
             "pages_visited": pages_visited or [],
@@ -132,9 +133,11 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
 
     Uses window functions to detect real session boundaries:
     a new session starts when there is a gap > 30 minutes between consecutive events.
-    """
-    since = datetime.utcnow() - timedelta(hours=2)
 
+    Aggregates the FULL event history per visitor (idempotent recompute) so the
+    intent score and pages_visited reflect all activity, not just a recent window.
+    Totals are SET (not incremented) on conflict — see _upsert_visitor.
+    """
     # Check if events table exists
     check = await db.execute(text(
         "SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'events')"
@@ -159,7 +162,7 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
                     ELSE 0
                 END AS is_new_session
             FROM events
-            WHERE site_id = :site_id AND created_at >= :since
+            WHERE site_id = :site_id
         ),
         session_numbered AS (
             SELECT *,
@@ -185,7 +188,7 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
             (ARRAY_AGG(ip_address ORDER BY created_at DESC) FILTER (WHERE ip_address != ''))[1] AS latest_ip
         FROM session_numbered
         GROUP BY visitor_id
-    """), {"site_id": site_id, "since": since})
+    """), {"site_id": site_id})
 
     count = 0
     for row in result.fetchall():

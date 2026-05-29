@@ -44,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS tone_preference VARCHAR(50) DEFAULT 'casual'",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(200)",
+            "ALTER TABLE users ALTER COLUMN hashed_password DROP NOT NULL",
             # Pre-merge tables: add updated_at inherited from Base
             "ALTER TABLE events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
             "ALTER TABLE sites ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
@@ -53,6 +54,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "ALTER TABLE enrichment_profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
             "ALTER TABLE user_api_keys ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
             "ALTER TABLE campaign_touchpoints ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
+            "ALTER TABLE resolution_logs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
             # Phase 1A: IP address on visitors for identity resolution
             "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45)",
             "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS company_domain VARCHAR(253)",
@@ -64,15 +66,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "ALTER TABLE enrichment_profiles ADD COLUMN IF NOT EXISTS facebook_url VARCHAR(500)",
             # Feed: track post source (visitors / following / my_posts)
             "ALTER TABLE posts ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'following'",
-            # Cleanup: remove mock posts from DB now that real APIs are active
-            "DELETE FROM drafts WHERE post_id IN (SELECT id FROM posts WHERE platform_post_id LIKE 'mock_%' OR platform_post_id LIKE 'visitor_tweet_%')",
-            "DELETE FROM posts WHERE platform_post_id LIKE 'mock_%' OR platform_post_id LIKE 'visitor_tweet_%'",
-            # Cleanup: remove visitor-source posts that came from mock enrichment handles
-            # These are real tweets from strangers scraped because mock enrichment generated fake handles
-            "DELETE FROM drafts WHERE post_id IN (SELECT id FROM posts WHERE source = 'visitors')",
-            "DELETE FROM posts WHERE source = 'visitors'",
-            # Cleanup: remove mock enrichment profiles (fake twitter handles, fake job titles)
-            "DELETE FROM enrichment_profiles WHERE twitter_handle IN ('sarahdavis', 'megantaylor', 'davidjones', 'meganthomas', 'lisajones', 'racheldavis', 'johnsmith')",
             # Fix source: user's own tweets should be 'my_posts', not default 'following'
             """UPDATE posts SET source = 'my_posts'
                WHERE source = 'following'
@@ -115,7 +108,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(
-    title="ReTargetAgent API",
+    title="Beam API",
     version="0.2.0",
     lifespan=lifespan,
 )
@@ -195,7 +188,21 @@ app.include_router(companies.router, prefix="/api/v1/companies", tags=["companie
 
 @app.get("/health")
 async def health_check() -> dict[str, str]:
-    return {"status": "ok", "env": settings.app_env}
+    """Liveness probe — always returns 200 if the process is running."""
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+async def health_ready() -> dict[str, str]:
+    """Readiness probe — returns 200 only when the DB is reachable."""
+    from fastapi.responses import JSONResponse
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(__import__("sqlalchemy").text("SELECT 1"))
+        return {"status": "ready"}
+    except Exception as exc:
+        logger.warning("health_ready_db_failed", error=str(exc))
+        return JSONResponse(status_code=503, content={"status": "unavailable", "detail": "database unreachable"})
 
 
 _pixel_js_cache: str | None = None

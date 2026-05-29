@@ -14,6 +14,7 @@ engine = create_async_engine(
     pool_size=10,
     max_overflow=20,
     pool_recycle=300,
+    pool_pre_ping=True,
     # Supabase pooler (transaction mode) doesn't support prepared statements
     connect_args={"prepared_statement_cache_size": 0, "statement_cache_size": 0}
     if "supabase" in settings.database_url

@@ -16,6 +16,7 @@ import httpx
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 from apps.api.config import settings
 from apps.api.models.api_key import UserApiKey
@@ -24,6 +25,30 @@ from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.services.key_vault import decrypt_key
 
 logger = structlog.get_logger()
+
+# Transient HTTP statuses worth retrying
+_TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
+
+
+def _is_transient_http_error(exc: BaseException) -> bool:
+    """Return True for retryable httpx errors (timeouts, connection errors, 5xx/429)."""
+    if isinstance(exc, httpx.TimeoutException):
+        return True
+    if isinstance(exc, httpx.ConnectError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _TRANSIENT_HTTP_STATUSES
+    return False
+
+
+# Retry decorator: 3 attempts, exponential backoff 1→2→8s, transient errors only.
+_http_retry = retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    retry=retry_if_exception(_is_transient_http_error),
+    reraise=True,
+)
+
 
 # All enrichment fields — used for completeness scoring
 ENRICHMENT_FIELDS: list[str] = [
@@ -244,32 +269,47 @@ class Enricher:
 
     # ──────────────────────── API Calls ──────────────────────────────────
 
+    @_http_retry
     async def _enrich_pdl(self, email: str) -> dict | None:
+        """Enrich a person record from PDL by email.
+
+        Guards for missing API key (returns None immediately — does not attempt
+        a call with an empty key which would mark the visitor permanently failed).
+        Retries up to 3× on transient errors (5xx, 429, timeouts).
+        """
+        if not settings.people_data_labs_api_key:
+            # No key configured — skip silently rather than sending an empty key
+            logger.debug("pdl_enrich_skipped_no_key")
+            return None
+
         if settings.mock_external_apis:
             return self._mock_pdl_enrichment(email)
 
         async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                resp = await client.get(
-                    "https://api.peopledatalabs.com/v5/person/enrich",
-                    headers={"X-Api-Key": settings.people_data_labs_api_key},
-                    params={"email": email},
-                )
-                if resp.status_code == 200:
-                    p = resp.json().get("data", {})
-                    return {
-                        "job_title": p.get("job_title"),
-                        "company_name": p.get("job_company_name"),
-                        "company_size": p.get("job_company_size"),
-                        "industry": p.get("industry"),
-                        "seniority_level": p.get("job_title_role"),
-                        "linkedin_url": p.get("linkedin_url"),
-                        "twitter_handle": (p.get("twitter_url", "") or "").rstrip("/").split("/")[-1] or None,
-                        "facebook_url": p.get("facebook_url"),
-                        "github_url": p.get("github_url"),
-                    }
-            except httpx.HTTPError as e:
-                logger.error("pdl_enrich_error", error=str(e))
+            resp = await client.get(
+                "https://api.peopledatalabs.com/v5/person/enrich",
+                headers={"X-Api-Key": settings.people_data_labs_api_key},
+                params={"email": email},
+            )
+            if resp.status_code == 200:
+                p = resp.json().get("data", {})
+                return {
+                    "job_title": p.get("job_title"),
+                    "company_name": p.get("job_company_name"),
+                    "company_size": p.get("job_company_size"),
+                    "industry": p.get("industry"),
+                    "seniority_level": p.get("job_title_role"),
+                    "linkedin_url": p.get("linkedin_url"),
+                    "twitter_handle": (p.get("twitter_url", "") or "").rstrip("/").split("/")[-1] or None,
+                    "facebook_url": p.get("facebook_url"),
+                    "github_url": p.get("github_url"),
+                }
+            elif resp.status_code == 404:
+                logger.debug("pdl_enrich_no_match", email_prefix=email[:5])
+            else:
+                logger.warning("pdl_enrich_error", status=resp.status_code)
+                if resp.status_code in _TRANSIENT_HTTP_STATUSES:
+                    resp.raise_for_status()
         return None
 
     async def _enrich_proxycurl(self, linkedin_url: str, *, api_key: str) -> dict:

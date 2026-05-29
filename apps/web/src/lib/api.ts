@@ -65,7 +65,7 @@ class ApiClient {
       if (!this.clerkToken) {
         this.clearToken();
         if (typeof window !== "undefined") {
-          window.location.href = "/login";
+          window.location.href = "/sign-in";
         }
       }
       throw new Error("Unauthorized");
@@ -235,7 +235,7 @@ class ApiClient {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `retargetagent-pixel-${siteId}.zip`;
+    a.download = `beam-pixel-${siteId}.zip`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

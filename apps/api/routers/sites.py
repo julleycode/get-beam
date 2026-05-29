@@ -67,11 +67,13 @@ async def create_site(
         existing = result.scalars().first()
 
     if existing:
-        # Ensure current user owns this site; if not, add ownership
         if existing.user_id != user.id:
-            existing.user_id = user.id
-            await db.commit()
-            await db.refresh(existing)
+            # Another user already owns this URL — refuse to reassign
+            raise HTTPException(
+                status_code=409,
+                detail="This site URL is already registered to another account.",
+            )
+        # Same user already has this site — return it as-is (dedup)
         return SiteOut.model_validate(existing)
 
     site = Site(
