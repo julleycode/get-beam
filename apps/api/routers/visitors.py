@@ -1,12 +1,12 @@
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.api_key import UserApiKey
-from apps.api.models.database import get_db
+from apps.api.models.database import async_session, get_db
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.site import Site
 from apps.api.models.user import User
@@ -119,6 +119,45 @@ async def get_visitor_stats(
         "enriched": enriched,
         "could_enrich_more": could_enrich_more,
     }
+
+
+@router.delete("/{site_id}/{visitor_id}/data")
+async def delete_visitor_data(
+    site_id: str,
+    visitor_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Erase ALL data for a single visitor (GDPR / deletion-request compliance).
+
+    Removes the visitor row plus identity, enrichment, events, and resolution
+    logs. Site-ownership is enforced so one tenant can't delete another's data.
+    """
+    from sqlalchemy import text as sql_text
+
+    await _verify_site_access(db, site_id, user)
+
+    deleted: dict[str, int] = {}
+    for table in (
+        "resolution_logs",
+        "identified_visitors",
+        "enrichment_profiles",
+        "events",
+        "segment_members",
+        "visitors",
+    ):
+        try:
+            r = await db.execute(
+                sql_text(f"DELETE FROM {table} WHERE site_id = :sid AND visitor_id = :vid"),
+                {"sid": site_id, "vid": visitor_id},
+            )
+            deleted[table] = r.rowcount
+        except Exception as e:
+            logger.warning("visitor_data_delete_partial", table=table, error=str(e))
+    await db.commit()
+
+    logger.info("visitor_data_deleted", site_id=site_id, visitor_id=visitor_id[:8], deleted=deleted)
+    return {"status": "deleted", "visitor_id": visitor_id, "deleted": deleted}
 
 
 @router.delete("/{site_id}/cleanup-test")
@@ -378,65 +417,100 @@ async def manual_identify_visitor(
     }
 
 
+async def _run_resolution_job(site_id: str) -> None:
+    """Background worker: resolve + enrich eligible visitors for a site.
+
+    Runs AFTER the HTTP response is sent, in its own DB session (the
+    request-scoped session is already closed by the time this runs).
+    Each visitor is resolved in isolation so one failure can't abort the batch.
+    """
+    async with async_session() as db:
+        result = await db.execute(
+            select(Visitor).where(
+                Visitor.site_id == site_id,
+                Visitor.identity_status == "anonymous",
+                Visitor.intent_score >= 40,
+            ).order_by(Visitor.intent_score.desc()).limit(50)
+        )
+        visitors = list(result.scalars().all())
+        if not visitors:
+            return
+
+        resolver = IdentityResolver(db)
+        enricher = Enricher(db)
+        resolved = 0
+        enriched = 0
+
+        for visitor in visitors:
+            try:
+                identified = await resolver.resolve(visitor)
+                if identified:
+                    resolved += 1
+                    profile = await enricher.enrich_tier1(visitor, identified)
+                    if profile:
+                        enriched += 1
+            except Exception as e:
+                logger.warning("resolve_visitor_error", visitor_id=visitor.visitor_id, error=str(e))
+
+        logger.info(
+            "resolution_job_complete",
+            site_id=site_id, processed=len(visitors), resolved=resolved, enriched=enriched,
+        )
+
+
 @router.post("/{site_id}/resolve")
 async def resolve_site_visitors(
     site_id: str,
+    background_tasks: BackgroundTasks,
     reset: bool = Query(False, description="Reset unresolvable visitors back to anonymous for re-processing"),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Trigger identity resolution + Tier 1 enrichment for all eligible visitors."""
-    from apps.api.models.visitor import IdentifiedVisitor as IdentVisitor
+    """Queue identity resolution + Tier 1 enrichment for eligible visitors.
+
+    Returns immediately; the actual resolution runs in the background so a
+    batch of up to 50 visitors × several external API calls never blocks the
+    request worker.
+    """
     from sqlalchemy import text as sql_text
 
     await _verify_site_access(db, site_id, user)
 
-    # Reset unresolvable visitors if requested
+    # Reset unresolvable visitors if requested. Only their logs are cleared —
+    # resolved visitors' logs are preserved (cost audit + 30-day dedup intact).
     if reset:
+        await db.execute(
+            sql_text(
+                "DELETE FROM resolution_logs WHERE site_id = :sid AND visitor_id IN "
+                "(SELECT visitor_id FROM visitors WHERE site_id = :sid AND identity_status = 'unresolvable')"
+            ),
+            {"sid": site_id},
+        )
         await db.execute(
             sql_text("UPDATE visitors SET identity_status = 'anonymous' WHERE site_id = :sid AND identity_status = 'unresolvable'"),
             {"sid": site_id},
         )
-        await db.execute(
-            sql_text("DELETE FROM resolution_logs WHERE site_id = :sid"),
-            {"sid": site_id},
-        )
         await db.commit()
 
-    # Find anonymous visitors with intent >= 40
-    result = await db.execute(
-        select(Visitor).where(
+    # Count eligible visitors (cheap) so we can report queue size immediately
+    count_result = await db.execute(
+        select(func.count()).select_from(Visitor).where(
             Visitor.site_id == site_id,
             Visitor.identity_status == "anonymous",
             Visitor.intent_score >= 40,
-        ).order_by(Visitor.intent_score.desc()).limit(50)
+        )
     )
-    visitors = list(result.scalars().all())
+    eligible = min(count_result.scalar() or 0, 50)
 
-    if not visitors:
+    if eligible == 0:
         return {"status": "no_eligible", "message": "No visitors with intent >= 40 to resolve."}
 
-    resolver = IdentityResolver(db)
-    enricher = Enricher(db)
-    resolved = 0
-    enriched = 0
-
-    for visitor in visitors:
-        try:
-            identified = await resolver.resolve(visitor)
-            if identified:
-                resolved += 1
-                profile = await enricher.enrich_tier1(visitor, identified)
-                if profile:
-                    enriched += 1
-        except Exception as e:
-            logger.warning("resolve_visitor_error", visitor_id=visitor.visitor_id, error=str(e))
+    background_tasks.add_task(_run_resolution_job, site_id)
 
     return {
-        "status": "completed",
-        "processed": len(visitors),
-        "resolved": resolved,
-        "enriched": enriched,
+        "status": "started",
+        "queued": eligible,
+        "message": f"Resolving {eligible} visitor(s) in the background. Refresh in a moment to see results.",
     }
 
 

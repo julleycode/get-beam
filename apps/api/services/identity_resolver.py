@@ -21,7 +21,9 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import structlog
 from sqlalchemy import select, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 from apps.api.config import settings
 from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog, Visitor
@@ -30,6 +32,31 @@ logger = structlog.get_logger()
 
 REDIS_RESOLUTION_PREFIX = "resolution:"
 RESOLUTION_CACHE_TTL = 30 * 86400  # 30 days
+
+# Transient HTTP errors worth retrying (timeouts, rate limits, 5xx server errors).
+# 4xx client errors (400, 401, 403, 404) are NOT transient — never retry those.
+_TRANSIENT_HTTP_STATUSES = {429, 500, 502, 503, 504}
+
+
+def _is_transient_http_error(exc: BaseException) -> bool:
+    """Return True for retryable httpx errors (timeouts, connection errors, 5xx/429)."""
+    if isinstance(exc, httpx.TimeoutException):
+        return True
+    if isinstance(exc, httpx.ConnectError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in _TRANSIENT_HTTP_STATUSES
+    return False
+
+
+# Retry decorator for external HTTP calls.
+# Retries up to 3 attempts (including the first) with exponential backoff 1→2→8s.
+_http_retry = retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    retry=retry_if_exception(_is_transient_http_error),
+    reraise=True,
+)
 
 
 class IdentityResolver:
@@ -231,69 +258,70 @@ class IdentityResolver:
             return await self._save_identified(visitor, data, "leadpipe")
         return None
 
+    @_http_retry
     async def _call_leadpipe_api(self, visitor: Visitor) -> dict | None:
         """Query Leadpipe for identified visitors matching this visitor's session.
 
         Match logic: Look for Leadpipe identifications from the same IP
         within a short time window of the visitor's last_seen timestamp.
+        Retries up to 3× on transient errors (5xx, 429, timeouts).
         """
         async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
-                # Query recent identifications, filter by page URL or IP
-                resp = await client.get(
-                    f"{self.LEADPIPE_API_BASE}/v1/data",
-                    headers={"X-API-Key": settings.leadpipe_api_key},
-                    params={
-                        "limit": 10,
-                        "sort": "desc",
-                    },
-                )
+            # Query recent identifications, filter by page URL or IP
+            resp = await client.get(
+                f"{self.LEADPIPE_API_BASE}/v1/data",
+                headers={"X-API-Key": settings.leadpipe_api_key},
+                params={
+                    "limit": 10,
+                    "sort": "desc",
+                },
+            )
 
-                if resp.status_code != 200:
-                    logger.warning("leadpipe_api_error", status=resp.status_code,
-                                   detail=resp.text[:200])
-                    return None
-
-                body = resp.json()
-                visitors_data = body.get("data", [])
-
-                if not visitors_data:
-                    logger.debug("leadpipe_no_matches")
-                    return None
-
-                # Find a match by IP address or page URL containing site domain
-                site_domain = None
-                if hasattr(visitor, "site_id"):
-                    # Try to extract site domain from visitor's pages
-                    pages = getattr(visitor, "pages_visited", []) or []
-                    if pages:
-                        from urllib.parse import urlparse
-                        try:
-                            site_domain = urlparse(pages[0]).netloc
-                        except Exception:
-                            pass
-
-                for lp_visitor in visitors_data:
-                    lp_email = lp_visitor.get("email") or lp_visitor.get("emails", [None])[0] if isinstance(lp_visitor.get("emails"), list) and lp_visitor.get("emails") else lp_visitor.get("email")
-                    if not lp_email:
-                        continue
-
-                    # Match by IP if available
-                    lp_ip = lp_visitor.get("ip") or lp_visitor.get("ipAddress")
-                    if lp_ip and lp_ip == visitor.ip_address:
-                        return self._parse_leadpipe_person(lp_visitor)
-
-                    # Match by page URL containing our site domain
-                    lp_pages = lp_visitor.get("pagesViewed") or lp_visitor.get("pages") or []
-                    if site_domain and any(site_domain in str(p) for p in lp_pages):
-                        return self._parse_leadpipe_person(lp_visitor)
-
-                logger.debug("leadpipe_no_ip_match", ip=visitor.ip_address[:8])
+            if resp.status_code == 404:
+                logger.debug("leadpipe_no_matches")
+                return None
+            if resp.status_code != 200:
+                logger.warning("leadpipe_api_error", status=resp.status_code,
+                               detail=resp.text[:200])
+                self._raise_if_transient(resp)
                 return None
 
-            except httpx.HTTPError as e:
-                logger.error("leadpipe_api_error", error=str(e))
-        return None
+            body = resp.json()
+            visitors_data = body.get("data", [])
+
+            if not visitors_data:
+                logger.debug("leadpipe_no_matches")
+                return None
+
+            # Find a match by IP address or page URL containing site domain
+            site_domain = None
+            if hasattr(visitor, "site_id"):
+                # Try to extract site domain from visitor's pages
+                pages = getattr(visitor, "pages_visited", []) or []
+                if pages:
+                    from urllib.parse import urlparse
+                    try:
+                        site_domain = urlparse(pages[0]).netloc
+                    except Exception:
+                        pass
+
+            for lp_visitor in visitors_data:
+                lp_email = lp_visitor.get("email") or lp_visitor.get("emails", [None])[0] if isinstance(lp_visitor.get("emails"), list) and lp_visitor.get("emails") else lp_visitor.get("email")
+                if not lp_email:
+                    continue
+
+                # Match by IP if available
+                lp_ip = lp_visitor.get("ip") or lp_visitor.get("ipAddress")
+                if lp_ip and lp_ip == visitor.ip_address:
+                    return self._parse_leadpipe_person(lp_visitor)
+
+                # Match by page URL containing our site domain
+                lp_pages = lp_visitor.get("pagesViewed") or lp_visitor.get("pages") or []
+                if site_domain and any(site_domain in str(p) for p in lp_pages):
+                    return self._parse_leadpipe_person(lp_visitor)
+
+            logger.debug("leadpipe_no_ip_match", ip=visitor.ip_address[:8])
+            return None
 
     @staticmethod
     def _parse_leadpipe_person(lp: dict) -> dict:
@@ -371,62 +399,60 @@ class IdentityResolver:
             return await self._save_identified(visitor, data, "capturify")
         return None
 
+    @_http_retry
     async def _call_capturify_api(self, visitor: Visitor) -> dict | None:
         """Query Capturify for identified visitors matching this visitor.
 
         Uses the same pattern as Leadpipe: query recent identifications,
         match by IP address, parse person data.
+        Retries up to 3× on transient errors (5xx, 429, timeouts).
         """
         async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
-                resp = await client.get(
-                    f"{self.CAPTURIFY_API_BASE}/v1/visitors",
-                    headers={"Authorization": f"Bearer {settings.capturify_api_key}"},
-                    params={
-                        "limit": 10,
-                        "sort": "desc",
-                    },
-                )
+            resp = await client.get(
+                f"{self.CAPTURIFY_API_BASE}/v1/visitors",
+                headers={"Authorization": f"Bearer {settings.capturify_api_key}"},
+                params={
+                    "limit": 10,
+                    "sort": "desc",
+                },
+            )
 
-                if resp.status_code == 401:
-                    logger.warning("capturify_unauthorized", detail="Check CAPTURIFY_API_KEY")
-                    return None
-                if resp.status_code == 404:
-                    logger.debug("capturify_no_matches")
-                    return None
-                if resp.status_code != 200:
-                    logger.warning("capturify_api_error", status=resp.status_code,
-                                   detail=resp.text[:200])
-                    return None
-
-                body = resp.json()
-                # Capturify may return {"data": [...]} or {"visitors": [...]} or a bare list
-                visitors_data = (
-                    body.get("data")
-                    or body.get("visitors")
-                    or (body if isinstance(body, list) else [])
-                )
-
-                if not visitors_data:
-                    logger.debug("capturify_empty_response")
-                    return None
-
-                for cap_visitor in visitors_data:
-                    # Match by IP address
-                    cap_ip = (
-                        cap_visitor.get("ip")
-                        or cap_visitor.get("ipAddress")
-                        or cap_visitor.get("ip_address")
-                    )
-                    if cap_ip and cap_ip == visitor.ip_address:
-                        return self._parse_capturify_person(cap_visitor)
-
-                logger.debug("capturify_no_ip_match", ip=visitor.ip_address[:8])
+            if resp.status_code == 401:
+                logger.warning("capturify_unauthorized", detail="Check CAPTURIFY_API_KEY")
+                return None
+            if resp.status_code == 404:
+                logger.debug("capturify_no_matches")
+                return None
+            if resp.status_code != 200:
+                logger.warning("capturify_api_error", status=resp.status_code,
+                               detail=resp.text[:200])
+                self._raise_if_transient(resp)
                 return None
 
-            except httpx.HTTPError as e:
-                logger.error("capturify_api_error", error=str(e))
-        return None
+            body = resp.json()
+            # Capturify may return {"data": [...]} or {"visitors": [...]} or a bare list
+            visitors_data = (
+                body.get("data")
+                or body.get("visitors")
+                or (body if isinstance(body, list) else [])
+            )
+
+            if not visitors_data:
+                logger.debug("capturify_empty_response")
+                return None
+
+            for cap_visitor in visitors_data:
+                # Match by IP address
+                cap_ip = (
+                    cap_visitor.get("ip")
+                    or cap_visitor.get("ipAddress")
+                    or cap_visitor.get("ip_address")
+                )
+                if cap_ip and cap_ip == visitor.ip_address:
+                    return self._parse_capturify_person(cap_visitor)
+
+            logger.debug("capturify_no_ip_match", ip=visitor.ip_address[:8])
+            return None
 
     @staticmethod
     def _parse_capturify_person(cap: dict) -> dict:
@@ -507,77 +533,75 @@ class IdentityResolver:
             return await self._save_identified(visitor, data, "rb2b")
         return None
 
+    @_http_retry
     async def _call_rb2b_api(self, visitor: Visitor) -> dict | None:
         """Call RB2B API Suite: IP to HEM → HEM to Business Profile.
 
         Two-step chain:
         1. IP → Hashed Email (HEM)
         2. HEM → Full business profile (name, email, LinkedIn, job title)
+        Retries up to 3× on transient errors (5xx, 429, timeouts).
         """
         async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
-                # Step 1: IP → Hashed Email Match (HEM)
-                resp = await client.post(
-                    "https://api.rb2b.com/v2/ip-to-hem",
-                    headers={
-                        "Authorization": f"Bearer {settings.rb2b_api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "ip": visitor.ip_address,
-                        "userAgent": getattr(visitor, "user_agent", "") or "",
-                    },
-                )
+            # Step 1: IP → Hashed Email Match (HEM)
+            resp = await client.post(
+                "https://api.rb2b.com/v2/ip-to-hem",
+                headers={
+                    "Authorization": f"Bearer {settings.rb2b_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "ip": visitor.ip_address,
+                    "userAgent": getattr(visitor, "user_agent", "") or "",
+                },
+            )
 
-                if resp.status_code != 200:
-                    if resp.status_code == 404:
-                        logger.debug("rb2b_no_match", ip=visitor.ip_address[:8])
-                    else:
-                        logger.warning("rb2b_ip_error", status=resp.status_code,
-                                       detail=resp.text[:200])
-                    return None
+            if resp.status_code == 404:
+                logger.debug("rb2b_no_match", ip=visitor.ip_address[:8])
+                return None
+            if resp.status_code != 200:
+                logger.warning("rb2b_ip_error", status=resp.status_code,
+                               detail=resp.text[:200])
+                self._raise_if_transient(resp)
+                return None
 
-                hem_data = resp.json()
-                hem = hem_data.get("hem") or hem_data.get("hashedEmail") or hem_data.get("data", {}).get("hem")
-                if not hem:
-                    logger.debug("rb2b_no_hem", ip=visitor.ip_address[:8])
-                    return None
+            hem_data = resp.json()
+            hem = hem_data.get("hem") or hem_data.get("hashedEmail") or hem_data.get("data", {}).get("hem")
+            if not hem:
+                logger.debug("rb2b_no_hem", ip=visitor.ip_address[:8])
+                return None
 
-                # Step 2: HEM → Business Profile
-                profile_resp = await client.post(
-                    "https://api.rb2b.com/v2/hem-to-business-profile",
-                    headers={
-                        "Authorization": f"Bearer {settings.rb2b_api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={"hem": hem},
-                )
+            # Step 2: HEM → Business Profile
+            profile_resp = await client.post(
+                "https://api.rb2b.com/v2/hem-to-business-profile",
+                headers={
+                    "Authorization": f"Bearer {settings.rb2b_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={"hem": hem},
+            )
 
-                if profile_resp.status_code != 200:
-                    # Got HEM but can't enrich — still try to use it
-                    logger.warning("rb2b_profile_error", status=profile_resp.status_code)
-                    return None
+            if profile_resp.status_code != 200:
+                logger.warning("rb2b_profile_error", status=profile_resp.status_code)
+                self._raise_if_transient(profile_resp)
+                return None
 
-                profile = profile_resp.json()
-                person = profile.get("data", profile)
+            profile = profile_resp.json()
+            person = profile.get("data", profile)
 
-                email = person.get("email") or person.get("workEmail") or person.get("personalEmail")
-                if not email:
-                    logger.debug("rb2b_no_email_in_profile", ip=visitor.ip_address[:8])
-                    return None
+            email = person.get("email") or person.get("workEmail") or person.get("personalEmail")
+            if not email:
+                logger.debug("rb2b_no_email_in_profile", ip=visitor.ip_address[:8])
+                return None
 
-                return {
-                    "email": email,
-                    "full_name": person.get("fullName") or person.get("name"),
-                    "city": person.get("city"),
-                    "region": person.get("state") or person.get("region"),
-                    "country": person.get("country", "US"),
-                    "confidence_score": 0.95,  # Identity graph = high confidence
-                }
-
-            except httpx.HTTPError as e:
-                logger.error("rb2b_api_error", error=str(e))
-        return None
+            return {
+                "email": email,
+                "full_name": person.get("fullName") or person.get("name"),
+                "city": person.get("city"),
+                "region": person.get("state") or person.get("region"),
+                "country": person.get("country", "US"),
+                "confidence_score": 0.95,  # Identity graph = high confidence
+            }
 
     def _mock_rb2b_response(self, visitor: Visitor) -> dict | None:
         """Mock: ~30% chance of identity graph match (simulates US B2B traffic)."""
@@ -632,53 +656,66 @@ class IdentityResolver:
             logger.info("pdl_ip_company_found", visitor_id=visitor.visitor_id[:8], domain=domain)
         return domain
 
+    @staticmethod
+    def _raise_if_transient(resp: httpx.Response) -> None:
+        """Raise HTTPStatusError for transient statuses so tenacity can retry them.
+
+        Intentionally does NOT raise for 400 (bad request / unresolvable IP) or
+        404 (no match) — those are legitimate "no result" responses.
+        """
+        if resp.status_code in _TRANSIENT_HTTP_STATUSES:
+            resp.raise_for_status()
+
+    @_http_retry
     async def _call_pdl_ip_enrich(self, visitor: Visitor) -> str | None:
-        """Call PDL /v5/ip/enrich — returns company domain or None."""
+        """Call PDL /v5/ip/enrich — returns company domain or None.
+
+        Retries up to 3× on transient errors (5xx, 429, timeouts).
+        Returns None (no retry) on 400/404 — those are legitimate non-matches.
+        """
         if not settings.people_data_labs_api_key:
             return None
         async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                resp = await client.get(
-                    "https://api.peopledatalabs.com/v5/ip/enrich",
-                    headers={"X-Api-Key": settings.people_data_labs_api_key},
-                    params={"ip": visitor.ip_address},
-                )
-                if resp.status_code == 200:
-                    body = resp.json()
-                    company = body.get("company", {}) or {}
-                    domain = company.get("website") or company.get("display_name")
+            resp = await client.get(
+                "https://api.peopledatalabs.com/v5/ip/enrich",
+                headers={"X-Api-Key": settings.people_data_labs_api_key},
+                params={"ip": visitor.ip_address},
+            )
+            if resp.status_code == 200:
+                body = resp.json()
+                company = body.get("company", {}) or {}
+                domain = company.get("website") or company.get("display_name")
 
-                    # Extract company domain from website URL if full URL
-                    if domain and domain.startswith("http"):
-                        from urllib.parse import urlparse
-                        domain = urlparse(domain).netloc or domain
+                # Extract company domain from website URL if full URL
+                if domain and domain.startswith("http"):
+                    from urllib.parse import urlparse
+                    domain = urlparse(domain).netloc or domain
 
-                    # Also grab location data from IP
-                    ip_data = body.get("ip", {}) or {}
-                    location = ip_data.get("location", {}) or {}
-                    if location:
-                        # Best-effort update of visitor location if empty
-                        if not visitor.country_code and location.get("country"):
-                            visitor.country_code = location["country"]
+                # Also grab location data from IP
+                ip_data = body.get("ip", {}) or {}
+                location = ip_data.get("location", {}) or {}
+                if location:
+                    # Best-effort update of visitor location if empty
+                    if not visitor.country_code and location.get("country"):
+                        visitor.country_code = location["country"]
 
-                    if domain:
-                        logger.info(
-                            "pdl_ip_enrich_match",
-                            ip=visitor.ip_address[:8],
-                            company=company.get("display_name", ""),
-                            domain=domain,
-                        )
-                        return domain
+                if domain:
+                    logger.info(
+                        "pdl_ip_enrich_match",
+                        ip=visitor.ip_address[:8],
+                        company=company.get("display_name", ""),
+                        domain=domain,
+                    )
+                    return domain
 
-                elif resp.status_code == 404:
-                    logger.debug("pdl_ip_no_match", ip=visitor.ip_address[:8])
-                elif resp.status_code == 400:
-                    logger.debug("pdl_ip_unresolvable", ip=visitor.ip_address[:8],
-                                 detail="IP is hosting/proxy/VPN — cannot resolve to company")
-                else:
-                    logger.warning("pdl_ip_error", status=resp.status_code, ip=visitor.ip_address[:8])
-            except httpx.HTTPError as e:
-                logger.error("pdl_ip_api_error", error=str(e))
+            elif resp.status_code == 404:
+                logger.debug("pdl_ip_no_match", ip=visitor.ip_address[:8])
+            elif resp.status_code == 400:
+                logger.debug("pdl_ip_unresolvable", ip=visitor.ip_address[:8],
+                             detail="IP is hosting/proxy/VPN — cannot resolve to company")
+            else:
+                logger.warning("pdl_ip_error", status=resp.status_code, ip=visitor.ip_address[:8])
+                self._raise_if_transient(resp)
         return None
 
     # ──────────────────── Provider: IPinfo ────────────────────
@@ -804,53 +841,58 @@ class IdentityResolver:
         except (socket.gaierror, OSError):
             return False
 
+    @_http_retry
     async def _call_ipinfo_api(self, visitor: Visitor) -> str | None:
+        """Query IPinfo for company domain from IP.
+
+        Retries up to 3× on transient errors (5xx, 429, timeouts).
+        """
         if not settings.ipinfo_token:
             return None
         async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                resp = await client.get(
-                    f"https://ipinfo.io/{visitor.ip_address}",
-                    params={"token": settings.ipinfo_token},
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    org = data.get("org", "")
-                    company = data.get("company", {})
+            resp = await client.get(
+                f"https://ipinfo.io/{visitor.ip_address}",
+                params={"token": settings.ipinfo_token},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                org = data.get("org", "")
+                company = data.get("company", {})
 
-                    # Business+ plan has company.domain directly
-                    domain = company.get("domain") if isinstance(company, dict) else None
+                # Business+ plan has company.domain directly
+                domain = company.get("domain") if isinstance(company, dict) else None
 
-                    # Filter out ISPs/hosting if company data available
-                    comp_type = company.get("type", "") if isinstance(company, dict) else ""
-                    if comp_type in ("isp", "hosting"):
-                        logger.debug("ipinfo_filtered_isp", org=org)
-                        return None
+                # Filter out ISPs/hosting if company data available
+                comp_type = company.get("type", "") if isinstance(company, dict) else ""
+                if comp_type in ("isp", "hosting"):
+                    logger.debug("ipinfo_filtered_isp", org=org)
+                    return None
 
-                    # Free tier fallback: extract domain from org name
-                    if not domain and org:
-                        domain = self._org_to_domain(org)
+                # Free tier fallback: extract domain from org name
+                if not domain and org:
+                    domain = self._org_to_domain(org)
 
-                    # DNS verification for heuristic domains
-                    if domain and not self._is_known_domain(domain):
-                        dns_ok = await self._verify_domain_exists(domain)
-                        if not dns_ok:
-                            logger.info(
-                                "ipinfo_heuristic_domain_dns_fail",
-                                domain=domain,
-                                org=org,
-                            )
-                            domain = None
+                # DNS verification for heuristic domains
+                if domain and not self._is_known_domain(domain):
+                    dns_ok = await self._verify_domain_exists(domain)
+                    if not dns_ok:
+                        logger.info(
+                            "ipinfo_heuristic_domain_dns_fail",
+                            domain=domain,
+                            org=org,
+                        )
+                        domain = None
 
-                    # Also grab location data
-                    if not visitor.country_code:
-                        country = data.get("country")
-                        if country:
-                            visitor.country_code = country
+                # Also grab location data
+                if not visitor.country_code:
+                    country = data.get("country")
+                    if country:
+                        visitor.country_code = country
 
-                    return domain
-            except httpx.HTTPError as e:
-                logger.error("ipinfo_api_error", error=str(e))
+                return domain
+            else:
+                logger.warning("ipinfo_api_error", status=resp.status_code)
+                self._raise_if_transient(resp)
         return None
 
     # ──────────────────── Provider: Hunter.io ────────────────────
@@ -877,39 +919,45 @@ class IdentityResolver:
             return await self._save_identified(visitor, data, "hunter")
         return None
 
+    @_http_retry
     async def _call_hunter_api(self, domain: str, offset: int = 0) -> dict | None:
-        """Hunter domain search — returns contact at position `offset` to avoid dedup."""
+        """Hunter domain search — returns contact at position `offset` to avoid dedup.
+
+        Retries up to 3× on transient errors (5xx, 429, timeouts).
+        """
         if not settings.hunter_api_key:
             return None
         async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                resp = await client.get(
-                    "https://api.hunter.io/v2/domain-search",
-                    params={
-                        "domain": domain,
-                        "api_key": settings.hunter_api_key,
-                        "limit": 5,
-                        "offset": offset,
-                    },
-                )
-                if resp.status_code == 200:
-                    body = resp.json().get("data", {})
-                    emails = body.get("emails", [])
-                    if emails:
-                        # Pick position 0 within this batch (offset handles cycling)
-                        person = emails[0]
-                        first = person.get("first_name", "")
-                        last = person.get("last_name", "")
-                        return {
-                            "email": person.get("value"),
-                            "full_name": f"{first} {last}".strip() or None,
-                            "city": None,
-                            "region": None,
-                            "country": None,
-                            "confidence_score": (person.get("confidence", 50) / 100.0),
-                        }
-            except httpx.HTTPError as e:
-                logger.error("hunter_api_error", error=str(e))
+            resp = await client.get(
+                "https://api.hunter.io/v2/domain-search",
+                params={
+                    "domain": domain,
+                    "api_key": settings.hunter_api_key,
+                    "limit": 5,
+                    "offset": offset,
+                },
+            )
+            if resp.status_code == 200:
+                body = resp.json().get("data", {})
+                emails = body.get("emails", [])
+                if emails:
+                    # Pick position 0 within this batch (offset handles cycling)
+                    person = emails[0]
+                    first = person.get("first_name", "")
+                    last = person.get("last_name", "")
+                    return {
+                        "email": person.get("value"),
+                        "full_name": f"{first} {last}".strip() or None,
+                        "city": None,
+                        "region": None,
+                        "country": None,
+                        "confidence_score": (person.get("confidence", 50) / 100.0),
+                    }
+            elif resp.status_code == 404:
+                logger.debug("hunter_no_match", domain=domain)
+            else:
+                logger.warning("hunter_api_error", status=resp.status_code)
+                self._raise_if_transient(resp)
         return None
 
     # ──────────────────── Provider: Apollo.io ────────────────────
@@ -936,37 +984,43 @@ class IdentityResolver:
             return await self._save_identified(visitor, data, "apollo")
         return None
 
+    @_http_retry
     async def _call_apollo_api(self, company_domain: str, offset: int = 0) -> dict | None:
-        """Apollo people search by company domain — uses page cycling to avoid dedup."""
+        """Apollo people search by company domain — uses page cycling to avoid dedup.
+
+        Retries up to 3× on transient errors (5xx, 429, timeouts).
+        """
         if not settings.apollo_api_key:
             return None
         # Apollo uses 1-based page numbers; offset 0→page 1, offset 1→page 2, etc.
         page = offset + 1
         async with httpx.AsyncClient(timeout=10.0) as client:
-            try:
-                resp = await client.post(
-                    "https://api.apollo.io/v1/mixed_people/search",
-                    headers={"X-Api-Key": settings.apollo_api_key},
-                    json={
-                        "q_organization_domains": company_domain,
-                        "per_page": 1,
-                        "page": page,
-                    },
-                )
-                if resp.status_code == 200:
-                    people = resp.json().get("people", [])
-                    if people:
-                        p = people[0]
-                        return {
-                            "email": p.get("email"),
-                            "full_name": p.get("name"),
-                            "city": p.get("city"),
-                            "region": p.get("state"),
-                            "country": p.get("country"),
-                            "confidence_score": 0.6,
-                        }
-            except httpx.HTTPError as e:
-                logger.error("apollo_api_error", error=str(e))
+            resp = await client.post(
+                "https://api.apollo.io/v1/mixed_people/search",
+                headers={"X-Api-Key": settings.apollo_api_key},
+                json={
+                    "q_organization_domains": company_domain,
+                    "per_page": 1,
+                    "page": page,
+                },
+            )
+            if resp.status_code == 200:
+                people = resp.json().get("people", [])
+                if people:
+                    p = people[0]
+                    return {
+                        "email": p.get("email"),
+                        "full_name": p.get("name"),
+                        "city": p.get("city"),
+                        "region": p.get("state"),
+                        "country": p.get("country"),
+                        "confidence_score": 0.6,
+                    }
+            elif resp.status_code == 404:
+                logger.debug("apollo_no_match", domain=company_domain)
+            else:
+                logger.warning("apollo_api_error", status=resp.status_code)
+                self._raise_if_transient(resp)
         return None
 
     # ──────────────────── Save + Log ────────────────────
@@ -974,6 +1028,11 @@ class IdentityResolver:
     async def _save_identified(
         self, visitor: Visitor, data: dict, provider: str
     ) -> IdentifiedVisitor:
+        """Persist an IdentifiedVisitor row, handling concurrent-insert races.
+
+        On UNIQUE constraint violation (same site_id + visitor_id already inserted
+        by a concurrent request), roll back and return the pre-existing row.
+        """
         identified = IdentifiedVisitor(
             visitor_id=visitor.visitor_id,
             site_id=visitor.site_id,
@@ -987,7 +1046,28 @@ class IdentityResolver:
         )
         self.db.add(identified)
         visitor.identity_status = "identified"
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            # A concurrent resolution already inserted this visitor — roll back
+            # and fetch the existing record instead of crashing.
+            await self.db.rollback()
+            logger.info(
+                "save_identified_conflict_fetch_existing",
+                visitor_id=visitor.visitor_id[:8],
+                provider=provider,
+            )
+            existing = await self.db.execute(
+                select(IdentifiedVisitor).where(
+                    IdentifiedVisitor.visitor_id == visitor.visitor_id,
+                    IdentifiedVisitor.site_id == visitor.site_id,
+                )
+            )
+            row = existing.scalar_one_or_none()
+            if row is None:
+                # Very unlikely: conflict resolved but row is gone — re-raise
+                raise
+            return row
         logger.info(
             "visitor_identified",
             visitor_id=visitor.visitor_id[:8],

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.post import Post
+from apps.api.models.site import Site
 from apps.api.models.social_account import Platform, SocialAccount
 from apps.api.services.platforms.twitter_scraper import (
     fetch_user_tweets,
@@ -108,10 +109,14 @@ async def sync_visitor_posts(
         return 0
 
     result = await db.execute(
-        select(EnrichmentProfile.twitter_handle).where(
+        select(EnrichmentProfile.twitter_handle)
+        .join(Site, Site.site_id == EnrichmentProfile.site_id)
+        .where(
+            Site.user_id == account.user_id,
             EnrichmentProfile.twitter_handle.isnot(None),
             EnrichmentProfile.twitter_handle != "",
-        ).limit(50)
+        )
+        .limit(50)
     )
     handles = [row[0] for row in result.all() if row[0]]
 

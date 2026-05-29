@@ -456,7 +456,7 @@ async def _call_openrouter(
                         "Authorization": f"Bearer {api_key}",
                         "Content-Type": "application/json",
                         "HTTP-Referer": settings.frontend_url,
-                        "X-Title": "RetargetAgent EasyEngage",
+                        "X-Title": "Beam",
                     },
                     json={
                         "model": try_model,
