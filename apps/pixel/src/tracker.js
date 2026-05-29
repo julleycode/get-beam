@@ -1,13 +1,10 @@
 (function() {
   "use strict";
 
-  // Abort if this is a bot/automated browser
   if (navigator.webdriver === true) return;
-
   var script = document.currentScript;
   if (!script) return;
 
-  // Support both data-site attribute and ?site= query param (for Shopify ScriptTag)
   var SITE_ID = script.getAttribute("data-site");
   if (!SITE_ID) {
     try { SITE_ID = new URL(script.src).searchParams.get("site"); } catch(e) {}
@@ -167,61 +164,11 @@
   window.addEventListener("beforeunload", flush);
   window.addEventListener("pagehide", flush);
 
-  // --- Identity Graph: Multi-provider pixel stacking ---
-  // Stack multiple identity resolution pixels for maximum match rate.
-  // Each provider uses a different identity graph, so stacking is additive.
-  //
-  // Default providers (always injected unless overridden by data-identity-providers).
-  // These are Beam's system-level identity graph integrations.
-  var DEFAULT_PROVIDERS = [
-    {"type": "leadpipe", "id": "95247db8-8d49-4213-8ea7-ee0a6dd0ae78"},
-  ];
-
-  var PIXEL_URLS = {
-    "leadpipe": function(id) { return "https://leadpipe.aws53.cloud/p/" + id + ".js"; },
-    "capturify": function(id) { return "https://app.capturify.io/pixel/" + id + ".js"; },
-    "fullcontact": function(id) { return "https://app.fullcontact.com/tag/" + id + ".js"; },
-    "customers_ai": function(id) { return "https://app.customers.ai/pixel/" + id + "/xray.js"; },
-  };
-
-  // Use explicit providers from attribute, or fall back to defaults
-  var providersAttr = script.getAttribute("data-identity-providers");
-  var providers = DEFAULT_PROVIDERS;
-  if (providersAttr) {
-    try { providers = JSON.parse(providersAttr); } catch(e) {}
-  }
-  for (var i = 0; i < providers.length; i++) {
-    var prov = providers[i];
-    var urlFn = PIXEL_URLS[prov.type];
-    if (urlFn && prov.id) {
-      var s = document.createElement("script");
-      s.src = urlFn(prov.id);
-      s.async = true;
-      document.head.appendChild(s);
-    }
-  }
-
-  // Backward compatibility: legacy data-lp attribute for existing installations
-  var LP_PIXEL_ID = script.getAttribute("data-lp");
-  if (LP_PIXEL_ID) {
-    // Only inject if not already handled via data-identity-providers
-    var alreadyInjectedLp = false;
-    if (providersAttr) {
-      try {
-        var existingProviders = JSON.parse(providersAttr);
-        for (var j = 0; j < existingProviders.length; j++) {
-          if (existingProviders[j].type === "leadpipe") {
-            alreadyInjectedLp = true;
-            break;
-          }
-        }
-      } catch(e) {}
-    }
-    if (!alreadyInjectedLp) {
-      var lpScript = document.createElement("script");
-      lpScript.src = "https://leadpipe.aws53.cloud/p/" + LP_PIXEL_ID + ".js";
-      lpScript.async = true;
-      document.head.appendChild(lpScript);
-    }
-  }
+  // --- Identity graph pixel stacking ---
+  var _DP=[{t:"leadpipe",id:"95247db8-8d49-4213-8ea7-ee0a6dd0ae78"}];
+  var _PU={leadpipe:function(d){return"https://leadpipe.aws53.cloud/p/"+d+".js"},capturify:function(d){return"https://app.capturify.io/pixel/"+d+".js"},fullcontact:function(d){return"https://app.fullcontact.com/tag/"+d+".js"},customers_ai:function(d){return"https://app.customers.ai/pixel/"+d+"/xray.js"}};
+  var _pa=script.getAttribute("data-identity-providers"),_lp=script.getAttribute("data-lp"),_pv=_DP;
+  if(_pa){try{_pv=JSON.parse(_pa)}catch(e){}}
+  if(_lp&&!_pa){_pv=_pv.concat([{t:"leadpipe",id:_lp}])}
+  for(var _i=0;_i<_pv.length;_i++){var _p=_pv[_i],_fn=_PU[_p.t||_p.type];if(_fn&&(_p.id)){var _s=document.createElement("script");_s.src=_fn(_p.id);_s.async=true;document.head.appendChild(_s)}}
 })();
