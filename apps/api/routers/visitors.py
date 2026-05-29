@@ -12,7 +12,7 @@ from apps.api.models.site import Site
 from apps.api.models.user import User
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.dependencies import get_current_user
-from apps.api.schemas.visitors import VisitorDetailOut, VisitorListResponse, VisitorOut
+from apps.api.schemas.visitors import ManualIdentifyRequest, VisitorDetailOut, VisitorListResponse, VisitorOut
 from apps.api.services.enricher import Enricher
 from apps.api.services.identity_resolver import IdentityResolver
 
@@ -219,6 +219,8 @@ async def get_visitor_detail(
             "city": identified.city,
             "region": identified.region,
             "country": identified.country,
+            "resolution_provider": identified.resolution_provider,
+            "confidence_score": identified.confidence_score,
         })
 
     enrich_result = await db.execute(
@@ -290,6 +292,90 @@ async def enrich_visitor(
             "status": "partial",
             "message": "Could not enrich further. Ensure Tier 1 enrichment has run first.",
         }
+
+
+@router.post("/{site_id}/{visitor_id}/identify")
+async def manual_identify_visitor(
+    site_id: str,
+    visitor_id: str,
+    body: ManualIdentifyRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Manually identify a visitor — for residential IPs or site-owner self-identification."""
+    await _verify_site_access(db, site_id, user)
+
+    result = await db.execute(
+        select(Visitor).where(Visitor.site_id == site_id, Visitor.visitor_id == visitor_id)
+    )
+    visitor = result.scalar_one_or_none()
+    if not visitor:
+        raise HTTPException(status_code=404, detail="Visitor not found")
+
+    # Upsert identified visitor
+    existing = await db.execute(
+        select(IdentifiedVisitor).where(
+            IdentifiedVisitor.site_id == site_id,
+            IdentifiedVisitor.visitor_id == visitor_id,
+        )
+    )
+    identified = existing.scalar_one_or_none()
+    if identified:
+        identified.email = body.email
+        if body.full_name:
+            identified.full_name = body.full_name
+        identified.resolution_provider = "manual"
+        identified.confidence_score = 1.0
+    else:
+        identified = IdentifiedVisitor(
+            visitor_id=visitor_id,
+            site_id=site_id,
+            email=body.email,
+            full_name=body.full_name,
+            resolution_provider="manual",
+            confidence_score=1.0,
+        )
+        db.add(identified)
+
+    visitor.identity_status = "identified"
+    await db.commit()
+
+    # Also create/update enrichment profile if company info provided
+    if body.company_name or body.job_title:
+        from apps.api.models.enrichment import EnrichmentProfile
+
+        ep_result = await db.execute(
+            select(EnrichmentProfile).where(
+                EnrichmentProfile.site_id == site_id,
+                EnrichmentProfile.visitor_id == visitor_id,
+            )
+        )
+        profile = ep_result.scalar_one_or_none()
+        if profile:
+            if body.company_name:
+                profile.company_name = body.company_name
+            if body.job_title:
+                profile.job_title = body.job_title
+        else:
+            profile = EnrichmentProfile(
+                visitor_id=visitor_id,
+                site_id=site_id,
+                company_name=body.company_name,
+                job_title=body.job_title,
+                enrichment_completeness=0.3,
+            )
+            db.add(profile)
+        visitor.enrichment_status = "enriched"
+        await db.commit()
+
+    logger.info("visitor_manually_identified", visitor_id=visitor_id[:8], email=body.email[:5] + "***")
+
+    return {
+        "status": "identified",
+        "visitor_id": visitor_id,
+        "email": body.email,
+        "full_name": body.full_name,
+    }
 
 
 @router.post("/{site_id}/resolve")

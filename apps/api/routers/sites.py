@@ -1,3 +1,4 @@
+import json
 import uuid
 
 import structlog
@@ -35,17 +36,49 @@ def _generate_site_id() -> str:
 # ──────────────────────────── Existing CRUD ────────────────────────────
 
 
+def _normalize_url(raw: str) -> str:
+    """Normalize URL for dedup: lowercase, strip trailing /, strip www."""
+    url = raw.strip().rstrip("/").lower()
+    for prefix in ("https://www.", "http://www."):
+        if url.startswith(prefix):
+            url = url.replace(prefix, prefix.replace("www.", ""), 1)
+    return url
+
+
 @router.post("/", response_model=SiteOut)
 async def create_site(
     body: SiteCreate,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SiteOut:
+    normalized_url = _normalize_url(body.url)
+
+    # Check if ANY user already created a site for this URL
+    result = await db.execute(
+        select(Site).where(Site.url == normalized_url).order_by(Site.created_at)
+    )
+    existing = result.scalars().first()
+    if not existing:
+        # Also check with www. variant and trailing slash variants
+        variants = {body.url.strip().rstrip("/").lower(), normalized_url}
+        result = await db.execute(
+            select(Site).where(Site.url.in_(variants)).order_by(Site.created_at)
+        )
+        existing = result.scalars().first()
+
+    if existing:
+        # Ensure current user owns this site; if not, add ownership
+        if existing.user_id != user.id:
+            existing.user_id = user.id
+            await db.commit()
+            await db.refresh(existing)
+        return SiteOut.model_validate(existing)
+
     site = Site(
         site_id=_generate_site_id(),
         user_id=user.id,
         name=body.name,
-        url=body.url,
+        url=normalized_url,
         description=body.description,
         category=body.category,
     )
@@ -93,9 +126,35 @@ async def get_pixel_snippet(
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
 
+    # Build identity providers list for multi-provider pixel stacking
+    providers: list[dict[str, str]] = []
+
+    # Leadpipe: prefer per-site pixel ID, fall back to global default
+    leadpipe_pixel_id = (
+        getattr(site, "leadpipe_pixel_id", None)
+        or (settings.leadpipe_default_pixel_id if settings.leadpipe_api_key or settings.leadpipe_default_pixel_id else None)
+    )
+    if leadpipe_pixel_id:
+        providers.append({"type": "leadpipe", "id": leadpipe_pixel_id})
+
+    if settings.capturify_pixel_id:
+        providers.append({"type": "capturify", "id": settings.capturify_pixel_id})
+
+    if settings.fullcontact_pixel_id:
+        providers.append({"type": "fullcontact", "id": settings.fullcontact_pixel_id})
+
+    if settings.customers_ai_pixel_id:
+        providers.append({"type": "customers_ai", "id": settings.customers_ai_pixel_id})
+
+    providers_attr = ""
+    if providers:
+        providers_json = json.dumps(providers, separators=(",", ":"))
+        providers_attr = f" data-identity-providers='{providers_json}'"
+
     snippet = (
         f'<script src="{settings.api_base_url}/pixel/tracker.js" '
-        f'data-site="{site.site_id}" data-api="{settings.api_base_url}" defer></script>'
+        f'data-site="{site.site_id}" data-api="{settings.api_base_url}"'
+        f'{providers_attr} defer></script>'
     )
     return SitePixelSnippet(site_id=site.site_id, snippet=snippet)
 

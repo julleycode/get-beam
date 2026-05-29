@@ -42,6 +42,8 @@ class VisitorDetailOut(VisitorOut):
     linkedin_headline: str | None = None
     twitter_bio: str | None = None
     enrichment_completeness: float | None = None
+    resolution_provider: str | None = None
+    confidence_score: float | None = None
 
 
 class VisitorListResponse(BaseModel):
@@ -49,3 +51,10 @@ class VisitorListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class ManualIdentifyRequest(BaseModel):
+    email: str
+    full_name: str | None = None
+    company_name: str | None = None
+    job_title: str | None = None
