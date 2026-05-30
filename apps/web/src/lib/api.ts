@@ -101,6 +101,12 @@ class ApiClient {
     );
   }
 
+  // Feature requests (submitted from the landing page FAB)
+  async listFeatureRequests(status?: string) {
+    const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+    return this.request<FeatureRequestListResponse>(`/api/v1/feature-requests${qs}`);
+  }
+
   // Sites
   async createSite(name: string, url: string, description?: string, category?: string) {
     return this.request<Site>("/api/v1/sites/", {
@@ -403,6 +409,22 @@ export interface Site {
   pixel_verified: boolean;
   daily_resolution_budget: number;
   created_at: string;
+}
+
+export interface FeatureRequest {
+  id: string;
+  title: string;
+  detail: string | null;
+  urgency: string | null;
+  email: string | null;
+  source: string | null;
+  status: string;
+  created_at: string;
+}
+
+export interface FeatureRequestListResponse {
+  requests: FeatureRequest[];
+  total: number;
 }
 
 export interface Visitor {

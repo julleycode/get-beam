@@ -9,6 +9,7 @@ if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { clerkMiddleware, createRouteMatcher } = require("@clerk/nextjs/server");
   const isPublicRoute = createRouteMatcher([
+    "/",            // public Beam marketing landing page
     "/login(.*)",
     "/sign-in(.*)",
     "/sign-up(.*)",

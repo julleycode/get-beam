@@ -24,6 +24,7 @@ const EASYENGAGE_ITEMS = [
 ];
 
 const BOTTOM_ITEMS = [
+  { href: "/dashboard/feature-requests", label: "Feature Requests" },
   { href: "/dashboard/settings", label: "Settings" },
 ];
 

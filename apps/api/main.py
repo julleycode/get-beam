@@ -16,8 +16,9 @@ from apps.api.models.message import Message  # noqa: F401
 from apps.api.models.draft import Draft  # noqa: F401
 from apps.api.models.voice_example import VoiceExample  # noqa: F401
 from apps.api.models.company import Company  # noqa: F401 — register for create_all
+from apps.api.models.feature_request import FeatureRequest  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
-from apps.api.routers import social_auth, drafts, feed, social_accounts, companies
+from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -184,6 +185,7 @@ app.include_router(social_accounts.router, prefix="/api/v1/social", tags=["socia
 app.include_router(drafts.router, prefix="/api/v1/drafts", tags=["drafts"])
 app.include_router(feed.router, prefix="/api/v1/feed", tags=["feed"])
 app.include_router(companies.router, prefix="/api/v1/companies", tags=["companies"])
+app.include_router(feature_requests.router, prefix="/api/v1/feature-requests", tags=["feature-requests"])
 
 
 @app.get("/health")

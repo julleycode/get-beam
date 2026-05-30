@@ -3,6 +3,12 @@ const nextConfig = {
   experimental: {
     missingSuspenseWithCSRBailout: false,
   },
+  async rewrites() {
+    return {
+      // Serve the static Beam marketing landing page at the root.
+      beforeFiles: [{ source: "/", destination: "/beam/index.html" }],
+    };
+  },
 };
 
 export default nextConfig;
