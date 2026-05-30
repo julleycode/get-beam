@@ -10,6 +10,7 @@ if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
   const { clerkMiddleware, createRouteMatcher } = require("@clerk/nextjs/server");
   const isPublicRoute = createRouteMatcher([
     "/",            // public Beam marketing landing page
+    "/onboarding(.*)",  // public aha-before-commit onboarding
     "/login(.*)",
     "/sign-in(.*)",
     "/sign-up(.*)",
