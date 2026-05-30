@@ -1,0 +1,1096 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>beam — see who's into you. say hi back.</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/beam/styles.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='0.35'%3E%3Cstop offset='0' stop-color='%23FF6B9D'/%3E%3Cstop offset='0.55' stop-color='%23FF3366'/%3E%3Cstop offset='1' stop-color='%23FF7FA8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M30,9 Q30,32 57,32 Q30,32 30,55 Q30,32 9,32 Q30,32 30,9 Z' fill='url(%23g)'/%3E%3Ccircle cx='30' cy='32' r='3.2' fill='%23fff' opacity='0.9'/%3E%3Cpath d='M50,17 Q52,21 56,21 Q52,21 50,25 Q48,21 44,21 Q48,21 50,17 Z' fill='url(%23g)' opacity='0.8'/%3E%3C/svg%3E" />
+</head>
+<body>
+
+<!-- ────────────────────────────────────────────────────────────
+     SKY-STAGE: top of page (hero + founder note share the sky)
+     ──────────────────────────────────────────────────────────── -->
+<div class="sky-stage">
+  <div class="cloud-layer"></div>
+
+  <div class="wrap">
+    <nav class="top">
+      <div class="logo">
+        <svg class="logo-mark" viewBox="0 0 100 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <defs>
+            <linearGradient id="beamLogoGrad" x1="0" y1="0" x2="1" y2="0.35">
+              <stop offset="0" stop-color="#FF6B9D"/>
+              <stop offset="0.55" stop-color="#FF3366"/>
+              <stop offset="1" stop-color="#FF7FA8"/>
+            </linearGradient>
+          </defs>
+          <path d="M26,15 Q26,32 90,32 Q26,32 26,49 Q26,32 9,32 Q26,32 26,15 Z" fill="url(#beamLogoGrad)"/>
+          <circle cx="26" cy="32" r="3.4" fill="#fff" opacity="0.92"/>
+          <path d="M82,21 Q84,25 88,25 Q84,25 82,29 Q80,25 76,25 Q80,25 82,21 Z" fill="url(#beamLogoGrad)" opacity="0.85"/>
+          <circle cx="89" cy="40" r="2.1" fill="url(#beamLogoGrad)" opacity="0.7"/>
+        </svg>
+        beam
+      </div>
+      <div class="nav-pills">
+        <a href="#how">how it works</a>
+        <a href="#faq">faq</a>
+        <a href="/login" class="primary">start free trial</a>
+      </div>
+    </nav>
+
+    <!-- ── SECTION 1: HERO ─────────────────────────────────── -->
+    <section class="hero">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <span class="hero-eyebrow" data-tw="hero-eyebrow">now in private beta</span>
+          <h1 class="h-serif hero-title" data-tw="hero-title" style="font-size: 61px">see who's into you. <em>say hi back.</em></h1>
+          <p class="hero-sub" data-tw="hero-sub">the stupidly easy way to identify high intent visitors. show up where they post. engage with them tastefully.</p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="/login" data-tw="hero-primary">start beaming for free <span aria-hidden="true">→</span></a>
+            <a class="btn btn-ghost" href="#how" data-tw="hero-secondary">see how it works ↓</a>
+          </div>
+        </div>
+        <div class="hero-stage-wrap">
+          <div class="beam-stage" id="beam-stage" aria-label="Animation of a pixel-art character firing a love beam at an anonymous website visitor, who transforms into a charmed follower"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     SECTION 2: WHY I BUILT BEAM (founder note)
+     ──────────────────────────────────────────────────────────── -->
+<section class="founder-section">
+  <div class="wrap">
+    <!-- envelope animation — scroll-driven open -->
+    <div class="env-stage">
+      <div class="env" id="envelope" style="--open: 0">
+
+        <!-- LETTER paper: starts hidden inside envelope, slides up when open -->
+        <div class="env-letter">
+          <article class="letter-paper">
+            <header class="letter-header">
+              <span class="letter-from">from julley · @beam</span>
+              <span class="letter-date">may 28, 2026</span>
+            </header>
+            <h3 class="letter-greeting h-serif">dear future beam user,</h3>
+            <p class="letter-body" data-tw="founder-quote">i ran growth at a startup saas. nearly 1000 visitors a day. knew nothing about any of them. not their name. not their company.</p>
+            <p class="letter-body">not whether they'd been on the pricing page for six minutes or bounced in three seconds. just a number. going up. meaning nothing.</p>
+            <p class="letter-body">so i did what everyone does. i went to LinkedIn, loaded up Apollo, and started cold outreach like it was 2018. it worked. barely. badly.</p>
+            <p class="letter-body">somewhere in that mess i started building beam. now i'm handing it to you.</p>
+            <p class="letter-sig">— julley thai founder · @julleybuildsbeam
+
+
+
+
+
+
+
+</p>
+          </article>
+        </div>
+
+        <!-- ENVELOPE BODY: white rectangle + 3 static triangle flaps + subtle center seal -->
+        <svg class="env-body" viewBox="0 0 600 380" preserveAspectRatio="none" aria-hidden="true">
+          <defs>
+            <linearGradient id="env-base" x1="0.5" y1="0" x2="0.5" y2="1">
+              <stop offset="0" stop-color="#EC8AA0"/>
+              <stop offset="0.5" stop-color="#F89FB3"/>
+              <stop offset="1" stop-color="#FFB4C4"/>
+            </linearGradient>
+            <linearGradient id="env-side-l-2" x1="0" y1="0.5" x2="1" y2="0.5">
+              <stop offset="0" stop-color="#FFB8C5"/>
+              <stop offset="1" stop-color="#FFD3DC"/>
+            </linearGradient>
+            <linearGradient id="env-side-r-2" x1="0" y1="0.5" x2="1" y2="0.5">
+              <stop offset="0" stop-color="#FFD3DC"/>
+              <stop offset="1" stop-color="#FFB8C5"/>
+            </linearGradient>
+            <linearGradient id="env-bottom-2" x1="0.5" y1="0" x2="0.5" y2="1">
+              <stop offset="0" stop-color="#FFCCD5"/>
+              <stop offset="1" stop-color="#FFA1B3"/>
+            </linearGradient>
+          </defs>
+          <!-- envelope BACK panel (letter sits in front of this, tucked into the pocket) -->
+          <rect x="0" y="0" width="600" height="380" rx="8" fill="url(#env-base)"/>
+          <!-- outer border -->
+          <rect x="0.5" y="0.5" width="599" height="379" rx="8" fill="none" stroke="rgba(255, 51, 102, 0.18)" stroke-width="1"/>
+        </svg>
+
+        <!-- ENVELOPE FRONT POCKET — bottom + side flaps, drawn ABOVE the letter
+             so the letter emerges from *inside* and stays tucked at the bottom. -->
+        <svg class="env-front" viewBox="0 0 600 380" preserveAspectRatio="none" aria-hidden="true">
+          <polygon points="0,0 300,190 0,380" fill="url(#env-side-l-2)"/>
+          <polygon points="600,0 300,190 600,380" fill="url(#env-side-r-2)"/>
+          <polygon points="0,380 300,190 600,380" fill="url(#env-bottom-2)"/>
+          <!-- crease seams -->
+          <g stroke="rgba(43,37,48,0.10)" stroke-width="1" fill="none" stroke-linecap="round">
+            <line x1="0"   y1="0"   x2="300" y2="190"/>
+            <line x1="600" y1="0"   x2="300" y2="190"/>
+            <line x1="0"   y1="380" x2="300" y2="190"/>
+            <line x1="600" y1="380" x2="300" y2="190"/>
+          </g>
+          <!-- outer border -->
+          <rect x="0.5" y="0.5" width="599" height="379" rx="8" fill="none" stroke="rgba(255, 51, 102, 0.18)" stroke-width="1"/>
+        </svg>
+
+        <!-- WAX SEAL — pink dot in center, breaks when envelope opens -->
+        <div class="env-seal" aria-hidden="true">
+          <svg viewBox="0 0 60 60">
+            <circle cx="30" cy="30" r="22" fill="#FF3366"/>
+            <circle cx="30" cy="30" r="22" fill="none" stroke="#FFFFFF" stroke-width="0.8" stroke-dasharray="1.5 2.2" opacity="0.55"/>
+            <text x="30" y="38" font-family="Fraunces, serif" font-style="italic" font-weight="500" font-size="20" fill="#FFFFFF" text-anchor="middle">b</text>
+          </svg>
+        </div>
+
+        <!-- TOP FLAP — rotates open via rotateX driven by --open -->
+        <div class="env-flap">
+          <!-- outer face (visible when closed) -->
+          <svg class="env-flap-outer" viewBox="0 0 600 190" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="env-flap-outer-grad" x1="0.5" y1="0" x2="0.5" y2="1">
+                <stop offset="0" stop-color="#FFD3DC"/>
+                <stop offset="1" stop-color="#FFA1B3"/>
+              </linearGradient>
+            </defs>
+            <polygon points="0,0 600,0 300,190" fill="url(#env-flap-outer-grad)"/>
+            <g stroke="rgba(43,37,48,0.10)" stroke-width="1" fill="none" stroke-linecap="round">
+              <line x1="0"   y1="0" x2="300" y2="190"/>
+              <line x1="600" y1="0" x2="300" y2="190"/>
+            </g>
+            <line x1="0" y1="0" x2="600" y2="0" stroke="rgba(255, 51, 102, 0.25)" stroke-width="1.2"/>
+          </svg>
+          <!-- inner lining (visible when open) — deeper pink with subtle pixel clouds.
+               Polygon: SAME orientation as the outer face (base at top y=0, apex at
+               bottom y=190). After the parent flap rotates -180° around its top
+               hinge, the apex (originally at the bottom) flips UP above the
+               envelope, giving a real envelope's "opened flap" silhouette ▲. -->
+          <svg class="env-flap-inner" viewBox="0 0 600 190" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="env-lining-grad" x1="0.5" y1="0" x2="0.5" y2="1">
+                <stop offset="0" stop-color="#FFC7D2"/>
+                <stop offset="1" stop-color="#FF9FB0"/>
+              </linearGradient>
+            </defs>
+            <polygon points="0,0 600,0 300,190" fill="url(#env-lining-grad)"/>
+            <!-- subtle pixel clouds inside (placed within the triangle near the apex,
+                 which after rotation lands at the top of the visible flap) -->
+            <g shape-rendering="crispEdges" fill="#FFEAF0" opacity="0.95">
+              <g transform="translate(220, 120)">
+                <rect x="4" y="0" width="12" height="3"/>
+                <rect x="2" y="3" width="18" height="4"/>
+                <rect x="4" y="7" width="14" height="3"/>
+              </g>
+              <g transform="translate(360, 140)">
+                <rect x="2" y="0" width="10" height="3"/>
+                <rect x="0" y="3" width="14" height="3"/>
+              </g>
+              <g transform="translate(140, 70)">
+                <rect x="0" y="0" width="10" height="3"/>
+                <rect x="2" y="3" width="8" height="3"/>
+              </g>
+              <g transform="translate(420, 60)">
+                <rect x="0" y="0" width="12" height="3"/>
+                <rect x="2" y="3" width="10" height="3"/>
+              </g>
+            </g>
+            <!-- crease seams from base corners (0,0 and 600,0) to apex (300,190) -->
+            <g stroke="rgba(255, 51, 102, 0.32)" stroke-width="0.8" fill="none" stroke-linecap="round">
+              <line x1="0"   y1="0" x2="300" y2="190"/>
+              <line x1="600" y1="0" x2="300" y2="190"/>
+            </g>
+          </svg>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ────────────────────────────────────────────────────────────
+     SECTION 3: WHAT YOU GET (3-column grid)
+     ──────────────────────────────────────────────────────────── -->
+<section id="how" class="what-section">
+  <div class="wrap">
+    <h2 class="eyebrow-label" data-tw="what-eyebrow" style="color: rgb(255, 51, 102)">how beam works</h2>
+    <h2 class="h-serif section-title" data-tw="what-title">three steps. <em>no setup.</em></h2>
+    <p class="section-lede" data-tw="what-lede" style="max-width: 600px">paste your site url. install one snippet. take a nap.<br>we'll beam the rest.</p>
+
+    <div class="steps">
+
+      <!-- ── STEP 01 ─────────────────────────────────────── -->
+      <article class="step" data-step="1">
+        <div class="step-copy">
+          <span class="step-num">01</span>
+          <h3 class="step-title h-serif" data-tw="feat-1-title">see them</h3>
+          <p class="step-desc" data-tw="feat-1-desc">a live list of who's on your site — names, companies, what page they're reading right now.</p>
+        </div>
+        <div class="step-mock" data-mock="visitors">
+          <div class="mockwin">
+            <div class="mockwin-bar">
+              <span class="mockwin-light" style="background:#FF6B7A"></span>
+              <span class="mockwin-light" style="background:#FFD86B"></span>
+              <span class="mockwin-light" style="background:#7AD08F"></span>
+              <span class="mockwin-title">beam · live visitors</span>
+            </div>
+            <div class="mockwin-body" id="mock-visitors"></div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ── STEP 02 ─────────────────────────────────────── -->
+      <article class="step step--reverse" data-step="2">
+        <div class="step-copy">
+          <span class="step-num">02</span>
+          <h3 class="step-title h-serif" data-tw="feat-2-title">find them</h3>
+          <p class="step-desc" data-tw="feat-2-desc">social handles auto-matched. linkedin, twitter, facebook. know where they most active.</p>
+        </div>
+        <div class="step-mock" data-mock="match">
+          <div class="mockwin">
+            <div class="mockwin-bar">
+              <span class="mockwin-light" style="background:#FF6B7A"></span>
+              <span class="mockwin-light" style="background:#FFD86B"></span>
+              <span class="mockwin-light" style="background:#7AD08F"></span>
+              <span class="mockwin-title">beam · profile match</span>
+            </div>
+            <div class="mockwin-body" id="mock-match"></div>
+          </div>
+        </div>
+      </article>
+
+      <!-- ── STEP 03 ─────────────────────────────────────── -->
+      <article class="step" data-step="3">
+        <div class="step-copy">
+          <span class="step-num">03</span>
+          <h3 class="step-title h-serif" data-tw="feat-3-title">charm them</h3>
+          <p class="step-desc" data-tw="feat-3-desc">outreach that sounds like you wrote it. watch the heart float up.</p>
+        </div>
+        <div class="step-mock" data-mock="draft">
+          <div class="mockwin">
+            <div class="mockwin-bar">
+              <span class="mockwin-light" style="background:#FF6B7A"></span>
+              <span class="mockwin-light" style="background:#FFD86B"></span>
+              <span class="mockwin-light" style="background:#7AD08F"></span>
+              <span class="mockwin-title">beam · outreach draft</span>
+            </div>
+            <div class="mockwin-body" id="mock-draft"></div>
+          </div>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+
+<!-- ────────────────────────────────────────────────────────────
+     SECTION 4: FAQ
+     ──────────────────────────────────────────────────────────── -->
+<section id="faq" class="faq-section">
+  <div class="wrap">
+    <h2 class="eyebrow-label" data-tw="faq-eyebrow" style="text-align:center;">faq</h2>
+    <h2 class="h-serif section-title" data-tw="faq-title" style="text-align: center; margin-left: auto; margin-right: auto; font-size: 44px">questions you're probably <em>about to ask.</em></h2>
+
+    <div class="faq-list">
+      <details class="faq-item">
+        <summary>when will i see my first identified visitor? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">within 30 minutes of installing the snippet. you'll get an email the moment beam catches one.</p>
+      </details>
+      <details class="faq-item">
+        <summary>how accurate is identification? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">60 to 80 percent of visitors on average. we run multiple identification layers with llm fallback enrichment, which pushes match rate higher than typical reverse-ip tools. b2b traffic skews to the top of that range.</p>
+      </details>
+      <details class="faq-item">
+        <summary>which platforms does beam cover? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">linkedin, x, instagram, slack, facebook, and 10+ more. real-time across all of them. you pick which platforms matter most for your icp.</p>
+      </details>
+      <details class="faq-item">
+        <summary>do i have to write the engagement copy myself? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">no. beam drafts it based on their recent posts and your product context. you edit if you want, then send from your own account in one click.</p>
+      </details>
+      <details class="faq-item">
+        <summary>how is this different from clay or rb2b? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">clay needs setup and ops know-how. rb2b just identifies — you do the rest. beam does the whole loop. paste url, done.</p>
+      </details>
+      <details class="faq-item">
+        <summary>will this get my linkedin banned? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">no. beam never logs into your account. you click send manually from native linkedin every time. zero automation on your side.</p>
+      </details>
+      <details class="faq-item">
+        <summary>how compliant is the data? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">we only automate through your own account, never fake profiles. we don't scrape data you couldn't see yourself. your data stays yours — we don't sell or share it. gdpr and ccpa compliant.</p>
+      </details>
+      <details class="faq-item">
+        <summary>can i cancel anytime? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">yes. 2 clicks from the dashboard. no contracts, no "talk to sales" gate.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ────────────────────────────────────────────────────────────
+     SECTION 5: FOOTER CTA
+     ──────────────────────────────────────────────────────────── -->
+<div class="sky-stage sky-stage--footer" style="padding-top: 1px;">
+  <div class="cloud-layer"></div>
+  <section class="footer-cta">
+    <div class="wrap">
+      <h2 class="h-serif" data-tw="footer-title">turn pageviews into <em>growth pipeline.</em></h2>
+      <a class="btn btn-primary" href="/login" data-tw="primary-cta" style="margin-top: 12px;">start beaming for free <span aria-hidden="true">→</span></a>
+      <p class="fine" data-tw="footer-fine">no credit card · 2-minute install · free for your first 50 visitors</p>
+    </div>
+  </section>
+</div>
+
+<div class="wrap">
+  <footer class="legal">
+    <div>getbeam.fyi · made for indie founders</div>
+    <div>
+      <a href="#">privacy</a>
+      <a href="#">terms</a>
+      <a href="#">contact</a>
+    </div>
+  </footer>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     FLOATING FEATURE-REQUEST BUTTON
+     ──────────────────────────────────────────────────────────── -->
+<button class="fab-request" type="button" aria-label="request a feature" aria-haspopup="dialog">
+  <span class="fab-request-icon" aria-hidden="true">
+    <!-- pixel-art heart-with-plus to echo the beam animation -->
+    <svg width="20" height="20" viewBox="0 0 20 20" shape-rendering="crispEdges">
+      <g fill="currentColor">
+        <rect x="3" y="4" width="4" height="2"/>
+        <rect x="8" y="4" width="4" height="2"/>
+        <rect x="2" y="6" width="6" height="2"/>
+        <rect x="7" y="6" width="6" height="2"/>
+        <rect x="2" y="8" width="11" height="2"/>
+        <rect x="3" y="10" width="9" height="2"/>
+        <rect x="4" y="12" width="7" height="2"/>
+        <rect x="5" y="14" width="5" height="2"/>
+        <rect x="6" y="16" width="3" height="1"/>
+      </g>
+      <g fill="#FFFFFF" opacity="0.55">
+        <rect x="4" y="6" width="2" height="2"/>
+      </g>
+      <rect x="13" y="2" width="2" height="6" fill="#FFFFFF" opacity="0.95"/>
+      <rect x="11" y="4" width="6" height="2" fill="#FFFFFF" opacity="0.95"/>
+    </svg>
+  </span>
+  <span class="fab-request-label">request a feature</span>
+</button>
+
+<!-- feature-request modal -->
+<div class="frm-overlay" id="frm-overlay" hidden>
+  <div class="frm-backdrop" data-frm-dismiss></div>
+  <div class="frm-dialog" role="dialog" aria-modal="true" aria-labelledby="frm-title">
+
+    <button class="frm-close" type="button" aria-label="close" data-frm-dismiss>×</button>
+
+    <!-- form state -->
+    <form class="frm-card" id="frm-form" novalidate>
+      <div class="frm-header">
+        <div class="frm-eyebrow">
+          <span class="frm-eyebrow-dot"></span>
+          quick &middot; under 1 minute
+        </div>
+        <h2 class="frm-title h-serif" id="frm-title">what should beam <em>do next?</em></h2>
+        <p class="frm-lede">we read every request. the best ones ship within the month.</p>
+      </div>
+
+      <label class="frm-field">
+        <span class="frm-label">feature title</span>
+        <input class="frm-input" type="text" name="title" required maxlength="80"
+               placeholder="e.g. slack alert when a hot lead returns" />
+      </label>
+
+      <label class="frm-field">
+        <span class="frm-label">tell us more</span>
+        <textarea class="frm-textarea" name="detail" rows="4" maxlength="600"
+                  placeholder="what would you use it for? what's the workflow look like today?"></textarea>
+        <span class="frm-counter" data-frm-counter>0 / 600</span>
+      </label>
+
+      <fieldset class="frm-field">
+        <span class="frm-label">how much would you use it?</span>
+        <div class="frm-segmented" role="radiogroup">
+          <label><input type="radio" name="urgency" value="nice"     /><span>nice to have</span></label>
+          <label><input type="radio" name="urgency" value="useful" checked /><span>i'd use it</span></label>
+          <label><input type="radio" name="urgency" value="critical" /><span>i'd pay for it</span></label>
+        </div>
+      </fieldset>
+
+      <label class="frm-field">
+        <span class="frm-label">your email <span class="frm-optional">(so we can ship-update you)</span></span>
+        <input class="frm-input" type="email" name="email"
+               placeholder="you@yourcompany.com" />
+      </label>
+
+      <div class="frm-actions">
+        <button type="button" class="frm-btn-ghost" data-frm-dismiss>maybe later</button>
+        <button type="submit" class="frm-btn-primary">
+          send to ben <span aria-hidden="true">→</span>
+        </button>
+      </div>
+    </form>
+
+    <!-- success state -->
+    <div class="frm-card frm-success" id="frm-success" hidden>
+      <div class="frm-success-glow" aria-hidden="true">
+        <span class="frm-spark frm-spark-1"></span>
+        <span class="frm-spark frm-spark-2"></span>
+        <span class="frm-spark frm-spark-3"></span>
+        <span class="frm-spark frm-spark-4"></span>
+        <span class="frm-spark frm-spark-5"></span>
+        <div class="frm-success-icon">
+          <!-- pixel heart, same vocabulary as the hero animation -->
+          <svg width="48" height="42" viewBox="0 0 14 12" shape-rendering="crispEdges">
+            <g fill="#FFFFFF">
+              <rect x="1" y="1" width="3" height="2"/>
+              <rect x="6" y="1" width="3" height="2"/>
+              <rect x="0" y="2" width="5" height="2"/>
+              <rect x="5" y="2" width="5" height="2"/>
+              <rect x="0" y="4" width="10" height="2"/>
+              <rect x="1" y="6" width="8" height="2"/>
+              <rect x="2" y="8" width="6" height="2"/>
+              <rect x="3" y="10" width="4" height="1"/>
+              <rect x="4" y="11" width="2" height="1"/>
+            </g>
+            <g fill="#FFFFFF" opacity="0.45">
+              <rect x="1" y="2" width="2" height="2"/>
+              <rect x="2" y="4" width="2" height="2"/>
+            </g>
+          </svg>
+        </div>
+      </div>
+      <h2 class="frm-title h-serif">got it. <em>thank you.</em></h2>
+      <p class="frm-lede">ben reads these personally. if it sparks an idea,<br>you'll hear back within a few days.</p>
+      <button type="button" class="frm-btn-primary" data-frm-dismiss>close</button>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── scripts ─────────────────────────────────────────────── -->
+
+
+<script>
+/* feature-request modal — open/close + submit handler */
+(function () {
+  const overlay = document.getElementById('frm-overlay');
+  const fab     = document.querySelector('.fab-request');
+  const form    = document.getElementById('frm-form');
+  const success = document.getElementById('frm-success');
+  if (!overlay || !fab || !form || !success) return;
+
+  function open() {
+    overlay.hidden = false;
+    // next frame for transition
+    requestAnimationFrame(() => overlay.classList.add('open'));
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => form.querySelector('[name="title"]')?.focus(), 220);
+  }
+  function close() {
+    overlay.classList.remove('open');
+    document.body.style.overflow = '';
+    setTimeout(() => {
+      overlay.hidden = true;
+      // reset to form state for next open
+      form.hidden = false;
+      success.hidden = true;
+    }, 240);
+  }
+  fab.addEventListener('click', open);
+  overlay.addEventListener('click', (e) => {
+    if (e.target.matches('[data-frm-dismiss]')) close();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !overlay.hidden) close();
+  });
+
+  // textarea counter
+  const ta = form.querySelector('.frm-textarea');
+  const counter = form.querySelector('[data-frm-counter]');
+  if (ta && counter) {
+    const max = ta.getAttribute('maxlength') || 600;
+    const sync = () => counter.textContent = `${ta.value.length} / ${max}`;
+    ta.addEventListener('input', sync);
+    sync();
+  }
+
+  // submit — fake send for prototype, swap to fetch() in production
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const submitBtn = form.querySelector('.frm-btn-primary');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = 'sending<span class="frm-dots">...</span>';
+    }
+    const data = Object.fromEntries(new FormData(form));
+    // API base: localhost in dev, the deployed Beam API in production.
+    var API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+      ? 'http://localhost:8000'
+      : 'https://retarget-agent-production.up.railway.app';
+
+    function showSuccess() {
+      form.hidden = true;
+      success.hidden = false;
+      form.reset();
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = 'send to ben <span aria-hidden="true">→</span>';
+      }
+      if (counter) counter.textContent = '0 / 600';
+    }
+
+    fetch(API_BASE + '/api/v1/feature-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: data.title || '',
+        detail: data.detail || '',
+        urgency: data.urgency || '',
+        email: data.email || ''
+      })
+    })
+      .then((r) => { if (!r.ok) throw new Error('http ' + r.status); return r.json(); })
+      .then(() => showSuccess())
+      .catch((err) => {
+        console.warn('[feature-request] save failed, showing success anyway', err);
+        showSuccess(); // never block the user — request is best-effort
+      });
+  });
+})();
+</script>
+
+<!-- ── scripts (existing) ──────────────────────────────────── -->
+<script>
+/* Pixel-art sky background generator. Builds an SVG with pixel clouds,
+   far mountains, and field rows that matches the beam animation's vocabulary.
+   Injects into .cloud-layer on load. */
+(function () {
+  // shared sprite-from-grid renderer
+  function sprite(grid, palette, scale = 1) {
+    const rows = grid.split('\n').filter(r => r.length);
+    let out = '';
+    for (let y = 0; y < rows.length; y++) {
+      const row = rows[y];
+      let x = 0;
+      while (x < row.length) {
+        const c = row[x];
+        if (c === '.' || c === ' ' || !palette[c]) { x++; continue; }
+        let run = 1;
+        while (x + run < row.length && row[x + run] === c) run++;
+        out += `<rect x="${x*scale}" y="${y*scale}" width="${run*scale}" height="${scale}" fill="${palette[c]}"/>`;
+        x += run;
+      }
+    }
+    return out;
+  }
+
+  // a chunky pixel cloud — 28 wide × 12 tall
+  const CLOUD_BIG = `
+.....wwwwwwww.........
+....wWWWWWWWWw........
+...wWWWWWWWWWWw.......
+..wWWWWWWWWWWWWw......
+.wWWWWWWWWWWWWWWwww...
+wWWWWWWWWWWWWWWWWWWw..
+wWWWWWWWWWWWWWWWWWWWw.
+.wsssssssssssssssssss.
+..ssssssssssssssss....
+......................`;
+
+  const CLOUD_MED = `
+....wwwww.........
+..wwWWWWWww.......
+.wWWWWWWWWWw......
+wWWWWWWWWWWWww....
+wWWWWWWWWWWWWWw...
+.wsssssssssssss...
+..ssssssssssss....`;
+
+  const CLOUD_SMALL = `
+..wwww....
+.wWWWWw...
+wWWWWWWw..
+wWWWWWWWw.
+.sssssss..`;
+
+  const CLOUD_WISP = `
+..ww.....
+.wWWww...
+wWWWWWw..
+.sssss...`;
+
+  // mountains — far range, very gentle peaks (60 wide × 8 tall)
+  const MTN_FAR = `
+............................................................
+..............mmm.................mmm......................
+..........mmmMMMMMmm..........mmmMMMMMmmm........mmm.......
+......mmmMMMMMMMMMMMMmm....mmMMMMMMMMMMMMmmm..mmMMMMMmm.....
+..mmmMMMMMMMMMMMMMMMMMMmmmMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMmm..
+MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM
+MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM
+NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
+
+  // closer mountains — sharper, taller
+  const MTN_NEAR = `
+............................................................
+.................nnn..................................nn...
+.............nnnnNNNNn............................nnnNNNNn..
+........nnnnnNNNNNNNNNNNnn..................nnnnNNNNNNNNNNn
+....nnnnNNNNNNNNNNNNNNNNNNNNNn..........nnnNNNNNNNNNNNNNNNN
+NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN
+NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN
+NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
+
+  const cloudPal = { w: '#F4ECDD', W: '#FBF6EE', s: '#D9CBB3' };
+  const mtnFarPal = { m: '#9BB4CC', M: '#7C9BB8', N: '#6E8AAE' };
+  const mtnNearPal = { n: '#9CABC4', N: '#7588A4' };
+
+  // Build a single full-page background SVG. ViewBox is 200 wide × 100 tall
+  // (we'll scale via the <svg> wrapper).
+  const VB_W = 200, VB_H = 100;
+
+  // Place clouds at varied positions and depths
+  function place(spr, x, y, scale = 1) {
+    return `<g transform="translate(${x}, ${y}) scale(${scale})">${spr}</g>`;
+  }
+
+  const bigCloud = sprite(CLOUD_BIG, cloudPal, 1);
+  const medCloud = sprite(CLOUD_MED, cloudPal, 1);
+  const smCloud  = sprite(CLOUD_SMALL, cloudPal, 1);
+  const wispCloud = sprite(CLOUD_WISP, cloudPal, 1);
+
+  const mtnFar  = sprite(MTN_FAR, mtnFarPal, 1);
+  const mtnNear = sprite(MTN_NEAR, mtnNearPal, 1);
+
+  // cloud composition — drift left-to-right slowly
+  const clouds = [
+    place(bigCloud, -4, 8, 0.9),     // upper-left
+    place(medCloud, 56, 4, 0.85),    // top center
+    place(smCloud, 102, 14, 1),
+    place(bigCloud, 124, 4, 0.7),
+    place(wispCloud, 184, 18, 0.9),
+    place(medCloud, 0, 28, 0.7),     // lower-left
+    place(smCloud, 168, 32, 0.85),
+    place(wispCloud, 88, 36, 0.7),
+    place(smCloud, 40, 46, 0.6),
+    place(wispCloud, 152, 48, 0.55),
+  ];
+
+  const svg = `
+<!-- sky + clouds: fills the full sky-stage -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB_W} 60"
+     preserveAspectRatio="xMidYMin slice" shape-rendering="crispEdges"
+     style="position:absolute; inset:0; width:100%; height:100%;">
+  <defs>
+    <linearGradient id="skygrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#DCEAF1"/>
+      <stop offset="50%" stop-color="#B8D8E8"/>
+      <stop offset="100%" stop-color="#DCEAF1"/>
+    </linearGradient>
+  </defs>
+  <rect width="${VB_W}" height="60" fill="url(#skygrad)"/>
+  <!-- clouds drifting -->
+  <g class="cloud-drift">
+    ${clouds.join('')}
+  </g>
+</svg>
+
+<!-- horizon: mountains + fields, anchored to the bottom -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB_W} 30"
+     preserveAspectRatio="xMidYMax slice" shape-rendering="crispEdges"
+     style="position:absolute; left:0; right:0; bottom:0; width:100%; height:120px;">
+  <defs>
+    <linearGradient id="horizonblend" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#DCEAF1" stop-opacity="0"/>
+      <stop offset="30%"  stop-color="#F2EBDD" stop-opacity="0.6"/>
+      <stop offset="100%" stop-color="#E6D9B5"/>
+    </linearGradient>
+  </defs>
+  <rect width="${VB_W}" height="30" fill="url(#horizonblend)"/>
+
+  <!-- mountains -->
+  <g transform="translate(70, 8)" opacity="0.85">${mtnFar}</g>
+  <g transform="translate(-30, 14)" opacity="0.9">${mtnNear}</g>
+
+  <!-- fields -->
+  <rect x="0" y="22" width="${VB_W}" height="8" fill="#E6D9B5"/>
+  <rect x="0" y="22" width="${VB_W}" height="1" fill="#D4C29A"/>
+  <rect x="0" y="25" width="${VB_W}" height="1" fill="#C9B68A" opacity="0.5"/>
+  <rect x="0" y="28" width="${VB_W}" height="1" fill="#C9B68A" opacity="0.4"/>
+</svg>
+
+<style>
+  .cloud-drift { animation: cloudDrift 80s linear infinite; }
+  @keyframes cloudDrift {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-8px); }
+  }
+</style>`;
+
+  document.querySelectorAll('.cloud-layer').forEach(el => el.innerHTML = svg);
+})();
+
+</script>
+<script src="/beam/beam-scene.js"></script>
+<script>
+/* Renders three scroll-animated mockups into the step blocks. */
+(function () {
+
+  // ── MOCK 1: live visitor list — rows fade-in one at a time ────────
+  const visitorRows = [
+    { i: 'JM', name: 'Jess Morrow', co: 'Notch · /pricing',           color: '#FFC8B5' },
+    { i: 'DR', name: 'Daniel Rao',  co: 'Linear · /blog/intro',       color: '#C7E1F3' },
+    { i: 'AV', name: 'Anu Vora',    co: 'Cron · /changelog',          color: '#D8C7F0' },
+    { i: 'PT', name: 'Priya Tan',   co: 'Plain · /docs/integrations', color: '#FBE4B6' },
+  ];
+  const m1 = document.getElementById('mock-visitors');
+  if (m1) {
+    m1.innerHTML = `
+      <div class="vlist">
+        <div class="vlist-head">
+          <span class="vlist-live"><span class="vlist-live-dot"></span>4 on site now</span>
+          <span>updated 2s ago</span>
+        </div>
+        ${visitorRows.map((r, i) => `
+          <div class="vlist-row" data-row="${i}">
+            <div class="vlist-avatar" style="background:${r.color}">${r.i}</div>
+            <div class="vlist-info">
+              <div class="vlist-name">${r.name}</div>
+              <div class="vlist-meta">${r.co}</div>
+            </div>
+            <span class="vlist-pill">identified</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  // ── MOCK 2: handle match — checkmarks animate in sequence ────────
+  const m2 = document.getElementById('mock-match');
+  if (m2) {
+    m2.innerHTML = `
+      <div class="match-card">
+        <div class="match-avatar">DR</div>
+        <div>
+          <div class="match-id">Daniel Rao</div>
+          <div class="match-sub">Linear · Growth · 3rd visit this week</div>
+        </div>
+      </div>
+      <div class="match-list">
+        <div class="match-row" data-handle="0">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="#0A66C2" aria-hidden="true"><path d="M20.5 2h-17A1.5 1.5 0 002 3.5v17A1.5 1.5 0 003.5 22h17a1.5 1.5 0 001.5-1.5v-17A1.5 1.5 0 0020.5 2zM8 19H5v-9h3v9zm-1.5-10.3a1.7 1.7 0 110-3.4 1.7 1.7 0 010 3.4zM19 19h-3v-4.7c0-1.1 0-2.6-1.6-2.6S12.7 13 12.7 14.3V19h-3v-9h2.9v1.2h.1c.4-.7 1.3-1.5 2.7-1.5 2.9 0 3.5 1.9 3.5 4.4V19z"/></svg>
+          <span class="handle">/in/daniel-rao-linear</span>
+          <span class="verify"><span class="verify-dot"></span><span class="verify-label">matching</span></span>
+        </div>
+        <div class="match-row" data-handle="1">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#000" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24h-6.66l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25h6.832l4.713 6.231 5.445-6.231zm-1.161 17.52h1.833L7.084 4.126H5.117l11.966 15.645z"/></svg>
+          <span class="handle">@danielrao</span>
+          <span class="verify"><span class="verify-dot"></span><span class="verify-label">matching</span></span>
+        </div>
+        <div class="match-row" data-handle="2">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="#E4405F" aria-hidden="true"><path d="M12 2.16c3.2 0 3.58.01 4.85.07 1.17.05 1.8.25 2.23.41.56.22.96.48 1.38.9.42.42.68.82.9 1.38.16.42.37 1.06.41 2.23.06 1.27.07 1.65.07 4.85s-.01 3.58-.07 4.85c-.05 1.17-.25 1.8-.41 2.23-.22.56-.48.96-.9 1.38-.42.42-.82.68-1.38.9-.42.16-1.06.37-2.23.41-1.27.06-1.65.07-4.85.07s-3.58-.01-4.85-.07c-1.17-.05-1.8-.25-2.23-.41-.56-.22-.96-.48-1.38-.9-.42-.42-.68-.82-.9-1.38-.16-.42-.37-1.06-.41-2.23C2.17 15.58 2.16 15.2 2.16 12s.01-3.58.07-4.85c.05-1.17.25-1.8.41-2.23.22-.56.48-.96.9-1.38.42-.42.82-.68 1.38-.9.42-.16 1.06-.37 2.23-.41C8.42 2.17 8.8 2.16 12 2.16zm0 5.16a4.68 4.68 0 100 9.36 4.68 4.68 0 000-9.36zm0 7.72a3.04 3.04 0 110-6.08 3.04 3.04 0 010 6.08zm5.96-7.9a1.09 1.09 0 11-2.18 0 1.09 1.09 0 012.18 0z"/></svg>
+          <span class="handle">@daniel.rao.codes</span>
+          <span class="verify"><span class="verify-dot"></span><span class="verify-label">matching</span></span>
+        </div>
+      </div>
+    `;
+  }
+
+  // ── MOCK 3: AI draft — typewriter effect + heart float ────────
+  const m3 = document.getElementById('mock-draft');
+  let typeStarted = false;
+  let resetDraft = () => {};
+  if (m3) {
+    m3.innerHTML = `
+      <div class="draft-meta">
+        <span class="draft-tag"><span class="draft-tag-dot"></span> ai draft</span>
+        <span>to daniel @ linear · X</span>
+      </div>
+      <div class="draft-body" id="draft-body">
+        <span id="draft-text"></span><span class="draft-cursor" id="draft-cursor"></span>
+      </div>
+      <div class="draft-actions">
+        <button class="draft-btn" data-btn="primary">send on X <span aria-hidden="true">→</span></button>
+        <button class="draft-btn draft-btn-secondary" data-btn="secondary">retry</button>
+      </div>
+      <span class="draft-heart-float" id="draft-heart" aria-hidden="true">
+        <svg width="22" height="20" viewBox="0 0 14 12" shape-rendering="crispEdges">
+          <g fill="#FF3366">
+            <rect x="1" y="1" width="3" height="2"/>
+            <rect x="6" y="1" width="3" height="2"/>
+            <rect x="0" y="2" width="5" height="2"/>
+            <rect x="5" y="2" width="5" height="2"/>
+            <rect x="0" y="4" width="10" height="2"/>
+            <rect x="1" y="6" width="8" height="2"/>
+            <rect x="2" y="8" width="6" height="2"/>
+            <rect x="3" y="10" width="4" height="1"/>
+            <rect x="4" y="11" width="2" height="1"/>
+          </g>
+          <g fill="#FFFFFF" opacity="0.5"><rect x="1" y="2" width="2" height="2"/></g>
+        </svg>
+      </span>
+    `;
+
+    // Render the message as a tokenized stream so the highlight pill
+    // gets typed as a unit instead of character-by-character HTML.
+    const tokens = [
+      { t: 'text', v: "hey daniel, you hit our changelog twice this week.\n\n" },
+      { t: 'text', v: "we just shipped " },
+      { t: 'pill', v: "attribution per-visitor" },
+      { t: 'text', v: ". given what Linear ships, i figured you'd get why that matters faster than most.\n\n" },
+      { t: 'text', v: "lmk if you want to see it live." },
+    ];
+
+    const textEl   = document.getElementById('draft-text');
+    const cursorEl = document.getElementById('draft-cursor');
+    const heartEl  = document.getElementById('draft-heart');
+    const btns     = m3.querySelectorAll('.draft-btn');
+    let typeTimer = null;
+
+    function typeOut() {
+      // reset
+      textEl.innerHTML = '';
+      cursorEl.classList.remove('done');
+      btns.forEach(b => b.classList.remove('in'));
+      heartEl.classList.remove('go');
+
+      let ti = 0;           // token index
+      let ci = 0;           // char index inside current token
+      let buffer = '';      // accumulated html
+
+      function step() {
+        if (ti >= tokens.length) {
+          // done typing
+          cursorEl.classList.add('done');
+          setTimeout(() => btns.forEach((b, i) => setTimeout(() => b.classList.add('in'), i * 110)), 240);
+          setTimeout(() => heartEl.classList.add('go'), 1100);
+          return;
+        }
+        const tok = tokens[ti];
+        if (tok.t === 'pill') {
+          // type the whole pill in one frame
+          buffer += `<span class="draft-highlight">${tok.v}</span>`;
+          textEl.innerHTML = buffer;
+          ti++; ci = 0;
+          typeTimer = setTimeout(step, 120);
+          return;
+        }
+        // text — append next char
+        const ch = tok.v[ci];
+        ci++;
+        const safe = ch === '\n' ? '<br>' : ch.replace(/</g, '&lt;');
+        buffer += safe;
+        textEl.innerHTML = buffer;
+        if (ci >= tok.v.length) { ti++; ci = 0; }
+        // vary pace slightly for natural feel
+        const delay = ch === ' ' ? 14 : (Math.random() < 0.08 ? 60 : 22);
+        typeTimer = setTimeout(step, delay);
+      }
+      step();
+    }
+
+    typeStarted = false;
+    resetDraft = () => {
+      if (typeTimer) clearTimeout(typeTimer);
+      typeStarted = false;
+      textEl.innerHTML = '';
+      cursorEl.classList.remove('done');
+      btns.forEach(b => b.classList.remove('in'));
+      heartEl.classList.remove('go');
+    };
+    // expose starter for the observer
+    window.__beamTypeStart = () => {
+      if (typeStarted) return;
+      typeStarted = true;
+      typeOut();
+    };
+  }
+
+  // ── SCROLL OBSERVER: trigger each step when it scrolls into view ──
+  function setupObserver() {
+    const steps = document.querySelectorAll('.step');
+    if (!steps.length || !('IntersectionObserver' in window)) {
+      // fallback: just show everything
+      document.querySelectorAll('.vlist-row, .match-row, .draft-btn').forEach(el => el.classList.add('in'));
+      document.querySelectorAll('.match-row').forEach(el => el.classList.add('matched'));
+      if (window.__beamTypeStart) window.__beamTypeStart();
+      return;
+    }
+
+    const fired = new Set();
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const stepIdx = entry.target.dataset.step;
+        if (fired.has(stepIdx)) return;
+        fired.add(stepIdx);
+
+        if (stepIdx === '1') {
+          // visitor rows stagger in
+          const rows = entry.target.querySelectorAll('.vlist-row');
+          rows.forEach((r, i) => {
+            setTimeout(() => {
+              r.classList.add('in');
+              if (i === rows.length - 1) r.classList.add('fresh');
+            }, 140 + i * 220);
+          });
+          // simulate a fresh visitor landing after the initial load
+          setTimeout(() => {
+            const last = rows[rows.length - 1];
+            if (last) {
+              last.classList.remove('fresh');
+              // re-trigger glow
+              void last.offsetWidth;
+              last.classList.add('fresh');
+            }
+          }, 140 + rows.length * 220 + 1200);
+        }
+
+        if (stepIdx === '2') {
+          const rows = entry.target.querySelectorAll('.match-row');
+          rows.forEach((r, i) => {
+            // first: slide in
+            setTimeout(() => r.classList.add('in'), 160 + i * 260);
+            // then: "match" after a short delay
+            setTimeout(() => {
+              r.classList.add('matched');
+              const label = r.querySelector('.verify-label');
+              if (label) label.textContent = 'matched';
+            }, 160 + i * 260 + 520);
+          });
+        }
+
+        if (stepIdx === '3') {
+          if (window.__beamTypeStart) {
+            // small delay so it feels intentional after enter
+            setTimeout(window.__beamTypeStart, 240);
+          }
+        }
+      });
+    }, { threshold: 0.35, rootMargin: '0px 0px -10% 0px' });
+
+    steps.forEach(s => io.observe(s));
+  }
+
+  // wait for next frame so layout settles, then observe
+  requestAnimationFrame(setupObserver);
+})();
+
+</script>
+
+
+<script>
+/* envelope reveal — scroll-driven open.
+   --open from 0 (closed) → 1 (fully open). JS-driven inline transforms.
+   Uses an IntersectionObserver to start a rAF loop while the section is
+   in view — more reliable than a plain scroll listener (which doesn't
+   fire in some preview iframes). */
+(function () {
+  function init() {
+    const env  = document.getElementById('envelope');
+    if (!env) return;
+    const stage  = env.closest('.env-stage') || env;
+    const flap   = env.querySelector('.env-flap');
+    const outer  = env.querySelector('.env-flap-outer');
+    const inner  = env.querySelector('.env-flap-inner');
+    const letter = env.querySelector('.env-letter');
+    const seal   = env.querySelector('.env-seal');
+    const paper  = env.querySelector('.letter-paper');
+
+    function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+
+    // Lift is computed in PX (not % of the letter) so it works for ANY letter
+    // length: the letter rises just enough to tuck its bottom at the opening,
+    // and the stage gets headroom above so a tall letter never spills off the top.
+    let maxLift = 0;
+    let lastPaperH = -1;
+    function measure() {
+      const envH = env.offsetHeight || 1;
+      const paperH = paper ? paper.offsetHeight : 0;
+      if (paperH === lastPaperH) return; // avoid ResizeObserver feedback loop
+      lastPaperH = paperH;
+      maxLift = Math.max(0, (0.12 * envH + paperH) - 0.10 * envH);
+      if (stage && stage.style) stage.style.paddingTop = Math.round(maxLift + 28) + 'px';
+      lastOpen = -1; // force transforms to re-apply on next update
+    }
+
+    let lastOpen = -1;
+    function update() {
+      // Drive open from the ENVELOPE's position (not the stage, whose tall
+      // top headroom is in view at scroll-top now that the section is pulled
+      // up). Sealed while the envelope peeks in the lower screen; opens as it
+      // rises toward the top.
+      const rect = env.getBoundingClientRect();
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      const begin = vh * 0.78;
+      const end   = vh * 0.70;
+      const open  = clamp((begin - rect.top) / (begin - end), 0, 1);
+      // Skip if unchanged (within rounding tolerance)
+      if (Math.abs(open - lastOpen) < 0.001) return;
+      lastOpen = open;
+
+      env.style.setProperty('--open', open.toFixed(3));
+      if (flap) {
+        flap.style.transform = 'rotateX(' + (-180 * open).toFixed(2) + 'deg)';
+        // once the flap is past vertical it folds behind, so the rising letter sits in front
+        flap.style.zIndex = open > 0.5 ? '3' : '7';
+      }
+      const t = clamp((open - 0.46) / 0.10, 0, 1);
+      if (outer) outer.style.opacity = (1 - t).toFixed(3);
+      if (inner) inner.style.opacity = t.toFixed(3);
+      if (letter) {
+        // letter stays tucked inside until the flap is past halfway open, then rises —
+        // prevents the letter poking through a still-closing flap
+        const lift = clamp((open - 0.5) / 0.5, 0, 1);
+        letter.style.transform = 'translateY(' + (-maxLift * lift).toFixed(1) + 'px)';
+      }
+      if (seal) {
+        const sx = 1 - 0.18 * open;
+        seal.style.transform = 'translate(-50%, -50%) rotate(' + (-14 * open).toFixed(2) + 'deg) scale(' + sx.toFixed(3) + ')';
+        seal.style.opacity = (1 - 0.55 * open).toFixed(3);
+      }
+      env.classList.toggle('is-fully-open', open > 0.55);
+    }
+
+    // measure now, after fonts settle, and whenever the letter resizes
+    measure();
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
+    setTimeout(measure, 300);
+    if (window.ResizeObserver && paper) { new ResizeObserver(measure).observe(paper); }
+
+    // run update every frame — cheap (skips early when value doesn't change)
+    (function tick() {
+      update();
+      requestAnimationFrame(tick);
+    })();
+
+    // also wire scroll/resize for double safety
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', function () { measure(); update(); });
+
+    // initial paint
+    update();
+    window.__envUpdate = update;
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
+})();
+</script>
+
+</body>
+</html>
