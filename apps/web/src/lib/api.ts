@@ -394,6 +394,24 @@ class ApiClient {
       body: JSON.stringify({ edited_content: editedContent }),
     });
   }
+
+  // ── Billing ────────────────────────────────────────────
+  async createCheckout(plan: BillingPlan, interval: BillingInterval) {
+    return this.request<{ checkout_url: string }>("/api/v1/billing/checkout", {
+      method: "POST",
+      body: JSON.stringify({ plan, interval }),
+    });
+  }
+
+  async createPortal() {
+    return this.request<{ portal_url: string }>("/api/v1/billing/portal", {
+      method: "POST",
+    });
+  }
+
+  async getBillingStatus() {
+    return this.request<BillingStatus>("/api/v1/billing/status");
+  }
 }
 
 export const api = new ApiClient();
@@ -583,4 +601,18 @@ export interface GenerateMultiDraftResponse {
   mode: "learning" | "confident";
   drafts: SocialDraft[];
   voice_example_count: number;
+}
+
+// ── Billing types ─────────────────────────────────────────
+
+export type BillingPlan = "free" | "pro" | "max";
+export type BillingInterval = "monthly" | "yearly";
+
+export interface BillingStatus {
+  plan: BillingPlan;
+  subscription_status: string | null;
+  monthly_identified_count: number;
+  monthly_limit: number | null;  // null = unlimited
+  trial_ends_at: string | null;
+  current_period_end: string | null;
 }

@@ -19,6 +19,7 @@ from apps.api.models.company import Company  # noqa: F401 — register for creat
 from apps.api.models.feature_request import FeatureRequest  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
+from apps.api.routers import billing
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -74,6 +75,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                      SELECT sa.username FROM social_accounts sa
                      WHERE sa.id = posts.social_account_id
                  )""",
+            # Billing: new columns on users
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'free'",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(255)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(50)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_period_end TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_identified_count INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_cycle_reset_at TIMESTAMP WITH TIME ZONE",
         ]:
             try:
                 await conn.execute(__import__("sqlalchemy").text(stmt))
@@ -189,6 +199,7 @@ app.include_router(feed.router, prefix="/api/v1/feed", tags=["feed"])
 app.include_router(companies.router, prefix="/api/v1/companies", tags=["companies"])
 app.include_router(feature_requests.router, prefix="/api/v1/feature-requests", tags=["feature-requests"])
 app.include_router(demo.router, prefix="/api/v1/demo", tags=["demo"])
+app.include_router(billing.router, prefix="/api/v1/billing", tags=["billing"])
 
 
 @app.get("/health")

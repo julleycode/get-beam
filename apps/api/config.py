@@ -134,6 +134,15 @@ class Settings(BaseSettings):
     encryption_key: str = ""  # Fernet key for BYOK API keys (strict)
     token_encryption_key: str = ""  # Fernet key for OAuth tokens (graceful)
 
+    # ─── Stripe Billing ───
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_pro_monthly: str = ""       # Stripe Price ID — Pro monthly
+    stripe_price_pro_yearly: str = ""        # Stripe Price ID — Pro yearly
+    stripe_price_max_monthly: str = ""       # Stripe Price ID — Max monthly
+    stripe_price_max_yearly: str = ""        # Stripe Price ID — Max yearly
+    stripe_portal_config_id: str = ""        # Optional Stripe Portal Configuration ID
+
     # ─── Feature flags ───
     mock_external_apis: bool = True          # Enrichment/identity APIs (PDL, IPinfo, etc.)
     mock_social_oauth: bool = True           # Social OAuth (Twitter, Facebook, etc.)
