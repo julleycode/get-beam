@@ -33,7 +33,7 @@
   // ── Real Beam API wiring ─────────────────────────────────────────────
   const BEAM_API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:8000'
-    : 'https://retarget-agent-production.up.railway.app';
+    : 'https://api.getbeam.fyi';
   async function apiPost(path, body, token) {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = 'Bearer ' + token;
@@ -48,6 +48,38 @@
     const r = await fetch(BEAM_API + path, { headers });
     if (!r.ok) throw new Error('http ' + r.status);
     return r.json();
+  }
+
+  // ── ClerkJS (loaded lazily, only when Clerk is configured) ───────────
+  // Lets the static onboarding create a real Clerk account in-page, so the
+  // signup→dashboard handoff uses the same Clerk session as the rest of the app.
+  let _clerkPromise = null;
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src; s.async = true; s.crossOrigin = 'anonymous';
+      s.onload = resolve; s.onerror = () => reject(new Error('script load failed: ' + src));
+      document.head.appendChild(s);
+    });
+  }
+  // Returns a loaded Clerk instance, or null when Clerk isn't configured / fails.
+  async function ensureClerk() {
+    if (_clerkPromise) return _clerkPromise;
+    _clerkPromise = (async () => {
+      let pk = null;
+      try {
+        const cfg = await apiGet('/api/v1/demo/clerk-config');
+        pk = cfg && cfg.publishable_key;
+      } catch (e) { /* config endpoint unreachable */ }
+      if (!pk) return null;  // Clerk not configured → caller falls back to legacy
+      if (!window.Clerk) {
+        await loadScript('https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js');
+      }
+      const clerk = new window.Clerk(pk);
+      await clerk.load();
+      return clerk;
+    })().catch(() => null);
+    return _clerkPromise;
   }
 
   const OB_STEPS = {
@@ -390,37 +422,102 @@
         </div>`);
       const errEl = c.querySelector('#ob-acc-err');
       const createBtn = c.querySelector('#ob-create');
+      const showErr = (html) => { errEl.innerHTML = html; errEl.style.display = 'block'; };
+      const clerkErr = (e) => (e && e.errors && e.errors[0] && (e.errors[0].longMessage || e.errors[0].message)) || String((e && e.message) || e);
+
+      // Shared tail: create the real site with the captured url + grab the live
+      // snippet (Clerk OR legacy token), then celebrate → dashboard step.
+      async function finishWithToken(token) {
+        if (ob.state.url && ob.state.url !== 'demo.beam.fyi') {
+          try {
+            const host = cleanHost(ob.state.url);
+            const site = await apiPost('/api/v1/sites/', { name: host, url: 'https://' + ob.state.url.replace(/^https?:\/\//, '') }, token);
+            ob.state.siteId = site.site_id;
+            const snip = await apiGet('/api/v1/sites/' + site.site_id + '/pixel', token);
+            ob.state.snippet = snip.snippet;
+          } catch (e) { /* site optional — dashboard can create it later */ }
+        }
+        ob.celebrate(); ob.answer('account created 🎉', 'dash');
+      }
+
+      // Clerk path: verify the email with a 6-digit code, then finish.
+      async function clerkVerify(clerk, signUp, email) {
+        ob.clearControls();
+        await ob.bot(`i sent a 6-digit code to <b>${esc(email)}</b> — pop it in to confirm it's you.`);
+        const vc = ob.controls(`
+          <div class="ob-card">
+            <label class="ob-label">verification code</label>
+            <input class="ob-input-plain" id="ob-code" inputmode="numeric" autocomplete="one-time-code" placeholder="123456" />
+          </div>
+          <div class="ob-error" id="ob-code-err" style="display:none;margin-top:10px"></div>
+          <div class="ob-actions" style="margin-top:12px"><button class="ob-btn ob-btn-primary ob-btn-block" id="ob-verify">verify</button></div>`);
+        const codeErr = vc.querySelector('#ob-code-err');
+        const vBtn = vc.querySelector('#ob-verify');
+        async function attempt() {
+          const code = vc.querySelector('#ob-code').value.trim();
+          codeErr.style.display = 'none';
+          if (!/^\d{4,8}$/.test(code)) { codeErr.textContent = 'enter the numeric code from your email.'; codeErr.style.display = 'block'; return; }
+          vBtn.disabled = true; vBtn.textContent = 'verifying…';
+          try {
+            const res = await signUp.attemptEmailAddressVerification({ code });
+            if (res.status !== 'complete') throw new Error('verification incomplete — double-check the code.');
+            await clerk.setActive({ session: res.createdSessionId });
+            const token = await clerk.session.getToken();
+            ob.user('verified ✓');
+            await finishWithToken(token);
+          } catch (e) {
+            vBtn.disabled = false; vBtn.textContent = 'verify';
+            codeErr.textContent = clerkErr(e); codeErr.style.display = 'block';
+          }
+        }
+        vBtn.addEventListener('click', attempt);
+        vc.querySelector('#ob-code').addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
+      }
+
       async function createAccount() {
         const email = c.querySelector('#ob-email').value.trim();
         const pass = c.querySelector('#ob-pass').value;
         errEl.style.display = 'none';
         if (!email || !pass || pass.length < 8) {
-          errEl.textContent = 'enter your email and a password of 8+ characters.';
-          errEl.style.display = 'block'; return;
+          showErr('enter your email and a password of 8+ characters.'); return;
         }
         createBtn.disabled = true; createBtn.textContent = 'creating…';
+
+        const clerk = await ensureClerk();
+        if (clerk) {
+          // ── Real Clerk account (matches the rest of the app's auth) ──
+          try {
+            const signUp = await clerk.client.signUp.create({ emailAddress: email, password: pass });
+            if (signUp.status === 'complete') {
+              await clerk.setActive({ session: signUp.createdSessionId });
+              const token = await clerk.session.getToken();
+              await finishWithToken(token);
+            } else {
+              await signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
+              await clerkVerify(clerk, signUp, email);
+            }
+          } catch (e) {
+            createBtn.disabled = false; createBtn.textContent = 'create account';
+            const msg = clerkErr(e);
+            showErr(/exist|already|taken|identifier/i.test(msg)
+              ? 'that email already has an account. <a href="/sign-in">sign in instead →</a>'
+              : ('could not create account: ' + msg));
+          }
+          return;
+        }
+
+        // ── Fallback: legacy email/password signup (Clerk not configured) ──
         try {
           const res = await apiPost('/api/v1/auth/signup', { email, password: pass });
           const token = res.access_token;
           try { localStorage.setItem('auth_token', token); } catch (e) {}
-          // Create the real site with the url captured earlier, then grab the live snippet
-          if (ob.state.url && ob.state.url !== 'demo.beam.fyi') {
-            try {
-              const host = cleanHost(ob.state.url);
-              const site = await apiPost('/api/v1/sites/', { name: host, url: 'https://' + ob.state.url.replace(/^https?:\/\//, '') }, token);
-              ob.state.siteId = site.site_id;
-              const snip = await apiGet('/api/v1/sites/' + site.site_id + '/pixel', token);
-              ob.state.snippet = snip.snippet;
-            } catch (e) { /* site optional — dashboard can create it later */ }
-          }
-          ob.celebrate(); ob.answer('account created 🎉', 'dash');
+          await finishWithToken(token);
         } catch (e) {
           createBtn.disabled = false; createBtn.textContent = 'create account';
           const msg = String(e.message || '');
-          errEl.innerHTML = /exist|registered|taken/i.test(msg)
+          showErr(/exist|registered|taken/i.test(msg)
             ? 'that email already has an account. <a href="/login">log in instead →</a>'
-            : ('could not create account: ' + msg);
-          errEl.style.display = 'block';
+            : ('could not create account: ' + msg));
         }
       }
       createBtn.addEventListener('click', createAccount);

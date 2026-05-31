@@ -14,8 +14,8 @@ class EmailSender:
         to_email: str,
         subject: str,
         body_html: str,
-        from_name: str = "ReTargetAgent",
-        from_email: str = "noreply@retargetagent.com",
+        from_name: str = "Beam",
+        from_email: str = "noreply@getbeam.fyi",
         unsubscribe_url: str | None = None,
     ) -> dict:
         if not unsubscribe_url:

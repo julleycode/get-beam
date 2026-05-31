@@ -39,7 +39,7 @@ export default function SignupPage() {
         <CardHeader>
           <CardTitle className="text-2xl">Create account</CardTitle>
           <CardDescription>
-            Get started with ReTargetAgent
+            Get started with Beam
           </CardDescription>
         </CardHeader>
         <CardContent>

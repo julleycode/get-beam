@@ -9,8 +9,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "ReTargetAgent",
-  description: "AI-powered retargeting for your website",
+  title: "Beam",
+  description: "See who visits your site. Reach out on their turf.",
 };
 
 export default function RootLayout({
@@ -30,7 +30,11 @@ export default function RootLayout({
   );
 
   if (hasClerk) {
-    return <ClerkProvider>{content}</ClerkProvider>;
+    return (
+      <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up">
+        {content}
+      </ClerkProvider>
+    );
   }
   return content;
 }

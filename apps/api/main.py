@@ -119,9 +119,11 @@ app.state.limiter = social_auth.limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 _cors_origins = [
-    settings.frontend_url,  # e.g. https://retarget-agent.vercel.app
+    settings.frontend_url,  # e.g. https://getbeam.fyi
     "http://localhost:3000",
     "http://localhost:3001",
+    "https://getbeam.fyi",
+    "https://www.getbeam.fyi",
     "https://retarget-agent.vercel.app",
     "https://retarget-agent-git-main-tranthaiwork-droids-projects.vercel.app",
 ]
