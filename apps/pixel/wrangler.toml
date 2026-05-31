@@ -1,4 +1,4 @@
-name = "retarget-pixel"
+name = "beam-pixel"
 main = "src/worker.js"
 compatibility_date = "2024-01-01"
 
@@ -7,5 +7,5 @@ bucket = "./src"
 
 [env.production]
 routes = [
-  { pattern = "pixel.retargetagent.com/*", zone_name = "retargetagent.com" }
+  { pattern = "pixel.getbeam.fyi/*", zone_name = "getbeam.fyi" }
 ]

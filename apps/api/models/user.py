@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import DateTime, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +25,16 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    # ─── Billing fields ───
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    plan: Mapped[str] = mapped_column(String(20), default="free", nullable=False, server_default="free")
+    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    subscription_status: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    trial_ends_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    current_period_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    monthly_identified_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
+    billing_cycle_reset_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # EasyEngage relationships
     social_accounts = relationship("SocialAccount", back_populates="user", cascade="all, delete-orphan")

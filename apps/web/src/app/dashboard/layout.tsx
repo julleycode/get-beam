@@ -24,6 +24,7 @@ const EASYENGAGE_ITEMS = [
 ];
 
 const BOTTOM_ITEMS = [
+  { href: "/dashboard/billing", label: "Billing" },
   { href: "/dashboard/feature-requests", label: "Feature Requests" },
   { href: "/dashboard/settings", label: "Settings" },
 ];
@@ -68,7 +69,7 @@ function ClerkSignOutButton() {
       size="sm"
       onClick={() => {
         api.clearToken();
-        signOut({ redirectUrl: "/login" });
+        signOut({ redirectUrl: "/sign-in" });
       }}
     >
       Sign out
@@ -105,7 +106,7 @@ function ClerkAuthGuard() {
 
   useEffect(() => {
     if (isSignedIn === false) {
-      router.replace("/login");
+      router.replace("/sign-in");
     }
   }, [isSignedIn, router]);
 
@@ -146,7 +147,7 @@ export default function DashboardLayout({
 
       <aside className="w-56 border-r bg-card p-4 flex flex-col">
         <div className="mb-6">
-          <h1 className="text-lg font-bold">ReTargetAgent</h1>
+          <h1 className="text-lg font-bold">Beam</h1>
           <p className="text-xs text-muted-foreground truncate">{userEmail}</p>
         </div>
         <nav className="flex flex-col gap-1 flex-1">

@@ -27,7 +27,7 @@ async def seed() -> None:
     async with async_session() as db:
         # Create test user
         user = User(
-            email="demo@retargetagent.com",
+            email="demo@getbeam.fyi",
             hashed_password=hash_password("password123"),
             full_name="Demo User",
         )
@@ -205,7 +205,7 @@ async def seed() -> None:
 
         await db.commit()
         print("Seed data created successfully!")
-        print(f"  User: demo@retargetagent.com / password123")
+        print(f"  User: demo@getbeam.fyi / password123")
         print(f"  Site: {site.site_id}")
         print(f"  Visitors: 25 (12 identified & enriched)")
         print(f"  Segments: 1")

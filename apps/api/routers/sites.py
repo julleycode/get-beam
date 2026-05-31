@@ -233,7 +233,7 @@ async def download_wordpress_plugin(
         content=zip_bytes,
         media_type="application/zip",
         headers={
-            "Content-Disposition": f"attachment; filename=retargetagent-pixel-{site_id}.zip"
+            "Content-Disposition": f"attachment; filename=beam-pixel-{site_id}.zip"
         },
     )
 

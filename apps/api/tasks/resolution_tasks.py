@@ -8,6 +8,7 @@ from sqlalchemy import select
 from apps.api.models.database import async_session
 from apps.api.models.site import Site
 from apps.api.models.visitor import Visitor
+from apps.api.services.billing import check_usage_allowed, increment_usage
 from apps.api.services.celery_app import celery_app
 from apps.api.services.enricher import Enricher
 from apps.api.services.identity_resolver import IdentityResolver
@@ -44,6 +45,11 @@ async def _process_all() -> dict:
 
 
 async def _process_site(db, site_id: str) -> tuple[int, int]:
+    # Look up the site owner to enforce plan usage limits
+    site_result = await db.execute(select(Site).where(Site.site_id == site_id))
+    site = site_result.scalar_one_or_none()
+    site_user_id = site.user_id if site else None
+
     result = await db.execute(
         select(Visitor).where(
             Visitor.site_id == site_id,
@@ -59,9 +65,24 @@ async def _process_site(db, site_id: str) -> tuple[int, int]:
     enriched = 0
 
     for visitor in visitors:
+        # ── Billing gate: skip resolution if monthly limit reached ──
+        if site_user_id is not None:
+            allowed = await check_usage_allowed(db, str(site_user_id))
+            if not allowed:
+                logger.info(
+                    "resolution_skipped_billing_limit",
+                    site_id=site_id,
+                    visitor_id=visitor.visitor_id,
+                    user_id=str(site_user_id),
+                )
+                continue
+
         identified = await resolver.resolve(visitor)
         if identified:
             resolved += 1
+            # Increment billing usage counter after successful resolution
+            if site_user_id is not None:
+                await increment_usage(db, str(site_user_id))
             # Cascade enrichment: PDL → Proxycurl → Twitter (auto)
             profile = await enricher.enrich_tier1(visitor, identified)
             if profile:

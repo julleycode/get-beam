@@ -1,4 +1,4 @@
-"""Verify that the ReTargetAgent tracking pixel is installed on a website."""
+"""Verify that the Beam tracking pixel is installed on a website."""
 
 import re
 from typing import TypedDict
@@ -21,7 +21,7 @@ class VerifyResult(TypedDict):
 
 
 async def verify_pixel(url: str, site_id: str) -> VerifyResult:
-    """Fetch a website URL and check if the ReTargetAgent pixel is installed."""
+    """Fetch a website URL and check if the Beam pixel is installed."""
     if not url.startswith(("http://", "https://")):
         url = f"https://{url}"
 
@@ -73,7 +73,7 @@ async def verify_pixel(url: str, site_id: str) -> VerifyResult:
         return VerifyResult(
             status="not_found",
             verified=False,
-            message="Found a ReTargetAgent pixel, but it's configured for a different site. Please check the site ID in your snippet.",
+            message="Found a Beam pixel, but it's configured for a different site. Please check the site ID in your snippet.",
         )
 
     logger.info("pixel_not_found", url=url, site_id=site_id)

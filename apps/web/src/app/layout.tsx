@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import { Analytics } from "@vercel/analytics/next";
 import { cn } from "@/lib/utils";
 import { ClerkTokenSync } from "@/components/clerk-token-sync";
 import { Providers } from "./providers";
@@ -9,8 +10,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "ReTargetAgent",
-  description: "AI-powered retargeting for your website",
+  title: "Beam",
+  description: "See who visits your site. Reach out on their turf.",
 };
 
 export default function RootLayout({
@@ -25,12 +26,17 @@ export default function RootLayout({
       <body className={cn(inter.variable, "font-sans antialiased")}>
         {hasClerk && <ClerkTokenSync />}
         <Providers>{children}</Providers>
+        <Analytics />
       </body>
     </html>
   );
 
   if (hasClerk) {
-    return <ClerkProvider>{content}</ClerkProvider>;
+    return (
+      <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up">
+        {content}
+      </ClerkProvider>
+    );
   }
   return content;
 }
