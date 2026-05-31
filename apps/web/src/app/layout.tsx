@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import { Analytics } from "@vercel/analytics/next";
 import { cn } from "@/lib/utils";
 import { ClerkTokenSync } from "@/components/clerk-token-sync";
 import { Providers } from "./providers";
@@ -25,6 +26,7 @@ export default function RootLayout({
       <body className={cn(inter.variable, "font-sans antialiased")}>
         {hasClerk && <ClerkTokenSync />}
         <Providers>{children}</Providers>
+        <Analytics />
       </body>
     </html>
   );
