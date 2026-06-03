@@ -294,8 +294,10 @@ class Enricher:
             if resp.status_code == 200:
                 p = resp.json().get("data", {})
                 return {
+                    "full_name": p.get("full_name"),
                     "job_title": p.get("job_title"),
                     "company_name": p.get("job_company_name"),
+                    "company_domain": p.get("job_company_website"),
                     "company_size": p.get("job_company_size"),
                     "industry": p.get("industry"),
                     "seniority_level": p.get("job_title_role"),
@@ -303,6 +305,8 @@ class Enricher:
                     "twitter_handle": (p.get("twitter_url", "") or "").rstrip("/").split("/")[-1] or None,
                     "facebook_url": p.get("facebook_url"),
                     "github_url": p.get("github_url"),
+                    "city": p.get("location_locality"),
+                    "country": p.get("location_country"),
                 }
             elif resp.status_code == 404:
                 logger.debug("pdl_enrich_no_match", email_prefix=email[:5])
@@ -361,16 +365,24 @@ class Enricher:
         titles = ["CTO", "VP Engineering", "Product Manager", "Founder", "Growth Lead", "Software Engineer"]
         companies = ["TechStartup Inc", "ScaleAI Co", "CloudVenture", "DataDriven Labs", "IndieSaaS"]
         industries = ["Technology", "SaaS", "E-commerce", "FinTech", "HealthTech"]
+        username = email.split("@")[0]
+        domain = email.split("@")[1] if "@" in email else "example.com"
+        first = username.split(".")[0].title() if "." in username else username.title()
+        last = username.split(".")[-1].title() if "." in username else "User"
         return {
+            "full_name": f"{first} {last}" if first != last else first,
             "job_title": random.choice(titles),
             "company_name": random.choice(companies),
+            "company_domain": domain,
             "company_size": random.choice(["1-10", "11-50", "51-200", "201-500"]),
             "industry": random.choice(industries),
             "seniority_level": random.choice(["senior", "executive", "manager", "entry"]),
-            "linkedin_url": f"https://linkedin.com/in/{email.split('@')[0]}",
-            "twitter_handle": email.split("@")[0].replace(".", ""),
-            "facebook_url": f"https://facebook.com/{email.split('@')[0].replace('.', '')}" if random.random() > 0.4 else None,
-            "github_url": f"https://github.com/{email.split('@')[0].replace('.', '')}" if random.random() > 0.5 else None,
+            "linkedin_url": f"https://linkedin.com/in/{username}",
+            "twitter_handle": username.replace(".", ""),
+            "facebook_url": f"https://facebook.com/{username.replace('.', '')}" if random.random() > 0.4 else None,
+            "github_url": f"https://github.com/{username.replace('.', '')}" if random.random() > 0.5 else None,
+            "city": random.choice(["San Francisco", "New York", "London", "Ho Chi Minh City"]),
+            "country": random.choice(["US", "UK", "VN", "SG"]),
         }
 
     def _mock_proxycurl_enrichment(self) -> dict:
