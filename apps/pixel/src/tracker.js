@@ -75,14 +75,36 @@
     return new Date().toISOString();
   }
 
+  // --- Fingerprint ---
+
+  function getFingerprint() {
+    var components = [
+      screen.width + "x" + screen.height,
+      screen.colorDepth,
+      new Date().getTimezoneOffset(),
+      navigator.language,
+      navigator.platform,
+      navigator.hardwareConcurrency || ""
+    ];
+    var str = components.join("|");
+    var hash = 0;
+    for (var i = 0; i < str.length; i++) {
+      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash = hash & hash; // Convert to 32bit int
+    }
+    return "fp_" + Math.abs(hash).toString(36);
+  }
+
   // --- State ---
 
   var visitorId = getVisitorId();
+  var fingerprint = getFingerprint();
   var queue = [];
 
   // --- Event Queueing ---
 
   function pushEvent(evt) {
+    evt._fp = fingerprint;
     queue.push(evt);
   }
 
@@ -122,6 +144,43 @@
       ts: now()
     });
   }
+
+  // --- UTM _bid identification ---
+  // If this page was visited via a Beam-decorated link (?_bid=...), send an
+  // utm_identify event so the backend can link the encrypted email to this
+  // visitor cookie.
+  (function() {
+    try {
+      var bidParam = new URLSearchParams(window.location.search).get("_bid");
+      if (bidParam) {
+        pushEvent({type: "utm_identify", bid: bidParam, url: window.location.href, ts: now()});
+      }
+    } catch(e) {}
+  })();
+
+  // --- Form email capture ---
+  // Listen for any form submission on the page. If the form contains an email
+  // field, send a form_email_capture event so the backend can link the email
+  // to this visitor cookie for future identification.
+  document.addEventListener("submit", function(e) {
+    try {
+      var form = e.target;
+      if (!form || form.nodeName !== "FORM") return;
+      var emailInput = form.querySelector(
+        "input[type='email'], input[name*='email'], input[name*='Email']"
+      );
+      if (emailInput && emailInput.value) {
+        pushEvent({
+          type: "form_email_capture",
+          email: emailInput.value,
+          url: window.location.href,
+          ts: now()
+        });
+        // Flush immediately so we don't lose the email if the page navigates
+        flush();
+      }
+    } catch(e) {}
+  }, true); // capture phase to run before potential SPA navigation
 
   // Track initial pageview
   trackPageview();

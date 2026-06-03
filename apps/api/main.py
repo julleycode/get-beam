@@ -10,6 +10,7 @@ from apps.api.config import settings
 from apps.api.models.database import engine, Base
 from apps.api.models.api_key import UserApiKey  # noqa: F401 — register for create_all
 from apps.api.models.event import Event as EventModel  # noqa: F401 — register for create_all
+from apps.api.models.visitor_email import VisitorEmail  # noqa: F401 — register for create_all
 from apps.api.models.social_account import SocialAccount  # noqa: F401
 from apps.api.models.post import Post  # noqa: F401
 from apps.api.models.message import Message  # noqa: F401
@@ -75,6 +76,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                      SELECT sa.username FROM social_accounts sa
                      WHERE sa.id = posts.social_account_id
                  )""",
+            # Phase: browser fingerprint for cross-session identification
+            "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS fingerprint VARCHAR(50)",
+            # Phase: visitor_emails table (created by create_all, but ensure index exists)
+            # The table itself is created by Base.metadata.create_all above;
+            # these are safety-net additions for pre-existing deployments.
             # Billing: new columns on users
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255)",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'free'",
