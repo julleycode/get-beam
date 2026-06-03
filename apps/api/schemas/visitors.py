@@ -44,6 +44,8 @@ class VisitorDetailOut(VisitorOut):
     enrichment_completeness: float | None = None
     resolution_provider: str | None = None
     confidence_score: float | None = None
+    social_context: dict | None = None
+    auto_draft_count: int | None = None
 
 
 class VisitorListResponse(BaseModel):

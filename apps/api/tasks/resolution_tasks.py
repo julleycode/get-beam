@@ -8,11 +8,13 @@ from sqlalchemy import select
 from apps.api.models.database import async_session
 from apps.api.models.site import Site
 from apps.api.models.visitor import Visitor
+from apps.api.services.auto_drafter import AutoDrafter
 from apps.api.services.billing import check_usage_allowed, increment_usage
 from apps.api.services.celery_app import celery_app
 from apps.api.services.enricher import Enricher
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.segmentation_trigger import check_and_trigger_segmentation
+from apps.api.services.social_intelligence import SocialIntelligence
 
 logger = structlog.get_logger()
 
@@ -61,8 +63,18 @@ async def _process_site(db, site_id: str) -> tuple[int, int]:
 
     resolver = IdentityResolver(db)
     enricher = Enricher(db)
+    social_intel = SocialIntelligence(db)
     resolved = 0
     enriched = 0
+
+    # Load the site owner User object once for auto-draft generation
+    site_user = None
+    if site_user_id is not None:
+        from apps.api.models.user import User
+        user_result = await db.execute(select(User).where(User.id == site_user_id))
+        site_user = user_result.scalar_one_or_none()
+
+    auto_drafter = AutoDrafter(db) if site_user else None
 
     for visitor in visitors:
         # ── Billing gate: skip resolution if monthly limit reached ──
@@ -87,6 +99,42 @@ async def _process_site(db, site_id: str) -> tuple[int, int]:
             profile = await enricher.enrich_tier1(visitor, identified)
             if profile:
                 enriched += 1
+
+                # ── Social Intelligence: fetch context for high-intent visitors ──
+                if visitor.intent_score >= 60:
+                    try:
+                        social_context = await social_intel.fetch_social_context(
+                            profile,
+                            visitor_intent=visitor.intent_score,
+                        )
+                        if social_context.get("recent_posts"):
+                            await social_intel.store_social_context(profile, social_context)
+
+                            # ── Auto-draft: generate engagement draft for site owner ──
+                            if auto_drafter and site_user:
+                                try:
+                                    enrichment_data = {
+                                        "full_name": identified.full_name,
+                                        "job_title": profile.job_title,
+                                    }
+                                    await auto_drafter.generate_for_visitor(
+                                        visitor=visitor,
+                                        enrichment_data=enrichment_data,
+                                        social_context=social_context,
+                                        user=site_user,
+                                    )
+                                except Exception as draft_err:
+                                    logger.warning(
+                                        "auto_draft_failed",
+                                        visitor_id=visitor.visitor_id,
+                                        error=str(draft_err),
+                                    )
+                    except Exception as social_err:
+                        logger.warning(
+                            "social_context_failed",
+                            visitor_id=visitor.visitor_id,
+                            error=str(social_err),
+                        )
 
     logger.info(
         "site_resolution_complete",
