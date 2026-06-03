@@ -15,6 +15,7 @@ from slowapi.util import get_remote_address
 
 from pydantic import BaseModel
 
+from apps.api.config import settings
 from apps.api.routers.social_auth import limiter
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.platform_detector import detect_platform
@@ -22,6 +23,17 @@ from apps.api.services.platform_detector import detect_platform
 logger = structlog.get_logger()
 
 router = APIRouter(tags=["demo"])
+
+
+@router.get("/clerk-config")
+async def demo_clerk_config() -> dict:
+    """Expose the Clerk publishable key so the static onboarding can load ClerkJS.
+
+    Publishable keys (pk_test_/pk_live_) are designed to be public — they ship in
+    the client bundle. Returns null when Clerk isn't configured so the onboarding
+    falls back to the legacy email/password signup.
+    """
+    return {"publishable_key": settings.clerk_publishable_key or None}
 
 
 class DetectBody(BaseModel):
@@ -126,4 +138,49 @@ async def demo_identify(request: Request) -> dict:
         base.update({"matched": True, "level": "company", "company_domain": domain})
 
     logger.info("demo_identify", ip=ip[:8], level=base.get("level"), matched=base["matched"])
+    return base
+
+
+class EmailIdentifyRequest(BaseModel):
+    email: str
+
+
+@router.post("/identify-by-email")
+@limiter.limit("6/minute")
+async def demo_identify_by_email(request: Request, body: EmailIdentifyRequest) -> dict:
+    """Enrich a real person by email — fallback when IP doesn't resolve.
+
+    Uses the same PDL enrichment pipeline as production. Returns genuine,
+    verifiable data (LinkedIn URL, Twitter handle, job title, company) —
+    never fabricated profiles.
+    """
+    email = body.email.strip().lower()
+    base: dict = {"matched": False, "email": email}
+
+    if not email or "@" not in email:
+        return base
+
+    try:
+        from apps.api.services.enricher import Enricher
+        prof = await Enricher(None)._enrich_pdl(email)
+        name = (prof.get("full_name") or "").strip() if prof else ""
+        has_identity = bool(name or (prof and prof.get("linkedin_url")))
+        if prof and has_identity:
+            base.update({
+                "matched": True,
+                "level": "person",
+                "full_name": name or None,
+                "email": email,
+                "job_title": prof.get("job_title"),
+                "company_name": prof.get("company_name"),
+                "company_domain": prof.get("company_domain"),
+                "linkedin_url": prof.get("linkedin_url"),
+                "twitter_handle": prof.get("twitter_handle"),
+                "city": prof.get("city"),
+                "country": prof.get("country"),
+            })
+    except Exception as e:
+        logger.warning("demo_identify_by_email_error", error=str(e))
+
+    logger.info("demo_identify_by_email", matched=base["matched"])
     return base

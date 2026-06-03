@@ -395,6 +395,26 @@ class ApiClient {
     });
   }
 
+  // ── Engagement ROI ─────────────────────────────────────
+  async getEngagementRoi(days = 7) {
+    return this.request<EngagementROI>(
+      `/api/v1/engagement/roi?days=${days}`
+    );
+  }
+
+  async trackEngagement(data: {
+    platform: string;
+    engagement_type: string;
+    post_url?: string;
+    draft_id?: string;
+    site_id: string;
+  }) {
+    return this.request<{ utm_tag: string }>("/api/v1/engagement/track", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   // ── Billing ────────────────────────────────────────────
   async createCheckout(plan: BillingPlan, interval: BillingInterval) {
     return this.request<{ checkout_url: string }>("/api/v1/billing/checkout", {
@@ -604,6 +624,15 @@ export interface GenerateMultiDraftResponse {
 }
 
 // ── Billing types ─────────────────────────────────────────
+
+// ── Engagement types ──────────────────────────────────────
+
+export interface EngagementROI {
+  total_engagements: number;
+  new_visitors_attributed: number;
+  identified_from_engagement: number;
+  period_days: number;
+}
 
 export type BillingPlan = "free" | "pro" | "max";
 export type BillingInterval = "monthly" | "yearly";

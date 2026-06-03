@@ -112,12 +112,151 @@ class IdentityResolver:
         )
         return result.scalar() or 0
 
+    # ──────────────────── Pre-waterfall: Prior Signal Check ────────────────────
+
+    async def _check_prior_signals(self, visitor: Visitor) -> IdentifiedVisitor | None:
+        """Check for existing identification signals BEFORE the IP waterfall.
+
+        Two checks (in order):
+        1. visitor_emails table — if this visitor_id has a captured email,
+           use it to enrich directly via PDL (no IP credit needed).
+        2. Fingerprint match — if another visitor with the same browser fingerprint
+           was already identified, copy their identity to this visitor.
+
+        Returns an IdentifiedVisitor if a signal produces a match, else None.
+        """
+        from apps.api.models.visitor_email import VisitorEmail
+
+        # ── Check 1: Captured email for this visitor ──
+        try:
+            email_result = await self.db.execute(
+                select(VisitorEmail.email)
+                .where(
+                    VisitorEmail.site_id == visitor.site_id,
+                    VisitorEmail.visitor_id == visitor.visitor_id,
+                )
+                .order_by(VisitorEmail.created_at.desc())
+                .limit(1)
+            )
+            captured_email = email_result.scalar_one_or_none()
+
+            if captured_email:
+                logger.info(
+                    "prior_signal_email_found",
+                    visitor_id=visitor.visitor_id[:8],
+                    email_domain=captured_email.split("@")[-1],
+                )
+                # Enrich the email directly with PDL
+                enriched = await self._enrich_email_pdl(visitor, captured_email)
+                if enriched:
+                    return enriched
+                # If PDL can't enrich it, still save the email as a basic identification
+                return await self._save_identified(
+                    visitor,
+                    {
+                        "email": captured_email,
+                        "full_name": None,
+                        "city": None,
+                        "region": None,
+                        "country": None,
+                        "confidence_score": 0.80,
+                    },
+                    "form_capture",
+                )
+        except Exception as exc:
+            logger.warning("prior_signal_email_check_failed", error=str(exc))
+
+        # ── Check 2: Fingerprint match against already-identified visitors ──
+        if getattr(visitor, "fingerprint", None):
+            try:
+                fp_result = await self.db.execute(
+                    select(IdentifiedVisitor)
+                    .join(Visitor, IdentifiedVisitor.visitor_id == Visitor.visitor_id)
+                    .where(
+                        Visitor.site_id == visitor.site_id,
+                        Visitor.fingerprint == visitor.fingerprint,
+                        Visitor.visitor_id != visitor.visitor_id,
+                    )
+                    .order_by(IdentifiedVisitor.resolved_at.desc())
+                    .limit(1)
+                )
+                matched = fp_result.scalar_one_or_none()
+
+                if matched:
+                    logger.info(
+                        "prior_signal_fingerprint_match",
+                        visitor_id=visitor.visitor_id[:8],
+                        matched_visitor=matched.visitor_id[:8],
+                    )
+                    # Copy identity to this visitor
+                    return await self._save_identified(
+                        visitor,
+                        {
+                            "email": matched.email,
+                            "full_name": matched.full_name,
+                            "city": matched.city,
+                            "region": matched.region,
+                            "country": matched.country,
+                            "confidence_score": 0.75,  # slightly lower — fingerprint match
+                        },
+                        "fingerprint_match",
+                    )
+            except Exception as exc:
+                logger.warning("prior_signal_fingerprint_check_failed", error=str(exc))
+
+        return None
+
+    async def _enrich_email_pdl(
+        self, visitor: Visitor, email: str
+    ) -> IdentifiedVisitor | None:
+        """Use PDL person enrich to get profile data from a known email address."""
+        if not settings.people_data_labs_api_key:
+            return None
+        if settings.mock_external_apis:
+            return None  # Let the caller handle mock mode — just save the email as-is
+
+        start = time.monotonic()
+        data: dict | None = None
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    "https://api.peopledatalabs.com/v5/person/enrich",
+                    headers={"X-Api-Key": settings.people_data_labs_api_key},
+                    params={"email": email, "pretty": "false"},
+                )
+                if resp.status_code == 200:
+                    body = resp.json()
+                    person = body.get("data", {}) or {}
+                    if person:
+                        data = {
+                            "email": email,
+                            "full_name": person.get("full_name"),
+                            "city": (person.get("location_names") or [None])[0],
+                            "region": person.get("location_region"),
+                            "country": person.get("location_country"),
+                            "confidence_score": 0.90,
+                        }
+                elif resp.status_code == 404:
+                    logger.debug("pdl_person_enrich_no_match", email_domain=email.split("@")[-1])
+                else:
+                    logger.warning("pdl_person_enrich_error", status=resp.status_code)
+        except Exception as exc:
+            logger.warning("pdl_person_enrich_exception", error=str(exc))
+
+        elapsed_ms = int((time.monotonic() - start) * 1000)
+        await self._log_resolution(visitor, "pdl_person_enrich", data is not None, 0.01 if data else 0.0, elapsed_ms)
+
+        if data:
+            return await self._save_identified(visitor, data, "pdl_person_enrich")
+        return None
+
     # ──────────────────── Main Waterfall ────────────────────
 
     async def resolve(self, visitor: Visitor) -> IdentifiedVisitor | None:
         """Waterfall identity resolution — try providers in order.
 
         Flow:
+        -1. Pre-waterfall: check for captured emails and fingerprint matches
         0. RB2B Identity Graph (IP → hashed email → person) — PERSON-LEVEL
         1. PDL IP Enrich (IP → company domain + location)
         2. IPinfo (IP → company domain) — fallback if PDL missed
@@ -131,6 +270,12 @@ class IdentityResolver:
         if not await self.check_daily_budget(visitor.site_id):
             logger.warning("resolution_budget_exhausted", site_id=visitor.site_id)
             return None
+
+        # ── Pre-waterfall: check prior signals (form capture, fingerprint) ──
+        # These don't count against the daily budget and work on residential IPs.
+        result = await self._check_prior_signals(visitor)
+        if result:
+            return result
 
         if not getattr(visitor, "ip_address", None):
             logger.info("resolution_skipped_no_ip", visitor_id=visitor.visitor_id[:8])

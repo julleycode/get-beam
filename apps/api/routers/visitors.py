@@ -279,7 +279,18 @@ async def get_visitor_detail(
             "linkedin_headline": enriched.linkedin_headline,
             "twitter_bio": enriched.twitter_bio,
             "enrichment_completeness": enriched.enrichment_completeness,
+            "social_context": enriched.social_context,
         })
+
+    # Count auto-generated drafts for this visitor
+    from apps.api.models.draft import Draft
+    draft_count_result = await db.execute(
+        select(func.count()).select_from(Draft).where(
+            Draft.visitor_id == visitor_id,
+            Draft.auto_generated.is_(True),
+        )
+    )
+    data["auto_draft_count"] = draft_count_result.scalar() or 0
 
     return VisitorDetailOut(**data)
 

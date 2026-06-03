@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { api, Site, SiteStats } from "@/lib/api";
+import { api, Site, SiteStats, EngagementROI } from "@/lib/api";
 import {
   Card,
   CardContent,
@@ -95,6 +95,54 @@ function SiteCard({ site }: { site: Site }) {
   );
 }
 
+function BeamLoopWidget() {
+  const [roi, setRoi] = useState<EngagementROI | null>(null);
+
+  useEffect(() => {
+    api.getEngagementRoi(7).then(setRoi).catch(() => {});
+  }, []);
+
+  if (!roi) return null;
+
+  // Only show widget if there is activity to display
+  const hasActivity = roi.total_engagements > 0 || roi.new_visitors_attributed > 0;
+
+  return (
+    <Card className="mb-6 border-blue-500/30 bg-blue-950/20">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium text-blue-400">
+          Your Beam Loop this week
+        </CardTitle>
+        <CardDescription className="text-xs">
+          Engagements driving new visitors back to your site
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {hasActivity ? (
+          <p className="text-sm font-medium">
+            <span className="text-blue-400 font-bold">{roi.total_engagements}</span>
+            {" engagements"}
+            <span className="text-muted-foreground mx-2">→</span>
+            <span className="text-green-400 font-bold">{roi.new_visitors_attributed}</span>
+            {" new visitors"}
+            <span className="text-muted-foreground mx-2">→</span>
+            <span className="text-purple-400 font-bold">{roi.identified_from_engagement}</span>
+            {" identified"}
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            No engagement activity yet. Approve a draft in{" "}
+            <Link href="/dashboard/engage" className="underline text-blue-400">
+              Engage
+            </Link>{" "}
+            to start the flywheel.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [sites, setSites] = useState<Site[]>([]);
@@ -125,6 +173,8 @@ export default function DashboardPage() {
           <Button size="sm">Add site</Button>
         </Link>
       </div>
+
+      <BeamLoopWidget />
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {sites.map((site) => (

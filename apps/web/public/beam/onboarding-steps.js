@@ -287,14 +287,74 @@
           company: id.company_domain, country: id.country,
         }), { cls: 'rich card', typing: false });
       } else {
-        await ob.bot(`you're on home/mobile wifi right now, so your own ip won't resolve — totally normal. here's exactly what beam shows for a real <b>corporate</b> visitor:`, { delay: 300 });
-        await ob.bot(profileCard({
-          name: 'julley tran', role: 'growth marketer · beam.fyi', company: 'beam.fyi',
-          email: 'julley@beam.fyi', linkedin: 'linkedin.com/in/julleytran', twitter: 'julleybuildsbeam',
-        }) + `<div class="ob-hint" style="margin-top:8px">sample visitor — your real ones show up the same way.</div>`, { cls: 'rich card', typing: false });
+        await ob.bot(`you're on home/mobile wifi right now, so your ip didn't resolve to a company — totally normal.`, { delay: 300 });
+        await ob.bot(`but i can still show you the magic. drop your work email and i'll pull your real profile — same engine, real data.`);
+        const ec = ob.controls(`
+          <div class="ob-field">
+            <input class="ob-input" id="ob-email-id" type="email" placeholder="you@company.com" autocomplete="email" />
+            <button class="ob-btn ob-btn-primary" data-go>identify me</button>
+          </div>`);
+        const emailResult = await new Promise(resolve => {
+          const inp = ec.querySelector('#ob-email-id');
+          setTimeout(() => inp.focus(), 60);
+          async function doLookup() {
+            const email = inp.value.trim();
+            if (!email || !email.includes('@')) { inp.focus(); return; }
+            ob.clearControls();
+            ob.user(email);
+            await ob.bot(`looking you up…`, { delay: 800 });
+            try {
+              const res = await apiPost('/api/v1/demo/identify-by-email', { email });
+              if (res && res.matched) {
+                ob.state.identified = res;
+                resolve(res);
+              } else {
+                await ob.bot(`hmm, couldn't find a profile for that email. try your work email (gmail/yahoo won't enrich).`);
+                const retry = ob.controls(`
+                  <div class="ob-field">
+                    <input class="ob-input" id="ob-email-retry" type="email" placeholder="you@company.com" />
+                    <button class="ob-btn ob-btn-primary" data-go>try again</button>
+                  </div>`);
+                const retryInp = retry.querySelector('#ob-email-retry');
+                retryInp.focus();
+                retry.querySelector('[data-go]').addEventListener('click', async () => {
+                  const e2 = retryInp.value.trim();
+                  if (!e2) return;
+                  ob.clearControls(); ob.user(e2);
+                  await ob.bot(`checking…`, { delay: 800 });
+                  try {
+                    const r2 = await apiPost('/api/v1/demo/identify-by-email', { email: e2 });
+                    if (r2 && r2.matched) { ob.state.identified = r2; resolve(r2); }
+                    else { await ob.bot(`still no match — no worries, this works best with corporate domains. let me show you the rest.`); resolve(null); }
+                  } catch (_) { resolve(null); }
+                });
+                retryInp.addEventListener('keydown', e => { if (e.key === 'Enter') retry.querySelector('[data-go]').click(); });
+              }
+            } catch (_) { await ob.bot(`something went wrong — let's keep going.`); resolve(null); }
+          }
+          ec.querySelector('[data-go]').addEventListener('click', doLookup);
+          inp.addEventListener('keydown', e => { if (e.key === 'Enter') doLookup(); });
+        });
+
+        if (emailResult && emailResult.matched) {
+          await ob.bot(`found you — here's your real profile, pulled from just an email:`, { delay: 300 });
+          await ob.bot(profileCard({
+            name: emailResult.full_name || emailResult.email,
+            role: [emailResult.job_title, emailResult.company_name || emailResult.company_domain].filter(Boolean).join(' · '),
+            company: emailResult.company_name || emailResult.company_domain,
+            country: emailResult.country, email: emailResult.email,
+            linkedin: (emailResult.linkedin_url || '').replace(/^https?:\/\//, '') || null,
+            twitter: emailResult.twitter_handle || null,
+          }), { cls: 'rich card', typing: false });
+        }
       }
       setTimeout(() => ob.celebrate(), 250);
-      await ob.bot(`is this you?`);
+      if (ob.state.identified && ob.state.identified.matched) {
+        await ob.bot(`is this you?`);
+      } else {
+        await ob.bot(`let's keep going — i'll show you how it works with real visitors.`);
+        ob.go('walk'); return;
+      }
       const c = ob.controls(`
         <button class="ob-btn ob-btn-primary" data-yes>✓ yes, that's me</button>
         <button class="ob-btn ob-btn-ghost" data-no>not quite</button>`);

@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -45,6 +45,10 @@ class Draft(Base):
         Enum(DraftStatus), default=DraftStatus.pending
     )
     strategy: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # Auto-generation fields (set when draft is created from visitor social context)
+    auto_generated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
+    visitor_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    context_summary: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     sent_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

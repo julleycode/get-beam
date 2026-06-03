@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import String, DateTime, Float, Integer, Text, Index, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
@@ -41,6 +42,10 @@ class EnrichmentProfile(Base):
     twitter_bio: Mapped[str | None] = mapped_column(String(500))
     twitter_follower_count: Mapped[int | None] = mapped_column(Integer)
     twitter_recent_topics: Mapped[dict] = mapped_column(JSONB, default=list)
+
+    # Social context (fetched for high-intent visitors after enrichment)
+    social_context: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    social_context_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Computed
     enrichment_completeness: Mapped[float] = mapped_column(Float, default=0.0)

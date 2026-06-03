@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class UTMParams(BaseModel):
@@ -17,7 +17,9 @@ class Viewport(BaseModel):
 
 
 class Event(BaseModel):
-    type: str = Field(..., pattern="^(pageview|scroll|time_on_page|click|visibility)$")
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: str = Field(..., pattern="^(pageview|scroll|time_on_page|click|visibility|form_email_capture|utm_identify)$")
     url: str | None = None
     referrer: str | None = None
     utm: UTMParams | None = None
@@ -33,6 +35,12 @@ class Event(BaseModel):
     page_title: str | None = None
     page_path: str | None = None
     ts: datetime
+    # Form email capture
+    email: str | None = None
+    # UTM link decoration
+    bid: str | None = None
+    # Browser fingerprint (sent on every event by the pixel as _fp field)
+    fp: str | None = Field(None, alias="_fp")
 
 
 class EventBatch(BaseModel):
