@@ -69,12 +69,18 @@
 <section class="story-section">
   <div class="story-wrap">
     <div class="story-line sl-1" data-sr>so you launched your vibe-coded product?</div>
-    <div class="story-line sl-2" data-sr>congrats. seriously.</div>
-    <div class="story-line sl-3" data-sr>how much traffic today? <em>100? 200?</em></div>
-    <div class="story-line sl-4" data-sr>nice.</div>
-    <div class="story-line sl-5 story-punch" data-sr>and how many did you reach out to <em>personally?</em></div>
-    <div class="story-line sl-6 story-silence" data-sr>...</div>
-    <div class="story-line sl-7" data-sr>yeah.</div>
+    <div class="story-line sl-2" data-sr>congrats. you rock! 🎉</div>
+    <div class="story-line sl-3" data-sr>how much traffic today?</div>
+    <div class="story-traffic" data-sr>
+      <button class="story-btn" data-traffic>50</button>
+      <button class="story-btn" data-traffic>100</button>
+      <button class="story-btn" data-traffic>500</button>
+      <button class="story-btn" data-traffic>1000+</button>
+    </div>
+    <div class="story-line sl-4 story-hidden" data-sr-after="traffic">nice.</div>
+    <div class="story-line sl-5 story-punch story-hidden" data-sr-after="traffic">and how many did you reach out to <em>personally?</em></div>
+    <div class="story-line sl-6 story-dots story-hidden" data-sr-after="traffic"><span class="dot d1">.</span><span class="dot d2">.</span><span class="dot d3">.</span></div>
+    <div class="story-line sl-7 story-hidden" data-sr-after="yeah">yeah.</div>
     <div class="story-line sl-8 story-stat" data-sr><span class="story-big">97%</span> of your visitors leave without a trace.</div>
     <div class="story-line sl-9" data-sr>no name. no email. no company. just a bounce.</div>
     <div class="story-line sl-10 story-punch" data-sr>you spent weeks building. they spent <em>4 seconds</em> leaving.</div>
@@ -866,10 +872,10 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
 <!-- ── SCROLL STORYTELLING OBSERVER ── -->
 <script>
 (function() {
-  var lines = document.querySelectorAll('[data-sr]');
+  // 1. Standard scroll-reveal for [data-sr] elements (not hidden ones)
+  var lines = document.querySelectorAll('[data-sr]:not([data-sr-after])');
   if (!lines.length || !('IntersectionObserver' in window)) {
-    // fallback: show all
-    lines.forEach(function(el) { el.classList.add('in'); });
+    document.querySelectorAll('[data-sr]').forEach(function(el) { el.classList.add('in'); });
     return;
   }
   var io = new IntersectionObserver(function(entries) {
@@ -881,6 +887,38 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
     });
   }, { threshold: 0.15, rootMargin: '0px 0px -60px 0px' });
   lines.forEach(function(el) { io.observe(el); });
+
+  // 2. Traffic button interaction — reveal next lines after click
+  var btns = document.querySelectorAll('[data-traffic]');
+  var trafficRevealed = false;
+  btns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      if (trafficRevealed) return;
+      trafficRevealed = true;
+      // Highlight picked button
+      btns.forEach(function(b) { b.classList.remove('picked'); });
+      btn.classList.add('picked');
+      // Reveal lines after traffic pick (staggered)
+      var afterTraffic = document.querySelectorAll('[data-sr-after="traffic"]');
+      afterTraffic.forEach(function(el, i) {
+        setTimeout(function() {
+          el.classList.add('story-show');
+          // If this is the dots line, animate dots
+          if (el.classList.contains('story-dots')) {
+            var dots = el.querySelectorAll('.dot');
+            dots.forEach(function(d, di) {
+              setTimeout(function() { d.classList.add('show'); }, 400 + di * 600);
+            });
+            // After all dots shown, reveal "yeah." with delay
+            setTimeout(function() {
+              var yeah = document.querySelector('[data-sr-after="yeah"]');
+              if (yeah) yeah.classList.add('story-show');
+            }, 400 + dots.length * 600 + 800);
+          }
+        }, i * 700);
+      });
+    });
+  });
 })();
 </script>
 

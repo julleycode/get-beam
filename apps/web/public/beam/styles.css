@@ -1526,14 +1526,66 @@ footer.legal a:hover { color: var(--ink); }
   color: #8a7a82;
 }
 
-/* The silence beat */
-.story-silence {
-  font-size: clamp(32px, 5vw, 56px);
-  letter-spacing: 0.3em;
-  color: #FF3366;
+/* Traffic buttons */
+.story-traffic {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 0.6em;
   opacity: 0;
+  transform: translateY(40px);
+  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.story-silence.in { opacity: 0.5; }
+.story-traffic.in { opacity: 1; transform: translateY(0); }
+.story-btn {
+  font-family: 'Fraunces', serif;
+  font-size: clamp(20px, 3vw, 32px);
+  font-weight: 500;
+  color: #FF3366;
+  background: rgba(255, 51, 102, 0.08);
+  border: 2px solid rgba(255, 51, 102, 0.25);
+  border-radius: 12px;
+  padding: 12px 28px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+.story-btn:hover {
+  background: rgba(255, 51, 102, 0.15);
+  border-color: #FF3366;
+  transform: translateY(-2px);
+}
+.story-btn.picked {
+  background: #FF3366;
+  color: white;
+  border-color: #FF3366;
+  transform: scale(1.05);
+}
+
+/* Hidden until triggered */
+.story-hidden {
+  opacity: 0 !important;
+  transform: translateY(40px) !important;
+  pointer-events: none;
+  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.7s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+.story-hidden.story-show {
+  opacity: 1 !important;
+  transform: translateY(0) !important;
+  pointer-events: auto;
+}
+
+/* Dots animation — each dot fades in one by one */
+.story-dots {
+  font-family: 'Fraunces', serif;
+  font-size: clamp(40px, 6vw, 72px);
+  letter-spacing: 0.4em;
+  color: #FF3366;
+  line-height: 1;
+}
+.dot { opacity: 0; transition: opacity 0.5s ease; }
+.dot.show { opacity: 0.5; }
 
 /* The stat callout */
 .story-stat {
