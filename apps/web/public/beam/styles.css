@@ -1484,8 +1484,8 @@ footer.legal a:hover { color: var(--ink); }
    ══════════════════════════════════════════════════════════════ */
 
 .story-section {
-  background: #1a1118;
-  color: #f5f0f0;
+  background: linear-gradient(180deg, #FFF8F5 0%, #FFF0EB 40%, #FFEAE3 100%);
+  color: #2b2530;
   padding: 120px 0 100px;
   overflow: hidden;
 }
@@ -1523,7 +1523,7 @@ footer.legal a:hover { color: var(--ink); }
   font-family: 'Inter', sans-serif;
   font-size: clamp(18px, 2.5vw, 28px);
   font-weight: 400;
-  color: #b8a0a8;
+  color: #8a7a82;
 }
 
 /* The silence beat */
@@ -1533,7 +1533,7 @@ footer.legal a:hover { color: var(--ink); }
   color: #FF3366;
   opacity: 0;
 }
-.story-silence.in { opacity: 0.6; }
+.story-silence.in { opacity: 0.5; }
 
 /* The stat callout */
 .story-stat {
@@ -1588,12 +1588,12 @@ footer.legal a:hover { color: var(--ink); }
 .story-letter-link {
   font-family: 'Inter', sans-serif;
   font-size: 14px;
-  color: #b8a0a8;
+  color: #8a7a82;
   text-decoration: none;
   transition: color 0.2s;
 }
 .story-letter-link:hover {
-  color: #FF6B9D;
+  color: #FF3366;
 }
 
 /* Mobile adjustments */
