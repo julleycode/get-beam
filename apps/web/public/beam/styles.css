@@ -1479,3 +1479,127 @@ footer.legal a:hover { color: var(--ink); }
   .env-seal { width: 50px; height: 50px; }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   SECTION 2: SCROLL STORYTELLING
+   ══════════════════════════════════════════════════════════════ */
+
+.story-section {
+  background: #1a1118;
+  color: #f5f0f0;
+  padding: 120px 0 100px;
+  overflow: hidden;
+}
+
+.story-wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.story-line {
+  font-family: 'Fraunces', serif;
+  font-size: clamp(26px, 4.5vw, 48px);
+  line-height: 1.25;
+  margin-bottom: 0.6em;
+  /* start invisible + shifted down */
+  opacity: 0;
+  transform: translateY(40px);
+  transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.story-line.in {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.story-line em {
+  color: #FF3366;
+  font-style: italic;
+}
+
+/* Short casual lines — smaller, Inter */
+.sl-2, .sl-4, .sl-6, .sl-7 {
+  font-family: 'Inter', sans-serif;
+  font-size: clamp(18px, 2.5vw, 28px);
+  font-weight: 400;
+  color: #b8a0a8;
+}
+
+/* The silence beat */
+.story-silence {
+  font-size: clamp(32px, 5vw, 56px);
+  letter-spacing: 0.3em;
+  color: #FF3366;
+  opacity: 0;
+}
+.story-silence.in { opacity: 0.6; }
+
+/* The stat callout */
+.story-stat {
+  font-family: 'Inter', sans-serif;
+  font-size: clamp(18px, 2.5vw, 28px);
+  font-weight: 400;
+}
+.story-big {
+  font-family: 'Fraunces', serif;
+  font-size: clamp(48px, 8vw, 80px);
+  font-weight: 600;
+  color: #FF3366;
+  display: block;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+/* Punch lines — bolder */
+.story-punch {
+  font-weight: 500;
+}
+
+/* The reveal: "that's beam" */
+.story-reveal {
+  font-size: clamp(36px, 6vw, 64px);
+  font-weight: 600;
+  margin-top: 0.8em;
+  margin-bottom: 0.5em;
+}
+.story-beam {
+  background: linear-gradient(135deg, #FF6B9D 0%, #FF3366 50%, #FF7FA8 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* CTA at bottom of story */
+.story-cta {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.story-cta.in {
+  opacity: 1;
+  transform: translateY(0);
+}
+.story-letter-link {
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  color: #b8a0a8;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.story-letter-link:hover {
+  color: #FF6B9D;
+}
+
+/* Mobile adjustments */
+@media (max-width: 640px) {
+  .story-section { padding: 80px 0 60px; }
+  .story-line { margin-bottom: 0.5em; }
+  .story-cta { flex-direction: column; align-items: flex-start; gap: 16px; }
+}
+

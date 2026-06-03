@@ -64,154 +64,38 @@
 </div>
 
 <!-- ────────────────────────────────────────────────────────────
-     SECTION 2: WHY I BUILT BEAM (founder note)
+     SECTION 2: SCROLL STORYTELLING (indie hacker hook)
      ──────────────────────────────────────────────────────────── -->
-<section class="founder-section">
-  <div class="wrap">
-    <!-- envelope animation — scroll-driven open -->
-    <div class="env-stage">
-      <div class="env" id="envelope" style="--open: 0">
-
-        <!-- LETTER paper: starts hidden inside envelope, slides up when open -->
-        <div class="env-letter">
-          <article class="letter-paper">
-            <header class="letter-header">
-              <span class="letter-from">from julley · @beam</span>
-              <span class="letter-date">may 28, 2026</span>
-            </header>
-            <h3 class="letter-greeting h-serif">dear future beam user,</h3>
-            <p class="letter-body" data-tw="founder-quote">i ran growth at a startup saas. nearly 1000 visitors a day. knew nothing about any of them. not their name. not their company.</p>
-            <p class="letter-body">not whether they'd been on the pricing page for six minutes or bounced in three seconds. just a number. going up. meaning nothing.</p>
-            <p class="letter-body">so i did what everyone does. i went to LinkedIn, loaded up Apollo, and started cold outreach like it was 2018. it worked. barely. badly.</p>
-            <p class="letter-body">somewhere in that mess i started building beam. now i'm handing it to you.</p>
-            <p class="letter-sig">— julley thai founder · @julleybuildsbeam
-
-
-
-
-
-
-
-</p>
-          </article>
-        </div>
-
-        <!-- ENVELOPE BODY: white rectangle + 3 static triangle flaps + subtle center seal -->
-        <svg class="env-body" viewBox="0 0 600 380" preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <linearGradient id="env-base" x1="0.5" y1="0" x2="0.5" y2="1">
-              <stop offset="0" stop-color="#EC8AA0"/>
-              <stop offset="0.5" stop-color="#F89FB3"/>
-              <stop offset="1" stop-color="#FFB4C4"/>
-            </linearGradient>
-            <linearGradient id="env-side-l-2" x1="0" y1="0.5" x2="1" y2="0.5">
-              <stop offset="0" stop-color="#FFB8C5"/>
-              <stop offset="1" stop-color="#FFD3DC"/>
-            </linearGradient>
-            <linearGradient id="env-side-r-2" x1="0" y1="0.5" x2="1" y2="0.5">
-              <stop offset="0" stop-color="#FFD3DC"/>
-              <stop offset="1" stop-color="#FFB8C5"/>
-            </linearGradient>
-            <linearGradient id="env-bottom-2" x1="0.5" y1="0" x2="0.5" y2="1">
-              <stop offset="0" stop-color="#FFCCD5"/>
-              <stop offset="1" stop-color="#FFA1B3"/>
-            </linearGradient>
-          </defs>
-          <!-- envelope BACK panel (letter sits in front of this, tucked into the pocket) -->
-          <rect x="0" y="0" width="600" height="380" rx="8" fill="url(#env-base)"/>
-          <!-- outer border -->
-          <rect x="0.5" y="0.5" width="599" height="379" rx="8" fill="none" stroke="rgba(255, 51, 102, 0.18)" stroke-width="1"/>
-        </svg>
-
-        <!-- ENVELOPE FRONT POCKET — bottom + side flaps, drawn ABOVE the letter
-             so the letter emerges from *inside* and stays tucked at the bottom. -->
-        <svg class="env-front" viewBox="0 0 600 380" preserveAspectRatio="none" aria-hidden="true">
-          <polygon points="0,0 300,190 0,380" fill="url(#env-side-l-2)"/>
-          <polygon points="600,0 300,190 600,380" fill="url(#env-side-r-2)"/>
-          <polygon points="0,380 300,190 600,380" fill="url(#env-bottom-2)"/>
-          <!-- crease seams -->
-          <g stroke="rgba(43,37,48,0.10)" stroke-width="1" fill="none" stroke-linecap="round">
-            <line x1="0"   y1="0"   x2="300" y2="190"/>
-            <line x1="600" y1="0"   x2="300" y2="190"/>
-            <line x1="0"   y1="380" x2="300" y2="190"/>
-            <line x1="600" y1="380" x2="300" y2="190"/>
-          </g>
-          <!-- outer border -->
-          <rect x="0.5" y="0.5" width="599" height="379" rx="8" fill="none" stroke="rgba(255, 51, 102, 0.18)" stroke-width="1"/>
-        </svg>
-
-        <!-- WAX SEAL — pink dot in center, breaks when envelope opens -->
-        <div class="env-seal" aria-hidden="true">
-          <svg viewBox="0 0 60 60">
-            <circle cx="30" cy="30" r="22" fill="#FF3366"/>
-            <circle cx="30" cy="30" r="22" fill="none" stroke="#FFFFFF" stroke-width="0.8" stroke-dasharray="1.5 2.2" opacity="0.55"/>
-            <text x="30" y="38" font-family="Fraunces, serif" font-style="italic" font-weight="500" font-size="20" fill="#FFFFFF" text-anchor="middle">b</text>
-          </svg>
-        </div>
-
-        <!-- TOP FLAP — rotates open via rotateX driven by --open -->
-        <div class="env-flap">
-          <!-- outer face (visible when closed) -->
-          <svg class="env-flap-outer" viewBox="0 0 600 190" preserveAspectRatio="none" aria-hidden="true">
-            <defs>
-              <linearGradient id="env-flap-outer-grad" x1="0.5" y1="0" x2="0.5" y2="1">
-                <stop offset="0" stop-color="#FFD3DC"/>
-                <stop offset="1" stop-color="#FFA1B3"/>
-              </linearGradient>
-            </defs>
-            <polygon points="0,0 600,0 300,190" fill="url(#env-flap-outer-grad)"/>
-            <g stroke="rgba(43,37,48,0.10)" stroke-width="1" fill="none" stroke-linecap="round">
-              <line x1="0"   y1="0" x2="300" y2="190"/>
-              <line x1="600" y1="0" x2="300" y2="190"/>
-            </g>
-            <line x1="0" y1="0" x2="600" y2="0" stroke="rgba(255, 51, 102, 0.25)" stroke-width="1.2"/>
-          </svg>
-          <!-- inner lining (visible when open) — deeper pink with subtle pixel clouds.
-               Polygon: SAME orientation as the outer face (base at top y=0, apex at
-               bottom y=190). After the parent flap rotates -180° around its top
-               hinge, the apex (originally at the bottom) flips UP above the
-               envelope, giving a real envelope's "opened flap" silhouette ▲. -->
-          <svg class="env-flap-inner" viewBox="0 0 600 190" preserveAspectRatio="none" aria-hidden="true">
-            <defs>
-              <linearGradient id="env-lining-grad" x1="0.5" y1="0" x2="0.5" y2="1">
-                <stop offset="0" stop-color="#FFC7D2"/>
-                <stop offset="1" stop-color="#FF9FB0"/>
-              </linearGradient>
-            </defs>
-            <polygon points="0,0 600,0 300,190" fill="url(#env-lining-grad)"/>
-            <!-- subtle pixel clouds inside (placed within the triangle near the apex,
-                 which after rotation lands at the top of the visible flap) -->
-            <g shape-rendering="crispEdges" fill="#FFEAF0" opacity="0.95">
-              <g transform="translate(220, 120)">
-                <rect x="4" y="0" width="12" height="3"/>
-                <rect x="2" y="3" width="18" height="4"/>
-                <rect x="4" y="7" width="14" height="3"/>
-              </g>
-              <g transform="translate(360, 140)">
-                <rect x="2" y="0" width="10" height="3"/>
-                <rect x="0" y="3" width="14" height="3"/>
-              </g>
-              <g transform="translate(140, 70)">
-                <rect x="0" y="0" width="10" height="3"/>
-                <rect x="2" y="3" width="8" height="3"/>
-              </g>
-              <g transform="translate(420, 60)">
-                <rect x="0" y="0" width="12" height="3"/>
-                <rect x="2" y="3" width="10" height="3"/>
-              </g>
-            </g>
-            <!-- crease seams from base corners (0,0 and 600,0) to apex (300,190) -->
-            <g stroke="rgba(255, 51, 102, 0.32)" stroke-width="0.8" fill="none" stroke-linecap="round">
-              <line x1="0"   y1="0" x2="300" y2="190"/>
-              <line x1="600" y1="0" x2="300" y2="190"/>
-            </g>
-          </svg>
-        </div>
-
-      </div>
+<section class="story-section">
+  <div class="story-wrap">
+    <div class="story-line sl-1" data-sr>so you launched your vibe-coded product?</div>
+    <div class="story-line sl-2" data-sr>congrats. seriously.</div>
+    <div class="story-line sl-3" data-sr>how much traffic today? <em>100? 200?</em></div>
+    <div class="story-line sl-4" data-sr>nice.</div>
+    <div class="story-line sl-5 story-punch" data-sr>and how many did you reach out to <em>personally?</em></div>
+    <div class="story-line sl-6 story-silence" data-sr>...</div>
+    <div class="story-line sl-7" data-sr>yeah.</div>
+    <div class="story-line sl-8 story-stat" data-sr><span class="story-big">97%</span> of your visitors leave without a trace.</div>
+    <div class="story-line sl-9" data-sr>no name. no email. no company. just a bounce.</div>
+    <div class="story-line sl-10 story-punch" data-sr>you spent weeks building. they spent <em>4 seconds</em> leaving.</div>
+    <div class="story-line sl-11" data-sr>what if you could see exactly who they are?</div>
+    <div class="story-line sl-12" data-sr>their name. their company. <em>their latest tweet.</em></div>
+    <div class="story-line sl-13" data-sr>and what if you could say hi — on <em>their turf?</em></div>
+    <div class="story-line sl-14" data-sr>not a cold email. not a linkedin spam.</div>
+    <div class="story-line sl-15" data-sr>a real comment. on something they actually posted.</div>
+    <div class="story-line sl-16" data-sr>in <em>your voice</em>. in <em>30 seconds</em>.</div>
+    <div class="story-line sl-17 story-reveal" data-sr>that's <span class="story-beam">beam</span>.</div>
+    <div class="story-cta" data-sr>
+      <a class="btn btn-primary" href="/onboarding">start beaming for free <span aria-hidden="true">→</span></a>
+      <a class="story-letter-link" href="/beam/letter.html">read the founder's letter →</a>
     </div>
   </div>
 </section>
+
+
+
+
+
 
 <!-- ────────────────────────────────────────────────────────────
      SECTION 3: WHAT YOU GET (3-column grid)
@@ -989,108 +873,28 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
 
 </script>
 
-
+<!-- ── SCROLL STORYTELLING OBSERVER ── -->
 <script>
-/* envelope reveal — scroll-driven open.
-   --open from 0 (closed) → 1 (fully open). JS-driven inline transforms.
-   Uses an IntersectionObserver to start a rAF loop while the section is
-   in view — more reliable than a plain scroll listener (which doesn't
-   fire in some preview iframes). */
-(function () {
-  function init() {
-    const env  = document.getElementById('envelope');
-    if (!env) return;
-    const stage  = env.closest('.env-stage') || env;
-    const flap   = env.querySelector('.env-flap');
-    const outer  = env.querySelector('.env-flap-outer');
-    const inner  = env.querySelector('.env-flap-inner');
-    const letter = env.querySelector('.env-letter');
-    const seal   = env.querySelector('.env-seal');
-    const paper  = env.querySelector('.letter-paper');
-
-    function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
-
-    // Lift is computed in PX (not % of the letter) so it works for ANY letter
-    // length: the letter rises just enough to tuck its bottom at the opening,
-    // and the stage gets headroom above so a tall letter never spills off the top.
-    let maxLift = 0;
-    let lastPaperH = -1;
-    function measure() {
-      const envH = env.offsetHeight || 1;
-      const paperH = paper ? paper.offsetHeight : 0;
-      if (paperH === lastPaperH) return; // avoid ResizeObserver feedback loop
-      lastPaperH = paperH;
-      maxLift = Math.max(0, (0.12 * envH + paperH) - 0.10 * envH);
-      if (stage && stage.style) stage.style.paddingTop = Math.round(maxLift + 28) + 'px';
-      lastOpen = -1; // force transforms to re-apply on next update
-    }
-
-    let lastOpen = -1;
-    function update() {
-      // Drive open from the ENVELOPE's position (not the stage, whose tall
-      // top headroom is in view at scroll-top now that the section is pulled
-      // up). Sealed while the envelope peeks in the lower screen; opens as it
-      // rises toward the top.
-      const rect = env.getBoundingClientRect();
-      const vh = window.innerHeight || document.documentElement.clientHeight;
-      const begin = vh * 0.78;
-      const end   = vh * 0.70;
-      const open  = clamp((begin - rect.top) / (begin - end), 0, 1);
-      // Skip if unchanged (within rounding tolerance)
-      if (Math.abs(open - lastOpen) < 0.001) return;
-      lastOpen = open;
-
-      env.style.setProperty('--open', open.toFixed(3));
-      if (flap) {
-        flap.style.transform = 'rotateX(' + (-180 * open).toFixed(2) + 'deg)';
-        // once the flap is past vertical it folds behind, so the rising letter sits in front
-        flap.style.zIndex = open > 0.5 ? '3' : '7';
-      }
-      const t = clamp((open - 0.46) / 0.10, 0, 1);
-      if (outer) outer.style.opacity = (1 - t).toFixed(3);
-      if (inner) inner.style.opacity = t.toFixed(3);
-      if (letter) {
-        // letter stays tucked inside until the flap is past halfway open, then rises —
-        // prevents the letter poking through a still-closing flap
-        const lift = clamp((open - 0.5) / 0.5, 0, 1);
-        letter.style.transform = 'translateY(' + (-maxLift * lift).toFixed(1) + 'px)';
-      }
-      if (seal) {
-        const sx = 1 - 0.18 * open;
-        seal.style.transform = 'translate(-50%, -50%) rotate(' + (-14 * open).toFixed(2) + 'deg) scale(' + sx.toFixed(3) + ')';
-        seal.style.opacity = (1 - 0.55 * open).toFixed(3);
-      }
-      env.classList.toggle('is-fully-open', open > 0.55);
-    }
-
-    // measure now, after fonts settle, and whenever the letter resizes
-    measure();
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
-    setTimeout(measure, 300);
-    if (window.ResizeObserver && paper) { new ResizeObserver(measure).observe(paper); }
-
-    // run update every frame — cheap (skips early when value doesn't change)
-    (function tick() {
-      update();
-      requestAnimationFrame(tick);
-    })();
-
-    // also wire scroll/resize for double safety
-    window.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('resize', function () { measure(); update(); });
-
-    // initial paint
-    update();
-    window.__envUpdate = update;
+(function() {
+  var lines = document.querySelectorAll('[data-sr]');
+  if (!lines.length || !('IntersectionObserver' in window)) {
+    // fallback: show all
+    lines.forEach(function(el) { el.classList.add('in'); });
+    return;
   }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  var io = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in');
+        io.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15, rootMargin: '0px 0px -60px 0px' });
+  lines.forEach(function(el) { io.observe(el); });
 })();
 </script>
+
+<!-- envelope JS removed — letter moved to /beam/letter.html -->
 
 </body>
 </html>
