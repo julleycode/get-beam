@@ -352,6 +352,7 @@
       if (ob.state.identified && ob.state.identified.matched) {
         await ob.bot(`is this you?`);
       } else {
+        await ob.bot(`no worries. let me show you how beam works when a real visitor lands.`, { delay: 400 });
         ob.go('walk'); return;
       }
       const c = ob.controls(`
@@ -415,21 +416,28 @@
     /* ── 10 · SAMPLE DRAFT ───────────────────────────────────── */
     async sample(ob) {
       const id = ob.state.identified;
-      const vName = (id && id.full_name) || 'this visitor';
+      const hasReal = id && id.matched && id.full_name;
+      const vName = hasReal ? id.full_name : '';
       const vCompany = (id && (id.company_name || id.company_domain)) || '';
       const vRole = (id && id.job_title) || '';
       const posts = ob.state.social_posts || [];
       const bestPost = posts.length > 0 ? posts[0] : null;
+      const siteHost = cleanHost(ob.state.url);
 
-      await ob.bot(`here's what i'd draft for ${vName}:`, { delay: 400 });
+      if (hasReal) {
+        await ob.bot(`here's what i'd draft for ${vName}:`, { delay: 400 });
+      } else {
+        await ob.bot(`here's what it looks like when a real visitor hits ${siteHost}:`, { delay: 400 });
+      }
 
       // Show context card with REAL data — real post if available
       const postSnippet = bestPost
         ? bestPost.content.length > 80 ? bestPost.content.slice(0, 80) + '…' : bestPost.content
         : '';
+      const visitorLabel = hasReal ? vName : 'a visitor from ' + siteHost;
       const card = await ob.bot(`
         <div class="ob-rows" style="margin-bottom:10px">
-          <div class="ob-row"><span class="k">visitor</span><span class="v">${vName}</span></div>
+          <div class="ob-row"><span class="k">visitor</span><span class="v">${visitorLabel}</span></div>
           ${vCompany ? '<div class="ob-row"><span class="k">company</span><span class="v">' + vCompany + '</span></div>' : ''}
           <div class="ob-row"><span class="k">detected on</span><span class="v">/pricing</span></div>
           ${bestPost ? '<div class="ob-row"><span class="k">latest post</span><span class="v" style="font-weight:400">"' + postSnippet + '"</span></div>' : ''}
@@ -469,8 +477,10 @@
         if (bestPost) {
           const snippet = bestPost.content.slice(0, 60);
           draftText = `this resonates. "${snippet}…" — would love to swap notes on this.`;
+        } else if (hasReal) {
+          draftText = `hey ${vName.split(' ')[0].toLowerCase()}! saw you checking out ${siteHost}. would love to connect.`;
         } else {
-          draftText = `hey ${vName.split(' ')[0].toLowerCase()}! saw you on ${cleanHost(ob.state.url)}. would love to connect.`;
+          draftText = `saw someone checking out your pricing page on ${siteHost}. this is what beam would draft based on their latest social posts and your writing style.`;
         }
       }
 

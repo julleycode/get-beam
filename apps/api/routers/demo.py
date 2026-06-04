@@ -305,7 +305,7 @@ async def demo_generate_draft(request: Request, body: DraftRequest) -> dict:
             f"Be genuine, not salesy. No hashtags. Lowercase casual tone."
         )
 
-    # Try Claude API
+    # Try Claude API (direct)
     if settings.anthropic_api_key and not settings.mock_external_apis:
         try:
             import httpx
@@ -329,14 +329,41 @@ async def demo_generate_draft(request: Request, body: DraftRequest) -> dict:
                     if text:
                         return {"draft": text.strip()}
         except Exception as e:
-            logger.warning("demo_generate_draft_error", error=str(e))
+            logger.warning("demo_generate_draft_anthropic_error", error=str(e))
+
+    # Try OpenRouter (fallback — supports 100+ models)
+    if settings.openrouter_api_key and not settings.mock_external_apis:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                resp = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {settings.openrouter_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": "anthropic/claude-sonnet-4-20250514",
+                        "max_tokens": 150,
+                        "messages": [{"role": "user", "content": prompt}],
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if text:
+                        return {"draft": text.strip()}
+        except Exception as e:
+            logger.warning("demo_generate_draft_openrouter_error", error=str(e))
 
     # Fallback: template referencing real post if available
     if body.recent_post:
         snippet = body.recent_post[:60] + ("..." if len(body.recent_post) > 60 else "")
-        return {"draft": f'this resonates. "{snippet}" — been thinking about this a lot lately. would love to swap notes.'}
+        return {"draft": f'this resonates. "{snippet}" — would love to swap notes on this.'}
 
-    company_bit = f"love what you're building at {body.visitor_company}. " if body.visitor_company else ""
+    site = body.user_url or "your site"
+    if name != "this visitor":
+        return {"draft": f"saw {first} checking out {site}. would love to connect and swap notes."}
     return {
-        "draft": f"hey {first}! saw you checking out {body.user_url or 'our site'}. {company_bit}would love to connect."
+        "draft": f"someone's been checking out your pricing page on {site}. this is what beam would draft based on their social posts and your tone."
     }
