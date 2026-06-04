@@ -324,7 +324,7 @@
                 });
                 retryInp.addEventListener('keydown', e => { if (e.key === 'Enter') retry.querySelector('[data-go]').click(); });
               }
-            } catch (_) { await ob.bot(`something went wrong — let's keep going.`); resolve(null); }
+            } catch (_) { resolve(null); }
           }
           ec.querySelector('[data-go]').addEventListener('click', doLookup);
           inp.addEventListener('keydown', e => { if (e.key === 'Enter') doLookup(); });
@@ -359,7 +359,6 @@
       if (ob.state.identified && ob.state.identified.matched) {
         await ob.bot(`is this you?`);
       } else {
-        await ob.bot(`let's keep going.`);
         ob.go('walk'); return;
       }
       const c = ob.controls(`
@@ -498,8 +497,8 @@
     /* ── 11 · PAYWALL ────────────────────────────────────────── */
     async paywall(ob) {
       const plans = {
-        pro: { name: 'pro', monthly: 49, feats: ['50 identified visitors / mo', 'social enrichment', 'ai drafts in your voice', 'manual send'] },
-        max: { name: 'max', monthly: 199, rec: true, feats: ['unlimited identified visitors', 'priority identification', 'team seats', 'custom integrations', 'api access'] },
+        pro: { name: 'pro', monthly: 19, feats: ['50 identified visitors / mo', 'social enrichment', 'ai drafts in your voice', 'manual send'] },
+        max: { name: 'max', monthly: 49, rec: true, feats: ['unlimited identified visitors', 'priority identification', 'team seats', 'api access'] },
         free: { name: 'free', monthly: 0, free: true, feats: ['10 identified visitors / mo', 'core enrichment', 'kick the tires', 'no card, ever'] },
       };
       await ob.bot(`beautiful work. ready to do this for your actual traffic? pick a plan:`, { delay: 400 });
