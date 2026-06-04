@@ -12,6 +12,7 @@ if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
     "/",            // public Beam marketing landing page
     "/onboarding(.*)",  // public aha-before-commit onboarding
     "/login(.*)",
+    "/signup(.*)",
     "/sign-in(.*)",
     "/sign-up(.*)",
   ]);
