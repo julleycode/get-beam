@@ -1,9 +1,6 @@
-import { SignUp } from "@clerk/nextjs";
+import { redirect } from "next/navigation";
 
-export default function SignUpPage() {
-  return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <SignUp />
-    </div>
-  );
+/** Redirect /sign-up → /signup (legacy auth page that works with or without Clerk) */
+export default function SignUpRedirect() {
+  redirect("/signup");
 }
