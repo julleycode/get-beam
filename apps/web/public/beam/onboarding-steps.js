@@ -219,25 +219,18 @@
       setTimeout(() => { if (document.getElementById('ob-controls')) ob.answer('', 'identify'); }, 3600);
     },
 
-    /* ── 7 · CAPTURED + IDENTIFYING (skeleton) ───────────────── */
+    /* ── 7 · CAPTURED + IDENTIFYING ───────────────── */
     async identify(ob) {
-      await ob.bot(`got you! 🎯 identifying…`, { delay: 500 });
-      await ob.bot(`
-        <div class="ob-profile">
-          <div class="ob-skel ob-avatar" style="background:#EEE6DA"></div>
-          <div class="who" style="flex:1">
-            <div class="ob-skel" style="height:18px;width:54%;margin-bottom:9px"></div>
-            <div class="ob-skel" style="height:12px;width:72%;margin-bottom:14px"></div>
-            <div class="ob-skel" style="height:11px;width:60%;margin-bottom:7px"></div>
-            <div class="ob-skel" style="height:11px;width:48%;margin-bottom:7px"></div>
-            <div class="ob-skel" style="height:11px;width:40%"></div>
-          </div>
-        </div>`, { cls: 'rich card', typing: false });
-      // REAL identification — runs the deployed IP→company→person waterfall
-      // on the visitor's own IP. (Residential/home wifi won't resolve → sample.)
+      await ob.bot(`got you! 🎯 identifying…`, { delay: 300 });
+      // Call API FIRST, then show result — no fake skeleton
       try { ob.state.identified = await apiPost('/api/v1/demo/identify', {}); }
       catch (e) { ob.state.identified = null; }
-      await ob.wait(1400);
+      const id = ob.state.identified;
+      if (id && id.matched) {
+        // IP resolved — show skeleton briefly then jump to wow
+        await ob.wait(600);
+      }
+      // Skip skeleton entirely — go straight to wow (which shows real data or email fallback)
       ob.go('wow');
     },
 
@@ -303,7 +296,7 @@
                 ob.state.identified = res;
                 resolve(res);
               } else {
-                await ob.bot(`no match. try your work email (gmail won't work).`);
+                await ob.bot(`no match for that email. works best with company emails (like you@company.com). edu and personal emails usually aren't in our database.`);
                 const retry = ob.controls(`
                   <div class="ob-field">
                     <input class="ob-input" id="ob-email-retry" type="email" placeholder="you@company.com" />
@@ -319,7 +312,7 @@
                   try {
                     const r2 = await apiPost('/api/v1/demo/identify-by-email', { email: e2 });
                     if (r2 && r2.matched) { ob.state.identified = r2; resolve(r2); }
-                    else { await ob.bot(`no match. works best with corporate domains. let's keep going.`); resolve(null); }
+                    else { await ob.bot(`still no match. no worries, let me show you how it works.`); resolve(null); }
                   } catch (_) { resolve(null); }
                 });
                 retryInp.addEventListener('keydown', e => { if (e.key === 'Enter') retry.querySelector('[data-go]').click(); });
