@@ -37,9 +37,8 @@
         beam
       </div>
       <div class="nav-pills">
-        <a href="#how">how it works</a>
-        <a href="#faq">faq</a>
-        <a href="/onboarding" class="primary">start free trial</a>
+        <a href="#how" onclick="openModal('modal-how'); return false;">how it works</a>
+        <a href="#faq" onclick="openModal('modal-faq'); return false;">faq</a>
       </div>
     </nav>
 
@@ -64,159 +63,62 @@
 </div>
 
 <!-- ────────────────────────────────────────────────────────────
-     SECTION 2: WHY I BUILT BEAM (founder note)
+     SECTION 2: SCROLL STORYTELLING (indie hacker hook)
      ──────────────────────────────────────────────────────────── -->
-<section class="founder-section">
-  <div class="wrap">
-    <!-- envelope animation — scroll-driven open -->
-    <div class="env-stage">
-      <div class="env" id="envelope" style="--open: 0">
-
-        <!-- LETTER paper: starts hidden inside envelope, slides up when open -->
-        <div class="env-letter">
-          <article class="letter-paper">
-            <header class="letter-header">
-              <span class="letter-from">from julley · @beam</span>
-              <span class="letter-date">may 28, 2026</span>
-            </header>
-            <h3 class="letter-greeting h-serif">dear future beam user,</h3>
-            <p class="letter-body" data-tw="founder-quote">i ran growth at a startup saas. nearly 1000 visitors a day. knew nothing about any of them. not their name. not their company.</p>
-            <p class="letter-body">not whether they'd been on the pricing page for six minutes or bounced in three seconds. just a number. going up. meaning nothing.</p>
-            <p class="letter-body">so i did what everyone does. i went to LinkedIn, loaded up Apollo, and started cold outreach like it was 2018. it worked. barely. badly.</p>
-            <p class="letter-body">somewhere in that mess i started building beam. now i'm handing it to you.</p>
-            <p class="letter-sig">— julley thai founder · @julleybuildsbeam
-
-
-
-
-
-
-
-</p>
-          </article>
-        </div>
-
-        <!-- ENVELOPE BODY: white rectangle + 3 static triangle flaps + subtle center seal -->
-        <svg class="env-body" viewBox="0 0 600 380" preserveAspectRatio="none" aria-hidden="true">
-          <defs>
-            <linearGradient id="env-base" x1="0.5" y1="0" x2="0.5" y2="1">
-              <stop offset="0" stop-color="#EC8AA0"/>
-              <stop offset="0.5" stop-color="#F89FB3"/>
-              <stop offset="1" stop-color="#FFB4C4"/>
-            </linearGradient>
-            <linearGradient id="env-side-l-2" x1="0" y1="0.5" x2="1" y2="0.5">
-              <stop offset="0" stop-color="#FFB8C5"/>
-              <stop offset="1" stop-color="#FFD3DC"/>
-            </linearGradient>
-            <linearGradient id="env-side-r-2" x1="0" y1="0.5" x2="1" y2="0.5">
-              <stop offset="0" stop-color="#FFD3DC"/>
-              <stop offset="1" stop-color="#FFB8C5"/>
-            </linearGradient>
-            <linearGradient id="env-bottom-2" x1="0.5" y1="0" x2="0.5" y2="1">
-              <stop offset="0" stop-color="#FFCCD5"/>
-              <stop offset="1" stop-color="#FFA1B3"/>
-            </linearGradient>
-          </defs>
-          <!-- envelope BACK panel (letter sits in front of this, tucked into the pocket) -->
-          <rect x="0" y="0" width="600" height="380" rx="8" fill="url(#env-base)"/>
-          <!-- outer border -->
-          <rect x="0.5" y="0.5" width="599" height="379" rx="8" fill="none" stroke="rgba(255, 51, 102, 0.18)" stroke-width="1"/>
-        </svg>
-
-        <!-- ENVELOPE FRONT POCKET — bottom + side flaps, drawn ABOVE the letter
-             so the letter emerges from *inside* and stays tucked at the bottom. -->
-        <svg class="env-front" viewBox="0 0 600 380" preserveAspectRatio="none" aria-hidden="true">
-          <polygon points="0,0 300,190 0,380" fill="url(#env-side-l-2)"/>
-          <polygon points="600,0 300,190 600,380" fill="url(#env-side-r-2)"/>
-          <polygon points="0,380 300,190 600,380" fill="url(#env-bottom-2)"/>
-          <!-- crease seams -->
-          <g stroke="rgba(43,37,48,0.10)" stroke-width="1" fill="none" stroke-linecap="round">
-            <line x1="0"   y1="0"   x2="300" y2="190"/>
-            <line x1="600" y1="0"   x2="300" y2="190"/>
-            <line x1="0"   y1="380" x2="300" y2="190"/>
-            <line x1="600" y1="380" x2="300" y2="190"/>
-          </g>
-          <!-- outer border -->
-          <rect x="0.5" y="0.5" width="599" height="379" rx="8" fill="none" stroke="rgba(255, 51, 102, 0.18)" stroke-width="1"/>
-        </svg>
-
-        <!-- WAX SEAL — pink dot in center, breaks when envelope opens -->
-        <div class="env-seal" aria-hidden="true">
-          <svg viewBox="0 0 60 60">
-            <circle cx="30" cy="30" r="22" fill="#FF3366"/>
-            <circle cx="30" cy="30" r="22" fill="none" stroke="#FFFFFF" stroke-width="0.8" stroke-dasharray="1.5 2.2" opacity="0.55"/>
-            <text x="30" y="38" font-family="Fraunces, serif" font-style="italic" font-weight="500" font-size="20" fill="#FFFFFF" text-anchor="middle">b</text>
-          </svg>
-        </div>
-
-        <!-- TOP FLAP — rotates open via rotateX driven by --open -->
-        <div class="env-flap">
-          <!-- outer face (visible when closed) -->
-          <svg class="env-flap-outer" viewBox="0 0 600 190" preserveAspectRatio="none" aria-hidden="true">
-            <defs>
-              <linearGradient id="env-flap-outer-grad" x1="0.5" y1="0" x2="0.5" y2="1">
-                <stop offset="0" stop-color="#FFD3DC"/>
-                <stop offset="1" stop-color="#FFA1B3"/>
-              </linearGradient>
-            </defs>
-            <polygon points="0,0 600,0 300,190" fill="url(#env-flap-outer-grad)"/>
-            <g stroke="rgba(43,37,48,0.10)" stroke-width="1" fill="none" stroke-linecap="round">
-              <line x1="0"   y1="0" x2="300" y2="190"/>
-              <line x1="600" y1="0" x2="300" y2="190"/>
-            </g>
-            <line x1="0" y1="0" x2="600" y2="0" stroke="rgba(255, 51, 102, 0.25)" stroke-width="1.2"/>
-          </svg>
-          <!-- inner lining (visible when open) — deeper pink with subtle pixel clouds.
-               Polygon: SAME orientation as the outer face (base at top y=0, apex at
-               bottom y=190). After the parent flap rotates -180° around its top
-               hinge, the apex (originally at the bottom) flips UP above the
-               envelope, giving a real envelope's "opened flap" silhouette ▲. -->
-          <svg class="env-flap-inner" viewBox="0 0 600 190" preserveAspectRatio="none" aria-hidden="true">
-            <defs>
-              <linearGradient id="env-lining-grad" x1="0.5" y1="0" x2="0.5" y2="1">
-                <stop offset="0" stop-color="#FFC7D2"/>
-                <stop offset="1" stop-color="#FF9FB0"/>
-              </linearGradient>
-            </defs>
-            <polygon points="0,0 600,0 300,190" fill="url(#env-lining-grad)"/>
-            <!-- subtle pixel clouds inside (placed within the triangle near the apex,
-                 which after rotation lands at the top of the visible flap) -->
-            <g shape-rendering="crispEdges" fill="#FFEAF0" opacity="0.95">
-              <g transform="translate(220, 120)">
-                <rect x="4" y="0" width="12" height="3"/>
-                <rect x="2" y="3" width="18" height="4"/>
-                <rect x="4" y="7" width="14" height="3"/>
-              </g>
-              <g transform="translate(360, 140)">
-                <rect x="2" y="0" width="10" height="3"/>
-                <rect x="0" y="3" width="14" height="3"/>
-              </g>
-              <g transform="translate(140, 70)">
-                <rect x="0" y="0" width="10" height="3"/>
-                <rect x="2" y="3" width="8" height="3"/>
-              </g>
-              <g transform="translate(420, 60)">
-                <rect x="0" y="0" width="12" height="3"/>
-                <rect x="2" y="3" width="10" height="3"/>
-              </g>
-            </g>
-            <!-- crease seams from base corners (0,0 and 600,0) to apex (300,190) -->
-            <g stroke="rgba(255, 51, 102, 0.32)" stroke-width="0.8" fill="none" stroke-linecap="round">
-              <line x1="0"   y1="0" x2="300" y2="190"/>
-              <line x1="600" y1="0" x2="300" y2="190"/>
-            </g>
-          </svg>
-        </div>
-
-      </div>
+<section class="story-section">
+  <div class="story-wrap">
+    <div class="story-line sl-1" data-sr>so you launched your vibe-coded product?</div>
+    <div class="story-line sl-2" data-sr>congrats. you rock! 🎉</div>
+    <div class="story-line sl-3" data-sr>how much traffic today?</div>
+    <div class="story-traffic" data-sr>
+      <button class="story-btn" data-traffic>50</button>
+      <button class="story-btn" data-traffic>100</button>
+      <button class="story-btn" data-traffic>500</button>
+      <button class="story-btn" data-traffic>1000+</button>
+    </div>
+    <div class="story-line sl-4 story-hidden" data-sr-after="traffic">nice.</div>
+    <div class="story-line sl-5 story-punch story-hidden" data-sr-after="traffic">and how many did you reach out to <em>personally?</em></div>
+    <div class="story-line sl-6 story-dots story-hidden" data-sr-after="traffic"><span class="dot d1">.</span><span class="dot d2">.</span><span class="dot d3">.</span></div>
+    <div class="story-line sl-7 story-hidden" data-sr-after="yeah">yeah.</div>
+    <div class="story-line sl-8 story-stat story-hidden" data-sr-after="rest"><span class="story-big">97%</span> of your visitors leave without a trace.</div>
+    <div class="story-line sl-9 story-hidden" data-sr-after="rest">no name. no email. no company. just a bounce.</div>
+    <div class="story-line sl-10 story-punch story-hidden" data-sr-after="rest">you spent weeks building. they spent <em>4 seconds</em> leaving.</div>
+    <div class="story-line sl-11 story-hidden" data-sr-after="rest">what if you could see exactly who they are?</div>
+    <div class="story-line sl-12 story-hidden" data-sr-after="rest">their name. their company. <em>their latest tweet.</em></div>
+    <div class="story-line sl-13 story-hidden" data-sr-after="rest">and say hi on <em>their feed?</em>
+      <span class="story-socials">
+        <span class="social-icon" data-tip="X (Twitter)"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></span>
+        <span class="social-icon" data-tip="LinkedIn"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg></span>
+        <span class="social-icon" data-tip="Instagram"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg></span>
+        <span class="social-icon" data-tip="Facebook"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg></span>
+        <span class="social-icon" data-tip="Threads"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12.186 24h-.007c-3.581-.024-6.334-1.205-8.184-3.509C2.35 18.44 1.5 15.586 1.472 12.01v-.017c.03-3.579.879-6.43 2.525-8.482C5.845 1.205 8.6.024 12.18 0h.014c2.746.02 5.043.725 6.826 2.098 1.677 1.29 2.858 3.13 3.509 5.467l-2.04.569c-1.104-3.96-3.898-5.984-8.304-6.015-2.91.022-5.11.936-6.54 2.717C4.307 6.504 3.616 8.914 3.59 12c.025 3.086.718 5.496 2.057 7.164 1.432 1.783 3.631 2.698 6.54 2.717 2.623-.02 4.358-.631 5.8-2.045 1.647-1.613 1.618-3.593 1.09-4.798-.31-.71-.873-1.3-1.634-1.75-.192 1.352-.622 2.446-1.284 3.272-.886 1.102-2.14 1.704-3.73 1.79-1.202.065-2.361-.218-3.259-.801-1.063-.689-1.685-1.74-1.752-2.96-.065-1.17.408-2.243 1.33-3.023.81-.684 1.9-1.11 3.236-1.267.94-.11 1.903-.098 2.863.037.02-.5.01-.99-.03-1.46-.12-1.33-.614-2.096-1.468-2.275-.994-.208-2.09.093-2.528.383l-1.09-1.747c.85-.53 2.396-.98 3.89-.86 1.478.118 2.588.76 3.204 1.856.49.87.72 2.028.68 3.444.51.18 1 .397 1.46.66 1.158.657 2.04 1.563 2.543 2.618.804 1.685.862 4.47-1.29 6.577C18.16 23.153 15.68 23.96 12.186 24zm-.09-8.296c-.78.043-1.378.272-1.728.662-.3.333-.36.726-.332 1.188.05.89.682 1.602 2.013 1.464 1.076-.112 2.375-.763 2.614-4.12-.724-.14-1.587-.19-2.567-.194z"/></svg></span>
+      </span>
+    </div>
+    <div class="story-line sl-14 story-hidden" data-sr-after="rest">not a cold email. not a linkedin spam.</div>
+    <div class="story-line sl-16 story-hidden" data-sr-after="rest">in <em>your voice</em>. in <em>30 seconds</em>.</div>
+    <div class="story-line sl-17 story-reveal story-hidden" data-sr-after="rest">that's <span class="story-beam">beam</span>.</div>
+    <div class="story-cta story-hidden" data-sr-after="rest">
+      <a class="btn btn-primary" href="/onboarding">start beaming for free <span aria-hidden="true">→</span></a>
+      <a class="story-letter-link" href="/beam/letter.html">read the founder's letter →</a>
     </div>
   </div>
 </section>
 
+<!-- ── ENDCARD — forest pixel art ── -->
+<section class="endcard">
+  <div class="endcard-content">
+    <a class="btn btn-primary btn-lg" href="/onboarding">start beaming for free <span aria-hidden="true">→</span></a>
+    <p class="endcard-fine">no credit card · 2-minute install · free for your first 50 visitors</p>
+  </div>
+</section>
+
+
+
 <!-- ────────────────────────────────────────────────────────────
      SECTION 3: WHAT YOU GET (3-column grid)
+     HIDDEN via display:none — remove the style to re-enable
      ──────────────────────────────────────────────────────────── -->
-<section id="how" class="what-section">
+<section id="how" class="what-section" style="display:none !important">
   <div class="wrap">
     <h2 class="eyebrow-label" data-tw="what-eyebrow" style="color: rgb(255, 51, 102)">how beam works</h2>
     <h2 class="h-serif section-title" data-tw="what-title">three steps. <em>no setup.</em></h2>
@@ -291,8 +193,9 @@
 
 <!-- ────────────────────────────────────────────────────────────
      SECTION 4: FAQ
+     HIDDEN via display:none — remove the style to re-enable
      ──────────────────────────────────────────────────────────── -->
-<section id="faq" class="faq-section">
+<section id="faq" class="faq-section" style="display:none !important">
   <div class="wrap">
     <h2 class="eyebrow-label" data-tw="faq-eyebrow" style="text-align:center;">faq</h2>
     <h2 class="h-serif section-title" data-tw="faq-title" style="text-align: center; margin-left: auto; margin-right: auto; font-size: 44px">questions you're probably <em>about to ask.</em></h2>
@@ -334,29 +237,98 @@
   </div>
 </section>
 
-<!-- ────────────────────────────────────────────────────────────
-     SECTION 5: FOOTER CTA
-     ──────────────────────────────────────────────────────────── -->
-<div class="sky-stage sky-stage--footer" style="padding-top: 1px;">
-  <div class="cloud-layer"></div>
-  <section class="footer-cta">
-    <div class="wrap">
-      <h2 class="h-serif" data-tw="footer-title">turn pageviews into <em>growth pipeline.</em></h2>
-      <a class="btn btn-primary" href="/onboarding" data-tw="primary-cta" style="margin-top: 12px;">start beaming for free <span aria-hidden="true">→</span></a>
-      <p class="fine" data-tw="footer-fine">no credit card · 2-minute install · free for your first 50 visitors</p>
-    </div>
-  </section>
-</div>
+<!-- SECTION 5: FOOTER CTA — hidden, CTA already in story section above -->
 
 <div class="wrap">
   <footer class="legal">
     <div>getbeam.fyi · made for indie founders</div>
-    <div>
-      <a href="#">privacy</a>
-      <a href="#">terms</a>
-      <a href="#">contact</a>
+    <div class="legal-links">
+      <a href="/beam/privacy.html">privacy</a>
+      <a href="/beam/terms.html">terms</a>
     </div>
   </footer>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     HOW IT WORKS MODAL
+     ──────────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-how" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-how-title">
+  <div class="modal-backdrop" onclick="closeModal('modal-how')"></div>
+  <div class="modal-content">
+    <button class="modal-close" onclick="closeModal('modal-how')" aria-label="close">&times;</button>
+    <h2 class="eyebrow-label" style="color:#FF3366">how beam works</h2>
+    <h2 class="h-serif modal-title" id="modal-how-title">three steps. <em>no setup.</em></h2>
+    <p class="modal-lede">paste your site url. install one snippet. take a nap.<br>we'll beam the rest.</p>
+    <div class="modal-steps">
+      <div class="modal-step">
+        <span class="step-num">01</span>
+        <div>
+          <h3 class="h-serif" style="font-size:22px;margin:0 0 6px">see them</h3>
+          <p>a live list of who's on your site — names, companies, what page they're reading right now.</p>
+        </div>
+      </div>
+      <div class="modal-step">
+        <span class="step-num">02</span>
+        <div>
+          <h3 class="h-serif" style="font-size:22px;margin:0 0 6px">find them</h3>
+          <p>social handles auto-matched. linkedin, twitter, facebook. know where they're most active.</p>
+        </div>
+      </div>
+      <div class="modal-step">
+        <span class="step-num">03</span>
+        <div>
+          <h3 class="h-serif" style="font-size:22px;margin:0 0 6px">charm them</h3>
+          <p>outreach that sounds like you wrote it. watch the heart float up.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     FAQ MODAL
+     ──────────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-faq" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-faq-title">
+  <div class="modal-backdrop" onclick="closeModal('modal-faq')"></div>
+  <div class="modal-content modal-content--wide">
+    <button class="modal-close" onclick="closeModal('modal-faq')" aria-label="close">&times;</button>
+    <h2 class="eyebrow-label" style="color:#FF3366;text-align:center">faq</h2>
+    <h2 class="h-serif modal-title" id="modal-faq-title" style="text-align:center">questions you're probably <em>about to ask.</em></h2>
+    <div class="faq-list" style="margin-top:24px">
+      <details class="faq-item">
+        <summary>when will i see my first identified visitor? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">within 30 minutes of installing the snippet. you'll get an email the moment beam catches one.</p>
+      </details>
+      <details class="faq-item">
+        <summary>how accurate is identification? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">60 to 80 percent of visitors on average. we run multiple identification layers with llm fallback enrichment, which pushes match rate higher than typical reverse-ip tools. b2b traffic skews to the top of that range.</p>
+      </details>
+      <details class="faq-item">
+        <summary>which platforms does beam cover? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">linkedin, x, instagram, slack, facebook, and 10+ more. real-time across all of them. you pick which platforms matter most for your icp.</p>
+      </details>
+      <details class="faq-item">
+        <summary>do i have to write the engagement copy myself? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">no. beam drafts it based on their recent posts and your product context. you edit if you want, then send from your own account in one click.</p>
+      </details>
+      <details class="faq-item">
+        <summary>how is this different from clay or rb2b? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">clay needs setup and ops know-how. rb2b just identifies — you do the rest. beam does the whole loop. paste url, done.</p>
+      </details>
+      <details class="faq-item">
+        <summary>will this get my linkedin banned? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">no. beam never logs into your account. you click send manually from native linkedin every time. zero automation on your side.</p>
+      </details>
+      <details class="faq-item">
+        <summary>how compliant is the data? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">we only automate through your own account, never fake profiles. we don't scrape data you couldn't see yourself. your data stays yours — we don't sell or share it. gdpr and ccpa compliant.</p>
+      </details>
+      <details class="faq-item">
+        <summary>can i cancel anytime? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">yes. 2 clicks from the dashboard. no contracts, no "talk to sales" gate.</p>
+      </details>
+    </div>
+  </div>
 </div>
 
 <!-- ────────────────────────────────────────────────────────────
@@ -989,107 +961,94 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
 
 </script>
 
+<!-- ── SCROLL STORYTELLING OBSERVER ── -->
+<script>
+(function() {
+  // 1. Standard scroll-reveal for [data-sr] elements (not hidden ones)
+  var lines = document.querySelectorAll('[data-sr]:not([data-sr-after])');
+  if (!lines.length || !('IntersectionObserver' in window)) {
+    document.querySelectorAll('[data-sr]').forEach(function(el) { el.classList.add('in'); });
+    return;
+  }
+  var io = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in');
+        io.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15, rootMargin: '0px 0px -60px 0px' });
+  lines.forEach(function(el) { io.observe(el); });
+
+  // 2. Traffic button interaction — reveal next lines after click
+  var btns = document.querySelectorAll('[data-traffic]');
+  var trafficRevealed = false;
+  btns.forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      if (trafficRevealed) return;
+      trafficRevealed = true;
+      // Highlight picked button
+      btns.forEach(function(b) { b.classList.remove('picked'); });
+      btn.classList.add('picked');
+      // Reveal lines after traffic pick (staggered)
+      var afterTraffic = document.querySelectorAll('[data-sr-after="traffic"]');
+      afterTraffic.forEach(function(el, i) {
+        setTimeout(function() {
+          el.classList.add('story-show');
+          // If this is the dots line, animate dots
+          if (el.classList.contains('story-dots')) {
+            var dots = el.querySelectorAll('.dot');
+            dots.forEach(function(d, di) {
+              setTimeout(function() { d.classList.add('show'); }, 400 + di * 600);
+            });
+            // After all dots shown, reveal "yeah." with delay
+            setTimeout(function() {
+              var yeah = document.querySelector('[data-sr-after="yeah"]');
+              if (yeah) yeah.classList.add('story-show');
+              // After yeah appears, stagger-reveal the rest of the story
+              setTimeout(function() {
+                var rest = document.querySelectorAll('[data-sr-after="rest"]');
+                rest.forEach(function(el, i) {
+                  setTimeout(function() {
+                    el.classList.add('story-show');
+                  }, i * 500);
+                });
+              }, 900);
+            }, 400 + dots.length * 600 + 800);
+          }
+        }, i * 700);
+      });
+    });
+  });
+})();
+</script>
+
+<!-- envelope JS removed — letter moved to /beam/letter.html -->
 
 <script>
-/* envelope reveal — scroll-driven open.
-   --open from 0 (closed) → 1 (fully open). JS-driven inline transforms.
-   Uses an IntersectionObserver to start a rAF loop while the section is
-   in view — more reliable than a plain scroll listener (which doesn't
-   fire in some preview iframes). */
-(function () {
-  function init() {
-    const env  = document.getElementById('envelope');
-    if (!env) return;
-    const stage  = env.closest('.env-stage') || env;
-    const flap   = env.querySelector('.env-flap');
-    const outer  = env.querySelector('.env-flap-outer');
-    const inner  = env.querySelector('.env-flap-inner');
-    const letter = env.querySelector('.env-letter');
-    const seal   = env.querySelector('.env-seal');
-    const paper  = env.querySelector('.letter-paper');
-
-    function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
-
-    // Lift is computed in PX (not % of the letter) so it works for ANY letter
-    // length: the letter rises just enough to tuck its bottom at the opening,
-    // and the stage gets headroom above so a tall letter never spills off the top.
-    let maxLift = 0;
-    let lastPaperH = -1;
-    function measure() {
-      const envH = env.offsetHeight || 1;
-      const paperH = paper ? paper.offsetHeight : 0;
-      if (paperH === lastPaperH) return; // avoid ResizeObserver feedback loop
-      lastPaperH = paperH;
-      maxLift = Math.max(0, (0.12 * envH + paperH) - 0.10 * envH);
-      if (stage && stage.style) stage.style.paddingTop = Math.round(maxLift + 28) + 'px';
-      lastOpen = -1; // force transforms to re-apply on next update
-    }
-
-    let lastOpen = -1;
-    function update() {
-      // Drive open from the ENVELOPE's position (not the stage, whose tall
-      // top headroom is in view at scroll-top now that the section is pulled
-      // up). Sealed while the envelope peeks in the lower screen; opens as it
-      // rises toward the top.
-      const rect = env.getBoundingClientRect();
-      const vh = window.innerHeight || document.documentElement.clientHeight;
-      const begin = vh * 0.78;
-      const end   = vh * 0.70;
-      const open  = clamp((begin - rect.top) / (begin - end), 0, 1);
-      // Skip if unchanged (within rounding tolerance)
-      if (Math.abs(open - lastOpen) < 0.001) return;
-      lastOpen = open;
-
-      env.style.setProperty('--open', open.toFixed(3));
-      if (flap) {
-        flap.style.transform = 'rotateX(' + (-180 * open).toFixed(2) + 'deg)';
-        // once the flap is past vertical it folds behind, so the rising letter sits in front
-        flap.style.zIndex = open > 0.5 ? '3' : '7';
-      }
-      const t = clamp((open - 0.46) / 0.10, 0, 1);
-      if (outer) outer.style.opacity = (1 - t).toFixed(3);
-      if (inner) inner.style.opacity = t.toFixed(3);
-      if (letter) {
-        // letter stays tucked inside until the flap is past halfway open, then rises —
-        // prevents the letter poking through a still-closing flap
-        const lift = clamp((open - 0.5) / 0.5, 0, 1);
-        letter.style.transform = 'translateY(' + (-maxLift * lift).toFixed(1) + 'px)';
-      }
-      if (seal) {
-        const sx = 1 - 0.18 * open;
-        seal.style.transform = 'translate(-50%, -50%) rotate(' + (-14 * open).toFixed(2) + 'deg) scale(' + sx.toFixed(3) + ')';
-        seal.style.opacity = (1 - 0.55 * open).toFixed(3);
-      }
-      env.classList.toggle('is-fully-open', open > 0.55);
-    }
-
-    // measure now, after fonts settle, and whenever the letter resizes
-    measure();
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(measure);
-    setTimeout(measure, 300);
-    if (window.ResizeObserver && paper) { new ResizeObserver(measure).observe(paper); }
-
-    // run update every frame — cheap (skips early when value doesn't change)
-    (function tick() {
-      update();
-      requestAnimationFrame(tick);
-    })();
-
-    // also wire scroll/resize for double safety
-    window.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('resize', function () { measure(); update(); });
-
-    // initial paint
-    update();
-    window.__envUpdate = update;
+/* how/faq modal open + close */
+function openModal(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.style.display = 'flex';
+  requestAnimationFrame(function() { el.classList.add('modal-open'); });
+  document.body.style.overflow = 'hidden';
+}
+function closeModal(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('modal-open');
+  document.body.style.overflow = '';
+  setTimeout(function() { el.style.display = 'none'; }, 240);
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    ['modal-how', 'modal-faq'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el && el.style.display !== 'none') closeModal(id);
+    });
   }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
-})();
+});
 </script>
 
 </body>
