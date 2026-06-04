@@ -51,6 +51,7 @@ body {
 .sky-stage {
   position: relative;
   background:
+    url('/beam/forest-bg.png') center top / cover no-repeat,
     linear-gradient(to bottom, var(--sky-pale) 0%, var(--sky) 38%, var(--sky-pale) 62%, var(--cream-warm) 78%, var(--field-1) 100%);
   overflow: hidden;
   isolation: isolate;
@@ -88,14 +89,13 @@ nav.top {
   display: inline-flex; align-items: center;
   gap: 0;
   padding: 8px 14px 8px 12px;
-  background: var(--cloud);
-  border: 1px solid var(--line);
+  background: transparent;
+  border: none;
   border-radius: 10px;
   font-family: 'Fraunces', serif;
   font-weight: 600;
   font-size: 22px;
   letter-spacing: -0.03em;
-  box-shadow: 0 1px 0 rgba(43,37,48,0.04);
 }
 .logo .logo-dot {
   width: 10px; height: 10px;
@@ -1701,5 +1701,109 @@ footer.legal a:hover { color: var(--ink); }
   .story-section { padding: 80px 0 60px; }
   .story-line { margin-bottom: 0.5em; }
   .story-cta { flex-direction: column; align-items: flex-start; gap: 16px; }
+}
+
+/* ── legal-links spacing ───────────────────────────────────── */
+footer.legal .legal-links a { margin-left: 18px; }
+
+
+/* ── how/faq modals ────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  z-index: 300;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+.modal-overlay.modal-open {
+  opacity: 1;
+}
+.modal-backdrop {
+  position: absolute; inset: 0;
+  background: color-mix(in oklab, var(--ink) 42%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.modal-content {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: var(--cloud);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  padding: 40px 36px 36px;
+  box-shadow:
+    0 1px 0 rgba(43,37,48,0.04),
+    0 24px 60px -20px rgba(43,37,48,0.28),
+    0 60px 100px -30px color-mix(in oklab, var(--pink) 20%, transparent);
+  transform: translateY(14px) scale(0.97);
+  transition: transform 0.26s cubic-bezier(0.34, 1.4, 0.5, 1);
+}
+.modal-overlay.modal-open .modal-content {
+  transform: translateY(0) scale(1);
+}
+.modal-content--wide { max-width: 680px; }
+.modal-close {
+  position: absolute;
+  top: 14px; right: 14px;
+  width: 32px; height: 32px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--ink-2);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: grid; place-items: center;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.modal-close:hover {
+  background: color-mix(in oklab, var(--pink) 12%, transparent);
+  color: var(--pink);
+}
+.modal-title {
+  font-size: clamp(26px, 3.2vw, 36px);
+  margin: 8px 0 12px;
+}
+.modal-title em { font-style: italic; color: var(--pink); font-weight: 500; }
+.modal-lede {
+  font-size: 15px;
+  color: var(--ink-2);
+  line-height: 1.55;
+  margin: 0 0 28px;
+}
+.modal-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.modal-step {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  padding: 20px;
+  background: var(--cream);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+}
+.modal-step .step-num {
+  flex: 0 0 auto;
+  margin-bottom: 0;
+}
+.modal-step p {
+  font-size: 14px;
+  color: var(--ink-2);
+  line-height: 1.55;
+  margin: 0;
+}
+
+@media (max-width: 560px) {
+  .modal-content { padding: 32px 22px 28px; }
+  .modal-title { font-size: 24px; }
 }
 

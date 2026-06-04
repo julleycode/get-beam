@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>privacy policy — beam</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='0.35'%3E%3Cstop offset='0' stop-color='%23FF6B9D'/%3E%3Cstop offset='0.55' stop-color='%23FF3366'/%3E%3Cstop offset='1' stop-color='%23FF7FA8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M30,9 Q30,32 57,32 Q30,32 30,55 Q30,32 9,32 Q30,32 30,9 Z' fill='url(%23g)'/%3E%3Ccircle cx='30' cy='32' r='3.2' fill='%23fff' opacity='0.9'/%3E%3Cpath d='M50,17 Q52,21 56,21 Q52,21 50,25 Q48,21 44,21 Q48,21 50,17 Z' fill='url(%23g)' opacity='0.8'/%3E%3C/svg%3E" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #FFF8F5;
+    color: #2b2530;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 60px 24px 80px;
+  }
+  .back {
+    position: fixed;
+    top: 24px;
+    left: 24px;
+    font-size: 14px;
+    color: #b8a0a8;
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  .back:hover { color: #FF3366; }
+  .letter {
+    max-width: 620px;
+    width: 100%;
+    background: white;
+    border-radius: 16px;
+    padding: 48px 40px;
+    box-shadow: 0 4px 24px rgba(43,37,48,0.08);
+    margin-top: 20px;
+  }
+  .letter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 32px;
+    font-size: 13px;
+    color: #b8a0a8;
+  }
+  .greeting {
+    font-family: 'Fraunces', serif;
+    font-size: 32px;
+    font-weight: 500;
+    font-style: italic;
+    margin-bottom: 28px;
+    color: #2b2530;
+    letter-spacing: -0.02em;
+  }
+  .greeting em { color: #FF3366; }
+  h2 {
+    font-family: 'Fraunces', serif;
+    font-size: 18px;
+    font-weight: 500;
+    margin: 28px 0 10px;
+    color: #2b2530;
+    letter-spacing: -0.015em;
+  }
+  p {
+    font-size: 15px;
+    line-height: 1.7;
+    color: #5a4f66;
+    margin-bottom: 14px;
+  }
+  ul {
+    font-size: 15px;
+    line-height: 1.7;
+    color: #5a4f66;
+    margin: 0 0 14px 20px;
+  }
+  ul li { margin-bottom: 6px; }
+  a { color: #FF3366; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .updated {
+    font-size: 12px;
+    color: #b8a0a8;
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px dashed rgba(43,37,48,0.12);
+  }
+  @media (max-width: 640px) {
+    .letter { padding: 32px 22px; }
+    .greeting { font-size: 26px; }
+  }
+</style>
+</head>
+<body>
+
+<a class="back" href="/beam/">← back to beam</a>
+
+<div class="letter">
+  <div class="letter-header">
+    <span>getbeam.fyi</span>
+    <span>privacy policy</span>
+  </div>
+
+  <h1 class="greeting">privacy policy. <em>plain english.</em></h1>
+
+  <p>beam is built by indie founders, for indie founders. we take data seriously — not because lawyers made us, but because we'd want the same from tools we use.</p>
+
+  <h2>what we collect</h2>
+  <p>when you use beam, we collect:</p>
+  <ul>
+    <li>your name and email when you sign up</li>
+    <li>your website's visitor event data (page views, time on site, referrer)</li>
+    <li>billing information (handled by stripe — we never see raw card numbers)</li>
+    <li>usage data to improve the product (feature clicks, session length)</li>
+  </ul>
+
+  <h2>what we do with it</h2>
+  <p>we use your data to:</p>
+  <ul>
+    <li>run the beam service for your account</li>
+    <li>identify and enrich visitor profiles for your site</li>
+    <li>send you transactional emails (new visitor alerts, billing receipts)</li>
+    <li>improve the product based on usage patterns</li>
+  </ul>
+  <p>we do not sell your data. we do not share visitor data with third parties except the enrichment providers we use to identify visitors on your behalf (people data labs, proxycurl). those providers have their own privacy policies.</p>
+
+  <h2>visitor data and your visitors</h2>
+  <p>when beam identifies a visitor on your site, it surfaces publicly available information — names, company, social handles — sourced from data brokers and public social networks. this data is cached for 30 days and only used within your beam dashboard.</p>
+  <p>identified visitors can request deletion by emailing <a href="mailto:privacy@getbeam.fyi">privacy@getbeam.fyi</a>. we'll process requests within 7 days.</p>
+
+  <h2>data retention</h2>
+  <p>visitor event data is retained for 90 days by default. enriched profiles are retained for as long as your account is active. you can delete any or all data from your dashboard settings at any time.</p>
+
+  <h2>security</h2>
+  <p>all data is encrypted in transit (tls) and at rest. we use supabase for storage, which is soc 2 compliant. we follow the principle of least privilege — only the services that need your data can access it.</p>
+
+  <h2>gdpr and ccpa</h2>
+  <p>if you're in the eu or california, you have the right to access, correct, and delete your personal data. email us at <a href="mailto:privacy@getbeam.fyi">privacy@getbeam.fyi</a> and we'll sort it out fast.</p>
+
+  <h2>cookies</h2>
+  <p>beam uses minimal cookies: one session cookie to keep you logged in, and one analytics cookie to measure basic usage (no third-party trackers). the beam tracking pixel on your site uses first-party storage only.</p>
+
+  <h2>changes to this policy</h2>
+  <p>if we make material changes, we'll email registered users at least 14 days before they take effect. the latest version is always at this url.</p>
+
+  <h2>contact</h2>
+  <p>questions? email <a href="mailto:privacy@getbeam.fyi">privacy@getbeam.fyi</a>. we're a small team and we respond personally.</p>
+
+  <p class="updated">last updated: june 2026</p>
+</div>
+
+</body>
+</html>

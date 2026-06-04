@@ -37,9 +37,8 @@
         beam
       </div>
       <div class="nav-pills">
-        <a href="#how">how it works</a>
-        <a href="#faq">faq</a>
-        <a href="/onboarding" class="primary">start free trial</a>
+        <a href="#how" onclick="openModal('modal-how'); return false;">how it works</a>
+        <a href="#faq" onclick="openModal('modal-faq'); return false;">faq</a>
       </div>
     </nav>
 
@@ -81,12 +80,12 @@
     <div class="story-line sl-5 story-punch story-hidden" data-sr-after="traffic">and how many did you reach out to <em>personally?</em></div>
     <div class="story-line sl-6 story-dots story-hidden" data-sr-after="traffic"><span class="dot d1">.</span><span class="dot d2">.</span><span class="dot d3">.</span></div>
     <div class="story-line sl-7 story-hidden" data-sr-after="yeah">yeah.</div>
-    <div class="story-line sl-8 story-stat" data-sr><span class="story-big">97%</span> of your visitors leave without a trace.</div>
-    <div class="story-line sl-9" data-sr>no name. no email. no company. just a bounce.</div>
-    <div class="story-line sl-10 story-punch" data-sr>you spent weeks building. they spent <em>4 seconds</em> leaving.</div>
-    <div class="story-line sl-11" data-sr>what if you could see exactly who they are?</div>
-    <div class="story-line sl-12" data-sr>their name. their company. <em>their latest tweet.</em></div>
-    <div class="story-line sl-13" data-sr>and say hi on <em>their feed?</em>
+    <div class="story-line sl-8 story-stat story-hidden" data-sr-after="rest"><span class="story-big">97%</span> of your visitors leave without a trace.</div>
+    <div class="story-line sl-9 story-hidden" data-sr-after="rest">no name. no email. no company. just a bounce.</div>
+    <div class="story-line sl-10 story-punch story-hidden" data-sr-after="rest">you spent weeks building. they spent <em>4 seconds</em> leaving.</div>
+    <div class="story-line sl-11 story-hidden" data-sr-after="rest">what if you could see exactly who they are?</div>
+    <div class="story-line sl-12 story-hidden" data-sr-after="rest">their name. their company. <em>their latest tweet.</em></div>
+    <div class="story-line sl-13 story-hidden" data-sr-after="rest">and say hi on <em>their feed?</em>
       <span class="story-socials">
         <span class="social-icon" data-tip="X (Twitter)"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></span>
         <span class="social-icon" data-tip="LinkedIn"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg></span>
@@ -95,10 +94,10 @@
         <span class="social-icon" data-tip="Threads"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M12.186 24h-.007c-3.581-.024-6.334-1.205-8.184-3.509C2.35 18.44 1.5 15.586 1.472 12.01v-.017c.03-3.579.879-6.43 2.525-8.482C5.845 1.205 8.6.024 12.18 0h.014c2.746.02 5.043.725 6.826 2.098 1.677 1.29 2.858 3.13 3.509 5.467l-2.04.569c-1.104-3.96-3.898-5.984-8.304-6.015-2.91.022-5.11.936-6.54 2.717C4.307 6.504 3.616 8.914 3.59 12c.025 3.086.718 5.496 2.057 7.164 1.432 1.783 3.631 2.698 6.54 2.717 2.623-.02 4.358-.631 5.8-2.045 1.647-1.613 1.618-3.593 1.09-4.798-.31-.71-.873-1.3-1.634-1.75-.192 1.352-.622 2.446-1.284 3.272-.886 1.102-2.14 1.704-3.73 1.79-1.202.065-2.361-.218-3.259-.801-1.063-.689-1.685-1.74-1.752-2.96-.065-1.17.408-2.243 1.33-3.023.81-.684 1.9-1.11 3.236-1.267.94-.11 1.903-.098 2.863.037.02-.5.01-.99-.03-1.46-.12-1.33-.614-2.096-1.468-2.275-.994-.208-2.09.093-2.528.383l-1.09-1.747c.85-.53 2.396-.98 3.89-.86 1.478.118 2.588.76 3.204 1.856.49.87.72 2.028.68 3.444.51.18 1 .397 1.46.66 1.158.657 2.04 1.563 2.543 2.618.804 1.685.862 4.47-1.29 6.577C18.16 23.153 15.68 23.96 12.186 24zm-.09-8.296c-.78.043-1.378.272-1.728.662-.3.333-.36.726-.332 1.188.05.89.682 1.602 2.013 1.464 1.076-.112 2.375-.763 2.614-4.12-.724-.14-1.587-.19-2.567-.194z"/></svg></span>
       </span>
     </div>
-    <div class="story-line sl-14" data-sr>not a cold email. not a linkedin spam.</div>
-    <div class="story-line sl-16" data-sr>in <em>your voice</em>. in <em>30 seconds</em>.</div>
-    <div class="story-line sl-17 story-reveal" data-sr>that's <span class="story-beam">beam</span>.</div>
-    <div class="story-cta" data-sr>
+    <div class="story-line sl-14 story-hidden" data-sr-after="rest">not a cold email. not a linkedin spam.</div>
+    <div class="story-line sl-16 story-hidden" data-sr-after="rest">in <em>your voice</em>. in <em>30 seconds</em>.</div>
+    <div class="story-line sl-17 story-reveal story-hidden" data-sr-after="rest">that's <span class="story-beam">beam</span>.</div>
+    <div class="story-cta story-hidden" data-sr-after="rest">
       <a class="btn btn-primary" href="/onboarding">start beaming for free <span aria-hidden="true">→</span></a>
       <a class="story-letter-link" href="/beam/letter.html">read the founder's letter →</a>
     </div>
@@ -238,12 +237,93 @@
 <div class="wrap">
   <footer class="legal">
     <div>getbeam.fyi · made for indie founders</div>
-    <div>
-      <a href="#">privacy</a>
-      <a href="#">terms</a>
-      <a href="#">contact</a>
+    <div class="legal-links">
+      <a href="/beam/privacy.html">privacy</a>
+      <a href="/beam/terms.html">terms</a>
     </div>
   </footer>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     HOW IT WORKS MODAL
+     ──────────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-how" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-how-title">
+  <div class="modal-backdrop" onclick="closeModal('modal-how')"></div>
+  <div class="modal-content">
+    <button class="modal-close" onclick="closeModal('modal-how')" aria-label="close">&times;</button>
+    <h2 class="eyebrow-label" style="color:#FF3366">how beam works</h2>
+    <h2 class="h-serif modal-title" id="modal-how-title">three steps. <em>no setup.</em></h2>
+    <p class="modal-lede">paste your site url. install one snippet. take a nap.<br>we'll beam the rest.</p>
+    <div class="modal-steps">
+      <div class="modal-step">
+        <span class="step-num">01</span>
+        <div>
+          <h3 class="h-serif" style="font-size:22px;margin:0 0 6px">see them</h3>
+          <p>a live list of who's on your site — names, companies, what page they're reading right now.</p>
+        </div>
+      </div>
+      <div class="modal-step">
+        <span class="step-num">02</span>
+        <div>
+          <h3 class="h-serif" style="font-size:22px;margin:0 0 6px">find them</h3>
+          <p>social handles auto-matched. linkedin, twitter, facebook. know where they're most active.</p>
+        </div>
+      </div>
+      <div class="modal-step">
+        <span class="step-num">03</span>
+        <div>
+          <h3 class="h-serif" style="font-size:22px;margin:0 0 6px">charm them</h3>
+          <p>outreach that sounds like you wrote it. watch the heart float up.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ────────────────────────────────────────────────────────────
+     FAQ MODAL
+     ──────────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="modal-faq" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-faq-title">
+  <div class="modal-backdrop" onclick="closeModal('modal-faq')"></div>
+  <div class="modal-content modal-content--wide">
+    <button class="modal-close" onclick="closeModal('modal-faq')" aria-label="close">&times;</button>
+    <h2 class="eyebrow-label" style="color:#FF3366;text-align:center">faq</h2>
+    <h2 class="h-serif modal-title" id="modal-faq-title" style="text-align:center">questions you're probably <em>about to ask.</em></h2>
+    <div class="faq-list" style="margin-top:24px">
+      <details class="faq-item">
+        <summary>when will i see my first identified visitor? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">within 30 minutes of installing the snippet. you'll get an email the moment beam catches one.</p>
+      </details>
+      <details class="faq-item">
+        <summary>how accurate is identification? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">60 to 80 percent of visitors on average. we run multiple identification layers with llm fallback enrichment, which pushes match rate higher than typical reverse-ip tools. b2b traffic skews to the top of that range.</p>
+      </details>
+      <details class="faq-item">
+        <summary>which platforms does beam cover? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">linkedin, x, instagram, slack, facebook, and 10+ more. real-time across all of them. you pick which platforms matter most for your icp.</p>
+      </details>
+      <details class="faq-item">
+        <summary>do i have to write the engagement copy myself? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">no. beam drafts it based on their recent posts and your product context. you edit if you want, then send from your own account in one click.</p>
+      </details>
+      <details class="faq-item">
+        <summary>how is this different from clay or rb2b? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">clay needs setup and ops know-how. rb2b just identifies — you do the rest. beam does the whole loop. paste url, done.</p>
+      </details>
+      <details class="faq-item">
+        <summary>will this get my linkedin banned? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">no. beam never logs into your account. you click send manually from native linkedin every time. zero automation on your side.</p>
+      </details>
+      <details class="faq-item">
+        <summary>how compliant is the data? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">we only automate through your own account, never fake profiles. we don't scrape data you couldn't see yourself. your data stays yours — we don't sell or share it. gdpr and ccpa compliant.</p>
+      </details>
+      <details class="faq-item">
+        <summary>can i cancel anytime? <span class="chev" aria-hidden="true">+</span></summary>
+        <p class="faq-answer">yes. 2 clicks from the dashboard. no contracts, no "talk to sales" gate.</p>
+      </details>
+    </div>
+  </div>
 </div>
 
 <!-- ────────────────────────────────────────────────────────────
@@ -920,6 +1000,15 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
             setTimeout(function() {
               var yeah = document.querySelector('[data-sr-after="yeah"]');
               if (yeah) yeah.classList.add('story-show');
+              // After yeah appears, stagger-reveal the rest of the story
+              setTimeout(function() {
+                var rest = document.querySelectorAll('[data-sr-after="rest"]');
+                rest.forEach(function(el, i) {
+                  setTimeout(function() {
+                    el.classList.add('story-show');
+                  }, i * 500);
+                });
+              }, 900);
             }, 400 + dots.length * 600 + 800);
           }
         }, i * 700);
@@ -930,6 +1019,32 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
 </script>
 
 <!-- envelope JS removed — letter moved to /beam/letter.html -->
+
+<script>
+/* how/faq modal open + close */
+function openModal(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.style.display = 'flex';
+  requestAnimationFrame(function() { el.classList.add('modal-open'); });
+  document.body.style.overflow = 'hidden';
+}
+function closeModal(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('modal-open');
+  document.body.style.overflow = '';
+  setTimeout(function() { el.style.display = 'none'; }, 240);
+}
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    ['modal-how', 'modal-faq'].forEach(function(id) {
+      var el = document.getElementById(id);
+      if (el && el.style.display !== 'none') closeModal(id);
+    });
+  }
+});
+</script>
 
 </body>
 </html>
