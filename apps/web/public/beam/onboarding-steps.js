@@ -169,7 +169,7 @@
         </div>`, { cls: 'rich plain', typing: false });
       const c = ob.controls(`
         <button class="ob-btn ob-btn-primary" data-go>i installed it</button>
-        <button class="ob-btn ob-btn-ghost" id="ob-dev">send to my dev</button>`);
+        <button class="ob-btn ob-btn-ghost" id="ob-dev">send to my AI agent</button>`);
       // copy button lives in the previous bubble
       const copyBtn = document.getElementById('ob-copy');
       if (copyBtn) copyBtn.addEventListener('click', () => {
@@ -178,25 +178,19 @@
         copyBtn.textContent = '✓ copied'; copyBtn.classList.add('copied');
         setTimeout(() => { copyBtn.textContent = 'copy'; copyBtn.classList.remove('copied'); }, 1800);
       });
-      c.querySelector('[data-go]').addEventListener('click', () => ob.answer('done — it\'s installed', 'detect'));
+      c.querySelector('[data-go]').addEventListener('click', () => ob.answer('installed', 'detect'));
       c.querySelector('#ob-dev').addEventListener('click', () => {
+        const prompt = `Install the Beam tracking pixel on ${cleanHost(ob.state.url)} (${ob.state.platform || 'unknown platform'}).\n\nAdd this snippet before </head>:\n<script src="https://beam.fyi/b.js" data-id="usr_8fk2c9"></scr` + `ipt>\n\nFor ${ob.state.platform || 'your site'}: ${PLATFORM_INSTALL[ob.state.platform] || PLATFORM_INSTALL.unknown}`;
+        if (navigator.clipboard) navigator.clipboard.writeText(prompt).catch(() => {});
         ob.modal(`
-          <h3>send install to your dev</h3>
-          <p>i'll email step-by-step instructions for ${ob.state.platform}.</p>
-          <label class="ob-label">your dev's email</label>
-          <input class="ob-input-plain" id="ob-dev-email" placeholder="dev@${cleanHost(ob.state.url)}" />
+          <h3>prompt copied ✓</h3>
+          <p>paste this into Cursor, Claude Code, or any AI coding agent. it has the snippet + install instructions for ${ob.state.platform || 'your site'}.</p>
+          <div class="ob-code" style="font-size:12px;max-height:140px;overflow-y:auto;margin:12px 0">${prompt.replace(/\n/g, '<br>').replace(/</g, '&lt;')}</div>
           <div class="ob-actions" style="margin-top:16px">
-            <button class="ob-btn ob-btn-primary" id="ob-dev-send">send</button>
-            <button class="ob-btn ob-btn-ghost" id="ob-dev-cancel">cancel</button>
+            <button class="ob-btn ob-btn-primary" id="ob-dev-ok">got it</button>
           </div>`);
         const back = document.getElementById('ob-modal-back');
-        setTimeout(() => { const i = back.querySelector('#ob-dev-email'); if (i) i.focus(); }, 60);
-        back.querySelector('#ob-dev-cancel').addEventListener('click', () => ob.closeModal());
-        back.querySelector('#ob-dev-send').addEventListener('click', () => {
-          const m = back.querySelector('.ob-modal');
-          m.innerHTML = `<h3>sent ✓</h3><p>your dev has the instructions. keep going — i'll detect the snippet automatically once it's live.</p><div class="ob-actions"><button class="ob-btn ob-btn-primary" id="ob-dev-ok">got it</button></div>`;
-          m.querySelector('#ob-dev-ok').addEventListener('click', () => { ob.closeModal(); ob.answer('sent it to my dev', 'detect'); });
-        });
+        back.querySelector('#ob-dev-ok').addEventListener('click', () => { ob.closeModal(); ob.answer('sent to my agent', 'detect'); });
       });
     },
 
@@ -287,8 +281,8 @@
           company: id.company_domain, country: id.country,
         }), { cls: 'rich card', typing: false });
       } else {
-        await ob.bot(`you're on home/mobile wifi right now, so your ip didn't resolve to a company — totally normal.`, { delay: 300 });
-        await ob.bot(`but i can still show you the magic. drop your work email and i'll pull your real profile — same engine, real data.`);
+        await ob.bot(`home wifi, so your ip didn't resolve. totally normal.`, { delay: 300 });
+        await ob.bot(`drop your work email and i'll pull your real profile.`);
         const ec = ob.controls(`
           <div class="ob-field">
             <input class="ob-input" id="ob-email-id" type="email" placeholder="you@company.com" autocomplete="email" />
@@ -309,7 +303,7 @@
                 ob.state.identified = res;
                 resolve(res);
               } else {
-                await ob.bot(`hmm, couldn't find a profile for that email. try your work email (gmail/yahoo won't enrich).`);
+                await ob.bot(`no match. try your work email (gmail won't work).`);
                 const retry = ob.controls(`
                   <div class="ob-field">
                     <input class="ob-input" id="ob-email-retry" type="email" placeholder="you@company.com" />
@@ -325,7 +319,7 @@
                   try {
                     const r2 = await apiPost('/api/v1/demo/identify-by-email', { email: e2 });
                     if (r2 && r2.matched) { ob.state.identified = r2; resolve(r2); }
-                    else { await ob.bot(`still no match — no worries, this works best with corporate domains. let me show you the rest.`); resolve(null); }
+                    else { await ob.bot(`no match. works best with corporate domains. let's keep going.`); resolve(null); }
                   } catch (_) { resolve(null); }
                 });
                 retryInp.addEventListener('keydown', e => { if (e.key === 'Enter') retry.querySelector('[data-go]').click(); });
@@ -337,7 +331,7 @@
         });
 
         if (emailResult && emailResult.matched) {
-          await ob.bot(`found you — here's your real profile, pulled from just an email:`, { delay: 300 });
+          await ob.bot(`found you:`, { delay: 300 });
           await ob.bot(profileCard({
             name: emailResult.full_name || emailResult.email,
             role: [emailResult.job_title, emailResult.company_name || emailResult.company_domain].filter(Boolean).join(' · '),
@@ -348,11 +342,24 @@
           }), { cls: 'rich card', typing: false });
         }
       }
+      // Fetch REAL social posts if we have a twitter handle
+      if (ob.state.identified && ob.state.identified.twitter_handle) {
+        try {
+          const sp = await apiPost('/api/v1/demo/social-posts', {
+            twitter_handle: ob.state.identified.twitter_handle,
+          });
+          ob.state.social_posts = (sp && sp.posts) || [];
+          ob.state.social_source = (sp && sp.source) || 'none';
+        } catch (_) { ob.state.social_posts = []; }
+      } else {
+        ob.state.social_posts = [];
+      }
+
       setTimeout(() => ob.celebrate(), 250);
       if (ob.state.identified && ob.state.identified.matched) {
         await ob.bot(`is this you?`);
       } else {
-        await ob.bot(`let's keep going — i'll show you how it works with real visitors.`);
+        await ob.bot(`let's keep going.`);
         ob.go('walk'); return;
       }
       const c = ob.controls(`
@@ -375,18 +382,35 @@
 
     /* ── 9 · WALKTHROUGH ─────────────────────────────────────── */
     async walk(ob) {
+      // Use real identified visitor data
+      const id = ob.state.identified;
+      const vName = (id && id.full_name) || 'a visitor';
+      const vHandle = (id && id.twitter_handle) ? '@' + id.twitter_handle : '';
+      const vCompany = (id && (id.company_name || id.company_domain)) || '';
+      const vRole = [id && id.job_title, vCompany].filter(Boolean).join(' · ') || '';
+      const initials = vName.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || '??';
+      const posts = ob.state.social_posts || [];
+
+      // Build real social card from actual posts
+      let socialCard = '';
+      if (vName !== 'a visitor') {
+        const postLines = posts.slice(0, 2).map(p => {
+          const snippet = p.content.length > 80 ? p.content.slice(0, 80) + '…' : p.content;
+          return `<div class="mini-line">· "${snippet}"</div>`;
+        }).join('');
+        socialCard = `<div class="ob-mini">
+          <div class="mini-row"><span class="mini-av" style="background:#C7E1F3">${initials}</span><div><div>${vName}</div><div class="mini-tag">${vRole}</div></div></div>
+          ${vHandle ? '<div class="mini-line" style="color:var(--pink,#FF3366)">· ' + vHandle + ' on x</div>' : ''}
+          ${postLines || (vHandle ? '<div class="mini-line" style="opacity:0.5">· no recent posts found</div>' : '')}
+        </div>`;
+      }
+
       const beats = [
-        { say: `that's the first thing i do — every visitor that lands, i try to identify. 7 fallback layers, so i catch 60–80% of your traffic.`, card: '' },
-        { say: `then i find where they're active — linkedin, x, instagram — so you know where to show up.`,
-          card: `<div class="ob-mini">
-            <div class="mini-row"><span class="mini-av" style="background:#C7E1F3">JT</span><div><div>julley tran</div><div class="mini-tag">active on linkedin · x</div></div></div>
-            <div class="mini-line">· "shipped beam.fyi from saigon" — 2h ago</div>
-            <div class="mini-line">· replied to @stripe on x — yesterday</div>
-          </div>` },
-        { say: `then i draft the engagement for you — personalized to what they posted, written in your voice.`,
-          card: `<div class="ob-draftcard"><div class="dmeta">${badge('in')} comment draft</div>"love this — shipping solo from saigon is the dream. the visitor-id space needs more opinionated builders."</div>` },
-        { say: `all you do is review and hit send. you send from your own account — i never log in, zero automation on your side. that's why accounts never get flagged.`, card: '' },
-        { say: `that's the whole thing: paste url → install snippet → i identify → you engage. stupidly easy.`, card: '' },
+        { say: `every visitor that lands, i identify. 7 layers. 60-80% match rate.`, card: '' },
+        { say: `then i find their socials.`, card: socialCard },
+        { say: `then i draft a reply. personalized. in your voice.`, card: '' },
+        { say: `you review, hit send. from your own account. no bans.`, card: '' },
+        { say: `paste url. install snippet. i identify. you engage. done.`, card: '' },
       ];
       for (let i = 0; i < beats.length; i++) {
         await ob.bot(beats[i].say);
@@ -398,31 +422,76 @@
 
     /* ── 10 · SAMPLE DRAFT ───────────────────────────────────── */
     async sample(ob) {
-      const drafts = [
-        `hey julley — just saw your post about shipping beam from saigon. the visitor-id space needs more opinionated builders. dm me if you ever want to swap notes.`,
-        `julley! "shipped beam.fyi from saigon" is exactly the energy. curious how you handle the long-tail identification problem — would love to compare approaches.`,
-        `saw you shipped beam from saigon — respect. most people overthink visitor identification. happy to be a second set of eyes on your fallback stack anytime.`,
-      ];
-      let di = 0;
-      await ob.bot(`watch what i'd actually do for the visitor we just found:`, { delay: 400 });
+      const id = ob.state.identified;
+      const vName = (id && id.full_name) || 'this visitor';
+      const vCompany = (id && (id.company_name || id.company_domain)) || '';
+      const vRole = (id && id.job_title) || '';
+      const posts = ob.state.social_posts || [];
+      const bestPost = posts.length > 0 ? posts[0] : null;
+
+      await ob.bot(`here's what i'd draft for ${vName}:`, { delay: 400 });
+
+      // Show context card with REAL data — real post if available
+      const postSnippet = bestPost
+        ? bestPost.content.length > 80 ? bestPost.content.slice(0, 80) + '…' : bestPost.content
+        : '';
       const card = await ob.bot(`
         <div class="ob-rows" style="margin-bottom:10px">
-          <div class="ob-row"><span class="k">visitor</span><span class="v">julley tran <span class="ob-hint">(you)</span></span></div>
+          <div class="ob-row"><span class="k">visitor</span><span class="v">${vName}</span></div>
+          ${vCompany ? '<div class="ob-row"><span class="k">company</span><span class="v">' + vCompany + '</span></div>' : ''}
           <div class="ob-row"><span class="k">detected on</span><span class="v">/pricing</span></div>
-          <div class="ob-row"><span class="k">last post</span><span class="v" style="font-weight:400">"shipped beam.fyi…" · 2h ago</span></div>
+          ${bestPost ? '<div class="ob-row"><span class="k">latest post</span><span class="v" style="font-weight:400">"' + postSnippet + '"</span></div>' : ''}
         </div>
-        <div class="ob-label" style="margin-bottom:6px">beam suggests · in your voice</div>
-        <div class="ob-draftcard"><div class="dmeta">${badge('in')} ready to send</div><span id="ob-draft">${drafts[0]}</span></div>`,
+        <div class="ob-label" style="margin-bottom:6px">beam is writing · in your voice</div>
+        <div class="ob-draftcard"><div class="dmeta">${badge('x')} ai draft</div><span id="ob-draft" class="ob-typing-cursor"></span></div>`,
         { cls: 'rich card', typing: false });
+
+      // Generate draft via AI — pass real post for context
+      async function generateDraft() {
+        try {
+          const res = await apiPost('/api/v1/demo/generate-draft', {
+            visitor_name: vName,
+            visitor_role: vRole,
+            visitor_company: vCompany,
+            user_url: ob.state.url || '',
+            recent_post: bestPost ? bestPost.content : '',
+          });
+          return (res && res.draft) || '';
+        } catch (_) { return ''; }
+      }
+
+      // Type out the draft with cursor effect
+      async function typeDraft(el, text) {
+        el.classList.add('ob-typing-cursor');
+        el.textContent = '';
+        for (let i = 0; i < text.length; i++) {
+          el.textContent = text.slice(0, i + 1);
+          await new Promise(r => setTimeout(r, 18 + Math.random() * 12));
+        }
+        el.classList.remove('ob-typing-cursor');
+      }
+
+      let draftText = await generateDraft();
+      if (!draftText) {
+        // Minimal fallback — still references real post if available
+        if (bestPost) {
+          const snippet = bestPost.content.slice(0, 60);
+          draftText = `this resonates. "${snippet}…" — would love to swap notes on this.`;
+        } else {
+          draftText = `hey ${vName.split(' ')[0].toLowerCase()}! saw you on ${cleanHost(ob.state.url)}. would love to connect.`;
+        }
+      }
+
+      const draftEl = card.querySelector('#ob-draft');
+      await typeDraft(draftEl, draftText);
+
       const c = ob.controls(`
-        <button class="ob-btn ob-btn-primary" data-go>i want this for my real visitors <span aria-hidden="true">→</span></button>
+        <button class="ob-btn ob-btn-primary" data-go>i want this for my visitors <span aria-hidden="true">→</span></button>
         <button class="ob-btn ob-btn-ghost" data-regen>↻ regenerate</button>`);
-      c.querySelector('[data-go]').addEventListener('click', () => ob.answer('i want this for real', 'paywall'));
-      c.querySelector('[data-regen]').addEventListener('click', () => {
-        di = (di + 1) % drafts.length;
-        const d = card.querySelector('#ob-draft');
-        d.style.opacity = '0.35';
-        setTimeout(() => { d.textContent = drafts[di]; d.style.transition = 'opacity .25s'; d.style.opacity = '1'; }, 180);
+      c.querySelector('[data-go]').addEventListener('click', () => ob.answer('i want this', 'paywall'));
+      c.querySelector('[data-regen]').addEventListener('click', async () => {
+        const newDraft = await generateDraft() || `${vName.split(' ')[0].toLowerCase()}, your work caught my eye. let's chat.`;
+        await typeDraft(draftEl, newDraft);
       });
     },
 
@@ -606,9 +675,9 @@
           <div class="ob-subcard">
             <div class="ob-dash-head"><b>identified visitors</b><span class="ob-pill green"><span class="pdot"></span> live</span></div>
             <div class="ob-visitor">
-              <div class="ob-avatar" style="width:42px;height:42px;border-radius:11px;font-size:16px">JT</div>
+              <div class="ob-avatar" style="width:42px;height:42px;border-radius:11px;font-size:16px">${((ob.state.identified && ob.state.identified.full_name) || 'You').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()}</div>
               <div style="flex:1;min-width:0">
-                <div style="font-weight:500">julley tran <span class="ob-hint">· you</span></div>
+                <div style="font-weight:500">${(ob.state.identified && ob.state.identified.full_name) || 'you'} <span class="ob-hint">· you</span></div>
                 <div class="ob-hint">/pricing · just now</div>
               </div>
               <button class="ob-btn ob-btn-ghost" style="padding:7px 13px;font-size:12.5px">draft</button>
