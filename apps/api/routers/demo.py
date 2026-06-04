@@ -184,3 +184,61 @@ async def demo_identify_by_email(request: Request, body: EmailIdentifyRequest) -
 
     logger.info("demo_identify_by_email", matched=base["matched"])
     return base
+
+
+class DraftRequest(BaseModel):
+    visitor_name: str = ""
+    visitor_role: str = ""
+    visitor_company: str = ""
+    user_url: str = ""
+
+
+@router.post("/generate-draft")
+@limiter.limit("10/minute")
+async def demo_generate_draft(request: Request, body: DraftRequest) -> dict:
+    """Generate a personalized engagement draft using AI.
+
+    Uses Claude to write a short, natural comment/reply that the user
+    could send to the identified visitor on social media.
+    """
+    name = body.visitor_name.strip() or "this visitor"
+    first = name.split()[0].lower() if name != "this visitor" else "there"
+
+    # Try Claude API
+    if settings.anthropic_api_key and not settings.mock_external_apis:
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": settings.anthropic_api_key,
+                        "anthropic-version": "2023-06-01",
+                        "content-type": "application/json",
+                    },
+                    json={
+                        "model": "claude-sonnet-4-20250514",
+                        "max_tokens": 150,
+                        "messages": [{"role": "user", "content": (
+                            f"Write a short, casual social media comment (2-3 sentences max) "
+                            f"that someone could post to engage with {name}"
+                            f"{' (' + body.visitor_role + ')' if body.visitor_role else ''}"
+                            f"{' at ' + body.visitor_company if body.visitor_company else ''}. "
+                            f"The commenter runs {body.user_url or 'a SaaS product'}. "
+                            f"Be genuine, not salesy. No hashtags. Lowercase casual tone."
+                        )}],
+                    },
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    text = data.get("content", [{}])[0].get("text", "")
+                    if text:
+                        return {"draft": text.strip()}
+        except Exception as e:
+            logger.warning("demo_generate_draft_error", error=str(e))
+
+    # Fallback: template-based draft
+    company_bit = f"love what you're building at {body.visitor_company}. " if body.visitor_company else ""
+    return {
+        "draft": f"hey {first}! saw you checking out {body.user_url or 'our site'}. {company_bit}would love to connect and swap notes."
+    }
