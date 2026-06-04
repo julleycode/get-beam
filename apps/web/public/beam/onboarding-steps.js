@@ -675,9 +675,9 @@
           <div class="ob-subcard">
             <div class="ob-dash-head"><b>identified visitors</b><span class="ob-pill green"><span class="pdot"></span> live</span></div>
             <div class="ob-visitor">
-              <div class="ob-avatar" style="width:42px;height:42px;border-radius:11px;font-size:16px">JT</div>
+              <div class="ob-avatar" style="width:42px;height:42px;border-radius:11px;font-size:16px">${((ob.state.identified && ob.state.identified.full_name) || 'You').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()}</div>
               <div style="flex:1;min-width:0">
-                <div style="font-weight:500">julley tran <span class="ob-hint">· you</span></div>
+                <div style="font-weight:500">${(ob.state.identified && ob.state.identified.full_name) || 'you'} <span class="ob-hint">· you</span></div>
                 <div class="ob-hint">/pricing · just now</div>
               </div>
               <button class="ob-btn ob-btn-ghost" style="padding:7px 13px;font-size:12.5px">draft</button>
