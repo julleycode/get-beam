@@ -342,6 +342,19 @@
           }), { cls: 'rich card', typing: false });
         }
       }
+      // Fetch REAL social posts if we have a twitter handle
+      if (ob.state.identified && ob.state.identified.twitter_handle) {
+        try {
+          const sp = await apiPost('/api/v1/demo/social-posts', {
+            twitter_handle: ob.state.identified.twitter_handle,
+          });
+          ob.state.social_posts = (sp && sp.posts) || [];
+          ob.state.social_source = (sp && sp.source) || 'none';
+        } catch (_) { ob.state.social_posts = []; }
+      } else {
+        ob.state.social_posts = [];
+      }
+
       setTimeout(() => ob.celebrate(), 250);
       if (ob.state.identified && ob.state.identified.matched) {
         await ob.bot(`is this you?`);
@@ -369,23 +382,34 @@
 
     /* ── 9 · WALKTHROUGH ─────────────────────────────────────── */
     async walk(ob) {
-      // Use identified visitor data if available, otherwise generic
+      // Use real identified visitor data
       const id = ob.state.identified;
       const vName = (id && id.full_name) || 'a visitor';
       const vHandle = (id && id.twitter_handle) ? '@' + id.twitter_handle : '';
       const vCompany = (id && (id.company_name || id.company_domain)) || '';
       const vRole = [id && id.job_title, vCompany].filter(Boolean).join(' · ') || '';
       const initials = vName.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || '??';
+      const posts = ob.state.social_posts || [];
+
+      // Build real social card from actual posts
+      let socialCard = '';
+      if (vName !== 'a visitor') {
+        const postLines = posts.slice(0, 2).map(p => {
+          const snippet = p.content.length > 80 ? p.content.slice(0, 80) + '…' : p.content;
+          return `<div class="mini-line">· "${snippet}"</div>`;
+        }).join('');
+        socialCard = `<div class="ob-mini">
+          <div class="mini-row"><span class="mini-av" style="background:#C7E1F3">${initials}</span><div><div>${vName}</div><div class="mini-tag">${vRole}</div></div></div>
+          ${vHandle ? '<div class="mini-line" style="color:var(--pink,#FF3366)">· ' + vHandle + ' on x</div>' : ''}
+          ${postLines || (vHandle ? '<div class="mini-line" style="opacity:0.5">· no recent posts found</div>' : '')}
+        </div>`;
+      }
 
       const beats = [
         { say: `every visitor that lands, i identify. 7 layers. 60-80% match rate.`, card: '' },
-        { say: `then i find their socials. linkedin, x, instagram.`,
-          card: vName !== 'a visitor' ? `<div class="ob-mini">
-            <div class="mini-row"><span class="mini-av" style="background:#C7E1F3">${initials}</span><div><div>${vName}</div><div class="mini-tag">${vRole}</div></div></div>
-            ${vHandle ? '<div class="mini-line">· ' + vHandle + ' on x</div>' : ''}
-          </div>` : '' },
+        { say: `then i find their socials.`, card: socialCard },
         { say: `then i draft a reply. personalized. in your voice.`, card: '' },
-        { say: `you review, hit send. from your own account. no automation. no bans.`, card: '' },
+        { say: `you review, hit send. from your own account. no bans.`, card: '' },
         { say: `paste url. install snippet. i identify. you engage. done.`, card: '' },
       ];
       for (let i = 0; i < beats.length; i++) {
@@ -402,70 +426,72 @@
       const vName = (id && id.full_name) || 'this visitor';
       const vCompany = (id && (id.company_name || id.company_domain)) || '';
       const vRole = (id && id.job_title) || '';
+      const posts = ob.state.social_posts || [];
+      const bestPost = posts.length > 0 ? posts[0] : null;
 
       await ob.bot(`here's what i'd draft for ${vName}:`, { delay: 400 });
 
-      // Show context card with real data
+      // Show context card with REAL data — real post if available
+      const postSnippet = bestPost
+        ? bestPost.content.length > 80 ? bestPost.content.slice(0, 80) + '…' : bestPost.content
+        : '';
       const card = await ob.bot(`
         <div class="ob-rows" style="margin-bottom:10px">
           <div class="ob-row"><span class="k">visitor</span><span class="v">${vName}</span></div>
           ${vCompany ? '<div class="ob-row"><span class="k">company</span><span class="v">' + vCompany + '</span></div>' : ''}
           <div class="ob-row"><span class="k">detected on</span><span class="v">/pricing</span></div>
+          ${bestPost ? '<div class="ob-row"><span class="k">latest post</span><span class="v" style="font-weight:400">"' + postSnippet + '"</span></div>' : ''}
         </div>
         <div class="ob-label" style="margin-bottom:6px">beam is writing · in your voice</div>
         <div class="ob-draftcard"><div class="dmeta">${badge('x')} ai draft</div><span id="ob-draft" class="ob-typing-cursor"></span></div>`,
         { cls: 'rich card', typing: false });
 
-      // Generate draft via AI API (or fallback to template)
-      let draftText = '';
-      try {
-        const res = await apiPost('/api/v1/demo/generate-draft', {
-          visitor_name: vName,
-          visitor_role: vRole,
-          visitor_company: vCompany,
-          user_url: ob.state.url || '',
-        });
-        draftText = (res && res.draft) || '';
-      } catch (_) {}
+      // Generate draft via AI — pass real post for context
+      async function generateDraft() {
+        try {
+          const res = await apiPost('/api/v1/demo/generate-draft', {
+            visitor_name: vName,
+            visitor_role: vRole,
+            visitor_company: vCompany,
+            user_url: ob.state.url || '',
+            recent_post: bestPost ? bestPost.content : '',
+          });
+          return (res && res.draft) || '';
+        } catch (_) { return ''; }
+      }
 
-      // Fallback if API fails
+      // Type out the draft with cursor effect
+      async function typeDraft(el, text) {
+        el.classList.add('ob-typing-cursor');
+        el.textContent = '';
+        for (let i = 0; i < text.length; i++) {
+          el.textContent = text.slice(0, i + 1);
+          await new Promise(r => setTimeout(r, 18 + Math.random() * 12));
+        }
+        el.classList.remove('ob-typing-cursor');
+      }
+
+      let draftText = await generateDraft();
       if (!draftText) {
-        const name = vName.split(' ')[0].toLowerCase();
-        draftText = `hey ${name}! saw you checking out ${cleanHost(ob.state.url)}. ${vCompany ? 'love what you\'re building at ' + vCompany + '. ' : ''}would love to connect and swap notes.`;
+        // Minimal fallback — still references real post if available
+        if (bestPost) {
+          const snippet = bestPost.content.slice(0, 60);
+          draftText = `this resonates. "${snippet}…" — would love to swap notes on this.`;
+        } else {
+          draftText = `hey ${vName.split(' ')[0].toLowerCase()}! saw you on ${cleanHost(ob.state.url)}. would love to connect.`;
+        }
       }
 
-      // Typing effect
       const draftEl = card.querySelector('#ob-draft');
-      for (let i = 0; i < draftText.length; i++) {
-        draftEl.textContent = draftText.slice(0, i + 1);
-        await new Promise(r => setTimeout(r, 18 + Math.random() * 12));
-      }
-      draftEl.classList.remove('ob-typing-cursor');
+      await typeDraft(draftEl, draftText);
 
       const c = ob.controls(`
         <button class="ob-btn ob-btn-primary" data-go>i want this for my visitors <span aria-hidden="true">→</span></button>
         <button class="ob-btn ob-btn-ghost" data-regen>↻ regenerate</button>`);
       c.querySelector('[data-go]').addEventListener('click', () => ob.answer('i want this', 'paywall'));
       c.querySelector('[data-regen]').addEventListener('click', async () => {
-        draftEl.classList.add('ob-typing-cursor');
-        draftEl.textContent = '';
-        let newDraft = '';
-        try {
-          const res = await apiPost('/api/v1/demo/generate-draft', {
-            visitor_name: vName, visitor_role: vRole,
-            visitor_company: vCompany, user_url: ob.state.url || '',
-          });
-          newDraft = (res && res.draft) || '';
-        } catch (_) {}
-        if (!newDraft) {
-          const name = vName.split(' ')[0].toLowerCase();
-          newDraft = `${name}, your work ${vCompany ? 'at ' + vCompany + ' ' : ''}caught my eye. let's chat about what you're building.`;
-        }
-        for (let i = 0; i < newDraft.length; i++) {
-          draftEl.textContent = newDraft.slice(0, i + 1);
-          await new Promise(r => setTimeout(r, 18 + Math.random() * 12));
-        }
-        draftEl.classList.remove('ob-typing-cursor');
+        const newDraft = await generateDraft() || `${vName.split(' ')[0].toLowerCase()}, your work caught my eye. let's chat.`;
+        await typeDraft(draftEl, newDraft);
       });
     },
 
