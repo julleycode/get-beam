@@ -50,17 +50,27 @@ body {
 /* ── pixel-art painterly sky (used as page-wide backdrop) ──────── */
 .sky-stage {
   position: relative;
-  background: url('/beam/forest-bg.jpg') center top / cover no-repeat;
+  background:
+    linear-gradient(to bottom, var(--sky-pale) 0%, var(--sky) 38%, var(--sky-pale) 62%, var(--cream-warm) 78%, var(--field-1) 100%);
   overflow: hidden;
   isolation: isolate;
 }
 .sky-stage::before {
-  display: none; /* disabled — forest bg replaces pixel-grain */
+  content: "";
+  position: absolute; inset: 0;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(255,255,255,0.4) 1px, transparent 1px);
+  background-size: 4px 4px;
+  opacity: 0.18;
+  pointer-events: none;
+  z-index: 0;
 }
 
-/* cloud layer hidden — forest bg replaces pixel clouds */
+/* the actual pixel clouds layer is a positioned SVG */
 .cloud-layer {
-  display: none;
+  position: absolute; inset: 0;
+  pointer-events: none;
+  z-index: 0;
 }
 
 /* layout container */
