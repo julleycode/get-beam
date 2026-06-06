@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useAuth } from "@clerk/nextjs";
 import { api, Site, SiteStats, EngagementROI } from "@/lib/api";
 import {
   Card,
@@ -145,21 +146,35 @@ function BeamLoopWidget() {
 
 export default function DashboardPage() {
   const router = useRouter();
+  const { getToken, isSignedIn } = useAuth();
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api
-      .listSites()
-      .then((s) => {
+    if (isSignedIn === undefined) return;
+    if (!isSignedIn) {
+      setLoading(false);
+      return;
+    }
+
+    const fetchSites = async () => {
+      try {
+        const token = await getToken();
+        if (token) api.setClerkToken(token);
+        const s = await api.listSites();
         setSites(s);
         if (s.length === 0) {
           router.push("/dashboard/onboarding");
         }
-      })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [router]);
+      } catch {
+        // Auth or network error — don't redirect to onboarding
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchSites();
+  }, [isSignedIn, getToken, router]);
 
   if (loading) {
     return <p className="text-muted-foreground">Loading...</p>;
