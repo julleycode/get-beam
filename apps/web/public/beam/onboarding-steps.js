@@ -595,12 +595,19 @@
       render();
     },
 
-    /* ── 12 · ACCOUNT CREATION ───────────────────────────────── */
+    /* ── 12 · ACCOUNT CREATION / LOGIN ─────────────────────────── */
     async account(ob) {
       const planLabel = ob.state.plan === 'free' ? 'the free tier' : `${ob.state.plan} (14-day trial)`;
       await ob.bot(`last step — let me save your account so ${planLabel} is ready when you're back.`);
       const prefill = (ob.state.identified && ob.state.identified.email) || '';
+
+      let mode = 'signup'; // 'signup' or 'login'
+
       const c = ob.controls(`
+        <div class="ob-auth-tabs" style="display:flex;gap:0;margin-bottom:16px;border-bottom:2px solid #f0e8dc">
+          <button class="ob-auth-tab active" id="ob-tab-signup" style="flex:1;padding:10px 0;font-size:14px;font-weight:600;border:none;background:none;cursor:pointer;color:#FF3366;border-bottom:2px solid #FF3366;margin-bottom:-2px;transition:all .2s">create account</button>
+          <button class="ob-auth-tab" id="ob-tab-login" style="flex:1;padding:10px 0;font-size:14px;font-weight:500;border:none;background:none;cursor:pointer;color:#8C8295;border-bottom:2px solid transparent;margin-bottom:-2px;transition:all .2s">sign in</button>
+        </div>
         <div class="ob-card">
           <label class="ob-label">email</label>
           <input class="ob-input-plain" id="ob-email" type="email" value="${prefill}" placeholder="you@yourcompany.com" style="margin-bottom:14px" />
@@ -609,16 +616,36 @@
         </div>
         <div class="ob-error" id="ob-acc-err" style="display:none;margin-top:10px"></div>
         <div class="ob-actions" style="flex-direction:column;align-items:stretch;gap:10px;margin-top:12px">
-          <button class="ob-btn ob-btn-primary ob-btn-block" id="ob-create">create account</button>
+          <button class="ob-btn ob-btn-primary ob-btn-block" id="ob-submit">create account</button>
           <button class="ob-btn ob-btn-ghost ob-btn-block" id="ob-google">continue with google</button>
-        </div>`);
+        </div>`, true);
+
       const errEl = c.querySelector('#ob-acc-err');
-      const createBtn = c.querySelector('#ob-create');
+      const submitBtn = c.querySelector('#ob-submit');
+      const tabSignup = c.querySelector('#ob-tab-signup');
+      const tabLogin = c.querySelector('#ob-tab-login');
+      const passInput = c.querySelector('#ob-pass');
       const showErr = (html) => { errEl.innerHTML = html; errEl.style.display = 'block'; };
       const clerkErr = (e) => (e && e.errors && e.errors[0] && (e.errors[0].longMessage || e.errors[0].message)) || String((e && e.message) || e);
 
-      // Shared tail: create the real site with the captured url + grab the live
-      // snippet (Clerk OR legacy token), then celebrate → dashboard step.
+      function switchTab(newMode) {
+        mode = newMode;
+        errEl.style.display = 'none';
+        if (mode === 'login') {
+          tabLogin.style.color = '#FF3366'; tabLogin.style.fontWeight = '600'; tabLogin.style.borderBottomColor = '#FF3366';
+          tabSignup.style.color = '#8C8295'; tabSignup.style.fontWeight = '500'; tabSignup.style.borderBottomColor = 'transparent';
+          submitBtn.textContent = 'sign in';
+          passInput.placeholder = 'your password';
+        } else {
+          tabSignup.style.color = '#FF3366'; tabSignup.style.fontWeight = '600'; tabSignup.style.borderBottomColor = '#FF3366';
+          tabLogin.style.color = '#8C8295'; tabLogin.style.fontWeight = '500'; tabLogin.style.borderBottomColor = 'transparent';
+          submitBtn.textContent = 'create account';
+          passInput.placeholder = 'choose a password (8+ chars)';
+        }
+      }
+      tabSignup.addEventListener('click', () => switchTab('signup'));
+      tabLogin.addEventListener('click', () => switchTab('login'));
+
       async function finishWithToken(token) {
         if (ob.state.url && ob.state.url !== 'demo.beam.fyi') {
           try {
@@ -627,12 +654,11 @@
             ob.state.siteId = site.site_id;
             const snip = await apiGet('/api/v1/sites/' + site.site_id + '/pixel', token);
             ob.state.snippet = snip.snippet;
-          } catch (e) { /* site optional — dashboard can create it later */ }
+          } catch (e) { /* site optional */ }
         }
         ob.celebrate(); ob.answer('account created 🎉', 'dash');
       }
 
-      // Clerk path: verify the email with a 6-digit code, then finish.
       async function clerkVerify(clerk, signUp, email) {
         ob.clearControls();
         await ob.bot(`i sent a 6-digit code to <b>${esc(email)}</b> — pop it in to confirm it's you.`);
@@ -666,6 +692,45 @@
         vc.querySelector('#ob-code').addEventListener('keydown', e => { if (e.key === 'Enter') attempt(); });
       }
 
+      async function loginAccount() {
+        const email = c.querySelector('#ob-email').value.trim();
+        const pass = c.querySelector('#ob-pass').value;
+        errEl.style.display = 'none';
+        if (!email || !pass) { showErr('enter your email and password.'); return; }
+        submitBtn.disabled = true; submitBtn.textContent = 'signing in…';
+
+        const clerk = await ensureClerk();
+        if (clerk) {
+          try {
+            const signIn = await clerk.client.signIn.create({ identifier: email, password: pass });
+            if (signIn.status === 'complete') {
+              await clerk.setActive({ session: signIn.createdSessionId });
+              const token = await clerk.session.getToken();
+              ob.user('signed in ✓');
+              await finishWithToken(token);
+            } else {
+              showErr('sign-in requires additional verification. <a href="/login">use the full login page →</a>');
+              submitBtn.disabled = false; submitBtn.textContent = 'sign in';
+            }
+          } catch (e) {
+            submitBtn.disabled = false; submitBtn.textContent = 'sign in';
+            showErr('invalid email or password. try again or <a href="/login">use the full login page →</a>');
+          }
+          return;
+        }
+
+        try {
+          const res = await apiPost('/api/v1/auth/login', { email, password: pass });
+          const token = res.access_token;
+          try { localStorage.setItem('auth_token', token); } catch (e) {}
+          ob.user('signed in ✓');
+          await finishWithToken(token);
+        } catch (e) {
+          submitBtn.disabled = false; submitBtn.textContent = 'sign in';
+          showErr('invalid email or password. try again.');
+        }
+      }
+
       async function createAccount() {
         const email = c.querySelector('#ob-email').value.trim();
         const pass = c.querySelector('#ob-pass').value;
@@ -673,11 +738,10 @@
         if (!email || !pass || pass.length < 8) {
           showErr('enter your email and a password of 8+ characters.'); return;
         }
-        createBtn.disabled = true; createBtn.textContent = 'creating…';
+        submitBtn.disabled = true; submitBtn.textContent = 'creating…';
 
         const clerk = await ensureClerk();
         if (clerk) {
-          // ── Real Clerk account (matches the rest of the app's auth) ──
           try {
             const signUp = await clerk.client.signUp.create({ emailAddress: email, password: pass });
             if (signUp.status === 'complete') {
@@ -689,33 +753,42 @@
               await clerkVerify(clerk, signUp, email);
             }
           } catch (e) {
-            createBtn.disabled = false; createBtn.textContent = 'create account';
+            submitBtn.disabled = false; submitBtn.textContent = 'create account';
             const msg = clerkErr(e);
-            showErr(/exist|already|taken|identifier/i.test(msg)
-              ? 'that email already has an account. <a href="/sign-in">sign in instead →</a>'
-              : ('could not create account: ' + msg));
+            if (/exist|already|taken|identifier/i.test(msg)) {
+              switchTab('login');
+              showErr('that email already has an account — switched to sign in for you.');
+            } else {
+              showErr('could not create account: ' + msg);
+            }
           }
           return;
         }
 
-        // ── Fallback: legacy email/password signup (Clerk not configured) ──
         try {
           const res = await apiPost('/api/v1/auth/signup', { email, password: pass });
           const token = res.access_token;
           try { localStorage.setItem('auth_token', token); } catch (e) {}
           await finishWithToken(token);
         } catch (e) {
-          createBtn.disabled = false; createBtn.textContent = 'create account';
+          submitBtn.disabled = false; submitBtn.textContent = 'create account';
           const msg = String(e.message || '');
-          showErr(/exist|registered|taken/i.test(msg)
-            ? 'that email already has an account. <a href="/login">log in instead →</a>'
-            : ('could not create account: ' + msg));
+          if (/exist|registered|taken/i.test(msg)) {
+            switchTab('login');
+            showErr('that email already has an account — switched to sign in for you.');
+          } else {
+            showErr('could not create account: ' + msg);
+          }
         }
       }
-      createBtn.addEventListener('click', createAccount);
-      c.querySelector('#ob-pass').addEventListener('keydown', e => { if (e.key === 'Enter') createAccount(); });
-      // Google → Clerk sign-up (handles OAuth), preserving intent
-      c.querySelector('#ob-google').addEventListener('click', () => { window.location.href = '/sign-up'; });
+
+      async function handleSubmit() {
+        if (mode === 'login') await loginAccount();
+        else await createAccount();
+      }
+      submitBtn.addEventListener('click', handleSubmit);
+      c.querySelector('#ob-pass').addEventListener('keydown', e => { if (e.key === 'Enter') handleSubmit(); });
+      c.querySelector('#ob-google').addEventListener('click', () => { window.location.href = '/signup'; });
     },
 
     /* ── 13 · DASHBOARD WELCOME ──────────────────────────────── */
