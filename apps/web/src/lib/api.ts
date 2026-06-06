@@ -422,6 +422,25 @@ class ApiClient {
     });
   }
 
+  // ── Waitlist Admin ─────────────────────────────────────
+  async getWaitlist() {
+    return this.request<WaitlistListResponse>("/api/v1/waitlist/");
+  }
+
+  async approveWaitlist(id: string) {
+    return this.request<{ status: string; id: string }>(
+      `/api/v1/waitlist/${id}/approve`,
+      { method: "PATCH" }
+    );
+  }
+
+  async rejectWaitlist(id: string) {
+    return this.request<{ status: string; id: string }>(
+      `/api/v1/waitlist/${id}/reject`,
+      { method: "PATCH" }
+    );
+  }
+
   // ── Billing ────────────────────────────────────────────
   async createCheckout(plan: BillingPlan, interval: BillingInterval) {
     return this.request<{ checkout_url: string }>("/api/v1/billing/checkout", {
@@ -645,6 +664,27 @@ export interface EngagementROI {
 
 export type BillingPlan = "free" | "pro" | "max";
 export type BillingInterval = "monthly" | "yearly";
+
+// ── Waitlist types ───────────────────────────────────────
+
+export interface WaitlistSignup {
+  id: string;
+  email: string;
+  site_url: string | null;
+  status: string;
+  invite_token: string | null;
+  created_at: string | null;
+  approved_at: string | null;
+}
+
+export interface WaitlistListResponse {
+  signups: WaitlistSignup[];
+  counts: {
+    pending: number;
+    approved: number;
+    rejected: number;
+  };
+}
 
 export interface BillingStatus {
   plan: BillingPlan;

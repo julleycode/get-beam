@@ -20,9 +20,10 @@ from apps.api.models.company import Company  # noqa: F401 — register for creat
 from apps.api.models.feature_request import FeatureRequest  # noqa: F401 — register for create_all
 from apps.api.models.engagement_attribution import EngagementAttribution  # noqa: F401 — register for create_all
 from apps.api.models.beam_identity import BeamIdentityNode  # noqa: F401 — register for create_all
+from apps.api.models.waitlist import WaitlistSignup  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
-from apps.api.routers import billing, engagement
+from apps.api.routers import billing, engagement, waitlist
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -232,6 +233,7 @@ app.include_router(feature_requests.router, prefix="/api/v1/feature-requests", t
 app.include_router(demo.router, prefix="/api/v1/demo", tags=["demo"])
 app.include_router(billing.router, prefix="/api/v1/billing", tags=["billing"])
 app.include_router(engagement.router, prefix="/api/v1/engagement", tags=["engagement"])
+app.include_router(waitlist.router, prefix="/api/v1/waitlist", tags=["waitlist"])
 
 
 @app.get("/health")

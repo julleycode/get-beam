@@ -53,6 +53,7 @@
           <div class="hero-actions">
             <form class="waitlist-form" id="hero-waitlist" onsubmit="return handleWaitlist(event, this)">
               <input type="email" class="waitlist-input" placeholder="you@company.com" required />
+              <input type="url" class="waitlist-input waitlist-site" name="site_url" placeholder="your site url (optional)" style="font-size:13px;max-width:220px;" />
               <button type="submit" class="btn btn-primary">join the waitlist <span aria-hidden="true">→</span></button>
             </form>
             <a class="btn btn-ghost" onclick="openModal('modal-how')" data-tw="hero-secondary">see how it works ↓</a>
@@ -1208,20 +1209,24 @@ function handleWaitlist(e, form) {
   e.preventDefault();
   var email = form.querySelector('input[type="email"]').value.trim();
   if (!email) return false;
+  var siteInput = form.querySelector('input[name="site_url"]');
+  var siteUrl = siteInput ? siteInput.value.trim() : '';
   var btn = form.querySelector('button');
   var orig = btn.innerHTML;
   btn.innerHTML = 'joining…';
   btn.disabled = true;
   var API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:8000' : 'https://api.getbeam.fyi';
+  var payload = {email: email};
+  if (siteUrl) payload.site_url = siteUrl;
   fetch(API + '/api/v1/demo/waitlist', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({email: email})
+    body: JSON.stringify(payload)
   }).then(function() {
-    form.innerHTML = '<div class="waitlist-success">you\'re in! 🎉 we\'ll reach out soon.</div>';
+    window.location.href = '/beam/waitlisted.html';
   }).catch(function() {
-    form.innerHTML = '<div class="waitlist-success">you\'re in! 🎉 we\'ll reach out soon.</div>';
+    window.location.href = '/beam/waitlisted.html';
   });
   return false;
 }

@@ -25,6 +25,7 @@ const EASYENGAGE_ITEMS = [
 
 const BOTTOM_ITEMS = [
   { href: "/dashboard/billing", label: "Billing" },
+  { href: "/dashboard/waitlist", label: "Waitlist" },
   { href: "/dashboard/feature-requests", label: "Feature Requests" },
   { href: "/dashboard/settings", label: "Settings" },
 ];
