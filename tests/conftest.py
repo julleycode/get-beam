@@ -51,6 +51,8 @@ async def test_engine():
     from apps.api.models.enrichment import EnrichmentProfile  # noqa: F401
     from apps.api.models.segment import Segment  # noqa: F401
     from apps.api.models.voice_example import VoiceExample  # noqa: F401
+    from apps.api.models.beam_identity import BeamIdentityNode  # noqa: F401
+    from apps.api.models.visitor_email import VisitorEmail  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

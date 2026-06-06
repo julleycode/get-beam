@@ -33,7 +33,7 @@ class Visitor(Base):
     device_type: Mapped[str | None] = mapped_column(String(20))
     ip_address: Mapped[str | None] = mapped_column(String(45))
     company_domain: Mapped[str | None] = mapped_column(String(253))
-    fingerprint: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     intent_score: Mapped[float] = mapped_column(Float, default=0.0)
     identity_status: Mapped[str] = mapped_column(String(20), default="anonymous")
     enrichment_status: Mapped[str] = mapped_column(String(20), default="pending")

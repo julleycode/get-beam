@@ -81,9 +81,10 @@ class TestPixelRemovedFeatures:
 class TestPixelSize:
     """Pixel should be small and efficient."""
 
-    def test_under_8kb(self, pixel_code: str):
-        # Bumped from 5KB to 8KB after adding form capture, fingerprint, and UTM identification
-        assert len(pixel_code.encode()) < 8000, f"Pixel is {len(pixel_code.encode())} bytes, should be under 8KB"
+    def test_under_10kb(self, pixel_code: str):
+        # Bumped to 10KB raw after fingerprint v2 (17 signals, canvas, WebGL)
+        # Gzipped size is the real constraint (under 5KB) — tested in test_pixel_fingerprint.py
+        assert len(pixel_code.encode()) < 10000, f"Pixel is {len(pixel_code.encode())} bytes, should be under 10KB"
 
     def test_is_iife(self, pixel_code: str):
         """Should be wrapped in an IIFE for isolation."""

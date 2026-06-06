@@ -19,6 +19,7 @@ from apps.api.models.voice_example import VoiceExample  # noqa: F401
 from apps.api.models.company import Company  # noqa: F401 — register for create_all
 from apps.api.models.feature_request import FeatureRequest  # noqa: F401 — register for create_all
 from apps.api.models.engagement_attribution import EngagementAttribution  # noqa: F401 — register for create_all
+from apps.api.models.beam_identity import BeamIdentityNode  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
 from apps.api.routers import billing, engagement
@@ -79,6 +80,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                  )""",
             # Phase: browser fingerprint for cross-session identification
             "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS fingerprint VARCHAR(50)",
+            # Phase 2: expand fingerprint column for 128-bit v2 fingerprints
+            "ALTER TABLE visitors ALTER COLUMN fingerprint TYPE VARCHAR(64)",
             # Phase: visitor_emails table (created by create_all, but ensure index exists)
             # The table itself is created by Base.metadata.create_all above;
             # these are safety-net additions for pre-existing deployments.

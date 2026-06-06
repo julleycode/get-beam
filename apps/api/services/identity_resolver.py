@@ -1,14 +1,14 @@
-"""Clay-style waterfall identity resolution.
+"""Clay-style identity resolution with parallel provider execution.
 
-Multiple providers tried in order:
+Identity graphs (Leadpipe, Capturify, RB2B) run in parallel via
+asyncio.gather — first match wins. If none match, IP→Company
+providers (PDL + IPinfo) also run in parallel, then feed Hunter/Apollo
+sequentially for person-level enrichment.
 
-1. PDL IP Enrich (IP → company domain + location)   ~30-40% match
-2. IPinfo (IP → company domain) — fallback           ~20-30% match
-3. Hunter (domain → employee emails)                 ~50% from domain
-4. Apollo (domain → contact lookup)                  ~40% fallback
-
-PDL and IPinfo both resolve IP → company. First to return a domain
-feeds Hunter for email lookup, then Apollo as final fallback.
+Providers:
+  Identity Graphs (parallel): Leadpipe ~35%, Capturify ~40%, RB2B ~30%
+  IP → Company (parallel):    PDL ~30-40%, IPinfo ~20-30%
+  Company → Person (seq):     Hunter ~50%, Apollo ~40%
 """
 
 import asyncio
@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 from apps.api.config import settings
+from apps.api.models.beam_identity import BeamIdentityNode
 from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog, Visitor
 
 logger = structlog.get_logger()
@@ -204,6 +205,11 @@ class IdentityResolver:
             except Exception as exc:
                 logger.warning("prior_signal_fingerprint_check_failed", error=str(exc))
 
+        # ── Check 3: Beam Identity Network (cross-customer graph) ──
+        result = await self._check_beam_identity_network(visitor)
+        if result:
+            return result
+
         return None
 
     async def _enrich_email_pdl(
@@ -253,15 +259,14 @@ class IdentityResolver:
     # ──────────────────── Main Waterfall ────────────────────
 
     async def resolve(self, visitor: Visitor) -> IdentifiedVisitor | None:
-        """Waterfall identity resolution — try providers in order.
+        """Identity resolution with parallel provider execution.
 
         Flow:
-        -1. Pre-waterfall: check for captured emails and fingerprint matches
-        0. RB2B Identity Graph (IP → hashed email → person) — PERSON-LEVEL
-        1. PDL IP Enrich (IP → company domain + location)
-        2. IPinfo (IP → company domain) — fallback if PDL missed
-        3. Hunter (domain → employee emails)    ← company-level fallback
-        4. Apollo (domain → contact)            ← company-level fallback
+        -1. Pre-waterfall: captured emails + fingerprint matches
+        0.  Identity Graphs (parallel): Leadpipe, Capturify, RB2B
+        1-2. IP→Company (parallel): PDL + IPinfo
+        3.  Hunter (domain → employee emails)
+        4.  Apollo (domain → contact)
         """
         if await self.was_recently_attempted(visitor.site_id, visitor.visitor_id):
             logger.info("resolution_skipped_recent_attempt", visitor_id=visitor.visitor_id[:8])
@@ -284,31 +289,17 @@ class IdentityResolver:
             return None
 
         # ══════════════════════════════════════════════════════════════
-        # Step 0: Identity Graph — PERSON-LEVEL identification
-        # Leadpipe / RB2B resolve visitors via cookie/device graph.
-        # Works even for residential IPs if person is in the graph.
+        # Step 0: Identity Graphs — PARALLEL person-level identification
+        # Leadpipe, Capturify, RB2B run concurrently via asyncio.gather.
         # ══════════════════════════════════════════════════════════════
 
-        # 0a. Leadpipe (pixel-based identity graph — 500 free IDs)
-        result = await self._try_leadpipe_identify(visitor)
-        if result:
-            return result
-
-        # 0b. Capturify (pixel-based, claims 60% match rate)
-        result = await self._try_capturify_identify(visitor)
-        if result:
-            return result
-
-        # 0c. RB2B (server-side IP → person, US only)
-        result = await self._try_rb2b_identify(visitor)
+        result = await self._resolve_identity_graphs_parallel(visitor)
         if result:
             return result
 
         # ══════════════════════════════════════════════════════════════
-        # Steps 1-4: IP → Company → Employee FALLBACK
-        # Only reaches here if identity graph had no match.
-        # This identifies the COMPANY, then picks an employee — lower
-        # confidence than identity graph (company-level, not person).
+        # Steps 1-2: IP → Company — PARALLEL fallback
+        # PDL IP Enrich + IPinfo run concurrently. First domain wins.
         # ══════════════════════════════════════════════════════════════
 
         company_domain: str | None = None
@@ -329,12 +320,7 @@ class IdentityResolver:
                 pass  # Redis failure is non-fatal
 
         if company_domain is None and (not self.redis or not await self._redis_has_key(cache_key)):
-            # ── Step 1: PDL IP Enrich (IP → company domain) ──
-            company_domain = await self._try_pdl_ip_enrich(visitor)
-
-            # ── Step 2: IPinfo (IP → company domain) — fallback ──
-            if not company_domain:
-                company_domain = await self._try_ipinfo_company(visitor)
+            company_domain = await self._resolve_ip_company_parallel(visitor)
 
             # ── Cache the result (hit or miss) ──
             if self.redis:
@@ -365,6 +351,157 @@ class IdentityResolver:
         visitor.identity_status = "unresolvable"
         await self.db.commit()
         return None
+
+    # ──────────────────── Parallel Orchestrators ────────────────────
+
+    _GRAPH_TIMEOUT = 5.0  # seconds per identity graph provider
+
+    async def _resolve_identity_graphs_parallel(
+        self, visitor: Visitor
+    ) -> IdentifiedVisitor | None:
+        """Run Leadpipe, Capturify, RB2B in parallel. Save first match."""
+
+        providers = [
+            ("leadpipe", settings.leadpipe_api_key,
+             self._mock_leadpipe_response, self._call_leadpipe_api, 0.0),
+            ("capturify", settings.capturify_api_key,
+             self._mock_capturify_response, self._call_capturify_api, 0.0),
+            ("rb2b", settings.rb2b_api_key,
+             self._mock_rb2b_response, self._call_rb2b_api, 0.09),
+        ]
+
+        async def _fetch(
+            name: str, api_key: str | None, mock_fn, call_fn
+        ) -> tuple[str, dict | None, int, bool]:
+            if not api_key:
+                return (name, None, 0, False)
+            start = time.monotonic()
+            try:
+                if settings.mock_external_apis:
+                    data = mock_fn(visitor)
+                else:
+                    data = await asyncio.wait_for(
+                        call_fn(visitor), timeout=self._GRAPH_TIMEOUT
+                    )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "identity_graph_timeout",
+                    provider=name,
+                    visitor_id=visitor.visitor_id[:8],
+                )
+                data = None
+            except Exception as exc:
+                logger.warning(
+                    "identity_graph_error",
+                    provider=name,
+                    error=str(exc),
+                    visitor_id=visitor.visitor_id[:8],
+                )
+                data = None
+            elapsed = int((time.monotonic() - start) * 1000)
+            return (name, data, elapsed, True)
+
+        results = await asyncio.gather(
+            *[_fetch(n, k, m, c) for n, k, m, c, _ in providers],
+            return_exceptions=True,
+        )
+
+        best_name: str | None = None
+        best_data: dict | None = None
+
+        for i, r in enumerate(results):
+            if isinstance(r, BaseException):
+                logger.warning(
+                    "identity_graph_gather_exc",
+                    provider=providers[i][0],
+                    error=str(r),
+                )
+                continue
+            name, data, elapsed, attempted = r
+            if not attempted:
+                continue
+            success_cost = providers[i][4] if (not settings.mock_external_apis and data) else 0.0
+            await self._log_resolution(
+                visitor, name, data is not None, success_cost, elapsed
+            )
+            if data and best_data is None:
+                best_name = name
+                best_data = data
+
+        if best_data and best_name:
+            logger.info(
+                "identity_graph_identified",
+                provider=best_name,
+                visitor_id=visitor.visitor_id[:8],
+                email=(best_data.get("email", "")[:5] + "***"
+                       if best_data.get("email") else None),
+            )
+            return await self._save_identified(visitor, best_data, best_name)
+
+        return None
+
+    async def _resolve_ip_company_parallel(self, visitor: Visitor) -> str | None:
+        """Run PDL IP Enrich + IPinfo in parallel. Return first domain."""
+
+        async def _fetch_pdl() -> tuple[str | None, int]:
+            start = time.monotonic()
+            try:
+                if settings.mock_external_apis:
+                    domain = self._mock_pdl_response(visitor)
+                else:
+                    domain = await asyncio.wait_for(
+                        self._call_pdl_ip_enrich(visitor),
+                        timeout=self._GRAPH_TIMEOUT,
+                    )
+            except asyncio.TimeoutError:
+                logger.warning("pdl_ip_timeout", visitor_id=visitor.visitor_id[:8])
+                domain = None
+            except Exception as exc:
+                logger.warning("pdl_ip_error", error=str(exc))
+                domain = None
+            elapsed = int((time.monotonic() - start) * 1000)
+            return (domain, elapsed)
+
+        async def _fetch_ipinfo() -> tuple[str | None, int]:
+            start = time.monotonic()
+            try:
+                if settings.mock_external_apis:
+                    domain = self._mock_ipinfo_response(visitor)
+                else:
+                    domain = await asyncio.wait_for(
+                        self._call_ipinfo_api(visitor),
+                        timeout=self._GRAPH_TIMEOUT,
+                    )
+            except asyncio.TimeoutError:
+                logger.warning("ipinfo_timeout", visitor_id=visitor.visitor_id[:8])
+                domain = None
+            except Exception as exc:
+                logger.warning("ipinfo_error", error=str(exc))
+                domain = None
+            elapsed = int((time.monotonic() - start) * 1000)
+            return (domain, elapsed)
+
+        (pdl_domain, pdl_ms), (ipi_domain, ipi_ms) = await asyncio.gather(
+            _fetch_pdl(), _fetch_ipinfo()
+        )
+
+        pdl_cost = 0.01 if (not settings.mock_external_apis and pdl_domain) else 0.0
+        await self._log_resolution(
+            visitor, "pdl_ip_enrich", pdl_domain is not None, pdl_cost, pdl_ms
+        )
+        await self._log_resolution(
+            visitor, "ipinfo", ipi_domain is not None, 0.0, ipi_ms
+        )
+
+        domain = pdl_domain or ipi_domain
+        if domain:
+            logger.info(
+                "ip_company_resolved",
+                visitor_id=visitor.visitor_id[:8],
+                domain=domain,
+                source="pdl" if pdl_domain else "ipinfo",
+            )
+        return domain
 
     # ──────────────────── Provider: Leadpipe Identity Graph ────────────────────
 
@@ -1219,7 +1356,93 @@ class IdentityResolver:
             provider=provider,
             email=data.get("email", "")[:5] + "***" if data.get("email") else None,
         )
+
+        # ── Beam Identity Network: contribute to cross-customer graph ──
+        await self._upsert_beam_identity(visitor, data, provider)
+
         return identified
+
+    async def _upsert_beam_identity(
+        self, visitor: Visitor, data: dict, provider: str
+    ) -> None:
+        """Write (fingerprint, email) to cross-customer identity graph."""
+        fp = getattr(visitor, "fingerprint", None)
+        email = data.get("email")
+        if not fp or not email:
+            return
+        try:
+            from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+            stmt = pg_insert(BeamIdentityNode).values(
+                fingerprint=fp,
+                email=email,
+                full_name=data.get("full_name"),
+                confidence_score=data.get("confidence_score", 0.0),
+                source_site_id=visitor.site_id,
+                source_provider=provider,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["fingerprint", "email"],
+                set_={
+                    "full_name": stmt.excluded.full_name,
+                    "confidence_score": stmt.excluded.confidence_score,
+                    "source_provider": stmt.excluded.source_provider,
+                    "updated_at": func.now(),
+                },
+            )
+            await self.db.execute(stmt)
+            await self.db.commit()
+            logger.info(
+                "beam_identity_upserted",
+                fingerprint=fp[:12],
+                email_domain=email.split("@")[-1],
+            )
+        except Exception as exc:
+            await self.db.rollback()
+            logger.debug("beam_identity_upsert_failed", error=str(exc))
+
+    async def _check_beam_identity_network(
+        self, visitor: Visitor
+    ) -> IdentifiedVisitor | None:
+        """Check cross-customer identity graph by fingerprint.
+
+        If this fingerprint was identified on ANY Beam site, reuse
+        that identity (discounted confidence: 0.85).
+        """
+        fp = getattr(visitor, "fingerprint", None)
+        if not fp:
+            return None
+        try:
+            result = await self.db.execute(
+                select(BeamIdentityNode)
+                .where(
+                    BeamIdentityNode.fingerprint == fp,
+                    BeamIdentityNode.email.isnot(None),
+                    BeamIdentityNode.confidence_score >= 0.5,
+                )
+                .order_by(BeamIdentityNode.confidence_score.desc())
+                .limit(1)
+            )
+            node = result.scalar_one_or_none()
+            if node:
+                logger.info(
+                    "beam_identity_network_match",
+                    visitor_id=visitor.visitor_id[:8],
+                    source_site=node.source_site_id,
+                    provider=node.source_provider,
+                )
+                return await self._save_identified(
+                    visitor,
+                    {
+                        "email": node.email,
+                        "full_name": node.full_name,
+                        "confidence_score": 0.85,
+                    },
+                    "beam_identity_network",
+                )
+        except Exception as exc:
+            logger.warning("beam_identity_check_failed", error=str(exc))
+        return None
 
     async def _log_resolution(
         self, visitor: Visitor, provider: str, success: bool, cost: float, ms: int

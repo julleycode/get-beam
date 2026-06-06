@@ -20,6 +20,60 @@
   function icPin() { return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="2.5"/></svg>`; }
   function badge(t) { return `<span class="ob-ib">${t}</span>`; }
 
+  // ── Fingerprint (v2) — same algorithm as pixel tracker.js ──
+  function _h128(str) {
+    var h = [0x811c9dc5, 0xc6a4a793, 0x6c62272e, 0x61c88647];
+    var p = [0x01000193, 0x0100019b, 0x01000199, 0x01000187];
+    for (var i = 0; i < str.length; i++) {
+      var c = str.charCodeAt(i);
+      for (var j = 0; j < 4; j++) h[j] = Math.imul(h[j] ^ c, p[j]) >>> 0;
+    }
+    return h[0].toString(36) + h[1].toString(36) + h[2].toString(36) + h[3].toString(36);
+  }
+  function _cvfp() {
+    try {
+      var cv = document.createElement('canvas'); cv.width = 200; cv.height = 50;
+      var ctx = cv.getContext('2d'); if (!ctx) return '';
+      ctx.textBaseline = 'top'; ctx.font = '14px Arial';
+      ctx.fillStyle = '#f60'; ctx.fillRect(125, 1, 62, 20);
+      ctx.fillStyle = '#069'; ctx.fillText('BmFp,1', 2, 15);
+      ctx.fillStyle = 'rgba(102,204,0,0.7)'; ctx.fillText('BmFp,1', 4, 17);
+      return cv.toDataURL().slice(-50);
+    } catch(e) { return ''; }
+  }
+  function _glfp() {
+    try {
+      var cv = document.createElement('canvas');
+      var gl = cv.getContext('webgl') || cv.getContext('experimental-webgl');
+      if (!gl) return '';
+      var ext = gl.getExtension('WEBGL_debug_renderer_info');
+      var v = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : '';
+      var r = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : '';
+      return v + '~' + r + '~' + gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    } catch(e) { return ''; }
+  }
+  function obFingerprint() {
+    var c = [];
+    c.push(screen.width + 'x' + screen.height);
+    c.push(screen.availWidth + 'x' + screen.availHeight);
+    c.push(screen.colorDepth);
+    c.push(window.devicePixelRatio || 1);
+    c.push(navigator.language);
+    c.push(navigator.platform);
+    c.push(navigator.hardwareConcurrency || 0);
+    c.push(navigator.deviceMemory || 0);
+    c.push(navigator.maxTouchPoints || 0);
+    c.push(navigator.cookieEnabled ? 1 : 0);
+    c.push(navigator.doNotTrack || '');
+    c.push(navigator.pdfViewerEnabled ? 1 : 0);
+    try { c.push(Intl.DateTimeFormat().resolvedOptions().timeZone); } catch(e) { c.push(''); }
+    try { c.push(navigator.connection ? navigator.connection.effectiveType : ''); } catch(e) { c.push(''); }
+    c.push(_cvfp());
+    c.push(_glfp());
+    c.push(Math.tan(-1e300));
+    return 'fp2_' + _h128(c.join('|'));
+  }
+
   const PLATFORM_INSTALL = {
     webflow:     'project settings → custom code → head',
     shopify:     'theme.liquid, before &lt;/head&gt;',
@@ -222,8 +276,8 @@
     /* ── 7 · CAPTURED + IDENTIFYING ───────────────── */
     async identify(ob) {
       await ob.bot(`got you! 🎯 identifying…`, { delay: 300 });
-      // Call API FIRST, then show result — no fake skeleton
-      try { ob.state.identified = await apiPost('/api/v1/demo/identify', {}); }
+      // Send browser fingerprint so backend can match against pixel events
+      try { ob.state.identified = await apiPost('/api/v1/demo/identify', { fingerprint: obFingerprint() }); }
       catch (e) { ob.state.identified = null; }
       const id = ob.state.identified;
       if (id && id.matched) {
@@ -273,9 +327,16 @@
           role: 'company-level match · ' + (id.country || ''),
           company: id.company_domain, country: id.country,
         }), { cls: 'rich card', typing: false });
+      } else if (id && id.matched && id.level === 'device') {
+        await ob.bot(`caught you! your browser fingerprint matched the pixel visit. 🔒`, { delay: 300 });
+        await ob.bot(`that's device-level identification — in production, we layer identity providers on top to get your name, email, and social profiles.`);
+        await ob.bot(`drop your work email and i'll show you the full profile experience.`);
       } else {
-        await ob.bot(`home wifi, so your ip didn't resolve. totally normal.`, { delay: 300 });
+        await ob.bot(`couldn't identify you this time — happens with ~30% of traffic. in production, our 7-layer waterfall catches most of your real visitors.`, { delay: 300 });
         await ob.bot(`drop your work email and i'll pull your real profile.`);
+      }
+
+      if (!id || !id.matched || id.level === 'device') {
         const ec = ob.controls(`
           <div class="ob-field">
             <input class="ob-input" id="ob-email-id" type="email" placeholder="you@company.com" autocomplete="email" />
