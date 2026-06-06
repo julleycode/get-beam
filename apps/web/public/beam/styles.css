@@ -51,7 +51,7 @@ body {
 .sky-stage {
   position: relative;
   background:
-    linear-gradient(to bottom, var(--sky-pale) 0%, var(--sky) 38%, var(--sky-pale) 62%, var(--cream-warm) 78%, var(--field-1) 100%);
+    linear-gradient(to bottom, var(--sky-pale) 0%, var(--sky) 50%, var(--sky-pale) 100%);
   overflow: hidden;
   isolation: isolate;
 }
