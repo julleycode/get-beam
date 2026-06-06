@@ -171,32 +171,44 @@ app.add_middleware(
 # Starlette middleware order: last add_middleware = outermost = runs first.
 # This must be added AFTER CORSMiddleware so it intercepts /ingest requests
 # before CORSMiddleware can reject them.
-from starlette.middleware.base import BaseHTTPMiddleware
-
-class PixelCORSMiddleware(BaseHTTPMiddleware):
+class PixelCORSMiddleware:
     """Allow cross-origin requests to /api/v1/events/ingest from any origin.
 
-    The tracking pixel is embedded on customer websites, so it must be able
-    to POST events from any domain.  CORSMiddleware only allows the dashboard
-    origin, so we intercept the pixel path here and short-circuit.
+    Pure ASGI middleware (not BaseHTTPMiddleware) to avoid event-loop conflicts
+    with asyncpg when running under pytest / ASGITransport.
     """
 
-    async def dispatch(self, request: Request, call_next):
-        if request.url.path in ("/api/v1/events/ingest", "/pixel/tracker.js"):
-            if request.method == "OPTIONS":
-                return Response(
-                    status_code=200,
-                    headers={
-                        "Access-Control-Allow-Origin": "*",
-                        "Access-Control-Allow-Methods": "POST, OPTIONS",
-                        "Access-Control-Allow-Headers": "Content-Type",
-                        "Access-Control-Max-Age": "86400",
-                    },
-                )
-            response = await call_next(request)
-            response.headers["Access-Control-Allow-Origin"] = "*"
-            return response
-        return await call_next(request)
+    _PIXEL_PATHS = {"/api/v1/events/ingest", "/pixel/tracker.js"}
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("path", "") not in self._PIXEL_PATHS:
+            await self.app(scope, receive, send)
+            return
+
+        if scope.get("method") == "OPTIONS":
+            response = Response(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Methods": "POST, OPTIONS",
+                    "Access-Control-Allow-Headers": "Content-Type",
+                    "Access-Control-Max-Age": "86400",
+                },
+            )
+            await response(scope, receive, send)
+            return
+
+        async def send_with_cors(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                headers.append((b"access-control-allow-origin", b"*"))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_cors)
 
 
 app.add_middleware(PixelCORSMiddleware)

@@ -79,23 +79,49 @@ async def test_db(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
 @pytest_asyncio.fixture
 async def test_client(test_engine) -> AsyncGenerator[AsyncClient, None]:
-    """Provide an async HTTP test client with DB dependency overridden to use test engine."""
+    """Provide an async HTTP test client with DB + rate-limit isolation.
+
+    - Overrides get_db so endpoints use the test engine (same event loop)
+    - Patches async_session in modules that import it directly
+    - Disables slowapi rate limiter
+    """
     from apps.api.main import app
     from apps.api.models.database import get_db
+    from apps.api.routers.social_auth import limiter
 
-    test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    test_session_factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
 
-    async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
+    async def override_get_db():
         async with test_session_factory() as session:
             yield session
 
-    app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_db] = override_get_db
+    limiter.enabled = False
+
+    import apps.api.routers.demo as demo_mod
+    import apps.api.routers.events as events_mod
+    import apps.api.routers.visitors as visitors_mod
+
+    orig = {
+        "demo": demo_mod.async_session,
+        "events": events_mod.async_session,
+        "visitors": visitors_mod.async_session,
+    }
+    demo_mod.async_session = test_session_factory
+    events_mod.async_session = test_session_factory
+    visitors_mod.async_session = test_session_factory
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
 
-    app.dependency_overrides.pop(get_db, None)
+    demo_mod.async_session = orig["demo"]
+    events_mod.async_session = orig["events"]
+    visitors_mod.async_session = orig["visitors"]
+    app.dependency_overrides.clear()
+    limiter.enabled = True
 
 
 @pytest_asyncio.fixture
