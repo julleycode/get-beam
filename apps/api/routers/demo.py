@@ -479,6 +479,7 @@ async def demo_generate_draft(request: Request, body: DraftRequest) -> dict:
 
 class WaitlistRequest(BaseModel):
     email: str
+    site_url: str | None = None
 
 
 @router.post("/waitlist")
@@ -491,18 +492,28 @@ async def join_waitlist(request: Request, body: WaitlistRequest) -> dict:
 
     logger.info("waitlist_signup", email=email)
 
-    # Store in feature_requests table as a waitlist entry
+    # Store in waitlist_signups table (upsert: ignore duplicate emails)
     try:
         from apps.api.models.database import get_db
-        from apps.api.models.feature_request import FeatureRequest
-        from sqlalchemy.ext.asyncio import AsyncSession
+        from apps.api.models.waitlist import WaitlistSignup
 
         async for db in get_db():
-            entry = FeatureRequest(
+            # Check for existing signup
+            from sqlalchemy import select as sa_select
+            result = await db.execute(
+                sa_select(WaitlistSignup).where(WaitlistSignup.email == email)
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                # Update site_url if provided and not already set
+                if body.site_url and not existing.site_url:
+                    existing.site_url = body.site_url
+                    await db.commit()
+                break
+
+            entry = WaitlistSignup(
                 email=email,
-                title="[WAITLIST] Private beta signup",
-                description=f"Waitlist signup from {email}",
-                category="waitlist",
+                site_url=body.site_url or None,
             )
             db.add(entry)
             await db.commit()
@@ -514,10 +525,11 @@ async def join_waitlist(request: Request, body: WaitlistRequest) -> dict:
     try:
         from apps.api.services.email_sender import EmailSender
         sender = EmailSender()
+        site_info = f" (site: {body.site_url})" if body.site_url else ""
         await sender.send(
             to_email="hello@getbeam.fyi",
             subject=f"New waitlist signup: {email}",
-            body_html=f"<p>{email} just joined the Beam waitlist.</p>",
+            body_html=f"<p>{email} just joined the Beam waitlist.{site_info}</p>",
         )
     except Exception:
         pass

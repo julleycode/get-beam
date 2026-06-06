@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>you're on the list — beam</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='0.35'%3E%3Cstop offset='0' stop-color='%23FF6B9D'/%3E%3Cstop offset='0.55' stop-color='%23FF3366'/%3E%3Cstop offset='1' stop-color='%23FF7FA8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d='M30,9 Q30,32 57,32 Q30,32 30,55 Q30,32 9,32 Q30,32 30,9 Z' fill='url(%23g)'/%3E%3Ccircle cx='30' cy='32' r='3.2' fill='%23fff' opacity='0.9'/%3E%3Cpath d='M50,17 Q52,21 56,21 Q52,21 50,25 Q48,21 44,21 Q48,21 50,17 Z' fill='url(%23g)' opacity='0.8'/%3E%3C/svg%3E" />
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: #FFF8F5;
+    color: #2b2530;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 60px 24px 80px;
+  }
+  .back {
+    position: fixed;
+    top: 24px;
+    left: 24px;
+    font-size: 14px;
+    color: #b8a0a8;
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  .back:hover { color: #FF3366; }
+  .card {
+    max-width: 580px;
+    width: 100%;
+    background: white;
+    border-radius: 16px;
+    padding: 48px 40px;
+    box-shadow: 0 4px 24px rgba(43,37,48,0.08);
+    margin-top: 20px;
+  }
+  .hero-emoji {
+    font-size: 48px;
+    margin-bottom: 16px;
+  }
+  .title {
+    font-family: 'Fraunces', serif;
+    font-size: 28px;
+    font-weight: 500;
+    font-style: italic;
+    margin-bottom: 8px;
+    color: #2b2530;
+  }
+  .subtitle {
+    font-size: 15px;
+    color: #b8a0a8;
+    margin-bottom: 32px;
+  }
+  .section-label {
+    font-family: 'Fraunces', serif;
+    font-size: 18px;
+    font-weight: 500;
+    color: #2b2530;
+    margin-bottom: 20px;
+  }
+  .steps {
+    list-style: none;
+    margin-bottom: 36px;
+  }
+  .steps li {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-bottom: 16px;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #4a3f50;
+  }
+  .step-num {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #FF6B9D, #FF3366);
+    color: white;
+    font-weight: 600;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .divider {
+    border: none;
+    border-top: 1px solid rgba(43,37,48,0.08);
+    margin: 32px 0;
+  }
+  .while-label {
+    font-family: 'Fraunces', serif;
+    font-size: 16px;
+    font-weight: 500;
+    font-style: italic;
+    color: #b8a0a8;
+    margin-bottom: 16px;
+  }
+  .links {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-bottom: 32px;
+  }
+  .links a {
+    font-size: 15px;
+    color: #FF3366;
+    text-decoration: none;
+    transition: color 0.2s;
+  }
+  .links a:hover { color: #e6294f; }
+  .share-section {
+    background: #FFF2F0;
+    border-radius: 12px;
+    padding: 24px;
+    text-align: center;
+  }
+  .share-label {
+    font-family: 'Fraunces', serif;
+    font-size: 16px;
+    font-weight: 500;
+    color: #2b2530;
+    margin-bottom: 12px;
+  }
+  .share-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: center;
+  }
+  .share-url {
+    font-size: 14px;
+    color: #b8a0a8;
+    background: white;
+    border: 1px solid rgba(43,37,48,0.1);
+    border-radius: 8px;
+    padding: 10px 16px;
+    flex: 1;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .copy-btn {
+    background: #FF3366;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+    white-space: nowrap;
+  }
+  .copy-btn:hover { background: #e6294f; }
+  .copy-btn.copied {
+    background: #22c55e;
+  }
+  @media (max-width: 640px) {
+    .card { padding: 32px 24px; }
+    body { padding: 40px 16px 60px; }
+    .share-row { flex-direction: column; }
+    .share-url { max-width: 100%; }
+  }
+</style>
+</head>
+<body>
+  <a class="back" href="/beam/index.html">&larr; back to beam</a>
+  <div class="card">
+    <div class="hero-emoji">&#127881;</div>
+    <h1 class="title">you're on the list!</h1>
+    <p class="subtitle">we'll get you in soon. here's what to expect.</p>
+
+    <p class="section-label">here's what happens next:</p>
+    <ol class="steps">
+      <li>
+        <span class="step-num">1</span>
+        <span>we review your site to make sure beam is a good fit.</span>
+      </li>
+      <li>
+        <span class="step-num">2</span>
+        <span>you get a personal invite within 48 hours.</span>
+      </li>
+      <li>
+        <span class="step-num">3</span>
+        <span>paste one snippet, beam does the rest.</span>
+      </li>
+    </ol>
+
+    <hr class="divider" />
+
+    <p class="while-label">while you wait:</p>
+    <div class="links">
+      <a href="/beam/letter.html">read the founder's letter &rarr;</a>
+      <a href="https://x.com/julleybuildbeam" target="_blank" rel="noopener">follow @julleybuildbeam on X &rarr;</a>
+    </div>
+
+    <div class="share-section">
+      <p class="share-label">tell a friend</p>
+      <div class="share-row">
+        <span class="share-url" id="share-url">https://getbeam.fyi</span>
+        <button class="copy-btn" id="copy-btn" onclick="copyLink()">copy link</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+function copyLink() {
+  var url = document.getElementById('share-url').textContent;
+  var btn = document.getElementById('copy-btn');
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(url).then(function() {
+      btn.textContent = 'copied!';
+      btn.classList.add('copied');
+      setTimeout(function() {
+        btn.textContent = 'copy link';
+        btn.classList.remove('copied');
+      }, 2000);
+    });
+  } else {
+    // fallback
+    var ta = document.createElement('textarea');
+    ta.value = url;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    btn.textContent = 'copied!';
+    btn.classList.add('copied');
+    setTimeout(function() {
+      btn.textContent = 'copy link';
+      btn.classList.remove('copied');
+    }, 2000);
+  }
+}
+</script>
+</body>
+</html>
