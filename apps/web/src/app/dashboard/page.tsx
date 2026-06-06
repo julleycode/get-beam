@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
+const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
 function SiteCard({ site }: { site: Site }) {
   const [stats, setStats] = useState<SiteStats | null>(null);
 
@@ -143,44 +145,84 @@ function BeamLoopWidget() {
   );
 }
 
-export default function DashboardPage() {
+function DashboardContent({ onSitesLoaded }: { onSitesLoaded: (sites: Site[]) => void }) {
   const router = useRouter();
-  const [sites, setSites] = useState<Site[]>([]);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     api
       .listSites()
       .then((s) => {
-        setSites(s);
+        onSitesLoaded(s);
         if (s.length === 0) {
           router.push("/dashboard/onboarding");
         }
       })
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, [router]);
+      .catch(() => {});
+  }, [router, onSitesLoaded]);
 
-  if (loading) {
-    return <p className="text-muted-foreground">Loading...</p>;
+  return null;
+}
+
+function ClerkTokenGate({ children }: { children: React.ReactNode }) {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { getToken, isSignedIn } = require("@clerk/nextjs").useAuth();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (isSignedIn === undefined) return;
+    if (!isSignedIn) {
+      setReady(true);
+      return;
+    }
+
+    getToken().then((token: string | null) => {
+      if (token) api.setClerkToken(token);
+      setReady(true);
+    }).catch(() => setReady(true));
+  }, [isSignedIn, getToken]);
+
+  if (!ready) return <p className="text-muted-foreground">Loading...</p>;
+  return <>{children}</>;
+}
+
+export default function DashboardPage() {
+  const [sites, setSites] = useState<Site[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  const handleSites = useState(() => (s: Site[]) => {
+    setSites(s);
+    setLoaded(true);
+  })[0];
+
+  const content = (
+    <>
+      <DashboardContent onSitesLoaded={handleSites} />
+      {!loaded ? (
+        <p className="text-muted-foreground">Loading...</p>
+      ) : (
+        <div>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-serif font-semibold tracking-tight">Dashboard</h2>
+            <Link href="/dashboard/onboarding">
+              <Button size="sm">Add site</Button>
+            </Link>
+          </div>
+
+          <BeamLoopWidget />
+
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {sites.map((site) => (
+              <SiteCard key={site.site_id} site={site} />
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  if (HAS_CLERK) {
+    return <ClerkTokenGate>{content}</ClerkTokenGate>;
   }
 
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-serif font-semibold tracking-tight">Dashboard</h2>
-        <Link href="/dashboard/onboarding">
-          <Button size="sm">Add site</Button>
-        </Link>
-      </div>
-
-      <BeamLoopWidget />
-
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {sites.map((site) => (
-          <SiteCard key={site.site_id} site={site} />
-        ))}
-      </div>
-    </div>
-  );
+  return content;
 }
