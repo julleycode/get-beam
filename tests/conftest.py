@@ -81,10 +81,17 @@ async def test_db(test_engine) -> AsyncGenerator[AsyncSession, None]:
 async def test_client() -> AsyncGenerator[AsyncClient, None]:
     """Provide an async HTTP test client for the FastAPI app."""
     from apps.api.main import app
+    from apps.api.models.database import engine as app_engine
+
+    # Dispose stale connections so the app engine creates fresh ones in the
+    # current event loop (asyncio_default_fixture_loop_scope = "function").
+    await app_engine.dispose()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+    await app_engine.dispose()
 
 
 @pytest_asyncio.fixture

@@ -7,6 +7,7 @@ MOCK_EXTERNAL_APIS=true is set by conftest.py.
 
 import json
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
@@ -128,8 +129,8 @@ class TestDemoFingerprintPreMatch:
             site_id=test_site,
             visitor_id=f"pixel-visitor-{uuid.uuid4().hex[:8]}",
             fingerprint=fp,
-            first_seen="2026-06-01T00:00:00",
-            last_seen="2026-06-01T00:00:00",
+            first_seen=datetime(2026, 6, 1, tzinfo=timezone.utc),
+            last_seen=datetime(2026, 6, 1, tzinfo=timezone.utc),
         ))
         await test_db.commit()
 
@@ -153,8 +154,8 @@ class TestDemoFingerprintPreMatch:
             site_id=test_site,
             visitor_id=f"pixel-no-match-{uuid.uuid4().hex[:8]}",
             fingerprint="fp2_existing_but_not_sent",
-            first_seen="2026-06-01T00:00:00",
-            last_seen="2026-06-01T00:00:00",
+            first_seen=datetime(2026, 6, 1, tzinfo=timezone.utc),
+            last_seen=datetime(2026, 6, 1, tzinfo=timezone.utc),
         ))
         await test_db.commit()
 
