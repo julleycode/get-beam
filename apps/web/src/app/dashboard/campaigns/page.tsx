@@ -51,7 +51,7 @@ export default function CampaignsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">Campaigns</h2>
+        <h2 className="text-2xl font-serif font-semibold tracking-tight">Campaigns</h2>
         <SiteSelector value={siteId} onChange={setSiteId} />
       </div>
 

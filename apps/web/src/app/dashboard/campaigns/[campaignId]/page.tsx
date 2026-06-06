@@ -45,7 +45,7 @@ export default function CampaignDetailPage() {
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <h2 className="text-2xl font-bold">{campaign.name}</h2>
+        <h2 className="text-2xl font-serif font-semibold tracking-tight">{campaign.name}</h2>
         <Badge className="mt-1">{campaign.status}</Badge>
       </div>
 

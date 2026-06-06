@@ -33,8 +33,8 @@ function statusColor(status: string) {
 }
 
 function intentColor(score: number): string {
-  if (score >= 70) return "text-green-400";
-  if (score >= 40) return "text-yellow-400";
+  if (score >= 70) return "text-green-600";
+  if (score >= 40) return "text-yellow-600";
   return "text-muted-foreground";
 }
 
@@ -69,7 +69,7 @@ export default function VisitorsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">Visitors</h2>
+        <h2 className="text-2xl font-serif font-semibold tracking-tight">Visitors</h2>
         <div className="flex items-center gap-3">
           <SiteSelector value={siteId} onChange={setSiteId} />
           <Select value={filter} onValueChange={setFilter}>

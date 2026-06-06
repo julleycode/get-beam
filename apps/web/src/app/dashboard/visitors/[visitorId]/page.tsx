@@ -106,7 +106,7 @@ export default function VisitorDetailPage() {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h2 className="text-2xl font-bold">Visitor Detail</h2>
+        <h2 className="text-2xl font-serif font-semibold tracking-tight">Visitor Detail</h2>
         <p className="text-sm font-mono text-muted-foreground">
           {visitor.visitor_id}
         </p>
@@ -268,8 +268,8 @@ export default function VisitorDetailPage() {
 
             {/* No-keys prompt */}
             {showNoKeysPrompt && (
-              <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-4 space-y-3">
-                <p className="text-sm font-medium text-yellow-500">
+              <div className="rounded-md border border-yellow-200 bg-yellow-50 p-4 space-y-3">
+                <p className="text-sm font-medium text-yellow-700">
                   API keys required for deep enrichment
                 </p>
                 <p className="text-xs text-muted-foreground">
@@ -329,7 +329,7 @@ export default function VisitorDetailPage() {
               {visitor.linkedin_url && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">LinkedIn</span>
-                  <span className="text-blue-400 truncate max-w-[300px]">
+                  <span className="text-blue-600 truncate max-w-[300px]">
                     {visitor.linkedin_url}
                   </span>
                 </div>
