@@ -15,6 +15,7 @@ if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
     "/signup(.*)",
     "/sign-in(.*)",
     "/sign-up(.*)",
+    "/pricing(.*)",
   ]);
   middleware = clerkMiddleware((auth: () => { protect: () => void }, request: NextRequest) => {
     if (!isPublicRoute(request)) {
