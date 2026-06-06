@@ -1877,9 +1877,13 @@ footer.legal .legal-links a { margin-left: 18px; }
 /* ── Waitlist form ── */
 .waitlist-form {
   display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.waitlist-row {
+  display: flex;
   gap: 8px;
   align-items: center;
-  flex-wrap: wrap;
 }
 .waitlist-input {
   font-family: 'DM Mono', monospace;
@@ -1890,8 +1894,13 @@ footer.legal .legal-links a { margin-left: 18px; }
   background: var(--cloud);
   color: var(--ink);
   outline: none;
-  width: 240px;
+  flex: 1;
+  min-width: 200px;
   transition: border-color 0.2s;
+}
+.waitlist-site {
+  font-size: 13px;
+  max-width: 360px;
 }
 .waitlist-input:focus {
   border-color: var(--pink);
@@ -1914,7 +1923,8 @@ footer.legal .legal-links a { margin-left: 18px; }
   color: white;
 }
 @media (max-width: 640px) {
-  .waitlist-form { flex-direction: column; align-items: flex-start; }
-  .waitlist-input { width: 100%; }
+  .waitlist-row { flex-direction: column; align-items: stretch; }
+  .waitlist-input { width: 100%; min-width: 0; }
+  .waitlist-site { max-width: 100%; }
 }
 

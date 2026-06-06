@@ -52,11 +52,12 @@
           <p class="hero-sub" data-tw="hero-sub">the stupidly easy way to identify high intent visitors. show up where they post. engage with them tastefully.</p>
           <div class="hero-actions">
             <form class="waitlist-form" id="hero-waitlist" onsubmit="return handleWaitlist(event, this)">
-              <input type="email" class="waitlist-input" placeholder="you@company.com" required />
-              <input type="url" class="waitlist-input waitlist-site" name="site_url" placeholder="your site url (optional)" style="font-size:13px;max-width:220px;" />
-              <button type="submit" class="btn btn-primary">join the waitlist <span aria-hidden="true">→</span></button>
+              <div class="waitlist-row">
+                <input type="email" class="waitlist-input" placeholder="you@company.com" required />
+                <button type="submit" class="btn btn-primary">join the waitlist <span aria-hidden="true">→</span></button>
+              </div>
+              <input type="url" class="waitlist-input waitlist-site" name="site_url" placeholder="your site url (optional)" />
             </form>
-            <a class="btn btn-ghost" onclick="openModal('modal-how')" data-tw="hero-secondary">see how it works ↓</a>
           </div>
         </div>
         <div class="hero-stage-wrap">
