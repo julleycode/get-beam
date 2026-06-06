@@ -11,6 +11,11 @@ class FeatureRequestCreate(BaseModel):
     email: str | None = Field(default=None, max_length=255)
 
 
+class FeatureRequestUpdate(BaseModel):
+    status: str | None = Field(default=None, max_length=20)
+    admin_note: str | None = Field(default=None, max_length=2000)
+
+
 class FeatureRequestOut(BaseModel):
     id: uuid.UUID
     title: str
@@ -19,7 +24,9 @@ class FeatureRequestOut(BaseModel):
     email: str | None
     source: str | None
     status: str
+    admin_note: str | None
     created_at: datetime
+    updated_at: datetime | None
 
     model_config = {"from_attributes": True}
 

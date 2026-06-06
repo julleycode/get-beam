@@ -21,4 +21,5 @@ class FeatureRequest(Base):
     # light context for triage
     source: Mapped[str | None] = mapped_column(String(50), default="landing_fab")
     status: Mapped[str] = mapped_column(String(20), default="new")  # new | planned | shipped | closed
+    admin_note: Mapped[str | None] = mapped_column(Text)
     # created_at / updated_at are provided by Base
