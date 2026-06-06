@@ -131,6 +131,10 @@ nav.top {
   color: var(--cream);
   font-weight: 500;
 }
+.nav-pills a.login-link {
+  color: var(--pink);
+  font-weight: 500;
+}
 
 /* ── buttons ───────────────────────────────────────────────────── */
 .btn {
@@ -424,7 +428,7 @@ footer.legal a:hover { color: var(--ink); }
   .feature-grid { grid-template-columns: 1fr; }
   .wrap { padding: 0 22px; }
   section { padding: 64px 0; }
-  .nav-pills a:not(.primary) { display: none; }
+  .nav-pills a:not(.primary):not(.login-link) { display: none; }
   h1.hero-title { font-size: clamp(36px, 9vw, 48px); }
 }
 
