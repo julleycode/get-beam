@@ -739,29 +739,7 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
   </g>
 </svg>
 
-<!-- horizon: mountains + fields, anchored to the bottom -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${VB_W} 30"
-     preserveAspectRatio="xMidYMax slice" shape-rendering="crispEdges"
-     style="position:absolute; left:0; right:0; bottom:0; width:100%; height:120px;">
-  <defs>
-    <linearGradient id="horizonblend" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%"   stop-color="#DCEAF1" stop-opacity="0"/>
-      <stop offset="30%"  stop-color="#F2EBDD" stop-opacity="0.6"/>
-      <stop offset="100%" stop-color="#E6D9B5"/>
-    </linearGradient>
-  </defs>
-  <rect width="${VB_W}" height="30" fill="url(#horizonblend)"/>
-
-  <!-- mountains -->
-  <g transform="translate(70, 8)" opacity="0.85">${mtnFar}</g>
-  <g transform="translate(-30, 14)" opacity="0.9">${mtnNear}</g>
-
-  <!-- fields -->
-  <rect x="0" y="22" width="${VB_W}" height="8" fill="#E6D9B5"/>
-  <rect x="0" y="22" width="${VB_W}" height="1" fill="#D4C29A"/>
-  <rect x="0" y="25" width="${VB_W}" height="1" fill="#C9B68A" opacity="0.5"/>
-  <rect x="0" y="28" width="${VB_W}" height="1" fill="#C9B68A" opacity="0.4"/>
-</svg>
+<!-- horizon removed — pure sky -->
 
 <style>
   .cloud-drift { animation: cloudDrift 80s linear infinite; }
