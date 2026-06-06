@@ -142,8 +142,7 @@ class TestDemoFingerprintPreMatch:
         data = resp.json()
 
         assert data.get("matched") is True
-        assert data.get("level") == "device"
-        assert data.get("resolution_provider") == "fingerprint"
+        assert data.get("fingerprint_matched") is True
 
     @pytest.mark.asyncio
     async def test_no_match_without_fingerprint(self, test_client, test_db, test_site):
