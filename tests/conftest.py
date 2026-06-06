@@ -78,13 +78,24 @@ async def test_db(test_engine) -> AsyncGenerator[AsyncSession, None]:
 
 
 @pytest_asyncio.fixture
-async def test_client() -> AsyncGenerator[AsyncClient, None]:
-    """Provide an async HTTP test client for the FastAPI app."""
+async def test_client(test_engine) -> AsyncGenerator[AsyncClient, None]:
+    """Provide an async HTTP test client with DB dependency overridden to use test engine."""
     from apps.api.main import app
+    from apps.api.models.database import get_db
+
+    test_session_factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def _override_get_db() -> AsyncGenerator[AsyncSession, None]:
+        async with test_session_factory() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = _override_get_db
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+    app.dependency_overrides.pop(get_db, None)
 
 
 @pytest_asyncio.fixture
