@@ -20,21 +20,21 @@ const PROVIDERS = [
     name: "OpenRouter",
     description: "AI replies — 100+ models (Grok, Llama, GPT-4o-mini, etc.)",
     docsUrl: "https://openrouter.ai/keys",
-    color: "text-purple-400",
+    color: "text-purple-600",
   },
   {
     id: "proxycurl",
     name: "Proxycurl",
     description: "LinkedIn profile enrichment",
     docsUrl: "https://nubela.co/proxycurl",
-    color: "text-blue-400",
+    color: "text-blue-600",
   },
   {
     id: "twitter",
     name: "Twitter / X",
     description: "Twitter bio & followers",
     docsUrl: "https://developer.twitter.com",
-    color: "text-sky-400",
+    color: "text-sky-600",
   },
 ];
 
@@ -132,7 +132,7 @@ export default function SettingsPage() {
   return (
     <div className="max-w-2xl space-y-6">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">Settings</h2>
+        <h2 className="text-2xl font-serif font-semibold tracking-tight">Settings</h2>
         <SiteSelector value={siteId} onChange={setSiteId} />
       </div>
 

@@ -222,7 +222,7 @@ export default function FeedPage() {
       )}
 
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Feed</h1>
+        <h1 className="text-2xl font-serif font-semibold tracking-tight">Feed</h1>
         <div className="flex gap-2">
           <button
             onClick={() => setShowImport(!showImport)}

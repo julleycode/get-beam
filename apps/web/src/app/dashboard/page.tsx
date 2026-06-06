@@ -35,7 +35,7 @@ function SiteCard({ site }: { site: Site }) {
               <p className="text-xs text-muted-foreground">Visitors</p>
             </div>
             <div>
-              <p className="text-2xl font-bold text-blue-400">
+              <p className="text-2xl font-bold text-blue-600">
                 {stats.identified}
               </p>
               <p className="text-xs text-muted-foreground">Identified</p>
@@ -108,9 +108,9 @@ function BeamLoopWidget() {
   const hasActivity = roi.total_engagements > 0 || roi.new_visitors_attributed > 0;
 
   return (
-    <Card className="mb-6 border-blue-500/30 bg-blue-950/20">
+    <Card className="mb-6 border-blue-200 bg-blue-50/60">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-blue-400">
+        <CardTitle className="text-sm font-medium text-blue-700">
           Your Beam Loop this week
         </CardTitle>
         <CardDescription className="text-xs">
@@ -120,19 +120,19 @@ function BeamLoopWidget() {
       <CardContent>
         {hasActivity ? (
           <p className="text-sm font-medium">
-            <span className="text-blue-400 font-bold">{roi.total_engagements}</span>
+            <span className="text-blue-600 font-bold">{roi.total_engagements}</span>
             {" engagements"}
             <span className="text-muted-foreground mx-2">→</span>
-            <span className="text-green-400 font-bold">{roi.new_visitors_attributed}</span>
+            <span className="text-green-600 font-bold">{roi.new_visitors_attributed}</span>
             {" new visitors"}
             <span className="text-muted-foreground mx-2">→</span>
-            <span className="text-purple-400 font-bold">{roi.identified_from_engagement}</span>
+            <span className="text-purple-600 font-bold">{roi.identified_from_engagement}</span>
             {" identified"}
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">
             No engagement activity yet. Approve a draft in{" "}
-            <Link href="/dashboard/engage" className="underline text-blue-400">
+            <Link href="/dashboard/engage" className="underline text-blue-600">
               Engage
             </Link>{" "}
             to start the flywheel.
@@ -168,7 +168,7 @@ export default function DashboardPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">Dashboard</h2>
+        <h2 className="text-2xl font-serif font-semibold tracking-tight">Dashboard</h2>
         <Link href="/dashboard/onboarding">
           <Button size="sm">Add site</Button>
         </Link>

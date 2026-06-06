@@ -41,7 +41,7 @@ export default function ExportsPage() {
   return (
     <div className="max-w-lg">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">Export Audiences</h2>
+        <h2 className="text-2xl font-serif font-semibold tracking-tight">Export Audiences</h2>
         <SiteSelector value={siteId} onChange={setSiteId} />
       </div>
 

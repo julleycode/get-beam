@@ -12,8 +12,8 @@ const URGENCY_LABEL: Record<string, string> = {
 
 const URGENCY_STYLE: Record<string, string> = {
   nice: "bg-muted text-muted-foreground",
-  useful: "bg-blue-500/15 text-blue-400",
-  critical: "bg-pink-500/15 text-pink-400",
+  useful: "bg-blue-100 text-blue-700",
+  critical: "bg-pink-100 text-pink-700",
 };
 
 export default function FeatureRequestsPage() {
@@ -36,7 +36,7 @@ export default function FeatureRequestsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Feature Requests</h1>
+        <h1 className="text-2xl font-serif font-semibold tracking-tight">Feature Requests</h1>
         <p className="text-muted-foreground">
           What people are asking for from the landing page — {total} total.
         </p>
@@ -75,7 +75,7 @@ export default function FeatureRequestsPage() {
                 {req.email && (
                   <>
                     <span>·</span>
-                    <a href={`mailto:${req.email}`} className="text-pink-400 hover:underline">
+                    <a href={`mailto:${req.email}`} className="text-primary hover:underline">
                       {req.email}
                     </a>
                   </>
