@@ -551,7 +551,7 @@
       const c = ob.controls(`
         <button class="ob-btn ob-btn-primary" data-go>i want this for my visitors <span aria-hidden="true">→</span></button>
         <button class="ob-btn ob-btn-ghost" data-regen>↻ regenerate</button>`);
-      c.querySelector('[data-go]').addEventListener('click', () => ob.answer('i want this', 'paywall'));
+      c.querySelector('[data-go]').addEventListener('click', () => window.location.href = '/pricing');
       c.querySelector('[data-regen]').addEventListener('click', async () => {
         const newDraft = await generateDraft() || `${vName.split(' ')[0].toLowerCase()}, your work caught my eye. let's chat.`;
         await typeDraft(draftEl, newDraft);
