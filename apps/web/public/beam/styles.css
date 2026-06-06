@@ -1802,29 +1802,67 @@ footer.legal .legal-links a { margin-left: 18px; }
   line-height: 1.55;
   margin: 0 0 28px;
 }
-.modal-steps {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
+.modal-content--carousel {
+  max-width: 540px;
+  padding-bottom: 24px;
+  overflow: hidden;
 }
-.modal-step {
+
+/* ── carousel ── */
+.carousel { position: relative; overflow: hidden; margin-top: 4px; }
+.carousel-track {
   display: flex;
-  gap: 18px;
+  transition: transform 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+}
+.carousel-slide {
+  flex: 0 0 100%;
+  min-width: 0;
+  padding: 0 4px;
+}
+.slide-text {
+  display: flex;
   align-items: flex-start;
-  padding: 20px;
+  gap: 14px;
+  padding: 14px 16px;
   background: var(--cream);
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 14px;
+  margin-bottom: 14px;
 }
-.modal-step .step-num {
-  flex: 0 0 auto;
-  margin-bottom: 0;
-}
-.modal-step p {
-  font-size: 14px;
+.slide-text .step-num { flex: 0 0 auto; margin-bottom: 0; }
+.slide-text h3 { font-size: 20px !important; }
+.slide-text p {
+  font-size: 13px;
   color: var(--ink-2);
-  line-height: 1.55;
+  line-height: 1.5;
   margin: 0;
+}
+.slide-mock .mockwin {
+  font-size: 13px;
+  max-height: 340px;
+  overflow: hidden;
+}
+
+/* dots */
+.carousel-dots {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 18px;
+}
+.carousel-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  border: none;
+  background: var(--line);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+.carousel-dot.active {
+  background: var(--pink);
+  transform: scale(1.25);
 }
 
 @media (max-width: 560px) {
