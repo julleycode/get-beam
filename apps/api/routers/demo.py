@@ -475,3 +475,51 @@ async def demo_generate_draft(request: Request, body: DraftRequest) -> dict:
     return {
         "draft": f"someone's been checking out your pricing page on {site}. this is what beam would draft based on their social posts and your tone."
     }
+
+
+class WaitlistRequest(BaseModel):
+    email: str
+
+
+@router.post("/waitlist")
+@limiter.limit("5/minute")
+async def join_waitlist(request: Request, body: WaitlistRequest) -> dict:
+    """Collect waitlist email for private beta."""
+    email = body.email.strip().lower()
+    if not email or "@" not in email:
+        return {"status": "invalid"}
+
+    logger.info("waitlist_signup", email=email)
+
+    # Store in feature_requests table as a waitlist entry
+    try:
+        from apps.api.models.database import get_db
+        from apps.api.models.feature_request import FeatureRequest
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        async for db in get_db():
+            entry = FeatureRequest(
+                email=email,
+                title="[WAITLIST] Private beta signup",
+                description=f"Waitlist signup from {email}",
+                category="waitlist",
+            )
+            db.add(entry)
+            await db.commit()
+            break
+    except Exception as e:
+        logger.warning("waitlist_db_error", error=str(e))
+
+    # Also send notification email if Resend configured
+    try:
+        from apps.api.services.email_sender import EmailSender
+        sender = EmailSender()
+        await sender.send(
+            to_email="hello@getbeam.fyi",
+            subject=f"New waitlist signup: {email}",
+            body_html=f"<p>{email} just joined the Beam waitlist.</p>",
+        )
+    except Exception:
+        pass
+
+    return {"status": "ok"}

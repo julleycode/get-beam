@@ -1874,3 +1874,47 @@ footer.legal .legal-links a { margin-left: 18px; }
   .modal-title { font-size: 24px; }
 }
 
+/* ── Waitlist form ── */
+.waitlist-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.waitlist-input {
+  font-family: 'DM Mono', monospace;
+  font-size: 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--cloud);
+  color: var(--ink);
+  outline: none;
+  width: 240px;
+  transition: border-color 0.2s;
+}
+.waitlist-input:focus {
+  border-color: var(--pink);
+}
+.waitlist-form-dark .waitlist-input {
+  background: rgba(255,255,255,0.12);
+  border-color: rgba(255,255,255,0.2);
+  color: white;
+}
+.waitlist-form-dark .waitlist-input::placeholder {
+  color: rgba(255,255,255,0.5);
+}
+.waitlist-success {
+  font-family: 'Fraunces', serif;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--pink);
+}
+.waitlist-form-dark .waitlist-success {
+  color: white;
+}
+@media (max-width: 640px) {
+  .waitlist-form { flex-direction: column; align-items: flex-start; }
+  .waitlist-input { width: 100%; }
+}
+
