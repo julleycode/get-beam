@@ -51,8 +51,11 @@
           <h1 class="h-serif hero-title" data-tw="hero-title" style="font-size: 61px">see who's into you. <em>say hi back.</em></h1>
           <p class="hero-sub" data-tw="hero-sub">the stupidly easy way to identify high intent visitors. show up where they post. engage with them tastefully.</p>
           <div class="hero-actions">
-            <a class="btn btn-primary" href="/onboarding" data-tw="hero-primary">start beaming for free <span aria-hidden="true">→</span></a>
-            <a class="btn btn-ghost" href="#how" data-tw="hero-secondary">see how it works ↓</a>
+            <form class="waitlist-form" id="hero-waitlist" onsubmit="return handleWaitlist(event, this)">
+              <input type="email" class="waitlist-input" placeholder="you@company.com" required />
+              <button type="submit" class="btn btn-primary">join the waitlist <span aria-hidden="true">→</span></button>
+            </form>
+            <a class="btn btn-ghost" onclick="openModal('modal-how')" data-tw="hero-secondary">see how it works ↓</a>
           </div>
         </div>
         <div class="hero-stage-wrap">
@@ -99,7 +102,10 @@
     <div class="story-line sl-16 story-hidden" data-sr-after="rest">in <em>your voice</em>. in <em>30 seconds</em>.</div>
     <div class="story-line sl-17 story-reveal story-hidden" data-sr-after="rest">that's <span class="story-beam">beam</span>.</div>
     <div class="story-cta story-hidden" data-sr-after="rest">
-      <a class="btn btn-primary" href="/onboarding">start beaming for free <span aria-hidden="true">→</span></a>
+      <form class="waitlist-form" id="story-waitlist" onsubmit="return handleWaitlist(event, this)">
+        <input type="email" class="waitlist-input" placeholder="you@company.com" required />
+        <button type="submit" class="btn btn-primary">join the waitlist <span aria-hidden="true">→</span></button>
+      </form>
       <a class="story-letter-link" href="/beam/letter.html">read the founder's letter →</a>
     </div>
   </div>
@@ -108,8 +114,11 @@
 <!-- ── ENDCARD — forest pixel art ── -->
 <section class="endcard">
   <div class="endcard-content">
-    <a class="btn btn-primary btn-lg" href="/onboarding">start beaming for free <span aria-hidden="true">→</span></a>
-    <p class="endcard-fine">no credit card · 2-minute install · free for your first 50 visitors</p>
+    <form class="waitlist-form waitlist-form-dark" id="end-waitlist" onsubmit="return handleWaitlist(event, this)">
+      <input type="email" class="waitlist-input" placeholder="you@company.com" required />
+      <button type="submit" class="btn btn-primary btn-lg">join the waitlist <span aria-hidden="true">→</span></button>
+    </form>
+    <p class="endcard-fine">limited spots · we'll reach out personally</p>
   </div>
 </section>
 
@@ -1191,6 +1200,31 @@ document.addEventListener('keydown', function(e) {
     });
   }
 });
+</script>
+
+<!-- ── WAITLIST HANDLER ── -->
+<script>
+function handleWaitlist(e, form) {
+  e.preventDefault();
+  var email = form.querySelector('input[type="email"]').value.trim();
+  if (!email) return false;
+  var btn = form.querySelector('button');
+  var orig = btn.innerHTML;
+  btn.innerHTML = 'joining…';
+  btn.disabled = true;
+  var API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:8000' : 'https://api.getbeam.fyi';
+  fetch(API + '/api/v1/demo/waitlist', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({email: email})
+  }).then(function() {
+    form.innerHTML = '<div class="waitlist-success">you\'re in! 🎉 we\'ll reach out soon.</div>';
+  }).catch(function() {
+    form.innerHTML = '<div class="waitlist-success">you\'re in! 🎉 we\'ll reach out soon.</div>';
+  });
+  return false;
+}
 </script>
 
 </body>

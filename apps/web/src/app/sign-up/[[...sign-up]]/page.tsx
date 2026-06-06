@@ -1,12 +1,6 @@
-"use client";
+import { redirect } from "next/navigation";
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { SignUp } = require("@clerk/nextjs");
-
+/** Private beta — sign-up blocked, redirect to landing page waitlist */
 export default function SignUpPage() {
-  return (
-    <div className="flex min-h-screen items-center justify-center p-4">
-      <SignUp />
-    </div>
-  );
+  redirect("/beam/index.html");
 }
