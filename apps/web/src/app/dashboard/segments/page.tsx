@@ -45,7 +45,7 @@ export default function SegmentsPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold">Segments</h2>
+        <h2 className="text-2xl font-serif font-semibold tracking-tight">Segments</h2>
         <div className="flex items-center gap-3">
           <SiteSelector value={siteId} onChange={setSiteId} />
           {siteId && (

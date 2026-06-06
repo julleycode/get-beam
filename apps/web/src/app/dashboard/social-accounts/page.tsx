@@ -43,7 +43,7 @@ export default function SocialAccountsPage() {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <h1 className="text-2xl font-bold">Connected Accounts</h1>
+      <h1 className="text-2xl font-serif font-semibold tracking-tight">Connected Accounts</h1>
 
       {isLoading ? (
         <p className="text-sm text-gray-400">Loading...</p>

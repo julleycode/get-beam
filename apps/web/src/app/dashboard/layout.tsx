@@ -44,10 +44,10 @@ function NavLink({
   return (
     <Link
       href={href}
-      className={`rounded-md px-3 py-2 text-sm transition-colors ${
+      className={`rounded-full px-4 py-2 text-sm transition-all ${
         isActive
-          ? "bg-accent text-accent-foreground font-medium"
-          : "text-muted-foreground hover:bg-accent/50"
+          ? "bg-[hsl(345,100%,60%)] text-[#FAF6F0] font-medium shadow-[0_1px_0_rgba(43,37,48,0.1),0_4px_12px_-4px_rgba(255,51,102,0.35)]"
+          : "text-muted-foreground hover:text-foreground hover:bg-secondary"
       }`}
     >
       {label}
@@ -145,10 +145,13 @@ export default function DashboardLayout({
       {/* Clerk auth guard (only when Clerk is active) */}
       {HAS_CLERK && <ClerkAuthGuard />}
 
-      <aside className="w-56 border-r bg-card p-4 flex flex-col">
+      <aside className="w-56 border-r border-[rgba(43,37,48,0.08)] bg-card p-4 flex flex-col">
         <div className="mb-6">
-          <h1 className="text-lg font-bold">Beam</h1>
-          <p className="text-xs text-muted-foreground truncate">{userEmail}</p>
+          <h1 className="text-xl font-serif font-semibold tracking-tight">
+            <span className="inline-block w-2.5 h-2.5 rounded-sm bg-[hsl(345,100%,60%)] mr-2 shadow-[0_0_0_3px_rgba(255,51,102,0.18)]" />
+            Beam
+          </h1>
+          <p className="text-xs text-muted-foreground truncate mt-1">{userEmail}</p>
         </div>
         <nav className="flex flex-col gap-1 flex-1">
           <p className="px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">

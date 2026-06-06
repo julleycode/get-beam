@@ -50,7 +50,7 @@ export default function DraftsPage() {
 
   return (
     <div className="max-w-3xl space-y-4">
-      <h1 className="text-2xl font-bold">Drafts</h1>
+      <h1 className="text-2xl font-serif font-semibold tracking-tight">Drafts</h1>
 
       <div className="flex gap-2 border-b border-gray-200 pb-2">
         {TABS.map((t) => (
