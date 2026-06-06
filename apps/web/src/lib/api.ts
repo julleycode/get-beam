@@ -107,6 +107,13 @@ class ApiClient {
     return this.request<FeatureRequestListResponse>(`/api/v1/feature-requests${qs}`);
   }
 
+  async updateFeatureRequest(id: string, data: { status?: string; admin_note?: string }) {
+    return this.request<FeatureRequest>(`/api/v1/feature-requests/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  }
+
   // Sites
   async createSite(name: string, url: string, description?: string, category?: string) {
     return this.request<Site>("/api/v1/sites/", {
@@ -457,7 +464,9 @@ export interface FeatureRequest {
   email: string | null;
   source: string | null;
   status: string;
+  admin_note: string | null;
   created_at: string;
+  updated_at: string | null;
 }
 
 export interface FeatureRequestListResponse {
