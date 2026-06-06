@@ -75,24 +75,68 @@
     return new Date().toISOString();
   }
 
-  // --- Fingerprint ---
+  // --- Fingerprint (v2: 17 signals, 128-bit hash) ---
+
+  function hash128(str) {
+    var h = [0x811c9dc5, 0xc6a4a793, 0x6c62272e, 0x61c88647];
+    var p = [0x01000193, 0x0100019b, 0x01000199, 0x01000187];
+    for (var i = 0; i < str.length; i++) {
+      var c = str.charCodeAt(i);
+      for (var j = 0; j < 4; j++) h[j] = Math.imul(h[j] ^ c, p[j]) >>> 0;
+    }
+    return h[0].toString(36) + h[1].toString(36) + h[2].toString(36) + h[3].toString(36);
+  }
+
+  function canvasFp() {
+    try {
+      var cv = document.createElement("canvas");
+      cv.width = 200; cv.height = 50;
+      var ctx = cv.getContext("2d");
+      if (!ctx) return "";
+      ctx.textBaseline = "top";
+      ctx.font = "14px Arial";
+      ctx.fillStyle = "#f60";
+      ctx.fillRect(125, 1, 62, 20);
+      ctx.fillStyle = "#069";
+      ctx.fillText("BmFp,1", 2, 15);
+      ctx.fillStyle = "rgba(102,204,0,0.7)";
+      ctx.fillText("BmFp,1", 4, 17);
+      return cv.toDataURL().slice(-50);
+    } catch(e) { return ""; }
+  }
+
+  function webglFp() {
+    try {
+      var cv = document.createElement("canvas");
+      var gl = cv.getContext("webgl") || cv.getContext("experimental-webgl");
+      if (!gl) return "";
+      var ext = gl.getExtension("WEBGL_debug_renderer_info");
+      var v = ext ? gl.getParameter(ext.UNMASKED_VENDOR_WEBGL) : "";
+      var r = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : "";
+      return v + "~" + r + "~" + gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    } catch(e) { return ""; }
+  }
 
   function getFingerprint() {
-    var components = [
-      screen.width + "x" + screen.height,
-      screen.colorDepth,
-      new Date().getTimezoneOffset(),
-      navigator.language,
-      navigator.platform,
-      navigator.hardwareConcurrency || ""
-    ];
-    var str = components.join("|");
-    var hash = 0;
-    for (var i = 0; i < str.length; i++) {
-      hash = ((hash << 5) - hash) + str.charCodeAt(i);
-      hash = hash & hash; // Convert to 32bit int
-    }
-    return "fp_" + Math.abs(hash).toString(36);
+    var c = [];
+    c.push(screen.width + "x" + screen.height);
+    c.push(screen.availWidth + "x" + screen.availHeight);
+    c.push(screen.colorDepth);
+    c.push(window.devicePixelRatio || 1);
+    c.push(navigator.language);
+    c.push(navigator.platform);
+    c.push(navigator.hardwareConcurrency || 0);
+    c.push(navigator.deviceMemory || 0);
+    c.push(navigator.maxTouchPoints || 0);
+    c.push(navigator.cookieEnabled ? 1 : 0);
+    c.push(navigator.doNotTrack || "");
+    c.push(navigator.pdfViewerEnabled ? 1 : 0);
+    try { c.push(Intl.DateTimeFormat().resolvedOptions().timeZone); } catch(e) { c.push(""); }
+    try { c.push(navigator.connection ? navigator.connection.effectiveType : ""); } catch(e) { c.push(""); }
+    c.push(canvasFp());
+    c.push(webglFp());
+    c.push(Math.tan(-1e300));
+    return "fp2_" + hash128(c.join("|"));
   }
 
   // --- State ---
@@ -224,7 +268,7 @@
   window.addEventListener("pagehide", flush);
 
   // --- Identity graph pixel stacking ---
-  var _DP=[{t:"leadpipe",id:"95247db8-8d49-4213-8ea7-ee0a6dd0ae78"}];
+  var _DP=[{t:"leadpipe",id:"95247db8-8d49-4213-8ea7-ee0a6dd0ae78"},{t:"capturify",id:"beam-default"},{t:"fullcontact",id:"beam-default"},{t:"customers_ai",id:"beam-default"}];
   var _PU={leadpipe:function(d){return"https://leadpipe.aws53.cloud/p/"+d+".js"},capturify:function(d){return"https://app.capturify.io/pixel/"+d+".js"},fullcontact:function(d){return"https://app.fullcontact.com/tag/"+d+".js"},customers_ai:function(d){return"https://app.customers.ai/pixel/"+d+"/xray.js"}};
   var _pa=script.getAttribute("data-identity-providers"),_lp=script.getAttribute("data-lp"),_pv=_DP;
   if(_pa){try{_pv=JSON.parse(_pa)}catch(e){}}

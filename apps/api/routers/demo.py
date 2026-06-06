@@ -1,12 +1,12 @@
 """Public demo endpoints used by the onboarding flow.
 
-`POST /api/v1/demo/identify` runs the REAL deployed identity waterfall
-(PDL IP Enrich → IPinfo → company domain → Hunter/Apollo contact) on the
-requester's own IP, so the onboarding "wow" reveal shows genuine data —
-not a fabricated profile. Residential IPs won't resolve (returns matched:false),
-and the frontend falls back to a clearly-labelled sample.
+`POST /api/v1/demo/identify` runs the FULL identity waterfall on the
+requester's own IP — identity graphs (Leadpipe, Capturify, RB2B) first
+in parallel, then IP→company→person fallback. Identity graphs work on
+ANY IP (residential, public WiFi, mobile) — not just business IPs.
 """
 
+import asyncio
 from types import SimpleNamespace
 
 import structlog
@@ -15,7 +15,11 @@ from slowapi.util import get_remote_address
 
 from pydantic import BaseModel
 
+from sqlalchemy import select
+
 from apps.api.config import settings
+from apps.api.models.database import async_session
+from apps.api.models.visitor import Visitor
 from apps.api.routers.social_auth import limiter
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.platform_detector import detect_platform
@@ -34,6 +38,10 @@ async def demo_clerk_config() -> dict:
     falls back to the legacy email/password signup.
     """
     return {"publishable_key": settings.clerk_publishable_key or None}
+
+
+class IdentifyBody(BaseModel):
+    fingerprint: str | None = None
 
 
 class DetectBody(BaseModel):
@@ -69,39 +77,141 @@ def _client_ip(request: Request) -> str:
 
 
 @router.post("/identify")
-@limiter.limit("6/minute")  # protect the paid PDL/Hunter/Apollo calls from abuse
-async def demo_identify(request: Request) -> dict:
-    """Run the real IP→company→person waterfall on the caller's IP (read-only)."""
+@limiter.limit("6/minute")
+async def demo_identify(request: Request, body: IdentifyBody = IdentifyBody()) -> dict:
+    """Run the FULL identity waterfall on the caller's IP (read-only).
+
+    Identity graphs (Leadpipe, Capturify, RB2B) run first IN PARALLEL —
+    they work on ANY IP including residential and public WiFi. Only falls
+    back to IP→company→person if all identity graphs miss.
+
+    When ``fingerprint`` is provided (from the onboarding page), we also
+    check whether the pixel already recorded a visit with that same
+    fingerprint — proving the pixel detected the onboarding user.
+    """
     ip = _client_ip(request)
-    base: dict = {"matched": False, "ip": ip}
+    base: dict = {"matched": False, "ip": ip, "providers_tried": []}
     if not ip:
         return base
 
-    # Reuse the production resolver's read-only call methods (no DB writes / logs).
     resolver = IdentityResolver(db=None)
     stub = SimpleNamespace(
         ip_address=ip, country_code=None, visitor_id="demo", site_id="demo",
         company_domain=None, pages_visited=[],
     )
 
+    # ── Pre-check: fingerprint match against recent pixel events ──
+    fp_matched = False
+    if body.fingerprint and body.fingerprint.startswith("fp2_"):
+        try:
+            async with async_session() as db:
+                result = await db.execute(
+                    select(Visitor.visitor_id, Visitor.ip_address)
+                    .where(
+                        Visitor.fingerprint == body.fingerprint,
+                    )
+                    .order_by(Visitor.last_seen.desc())
+                    .limit(1)
+                )
+                pixel_visitor = result.first()
+                if pixel_visitor:
+                    fp_matched = True
+                    base["fingerprint_matched"] = True
+                    base["providers_tried"].append("fingerprint")
+                    logger.info("demo_fingerprint_match", fp=body.fingerprint[:12])
+        except Exception as e:
+            logger.debug("demo_fingerprint_check_failed", error=str(e))
+
+    # ── Step 0: Identity Graphs in parallel (works on ANY IP) ──
+
+    async def _try_graph(name: str, call_fn, mock_fn) -> tuple[str, dict | None]:
+        try:
+            if settings.mock_external_apis:
+                return name, mock_fn(stub)
+            return name, await call_fn(stub)
+        except Exception as e:
+            logger.warning("demo_identity_graph_error", provider=name, error=str(e))
+            return name, None
+
+    graph_tasks = []
+    if settings.leadpipe_api_key or settings.mock_external_apis:
+        graph_tasks.append(_try_graph(
+            "leadpipe", resolver._call_leadpipe_api, resolver._mock_leadpipe_response,
+        ))
+    if settings.capturify_api_key or settings.mock_external_apis:
+        graph_tasks.append(_try_graph(
+            "capturify", resolver._call_capturify_api, resolver._mock_capturify_response,
+        ))
+    if settings.rb2b_api_key or settings.mock_external_apis:
+        graph_tasks.append(_try_graph(
+            "rb2b", resolver._call_rb2b_api, resolver._mock_rb2b_response,
+        ))
+
+    best_match: dict | None = None
+    best_provider: str = ""
+
+    if graph_tasks:
+        results = await asyncio.gather(*graph_tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                continue
+            name, data = result
+            base["providers_tried"].append(name)
+            if data and data.get("email"):
+                score = data.get("confidence_score", 0)
+                if not best_match or score > best_match.get("confidence_score", 0):
+                    best_match = data
+                    best_provider = name
+
+    if best_match:
+        base.update({
+            "matched": True,
+            "level": "person",
+            "full_name": best_match.get("full_name"),
+            "email": best_match.get("email"),
+            "city": best_match.get("city"),
+            "country": best_match.get("country"),
+            "resolution_provider": best_provider,
+        })
+        try:
+            from apps.api.services.enricher import Enricher
+            prof = await Enricher(None)._enrich_pdl(best_match["email"])
+            if prof:
+                base.update({
+                    "job_title": prof.get("job_title"),
+                    "company_name": prof.get("company_name"),
+                    "company_domain": prof.get("company_domain"),
+                    "linkedin_url": prof.get("linkedin_url"),
+                    "twitter_handle": prof.get("twitter_handle"),
+                })
+        except Exception as e:
+            logger.warning("demo_identify_enrich_error", error=str(e))
+
+        logger.info("demo_identify", ip=ip[:8], level="person", matched=True, provider=best_provider)
+        return base
+
+    # ── Steps 1-4: IP → Company → Person fallback ──
+
+    base["providers_tried"].extend(["pdl_ip", "ipinfo"])
     try:
-        # 1) IP → company domain (PDL IP Enrich, then IPinfo fallback)
         domain = await resolver._call_pdl_ip_enrich(stub)
         if not domain:
             domain = await resolver._call_ipinfo_api(stub)
-    except Exception as e:  # never break onboarding on an upstream hiccup
+    except Exception as e:
         logger.warning("demo_identify_ip_error", error=str(e))
         domain = None
 
     base["country"] = getattr(stub, "country_code", None)
 
     if not domain:
-        # Residential / hosting / no-match — frontend shows a labelled sample.
+        if fp_matched:
+            base.update({"matched": True, "level": "device", "resolution_provider": "fingerprint"})
+            logger.info("demo_identify", ip=ip[:8], level="device", matched=True)
         return base
 
     base["company_domain"] = domain
+    base["providers_tried"].extend(["hunter", "apollo"])
 
-    # 2) company domain → a real contact (Hunter, then Apollo)
     contact = None
     try:
         contact = await resolver._call_hunter_api(domain)
@@ -120,7 +230,6 @@ async def demo_identify(request: Request) -> dict:
             "city": contact.get("city"),
             "country": contact.get("country") or base.get("country"),
         })
-        # Genuine Tier-1 enrichment: email → job title + LinkedIn/Twitter (same as prod)
         try:
             from apps.api.services.enricher import Enricher
             prof = await Enricher(None)._enrich_pdl(contact["email"])
@@ -134,7 +243,6 @@ async def demo_identify(request: Request) -> dict:
         except Exception as e:
             logger.warning("demo_identify_enrich_error", error=str(e))
     else:
-        # Company resolved but no person — still a real, honest result.
         base.update({"matched": True, "level": "company", "company_domain": domain})
 
     logger.info("demo_identify", ip=ip[:8], level=base.get("level"), matched=base["matched"])
