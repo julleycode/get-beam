@@ -521,15 +521,57 @@ async def join_waitlist(request: Request, body: WaitlistRequest) -> dict:
     except Exception as e:
         logger.warning("waitlist_db_error", error=str(e))
 
-    # Also send notification email if Resend configured
+    # Send confirmation email to subscriber
     try:
         from apps.api.services.email_sender import EmailSender
         sender = EmailSender()
+
+        await sender.send(
+            to_email=email,
+            subject="you're on the list — beam",
+            body_html="""
+<div style="font-family: 'Inter', -apple-system, sans-serif; max-width: 520px; margin: 0 auto; color: #2b2530;">
+  <p style="font-size: 16px; line-height: 1.7; color: #4a3f50;">hey,</p>
+  <p style="font-size: 16px; line-height: 1.7; color: #4a3f50;">
+    you're on the beam waitlist. we'll let you know as soon as your spot opens up.
+  </p>
+  <p style="font-size: 16px; line-height: 1.7; color: #4a3f50;">
+    beam shows you exactly who's visiting your site — real people, real profiles — so you can
+    follow up while they're still warm.
+  </p>
+  <p style="font-size: 16px; line-height: 1.7; color: #4a3f50;">
+    sit tight. it won't be long.
+  </p>
+  <p style="font-size: 15px; line-height: 1.7; color: #FF3366; font-style: italic; margin-top: 24px;">
+    &mdash; julley, beam
+  </p>
+</div>
+""",
+            from_name="Beam",
+            from_email="hello@getbeam.fyi",
+        )
+    except Exception as e:
+        logger.warning("waitlist_confirmation_email_failed", email=email, error=str(e))
+
+    # Send notification to admin
+    try:
+        sender = EmailSender()
         site_info = f" (site: {body.site_url})" if body.site_url else ""
         await sender.send(
-            to_email="hello@getbeam.fyi",
+            to_email="tranthai.work@gmail.com",
             subject=f"New waitlist signup: {email}",
-            body_html=f"<p>{email} just joined the Beam waitlist.{site_info}</p>",
+            body_html=f"""
+<div style="font-family: 'Inter', -apple-system, sans-serif; max-width: 520px; margin: 0 auto; color: #2b2530;">
+  <p style="font-size: 16px; line-height: 1.7; color: #4a3f50;">
+    <strong>{email}</strong> just joined the Beam waitlist.{site_info}
+  </p>
+  <p style="font-size: 14px; color: #b8a0a8;">
+    <a href="https://getbeam.fyi/dashboard/waitlist">Review in dashboard &rarr;</a>
+  </p>
+</div>
+""",
+            from_name="Beam",
+            from_email="noreply@getbeam.fyi",
         )
     except Exception:
         pass

@@ -81,7 +81,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""  # legacy — use OpenRouter instead
     openrouter_api_key: str = ""  # OpenRouter.ai — single key for 100+ models
     default_ai_model: str = "deepseek/deepseek-v4-flash:free"  # free tier — good for social replies
-    resend_api_key: str = ""
+    resend_api_key: str = ""  # deprecated — use SendGrid
+    sendgrid_api_key: str = ""
 
     # ─── Identity Graph (person-level from IP) ───
     rb2b_api_key: str = ""          # RB2B API Suite — IP → hashed email → person (US traffic)

@@ -15,7 +15,7 @@ class EmailSender:
         subject: str,
         body_html: str,
         from_name: str = "Beam",
-        from_email: str = "noreply@getbeam.fyi",
+        from_email: str = "hello@getbeam.fyi",
         unsubscribe_url: str | None = None,
     ) -> dict:
         if not unsubscribe_url:
@@ -31,22 +31,23 @@ class EmailSender:
             logger.info("email_sent_mock", to=to_email, subject=subject)
             return {"id": "mock_email_id", "status": "sent"}
 
-        import resend
+        from sendgrid import SendGridAPIClient
+        from sendgrid.helpers.mail import Mail, Email, To, Content, Header
 
-        resend.api_key = settings.resend_api_key
-
-        params = {
-            "from": f"{from_name} <{from_email}>",
-            "to": [to_email],
-            "subject": subject,
-            "html": full_html,
-            "headers": {"List-Unsubscribe": f"<{unsubscribe_url}>"},
-        }
+        message = Mail(
+            from_email=Email(from_email, from_name),
+            to_emails=To(to_email),
+            subject=subject,
+            html_content=Content("text/html", full_html),
+        )
+        message.add_header(Header("List-Unsubscribe", f"<{unsubscribe_url}>"))
 
         try:
-            result = resend.Emails.send(params)
-            logger.info("email_sent", to=to_email, id=result.get("id"))
-            return result
+            sg = SendGridAPIClient(settings.sendgrid_api_key)
+            response = sg.send(message)
+            msg_id = response.headers.get("X-Message-Id", "unknown")
+            logger.info("email_sent", to=to_email, id=msg_id, status=response.status_code)
+            return {"id": msg_id, "status": response.status_code}
         except Exception as e:
             logger.error("email_send_failed", to=to_email, error=str(e))
             raise
