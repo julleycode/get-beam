@@ -268,7 +268,7 @@
   window.addEventListener("pagehide", flush);
 
   // --- Identity graph pixel stacking ---
-  var _DP=[{t:"leadpipe",id:"95247db8-8d49-4213-8ea7-ee0a6dd0ae78"},{t:"capturify",id:"beam-default"},{t:"fullcontact",id:"beam-default"},{t:"customers_ai",id:"beam-default"}];
+  var _DP=[{t:"leadpipe",id:"95247db8-8d49-4213-8ea7-ee0a6dd0ae78"}];
   var _PU={leadpipe:function(d){return"https://leadpipe.aws53.cloud/p/"+d+".js"},capturify:function(d){return"https://app.capturify.io/pixel/"+d+".js"},fullcontact:function(d){return"https://app.fullcontact.com/tag/"+d+".js"},customers_ai:function(d){return"https://app.customers.ai/pixel/"+d+"/xray.js"}};
   var _pa=script.getAttribute("data-identity-providers"),_lp=script.getAttribute("data-lp"),_pv=_DP;
   if(_pa){try{_pv=JSON.parse(_pa)}catch(e){}}
