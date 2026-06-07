@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { api, VisitorDetail } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,7 +36,6 @@ function CompletenessBar({ value }: { value: number }) {
 export default function VisitorDetailPage() {
   const params = useParams();
   const searchParams = useSearchParams();
-  const router = useRouter();
   const visitorId = params.visitorId as string;
   const siteId = searchParams.get("site") || "";
   const [visitor, setVisitor] = useState<VisitorDetail | null>(null);
@@ -48,7 +47,6 @@ export default function VisitorDetailPage() {
     status: string;
     message: string;
   } | null>(null);
-  const [showNoKeysPrompt, setShowNoKeysPrompt] = useState(false);
 
   useEffect(() => {
     if (!siteId || !visitorId) return;
@@ -63,28 +61,14 @@ export default function VisitorDetailPage() {
     if (!siteId || !visitorId) return;
     setEnriching(true);
     setEnrichResult(null);
-    setShowNoKeysPrompt(false);
 
     try {
       const result = await api.enrichVisitor(siteId, visitorId);
-
-      if (result.status === "no_keys") {
-        setShowNoKeysPrompt(true);
-        return;
-      }
-
       setEnrichResult({ status: result.status, message: result.message });
 
-      // Refresh visitor data after enrichment
-      if (result.status === "enriched" || result.status === "queued") {
-        setTimeout(async () => {
-          try {
-            const updated = await api.getVisitor(siteId, visitorId);
-            setVisitor(updated);
-          } catch {
-            // ignore
-          }
-        }, 2000);
+      if (result.status === "enriched") {
+        const updated = await api.getVisitor(siteId, visitorId);
+        setVisitor(updated);
       }
     } catch (err) {
       setEnrichResult({
@@ -100,8 +84,8 @@ export default function VisitorDetailPage() {
   if (!visitor) return <p className="text-destructive">Visitor not found</p>;
 
   const completeness = visitor.enrichment_completeness ?? 0;
-  const canEnrichMore =
-    visitor.identity_status !== "anonymous" && completeness < 1.0;
+  const hasDeepResearch = !!visitor.social_context?.deep_research;
+  const canEnrich = visitor.identity_status !== "anonymous" && !hasDeepResearch;
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -226,7 +210,7 @@ export default function VisitorDetailPage() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">Enrichment</CardTitle>
-              {canEnrichMore && (
+              {canEnrich && (
                 <Button
                   size="sm"
                   onClick={handleEnrich}
@@ -253,53 +237,28 @@ export default function VisitorDetailPage() {
                           d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
                         />
                       </svg>
-                      Enriching...
+                      Researching...
                     </>
                   ) : (
-                    "Enrich More"
+                    "Enrich"
                   )}
                 </Button>
               )}
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Completeness bar */}
             <CompletenessBar value={completeness} />
 
-            {/* No-keys prompt */}
-            {showNoKeysPrompt && (
-              <div className="rounded-md border border-yellow-200 bg-yellow-50 p-4 space-y-3">
-                <p className="text-sm font-medium text-yellow-700">
-                  API keys required for deep enrichment
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Add your Proxycurl or Twitter API key in Settings to unlock
-                  LinkedIn details, Twitter bio, and more.
-                </p>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    router.push(
-                      `/dashboard/settings?site=${siteId}`
-                    )
-                  }
-                >
-                  Go to Settings
-                </Button>
-              </div>
-            )}
-
-            {/* Enrich result message */}
             {enrichResult && (
               <p
                 className={`text-xs ${
-                  enrichResult.status === "enriched" ||
-                  enrichResult.status === "queued"
+                  enrichResult.status === "enriched"
                     ? "text-green-500"
                     : enrichResult.status === "error"
                       ? "text-destructive"
-                      : "text-muted-foreground"
+                      : enrichResult.status === "limit_reached"
+                        ? "text-yellow-600"
+                        : "text-muted-foreground"
                 }`}
               >
                 {enrichResult.message}
@@ -329,29 +288,35 @@ export default function VisitorDetailPage() {
               {visitor.linkedin_url && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">LinkedIn</span>
-                  <span className="text-blue-600 truncate max-w-[300px]">
+                  <a
+                    href={visitor.linkedin_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline truncate max-w-[300px]"
+                  >
                     {visitor.linkedin_url}
-                  </span>
+                  </a>
                 </div>
               )}
               {visitor.twitter_handle && (
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Twitter</span>
-                  <span>@{visitor.twitter_handle}</span>
+                  <span className="text-muted-foreground">Twitter/X</span>
+                  <a
+                    href={`https://x.com/${visitor.twitter_handle}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 hover:underline"
+                  >
+                    @{visitor.twitter_handle}
+                  </a>
                 </div>
               )}
 
-              {/* Tier 2 fields */}
               {visitor.linkedin_headline && (
                 <>
                   <Separator />
-                  <p className="text-xs text-muted-foreground font-medium pt-1">
-                    Deep Enrichment
-                  </p>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">
-                      LinkedIn headline
-                    </span>
+                    <span className="text-muted-foreground">LinkedIn headline</span>
                     <span className="text-right max-w-[300px]">
                       {visitor.linkedin_headline}
                     </span>
@@ -367,13 +332,43 @@ export default function VisitorDetailPage() {
                 </div>
               )}
 
-              {/* Empty state */}
-              {completeness === 0 && (
+              {completeness === 0 && !hasDeepResearch && (
                 <p className="text-xs text-muted-foreground italic">
-                  No enrichment data yet. Tier 1 enrichment runs automatically
-                  after identity resolution.
+                  No enrichment data yet. Click Enrich to research this visitor.
                 </p>
               )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Deep Research Card */}
+      {hasDeepResearch && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Deep Research</CardTitle>
+              {visitor.social_context?.researched_at && (
+                <span className="text-xs text-muted-foreground">
+                  {new Date(visitor.social_context.researched_at).toLocaleDateString()}
+                </span>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="prose prose-sm max-w-none dark:prose-invert">
+              {visitor.social_context!.deep_research!.split("\n").map((line, i) => {
+                if (!line.trim()) return <br key={i} />;
+                if (line.startsWith("## "))
+                  return <h3 key={i} className="text-base font-semibold mt-4 mb-2">{line.replace("## ", "")}</h3>;
+                if (line.startsWith("### "))
+                  return <h4 key={i} className="text-sm font-semibold mt-3 mb-1">{line.replace("### ", "")}</h4>;
+                if (line.startsWith("**") && line.endsWith("**"))
+                  return <p key={i} className="font-semibold text-sm">{line.replace(/\*\*/g, "")}</p>;
+                if (line.startsWith("- "))
+                  return <li key={i} className="text-sm ml-4 list-disc">{line.replace("- ", "")}</li>;
+                return <p key={i} className="text-sm leading-relaxed">{line}</p>;
+              })}
             </div>
           </CardContent>
         </Card>

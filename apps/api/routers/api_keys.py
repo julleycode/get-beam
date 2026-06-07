@@ -126,7 +126,6 @@ async def test_api_key(
 async def _test_key(provider: str, api_key: str) -> bool:
     """Make a lightweight test call to verify the API key works."""
     if settings.mock_external_apis:
-        # In mock mode, all keys are "valid"
         return True
 
     try:
@@ -143,7 +142,6 @@ async def _test_key(provider: str, api_key: str) -> bool:
                     "https://api.twitter.com/2/users/me",
                     headers={"Authorization": f"Bearer {api_key}"},
                 )
-                # 200 = valid, 401 = invalid, 403 = valid but restricted
                 return resp.status_code in (200, 403)
 
             elif provider == "openrouter":
@@ -152,6 +150,30 @@ async def _test_key(provider: str, api_key: str) -> bool:
                     headers={"Authorization": f"Bearer {api_key}"},
                 )
                 return resp.status_code == 200
+
+            elif provider == "anthropic":
+                resp = await client.get(
+                    "https://api.anthropic.com/v1/models",
+                    headers={
+                        "x-api-key": api_key,
+                        "anthropic-version": "2023-06-01",
+                    },
+                )
+                return resp.status_code == 200
+
+            elif provider == "people_data_labs":
+                resp = await client.get(
+                    "https://api.peopledatalabs.com/v5/person/enrich",
+                    headers={"X-Api-Key": api_key},
+                    params={"email": "test@test.com"},
+                )
+                return resp.status_code in (200, 404)
+
+            else:
+                # Providers without test endpoints (rb2b, leadpipe, capturify,
+                # customers_ai, hunter, apollo, facebook, linkedin, etc.)
+                # — accept the key on trust, validate on first real use.
+                return bool(api_key and len(api_key) >= 10)
 
     except httpx.HTTPError as e:
         logger.warning("api_key_test_failed", provider=provider, error=str(e))

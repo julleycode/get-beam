@@ -5,7 +5,6 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.models.api_key import UserApiKey
 from apps.api.models.database import async_session, get_db
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.site import Site
@@ -15,6 +14,7 @@ from apps.api.dependencies import get_current_user
 from apps.api.schemas.visitors import ManualIdentifyRequest, VisitorDetailOut, VisitorListResponse, VisitorOut
 from apps.api.services.enricher import Enricher
 from apps.api.services.identity_resolver import IdentityResolver
+from apps.api.services.usage_limits import check_enrich_budget, check_identify_budget
 
 logger = structlog.get_logger()
 
@@ -302,10 +302,24 @@ async def enrich_visitor(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Trigger Tier 2 (BYOK) enrichment for a specific visitor."""
+    """Deep-research enrichment via Claude API with web search.
+
+    Daily cap: 3 enrichments/day (free tier). BYOK all APIs to unlock unlimited.
+    """
     await _verify_site_access(db, site_id, user)
 
-    # Check visitor exists
+    budget = await check_enrich_budget(db, site_id, user.id)
+    if not budget["allowed"]:
+        return {
+            "status": "limit_reached",
+            "message": (
+                f"Daily enrichment limit reached ({budget['used']}/{budget['limit']}). "
+                "Add your own API keys in Settings to unlock unlimited enrichments."
+            ),
+            "used": budget["used"],
+            "limit": budget["limit"],
+        }
+
     result = await db.execute(
         select(Visitor).where(Visitor.site_id == site_id, Visitor.visitor_id == visitor_id)
     )
@@ -313,35 +327,29 @@ async def enrich_visitor(
     if not visitor:
         raise HTTPException(status_code=404, detail="Visitor not found")
 
-    # Check user has BYOK keys
-    key_result = await db.execute(
-        select(UserApiKey).where(
-            UserApiKey.user_id == user.id,
-            UserApiKey.is_valid == True,  # noqa: E712
+    id_result = await db.execute(
+        select(IdentifiedVisitor).where(
+            IdentifiedVisitor.site_id == site_id,
+            IdentifiedVisitor.visitor_id == visitor_id,
         )
     )
-    user_keys = list(key_result.scalars().all())
-    if not user_keys:
+    identified = id_result.scalar_one_or_none()
+    if not identified:
         return {
-            "status": "no_keys",
-            "message": "Add your Proxycurl or Twitter API key in Settings to unlock full profiles.",
+            "status": "not_identified",
+            "message": "Visitor must be identified (email/name) before enrichment.",
         }
 
-    # Run Tier 2 enrichment
+    enrich_result = await db.execute(
+        select(EnrichmentProfile).where(
+            EnrichmentProfile.site_id == site_id,
+            EnrichmentProfile.visitor_id == visitor_id,
+        )
+    )
+    profile = enrich_result.scalar_one_or_none()
+
     enricher = Enricher(db)
-    profile = await enricher.enrich_tier2(visitor, str(user.id))
-
-    if profile:
-        return {
-            "status": "enriched",
-            "completeness": profile.enrichment_completeness,
-            "message": "Profile enriched with additional data.",
-        }
-    else:
-        return {
-            "status": "partial",
-            "message": "Could not enrich further. Ensure Tier 1 enrichment has run first.",
-        }
+    return await enricher.deep_research(visitor, identified, profile)
 
 
 @router.post("/{site_id}/{visitor_id}/identify")
@@ -428,7 +436,7 @@ async def manual_identify_visitor(
     }
 
 
-async def _run_resolution_job(site_id: str) -> None:
+async def _run_resolution_job(site_id: str, max_resolve: int = 20) -> None:
     """Background worker: resolve + enrich eligible visitors for a site.
 
     Runs AFTER the HTTP response is sent, in its own DB session (the
@@ -441,7 +449,7 @@ async def _run_resolution_job(site_id: str) -> None:
                 Visitor.site_id == site_id,
                 Visitor.identity_status == "anonymous",
                 Visitor.intent_score >= 40,
-            ).order_by(Visitor.intent_score.desc()).limit(50)
+            ).order_by(Visitor.intent_score.desc()).limit(max_resolve)
         )
         visitors = list(result.scalars().all())
         if not visitors:
@@ -479,16 +487,24 @@ async def resolve_site_visitors(
 ) -> dict:
     """Queue identity resolution + Tier 1 enrichment for eligible visitors.
 
-    Returns immediately; the actual resolution runs in the background so a
-    batch of up to 50 visitors × several external API calls never blocks the
-    request worker.
+    Daily cap: 20 identifications/day (free tier). BYOK all APIs to unlock unlimited.
     """
     from sqlalchemy import text as sql_text
 
     await _verify_site_access(db, site_id, user)
 
-    # Reset unresolvable visitors if requested. Only their logs are cleared —
-    # resolved visitors' logs are preserved (cost audit + 30-day dedup intact).
+    budget = await check_identify_budget(db, site_id, user.id)
+    if not budget["allowed"]:
+        return {
+            "status": "limit_reached",
+            "message": (
+                f"Daily identification limit reached ({budget['used']}/{budget['limit']}). "
+                "Add your own API keys in Settings to unlock unlimited identifications."
+            ),
+            "used": budget["used"],
+            "limit": budget["limit"],
+        }
+
     if reset:
         await db.execute(
             sql_text(
@@ -503,7 +519,6 @@ async def resolve_site_visitors(
         )
         await db.commit()
 
-    # Count eligible visitors (cheap) so we can report queue size immediately
     count_result = await db.execute(
         select(func.count()).select_from(Visitor).where(
             Visitor.site_id == site_id,
@@ -511,16 +526,33 @@ async def resolve_site_visitors(
             Visitor.intent_score >= 40,
         )
     )
-    eligible = min(count_result.scalar() or 0, 50)
+    eligible_raw = count_result.scalar() or 0
+
+    remaining = (budget["limit"] - budget["used"]) if budget["limit"] else eligible_raw
+    eligible = min(eligible_raw, remaining)
 
     if eligible == 0:
+        if eligible_raw > 0:
+            return {
+                "status": "limit_reached",
+                "message": (
+                    f"Daily limit allows {remaining} more identification(s) today, "
+                    f"but {eligible_raw} visitor(s) are eligible. "
+                    "Add your own API keys to unlock unlimited."
+                ),
+                "used": budget["used"],
+                "limit": budget["limit"],
+            }
         return {"status": "no_eligible", "message": "No visitors with intent >= 40 to resolve."}
 
-    background_tasks.add_task(_run_resolution_job, site_id)
+    background_tasks.add_task(_run_resolution_job, site_id, eligible)
 
     return {
         "status": "started",
         "queued": eligible,
+        "used_today": budget["used"],
+        "daily_limit": budget["limit"],
+        "is_byok": budget["is_byok"],
         "message": f"Resolving {eligible} visitor(s) in the background. Refresh in a moment to see results.",
     }
 

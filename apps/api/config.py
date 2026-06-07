@@ -149,7 +149,8 @@ class Settings(BaseSettings):
     sync_interval_minutes: int = 60
 
     # ─── Rate limits ───
-    default_daily_resolution_budget: int = 50
+    default_daily_resolution_budget: int = 20   # Free tier: 20 identifications/day (BYOK = unlimited)
+    default_daily_enrichment_budget: int = 3    # Free tier: 3 deep research/day (BYOK = unlimited)
     max_emails_per_hour_per_site: int = 50
 
     # CORS — comma-separated origins allowed
