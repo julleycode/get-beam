@@ -223,6 +223,20 @@ class ApiClient {
     });
   }
 
+  async getDetectionPreview(siteId: string) {
+    return this.request<{
+      site_id: string;
+      signals: Array<{
+        key: string;
+        name: string;
+        category: string;
+        active: boolean;
+        description: string;
+      }>;
+      total_visitors: number;
+    }>(`/api/v1/sites/${siteId}/detection-preview`);
+  }
+
   async shopifyConnect(siteId: string, shopDomain: string) {
     return this.request<{ install_url: string }>(
       `/api/v1/sites/${siteId}/shopify/connect`,

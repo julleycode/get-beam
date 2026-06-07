@@ -277,11 +277,6 @@ class Enricher:
         a call with an empty key which would mark the visitor permanently failed).
         Retries up to 3× on transient errors (5xx, 429, timeouts).
         """
-        if not settings.people_data_labs_api_key:
-            # No key configured — skip silently rather than sending an empty key
-            logger.debug("pdl_enrich_skipped_no_key")
-            return None
-
         if settings.mock_external_apis:
             return self._mock_pdl_enrichment(email)
 

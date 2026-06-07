@@ -154,6 +154,70 @@ async def resolve_company_from_ip(ip: str) -> str | None:
         return None
 
 
+_PRIVACY_CACHE_PREFIX = "ip_privacy:"
+_PRIVACY_CACHE_TTL = 7 * 24 * 3600
+
+
+async def check_ip_privacy(ip: str) -> dict | None:
+    """Check if IP is VPN/proxy/tor/hosting via IPinfo Privacy Detection API.
+
+    Returns {"vpn": bool, "proxy": bool, "tor": bool, "relay": bool, "hosting": bool}
+    or None if check fails/disabled. Cached in Redis with 7-day TTL.
+    """
+    from apps.api.config import settings
+
+    if not settings.ipinfo_token:
+        return None
+    if not ip or _PRIVATE_RE.match(ip):
+        return None
+
+    cache_key = f"{_PRIVACY_CACHE_PREFIX}{ip}"
+    try:
+        from apps.api.services.redis_client import get_redis
+        import json
+        redis = get_redis()
+        cached = await redis.get(cache_key)
+        if cached is not None:
+            return json.loads(cached)
+    except Exception:
+        pass
+
+    try:
+        import httpx
+        import json
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"https://ipinfo.io/{ip}/privacy",
+                params={"token": settings.ipinfo_token},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                result = {
+                    "vpn": data.get("vpn", False),
+                    "proxy": data.get("proxy", False),
+                    "tor": data.get("tor", False),
+                    "relay": data.get("relay", False),
+                    "hosting": data.get("hosting", False),
+                }
+                try:
+                    redis = get_redis()
+                    await redis.setex(cache_key, _PRIVACY_CACHE_TTL, json.dumps(result))
+                except Exception:
+                    pass
+                return result
+    except Exception as e:
+        logger.debug("ip_privacy_check_failed", ip=ip[:10], error=str(e))
+
+    return None
+
+
+def is_ip_suspicious(privacy: dict | None) -> bool:
+    """Return True if any privacy flag is set (VPN/proxy/tor/relay/hosting)."""
+    if not privacy:
+        return False
+    return any(privacy.get(k, False) for k in ("vpn", "proxy", "tor", "relay", "hosting"))
+
+
 async def resolve_company_cached(ip: str) -> str | None:
     """Resolve IP to company domain with Redis caching (30-day TTL).
 

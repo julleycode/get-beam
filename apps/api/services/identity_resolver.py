@@ -288,6 +288,23 @@ class IdentityResolver:
             await self.db.commit()
             return None
 
+        # ── VPN/Proxy/Tor detection — skip expensive lookups for masked IPs ──
+        if not settings.mock_external_apis and settings.ipinfo_token:
+            try:
+                from apps.api.services.company_resolver import check_ip_privacy, is_ip_suspicious
+                privacy = await check_ip_privacy(visitor.ip_address)
+                if is_ip_suspicious(privacy):
+                    logger.info(
+                        "resolution_skipped_vpn",
+                        visitor_id=visitor.visitor_id[:8],
+                        privacy=privacy,
+                    )
+                    visitor.identity_status = "vpn_filtered"
+                    await self.db.commit()
+                    return None
+            except Exception as exc:
+                logger.debug("vpn_check_failed", error=str(exc))
+
         # ══════════════════════════════════════════════════════════════
         # Step 0: Identity Graphs — PARALLEL person-level identification
         # Leadpipe, Capturify, RB2B run concurrently via asyncio.gather.
@@ -373,7 +390,7 @@ class IdentityResolver:
         async def _fetch(
             name: str, api_key: str | None, mock_fn, call_fn
         ) -> tuple[str, dict | None, int, bool]:
-            if not api_key:
+            if not api_key and not settings.mock_external_apis:
                 return (name, None, 0, False)
             start = time.monotonic()
             try:
@@ -515,7 +532,7 @@ class IdentityResolver:
         We poll their API for identified visitors matching this visitor's
         page URL + timestamp window.
         """
-        if not settings.leadpipe_api_key:
+        if not settings.leadpipe_api_key and not settings.mock_external_apis:
             return None
 
         start = time.monotonic()
@@ -656,7 +673,7 @@ class IdentityResolver:
         Capturify's JS pixel captures browser signals and matches against
         their identity graph. Claims ~60% match rate. API key required.
         """
-        if not settings.capturify_api_key:
+        if not settings.capturify_api_key and not settings.mock_external_apis:
             return None
 
         start = time.monotonic()
@@ -790,7 +807,7 @@ class IdentityResolver:
         Works even for residential IPs if the person is in RB2B's network.
         US traffic only. Returns actual visitor's email, not a company employee.
         """
-        if not settings.rb2b_api_key:
+        if not settings.rb2b_api_key and not settings.mock_external_apis:
             return None
 
         start = time.monotonic()
@@ -819,27 +836,33 @@ class IdentityResolver:
     async def _call_rb2b_api(self, visitor: Visitor) -> dict | None:
         """Call RB2B API Suite: IP to HEM → HEM to Business Profile.
 
-        Two-step chain:
-        1. IP → Hashed Email (HEM)
-        2. HEM → Full business profile (name, email, LinkedIn, job title)
-        Retries up to 3× on transient errors (5xx, 429, timeouts).
+        Two-step chain (api.rb2b.com/api/v1/):
+        1. ip_to_hem: IP → Hashed Email (md5/sha256 + score)
+        2. hem_to_business_profile: HEM → Full business profile
+        Auth: Api-Key header. Retries up to 3× on transient errors.
         """
+        rb2b_headers = {
+            "Api-Key": settings.rb2b_api_key,
+            "Content-Type": "application/json",
+        }
+
         async with httpx.AsyncClient(timeout=15.0) as client:
             # Step 1: IP → Hashed Email Match (HEM)
             resp = await client.post(
-                "https://api.rb2b.com/v2/ip-to-hem",
-                headers={
-                    "Authorization": f"Bearer {settings.rb2b_api_key}",
-                    "Content-Type": "application/json",
-                },
+                "https://api.rb2b.com/api/v1/ip_to_hem",
+                headers=rb2b_headers,
                 json={
-                    "ip": visitor.ip_address,
-                    "userAgent": getattr(visitor, "user_agent", "") or "",
+                    "ip_address": visitor.ip_address,
+                    "user_agent": getattr(visitor, "user_agent", "") or "",
+                    "include_sha256": True,
                 },
             )
 
             if resp.status_code == 404:
                 logger.debug("rb2b_no_match", ip=visitor.ip_address[:8])
+                return None
+            if resp.status_code == 403:
+                logger.warning("rb2b_service_unavailable", detail=resp.text[:200])
                 return None
             if resp.status_code != 200:
                 logger.warning("rb2b_ip_error", status=resp.status_code,
@@ -848,19 +871,22 @@ class IdentityResolver:
                 return None
 
             hem_data = resp.json()
-            hem = hem_data.get("hem") or hem_data.get("hashedEmail") or hem_data.get("data", {}).get("hem")
-            if not hem:
+            results = hem_data.get("results", [])
+            if not results:
                 logger.debug("rb2b_no_hem", ip=visitor.ip_address[:8])
+                return None
+
+            best = max(results, key=lambda r: r.get("score", 0))
+            hem = best.get("md5") or best.get("sha256")
+            if not hem:
+                logger.debug("rb2b_no_hem_hash", ip=visitor.ip_address[:8])
                 return None
 
             # Step 2: HEM → Business Profile
             profile_resp = await client.post(
-                "https://api.rb2b.com/v2/hem-to-business-profile",
-                headers={
-                    "Authorization": f"Bearer {settings.rb2b_api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={"hem": hem},
+                "https://api.rb2b.com/api/v1/hem_to_business_profile",
+                headers=rb2b_headers,
+                json={"md5": hem},
             )
 
             if profile_resp.status_code != 200:
@@ -869,20 +895,25 @@ class IdentityResolver:
                 return None
 
             profile = profile_resp.json()
-            person = profile.get("data", profile)
+            person = profile.get("result", profile)
 
-            email = person.get("email") or person.get("workEmail") or person.get("personalEmail")
+            personal_emails = person.get("personal_emails") or []
+            work_email = person.get("work_email")
+            email = work_email or (personal_emails[0] if personal_emails else None)
             if not email:
                 logger.debug("rb2b_no_email_in_profile", ip=visitor.ip_address[:8])
                 return None
 
             return {
                 "email": email,
-                "full_name": person.get("fullName") or person.get("name"),
+                "full_name": person.get("full_name"),
+                "title": person.get("current_title"),
+                "company": person.get("current_company"),
+                "linkedin_url": person.get("linkedin_url"),
                 "city": person.get("city"),
                 "region": person.get("state") or person.get("region"),
                 "country": person.get("country", "US"),
-                "confidence_score": 0.95,  # Identity graph = high confidence
+                "confidence_score": min(best.get("score", 0.9), 0.99),
             }
 
     def _mock_rb2b_response(self, visitor: Visitor) -> dict | None:
@@ -1309,12 +1340,56 @@ class IdentityResolver:
 
     async def _save_identified(
         self, visitor: Visitor, data: dict, provider: str
-    ) -> IdentifiedVisitor:
+    ) -> IdentifiedVisitor | None:
         """Persist an IdentifiedVisitor row, handling concurrent-insert races.
 
-        On UNIQUE constraint violation (same site_id + visitor_id already inserted
-        by a concurrent request), roll back and return the pre-existing row.
+        Validates email before saving. On UNIQUE constraint violation
+        (same site_id + visitor_id already inserted by a concurrent request),
+        roll back and return the pre-existing row.
         """
+        email = data.get("email")
+        if email:
+            from apps.api.services.email_validator import validate_email
+            is_valid, reason = await validate_email(email)
+            if not is_valid:
+                logger.info(
+                    "email_validation_failed",
+                    visitor_id=visitor.visitor_id[:8],
+                    reason=reason,
+                    provider=provider,
+                )
+                data.pop("email", None)
+
+        # Email dedup: if same (site_id, email) already identified under
+        # a different visitor_id, link via canonical_visitor_id instead
+        # of creating a duplicate IdentifiedVisitor row.
+        if data.get("email"):
+            existing_by_email = await self.db.execute(
+                select(IdentifiedVisitor).where(
+                    IdentifiedVisitor.site_id == visitor.site_id,
+                    IdentifiedVisitor.email == data["email"],
+                    IdentifiedVisitor.visitor_id != visitor.visitor_id,
+                )
+            )
+            canonical = existing_by_email.scalar_one_or_none()
+            if canonical:
+                visitor.identity_status = "merged"
+                visitor.canonical_visitor_id = canonical.visitor_id
+                try:
+                    await self.db.commit()
+                except Exception:
+                    await self.db.rollback()
+                logger.info(
+                    "visitor_merged_by_email",
+                    visitor_id=visitor.visitor_id[:8],
+                    canonical_visitor_id=canonical.visitor_id[:8],
+                )
+                return canonical
+
+        if not data.get("email") and not data.get("full_name"):
+            logger.info("save_skipped_no_identity_data", visitor_id=visitor.visitor_id[:8])
+            return None
+
         identified = IdentifiedVisitor(
             visitor_id=visitor.visitor_id,
             site_id=visitor.site_id,

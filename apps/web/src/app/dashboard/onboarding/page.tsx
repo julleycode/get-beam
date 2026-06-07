@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { api, BillingInterval } from "@/lib/api";
 import { PixelInstallGuide } from "@/components/pixel-install-guide";
@@ -15,6 +15,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+
+type DetectionSignal = {
+  key: string;
+  name: string;
+  category: string;
+  active: boolean;
+  description: string;
+};
 
 type Step = "create" | "install" | "done" | "plan";
 
@@ -88,6 +96,10 @@ export default function OnboardingPage() {
   const [interval, setInterval] = useState<BillingInterval>("monthly");
   const [actionPlan, setActionPlan] = useState<string | null>(null);
 
+  const [detectionSignals, setDetectionSignals] = useState<DetectionSignal[]>([]);
+  const [detectionLoading, setDetectionLoading] = useState(false);
+  const [totalVisitors, setTotalVisitors] = useState(0);
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setError("");
@@ -120,9 +132,18 @@ export default function OnboardingPage() {
     }
   }
 
-  function handleVerified() {
+  async function handleVerified() {
     setStep("done");
-    setTimeout(() => setStep("plan"), 1500);
+    setDetectionLoading(true);
+    try {
+      const preview = await api.getDetectionPreview(siteId);
+      setDetectionSignals(preview.signals);
+      setTotalVisitors(preview.total_visitors);
+    } catch {
+      setDetectionSignals([]);
+    } finally {
+      setDetectionLoading(false);
+    }
   }
 
   async function handlePlanClick(planId: string) {
@@ -300,31 +321,101 @@ export default function OnboardingPage() {
         </Card>
       )}
 
-      {/* Step 3: Done (brief success) */}
+      {/* Step 3: Detection Preview */}
       {step === "done" && (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-16 gap-4">
-            <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center">
-              <svg
-                className="w-8 h-8 text-green-500"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M5 13l4 4L19 7"
-                />
-              </svg>
-            </div>
-            <h3 className="text-xl font-bold">Pixel verified!</h3>
-            <p className="text-muted-foreground text-center max-w-md">
-              Your tracking pixel is live. Now let&apos;s pick a plan.
-            </p>
-          </CardContent>
-        </Card>
+        <div className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center">
+                  <svg className="w-5 h-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <div>
+                  <CardTitle>Pixel verified &amp; scanning</CardTitle>
+                  <CardDescription>
+                    {detectionLoading
+                      ? "Analyzing detection capabilities..."
+                      : `${detectionSignals.filter(s => s.active).length} of ${detectionSignals.length} detection signals active`}
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {detectionLoading ? (
+                <div className="flex flex-col items-center py-8 gap-3">
+                  <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  <p className="text-sm text-muted-foreground">Scanning your pixel signals...</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Stats row */}
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="rounded-lg border bg-card p-3 text-center">
+                      <p className="text-2xl font-bold text-green-500">
+                        {detectionSignals.filter(s => s.active).length}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Signals Active</p>
+                    </div>
+                    <div className="rounded-lg border bg-card p-3 text-center">
+                      <p className="text-2xl font-bold">
+                        {detectionSignals.length}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Total Signals</p>
+                    </div>
+                    <div className="rounded-lg border bg-card p-3 text-center">
+                      <p className="text-2xl font-bold">
+                        {totalVisitors}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Visitors Detected</p>
+                    </div>
+                  </div>
+
+                  {/* Signals by category */}
+                  {(() => {
+                    const categories = [...new Set(detectionSignals.map(s => s.category))];
+                    return categories.map(cat => (
+                      <div key={cat}>
+                        <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{cat}</h4>
+                        <div className="space-y-1">
+                          {detectionSignals.filter(s => s.category === cat).map(signal => (
+                            <div
+                              key={signal.key}
+                              className={`flex items-center gap-2 rounded-md px-3 py-1.5 text-sm ${
+                                signal.active
+                                  ? "bg-green-500/5 text-foreground"
+                                  : "bg-muted/50 text-muted-foreground"
+                              }`}
+                            >
+                              {signal.active ? (
+                                <svg className="w-3.5 h-3.5 text-green-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                                </svg>
+                              ) : (
+                                <svg className="w-3.5 h-3.5 text-muted-foreground/50 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              )}
+                              <span className="font-medium">{signal.name}</span>
+                              <span className="text-xs text-muted-foreground ml-auto hidden sm:inline">{signal.description}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {!detectionLoading && (
+            <Button className="w-full" size="lg" onClick={() => setStep("plan")}>
+              Continue to Plans
+            </Button>
+          )}
+        </div>
       )}
 
       {/* Step 4: Choose plan */}
