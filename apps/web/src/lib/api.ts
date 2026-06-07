@@ -289,12 +289,13 @@ class ApiClient {
     );
   }
 
-  // Tier 2 Enrichment
+  // Deep Research Enrichment
   async enrichVisitor(siteId: string, visitorId: string) {
     return this.request<{
       status: string;
       completeness?: number;
       message: string;
+      social_context?: Record<string, unknown>;
     }>(`/api/v1/visitors/${siteId}/${visitorId}/enrich`, {
       method: "POST",
     });
@@ -529,6 +530,11 @@ export interface VisitorDetail extends Visitor {
   linkedin_headline?: string | null;
   twitter_bio?: string | null;
   enrichment_completeness?: number | null;
+  social_context?: {
+    deep_research?: string;
+    researched_at?: string;
+    model?: string;
+  } | null;
 }
 
 export interface VisitorListResponse {

@@ -3,7 +3,28 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
-ALLOWED_PROVIDERS = {"proxycurl", "twitter", "openrouter"}
+ALLOWED_PROVIDERS = {
+    # AI
+    "anthropic",
+    "openrouter",
+    # Identity resolution
+    "rb2b",
+    "leadpipe",
+    "capturify",
+    "customers_ai",
+    # Enrichment
+    "proxycurl",
+    "hunter",
+    "apollo",
+    "ipinfo",
+    "people_data_labs",
+    # Social
+    "twitter",
+    "facebook",
+    "linkedin",
+    "tiktok",
+    "instagram",
+}
 
 
 class ApiKeyCreate(BaseModel):

@@ -5,13 +5,16 @@ Waterfall enrichment — output of provider A becomes input for provider B:
 1. PDL Enrich (email → job title, company, LinkedIn URL, Twitter handle)
 2. Proxycurl (LinkedIn URL from step 1 → headline, summary, followers)
 3. Twitter (handle from step 1 → bio, followers, topics)
+4. Deep Research (Claude API + web search → comprehensive social profile)
 
 System-level API keys (PDL, Proxycurl) are used automatically.
 BYOK keys (user-provided) extend coverage when system keys are absent.
 """
 
 import random
+from datetime import datetime, timezone
 
+import anthropic
 import httpx
 import structlog
 from sqlalchemy import select
@@ -412,6 +415,162 @@ class Enricher:
                 ["AI", "startups", "SaaS", "growth", "coding", "product"], 3
             ),
         }
+
+    # ──────────────── Deep Research (Claude API + web search) ─────────────
+
+    async def deep_research(
+        self,
+        visitor: Visitor,
+        identified: IdentifiedVisitor,
+        profile: EnrichmentProfile | None = None,
+    ) -> dict:
+        """Use Claude API with web search to research visitor's social media presence.
+
+        Returns {"status": ..., "social_context": ..., "message": ...}.
+        Stores results in EnrichmentProfile.social_context JSONB field.
+        """
+        if not profile:
+            profile = await self._get_existing_profile(visitor)
+
+        name = identified.full_name or (identified.email.split("@")[0] if identified.email else "Unknown")
+        linkedin_url = profile.linkedin_url if profile else None
+        twitter_handle = profile.twitter_handle if profile else None
+        company = profile.company_name if profile else None
+        job_title = profile.job_title if profile else None
+
+        context_lines = [f"Name: {name}"]
+        if identified.email:
+            context_lines.append(f"Email: {identified.email}")
+        if linkedin_url:
+            context_lines.append(f"LinkedIn: {linkedin_url}")
+        if twitter_handle:
+            context_lines.append(f"Twitter/X: @{twitter_handle}")
+        if company:
+            context_lines.append(f"Company: {company}")
+        if job_title:
+            context_lines.append(f"Title: {job_title}")
+
+        person_context = "\n".join(context_lines)
+
+        prompt = f"""Deep-dive research about this person's online presence and social media activity.
+
+{person_context}
+
+Your task:
+1. Find ALL social media profiles (Twitter/X, LinkedIn, GitHub, Instagram, YouTube, TikTok, personal blog/website, Substack, newsletter)
+2. Determine which platforms they are MOST active on — with evidence (follower counts, posting frequency, engagement)
+3. What they post about: interests, expertise areas, recurring topics
+4. Professional background: career path, current projects, companies built or worked at
+5. Notable content, communities, or brands they are associated with
+6. My honest read: what makes them interesting, where they are credible, where they are not
+
+CRITICAL RULES:
+- Be completely honest. If public information is limited, say "Public information on this person is limited" and report only what you can verify.
+- Do NOT fabricate, guess, or hallucinate any information. Only report what you find through actual web searches.
+- If you cannot find social profiles, say so clearly.
+- Distinguish between verified facts and reasonable inferences.
+
+Write a comprehensive but honest profile analysis. Use a direct, conversational tone — not corporate."""
+
+        if settings.mock_external_apis:
+            research_text = self._mock_deep_research(name, identified.email)
+        else:
+            if not settings.anthropic_api_key:
+                logger.warning("deep_research_skipped_no_api_key")
+                return {
+                    "status": "error",
+                    "message": "Anthropic API key not configured. Set ANTHROPIC_API_KEY to enable deep research.",
+                }
+
+            try:
+                client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+                response = await client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=16384,
+                    tools=[{
+                        "type": "web_search_20250305",
+                        "name": "web_search",
+                        "max_uses": 10,
+                    }],
+                    messages=[{"role": "user", "content": prompt}],
+                )
+
+                research_text = ""
+                for block in response.content:
+                    if hasattr(block, "text"):
+                        research_text += block.text + "\n"
+
+                if not research_text.strip():
+                    logger.warning("deep_research_empty_response", visitor_id=visitor.visitor_id[:8])
+                    return {
+                        "status": "partial",
+                        "message": "Deep research returned no results.",
+                    }
+
+                research_text = research_text.strip()
+            except anthropic.APIError as e:
+                logger.error("deep_research_api_error", error=str(e), visitor_id=visitor.visitor_id[:8])
+                return {
+                    "status": "error",
+                    "message": f"Claude API error: {e.message}",
+                }
+
+        if not profile:
+            profile = EnrichmentProfile(
+                visitor_id=visitor.visitor_id,
+                site_id=visitor.site_id,
+                enrichment_completeness=0.0,
+            )
+            self.db.add(profile)
+
+        now = datetime.now(timezone.utc)
+        profile.social_context = {
+            "deep_research": research_text,
+            "researched_at": now.isoformat(),
+            "model": "claude-sonnet-4-20250514",
+        }
+        profile.social_context_updated_at = now
+
+        if profile.enrichment_completeness < 0.5:
+            profile.enrichment_completeness = max(profile.enrichment_completeness, 0.5)
+        visitor.enrichment_status = "enriched"
+        await self.db.commit()
+
+        logger.info(
+            "deep_research_complete",
+            visitor_id=visitor.visitor_id[:8],
+            research_length=len(research_text),
+        )
+
+        return {
+            "status": "enriched",
+            "completeness": profile.enrichment_completeness,
+            "message": "Deep research completed.",
+            "social_context": profile.social_context,
+        }
+
+    @staticmethod
+    def _mock_deep_research(name: str, email: str | None) -> str:
+        username = email.split("@")[0] if email else name.lower().replace(" ", "")
+        return f"""## {name} — Profile Research
+
+**Public information on this person is limited.** Here is what could be found:
+
+### Social Media Presence
+- **LinkedIn**: Profile exists but limited public details visible without connection
+- **Twitter/X**: No verified public account found matching this identity
+- **GitHub**: No public repositories found
+
+### Professional Background
+Based on limited public data, {name} appears to work in the technology space. Further details require direct outreach or additional data sources.
+
+### Honest Assessment
+This person has a relatively low public digital footprint. This could mean they:
+- Prefer privacy over public presence
+- Are early in their career
+- Operate primarily through private/professional channels
+
+**Confidence level: Low** — Most details could not be independently verified through public sources. The information above is based on what limited data was available and should be treated as preliminary."""
 
     # ──────────────────────── Legacy compat ──────────────────────────────
 
