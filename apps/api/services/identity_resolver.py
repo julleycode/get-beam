@@ -288,6 +288,23 @@ class IdentityResolver:
             await self.db.commit()
             return None
 
+        # ── VPN/Proxy/Tor detection — skip expensive lookups for masked IPs ──
+        if not settings.mock_external_apis and settings.ipinfo_token:
+            try:
+                from apps.api.services.company_resolver import check_ip_privacy, is_ip_suspicious
+                privacy = await check_ip_privacy(visitor.ip_address)
+                if is_ip_suspicious(privacy):
+                    logger.info(
+                        "resolution_skipped_vpn",
+                        visitor_id=visitor.visitor_id[:8],
+                        privacy=privacy,
+                    )
+                    visitor.identity_status = "vpn_filtered"
+                    await self.db.commit()
+                    return None
+            except Exception as exc:
+                logger.debug("vpn_check_failed", error=str(exc))
+
         # ══════════════════════════════════════════════════════════════
         # Step 0: Identity Graphs — PARALLEL person-level identification
         # Leadpipe, Capturify, RB2B run concurrently via asyncio.gather.
@@ -1323,12 +1340,56 @@ class IdentityResolver:
 
     async def _save_identified(
         self, visitor: Visitor, data: dict, provider: str
-    ) -> IdentifiedVisitor:
+    ) -> IdentifiedVisitor | None:
         """Persist an IdentifiedVisitor row, handling concurrent-insert races.
 
-        On UNIQUE constraint violation (same site_id + visitor_id already inserted
-        by a concurrent request), roll back and return the pre-existing row.
+        Validates email before saving. On UNIQUE constraint violation
+        (same site_id + visitor_id already inserted by a concurrent request),
+        roll back and return the pre-existing row.
         """
+        email = data.get("email")
+        if email:
+            from apps.api.services.email_validator import validate_email
+            is_valid, reason = await validate_email(email)
+            if not is_valid:
+                logger.info(
+                    "email_validation_failed",
+                    visitor_id=visitor.visitor_id[:8],
+                    reason=reason,
+                    provider=provider,
+                )
+                data.pop("email", None)
+
+        # Email dedup: if same (site_id, email) already identified under
+        # a different visitor_id, link via canonical_visitor_id instead
+        # of creating a duplicate IdentifiedVisitor row.
+        if data.get("email"):
+            existing_by_email = await self.db.execute(
+                select(IdentifiedVisitor).where(
+                    IdentifiedVisitor.site_id == visitor.site_id,
+                    IdentifiedVisitor.email == data["email"],
+                    IdentifiedVisitor.visitor_id != visitor.visitor_id,
+                )
+            )
+            canonical = existing_by_email.scalar_one_or_none()
+            if canonical:
+                visitor.identity_status = "merged"
+                visitor.canonical_visitor_id = canonical.visitor_id
+                try:
+                    await self.db.commit()
+                except Exception:
+                    await self.db.rollback()
+                logger.info(
+                    "visitor_merged_by_email",
+                    visitor_id=visitor.visitor_id[:8],
+                    canonical_visitor_id=canonical.visitor_id[:8],
+                )
+                return canonical
+
+        if not data.get("email") and not data.get("full_name"):
+            logger.info("save_skipped_no_identity_data", visitor_id=visitor.visitor_id[:8])
+            return None
+
         identified = IdentifiedVisitor(
             visitor_id=visitor.visitor_id,
             site_id=visitor.site_id,

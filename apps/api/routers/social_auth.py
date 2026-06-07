@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from jose import jwt
 from passlib.context import CryptContext
-from slowapi import Limiter
 from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -37,8 +36,7 @@ router = APIRouter(tags=["social-auth"])
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# Rate limiter instance — shared with main app via app.state
-limiter = Limiter(key_func=get_remote_address)
+from apps.api.services.rate_limiter import limiter
 
 
 def _create_token(user_id: str) -> str:

@@ -10,6 +10,7 @@ from apps.api.models.event import Event
 from apps.api.schemas.events import EventBatch
 from apps.api.services.bot_filter import is_bot
 from apps.api.services.link_decorator import decode_bid
+from apps.api.services.rate_limiter import limiter
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -42,6 +43,7 @@ async def _parse_event_batch(request: Request) -> EventBatch:
 
 
 @router.post("/ingest", status_code=204)
+@limiter.limit("100/minute")
 async def ingest_events(
     request: Request, db: AsyncSession = Depends(get_db)
 ) -> Response:
@@ -68,6 +70,11 @@ async def ingest_events(
         return Response(status_code=403)
 
     ip_address = _extract_ip(request)
+
+    # Client Hints extraction (best-effort)
+    ch_ua = request.headers.get("sec-ch-ua", "")
+    ch_platform = request.headers.get("sec-ch-ua-platform", "").strip('"')
+    ch_mobile = request.headers.get("sec-ch-ua-mobile", "")
 
     # GeoIP resolution (best-effort, non-blocking on failure)
     country_code = ""
@@ -128,7 +135,20 @@ async def ingest_events(
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
 
-    return Response(status_code=204)
+    # Server-side Set-Cookie: first-party HttpOnly cookie survives Safari ITP.
+    # Named _rta_svid (server-side visitor ID) to coexist with client _rta_vid.
+    # On future requests, the ingest endpoint can reconcile both.
+    response = Response(status_code=204)
+    response.set_cookie(
+        key="_rta_svid",
+        value=batch.visitor_id,
+        max_age=365 * 86400,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        path="/",
+    )
+    return response
 
 
 async def _process_signal_events(db: AsyncSession, batch: EventBatch) -> None:
@@ -175,10 +195,16 @@ async def _process_signal_events(db: AsyncSession, batch: EventBatch) -> None:
 
     emails_to_upsert: list[dict] = []
 
+    from apps.api.services.email_validator import validate_email
+
     for event in batch.events:
         if event.type == "form_email_capture" and event.email:
             raw_email = event.email.strip().lower()
             if raw_email and "@" in raw_email:
+                is_valid, reason = await validate_email(raw_email)
+                if not is_valid:
+                    logger.info("form_email_rejected", reason=reason, email_domain=raw_email.split("@")[-1])
+                    continue
                 emails_to_upsert.append({
                     "site_id": batch.site_id,
                     "visitor_id": batch.visitor_id,
@@ -197,6 +223,10 @@ async def _process_signal_events(db: AsyncSession, batch: EventBatch) -> None:
             if decoded_email:
                 decoded_email = decoded_email.strip().lower()
                 if decoded_email and "@" in decoded_email:
+                    is_valid, reason = await validate_email(decoded_email)
+                    if not is_valid:
+                        logger.info("utm_email_rejected", reason=reason)
+                        continue
                     emails_to_upsert.append({
                         "site_id": batch.site_id,
                         "visitor_id": batch.visitor_id,

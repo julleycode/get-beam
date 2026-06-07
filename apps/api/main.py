@@ -144,8 +144,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Wire up slowapi rate limiter from social_auth router
-app.state.limiter = social_auth.limiter
+# Wire up shared slowapi rate limiter
+from apps.api.services.rate_limiter import limiter as shared_limiter
+app.state.limiter = shared_limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 _cors_origins = [

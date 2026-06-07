@@ -210,6 +210,42 @@ async def verify_pixel_endpoint(
     )
 
 
+# ──────────────────────── Detection Preview ───────────────────────────
+
+
+@router.get("/{site_id}/detection-preview")
+async def detection_preview(
+    site_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Scan the installed pixel and report which detection signals are active."""
+    result = await db.execute(
+        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
+    )
+    site = result.scalar_one_or_none()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    from apps.api.services.detection_scanner import scan_detection_signals
+
+    signals = await scan_detection_signals(site.url, site_id)
+
+    from apps.api.models.visitor import Visitor
+    from sqlalchemy import func
+
+    total_r = await db.execute(
+        select(func.count()).select_from(Visitor).where(Visitor.site_id == site_id)
+    )
+    total_visitors = total_r.scalar() or 0
+
+    return {
+        "site_id": site_id,
+        "signals": signals,
+        "total_visitors": total_visitors,
+    }
+
+
 # ──────────────────────── WordPress Plugin ─────────────────────────────
 
 

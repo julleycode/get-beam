@@ -13,6 +13,19 @@ from apps.api.models.visitor import Visitor, IdentifiedVisitor
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.segment import Segment, SegmentMember
 from apps.api.models.campaign import Campaign
+from apps.api.models.social_account import SocialAccount  # noqa: F401
+from apps.api.models.company import Company  # noqa: F401
+from apps.api.models.beam_identity import BeamIdentityNode  # noqa: F401
+from apps.api.models.draft import Draft  # noqa: F401
+from apps.api.models.post import Post  # noqa: F401
+from apps.api.models.api_key import *  # noqa: F401,F403
+from apps.api.models.engagement_attribution import *  # noqa: F401,F403
+from apps.api.models.event import *  # noqa: F401,F403
+from apps.api.models.feature_request import *  # noqa: F401,F403
+from apps.api.models.message import *  # noqa: F401,F403
+from apps.api.models.visitor_email import *  # noqa: F401,F403
+from apps.api.models.voice_example import *  # noqa: F401,F403
+from apps.api.models.waitlist import *  # noqa: F401,F403
 from apps.api.services.auth import hash_password
 from apps.api.services.clickhouse_client import init_clickhouse_schema, get_clickhouse_client
 from apps.api.services.visitor_aggregator import calculate_intent_score

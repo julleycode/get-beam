@@ -40,12 +40,17 @@
     document.cookie = name + "=" + value + ";path=/;expires=" + d.toUTCString() + ";SameSite=Lax";
   }
 
+  function lsGet(k) { try { return localStorage.getItem(k); } catch(e) { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, v); } catch(e) {} }
+  function lsDel(k) { try { localStorage.removeItem(k); } catch(e) {} }
+
   function getVisitorId() {
-    var vid = getCookie(COOKIE_NAME);
+    var vid = getCookie(COOKIE_NAME) || lsGet(COOKIE_NAME);
     if (!vid) {
       vid = uuid();
-      setCookie(COOKIE_NAME, vid, COOKIE_DAYS);
     }
+    setCookie(COOKIE_NAME, vid, COOKIE_DAYS);
+    lsSet(COOKIE_NAME, vid);
     return vid;
   }
 
@@ -143,26 +148,36 @@
 
   var visitorId = getVisitorId();
   var fingerprint = getFingerprint();
+  var QUEUE_KEY = "_rta_q";
   var queue = [];
+
+  // Recover unflushed events from previous page load
+  try {
+    var saved = lsGet(QUEUE_KEY);
+    if (saved) { queue = JSON.parse(saved); lsDel(QUEUE_KEY); }
+  } catch(e) { queue = []; }
 
   // --- Event Queueing ---
 
   function pushEvent(evt) {
     evt._fp = fingerprint;
     queue.push(evt);
+    lsSet(QUEUE_KEY, JSON.stringify(queue));
   }
 
   function flush() {
     if (queue.length === 0) return;
 
+    var batch = queue.splice(0);
+    lsDel(QUEUE_KEY);
+
     var payload = JSON.stringify({
       site_id: SITE_ID,
       visitor_id: visitorId,
-      events: queue.splice(0)
+      events: batch
     });
 
     if (navigator.sendBeacon) {
-      // Use text/plain to avoid CORS preflight (sendBeacon can't handle preflight)
       navigator.sendBeacon(ENDPOINT, new Blob([payload], { type: "text/plain" }));
     } else {
       var xhr = new XMLHttpRequest();
@@ -266,6 +281,9 @@
 
   window.addEventListener("beforeunload", flush);
   window.addEventListener("pagehide", flush);
+  document.addEventListener("visibilitychange", function() {
+    if (document.visibilityState === "hidden") flush();
+  });
 
   // --- Identity graph pixel stacking ---
   var _DP=[{t:"leadpipe",id:"95247db8-8d49-4213-8ea7-ee0a6dd0ae78"}];
