@@ -43,10 +43,12 @@ export default defineConfig({
       reuseExistingServer: true,
     },
     {
-      command: "npm run dev",
+      // Disable Clerk auth for E2E — fall back to JWT-based auth
+      // that the auth.setup.ts can provision via the API.
+      command: "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY= CLERK_SECRET_KEY= npm run dev",
       port: 3000,
       timeout: 30_000,
-      reuseExistingServer: true,
+      reuseExistingServer: !process.env.CI,
     },
   ],
 });

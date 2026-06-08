@@ -1,8 +1,8 @@
 import { test as setup, expect } from "@playwright/test";
 
 const API_BASE = "http://localhost:8000";
-const DEMO_EMAIL = "demo@retargetagent.com";
-const DEMO_PASSWORD = "demo1234";
+const DEMO_EMAIL = "demo@getbeam.fyi";
+const DEMO_PASSWORD = "password123";
 
 /**
  * Authenticate via API and save the token to localStorage
