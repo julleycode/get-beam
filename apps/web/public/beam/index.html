@@ -94,7 +94,7 @@
     <section class="hero">
       <div class="hero-grid">
         <div class="hero-copy">
-          <span class="hero-eyebrow" data-tw="hero-eyebrow">now in private beta</span>
+          <span class="hero-eyebrow" data-tw="hero-eyebrow"><span class="dot"></span> now in private beta — <strong id="beta-remaining" style="color:var(--pink)">…</strong> spots left</span>
           <h1 class="h-serif hero-title" data-tw="hero-title" style="font-size: 61px">see who's into you. <em>say hi back.</em></h1>
           <p class="hero-sub" data-tw="hero-sub">the stupidly easy way to identify high intent visitors. show up where they post. engage with them tastefully.</p>
           <div class="hero-actions">
@@ -1229,6 +1229,23 @@ document.addEventListener('keydown', function(e) {
 
 <!-- ── WAITLIST HANDLER ── -->
 <script>
+(function loadBetaSlots() {
+  var API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:8000' : 'https://api.getbeam.fyi';
+  fetch(API + '/api/v1/demo/beta-slots')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var el = document.getElementById('beta-remaining');
+      if (el && typeof d.remaining === 'number') {
+        el.textContent = d.remaining;
+      }
+    })
+    .catch(function() {
+      var el = document.getElementById('beta-remaining');
+      if (el) el.textContent = '18';
+    });
+})();
+
 function handleWaitlist(e, form) {
   e.preventDefault();
   var email = form.querySelector('input[type="email"]').value.trim();
@@ -1248,6 +1265,8 @@ function handleWaitlist(e, form) {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(payload)
   }).then(function() {
+    var el = document.getElementById('beta-remaining');
+    if (el) { var n = parseInt(el.textContent, 10); if (n > 0) el.textContent = n - 1; }
     window.location.href = '/beam/waitlisted.html';
   }).catch(function() {
     window.location.href = '/beam/waitlisted.html';

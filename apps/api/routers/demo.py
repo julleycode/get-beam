@@ -577,3 +577,25 @@ async def join_waitlist(request: Request, body: WaitlistRequest) -> dict:
         pass
 
     return {"status": "ok"}
+
+
+BETA_TOTAL_SLOTS = 20
+
+
+@router.get("/beta-slots")
+async def beta_slots() -> dict:
+    """Public endpoint: how many private-beta slots remain."""
+    try:
+        from apps.api.models.waitlist import WaitlistSignup
+        async with async_session() as db:
+            result = await db.execute(
+                select(WaitlistSignup).where(
+                    WaitlistSignup.status.in_(["approved", "pending"])
+                )
+            )
+            taken = len(result.scalars().all())
+    except Exception:
+        taken = 2  # fallback if DB unreachable
+
+    remaining = max(0, BETA_TOTAL_SLOTS - taken)
+    return {"total": BETA_TOTAL_SLOTS, "taken": taken, "remaining": remaining}
