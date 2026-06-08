@@ -113,6 +113,7 @@
     <li>your name and email when you sign up</li>
     <li>your website's visitor event data (page views, time on site, referrer)</li>
     <li>billing information (handled by stripe — we never see raw card numbers)</li>
+    <li>IP addresses of your website visitors (used for identity resolution and geolocation)</li>
     <li>usage data to improve the product (feature clicks, session length)</li>
   </ul>
 
@@ -127,8 +128,13 @@
   <p>we do not sell your data. we do not share visitor data with third parties except the enrichment providers we use to identify visitors on your behalf (people data labs, proxycurl). those providers have their own privacy policies.</p>
 
   <h2>visitor data and your visitors</h2>
-  <p>when beam identifies a visitor on your site, it surfaces publicly available information — names, company, social handles — sourced from data brokers and public social networks. this data is cached for 30 days and only used within your beam dashboard.</p>
+  <p>beam's person-level visitor identification only resolves visitors with US-based IP addresses. we use IP geofencing to restrict person-level identification to US traffic only. beam does not intentionally or deliberately provide person-level identification for european, UK, or other non-US markets.</p>
+  <p>beam resolves anonymous visitors by matching IP addresses against third-party data providers (people data labs, proxycurl, fullcontact). the information surfaced — names, job titles, companies, linkedin profiles — comes from these data enrichment services and publicly available sources. this data is cached for 30 days and only used within your beam dashboard.</p>
   <p>identified visitors can request deletion by emailing <a href="mailto:hello@getbeam.fyi">hello@getbeam.fyi</a>. we'll process requests within 7 days.</p>
+
+  <h2>your responsibilities as a beam user</h2>
+  <p>when you install the beam pixel on your site, you are responsible for updating your own site's privacy policy to disclose visitor tracking and identification. you should inform your visitors that you use a third-party service to identify anonymous traffic.</p>
+  <p>we recommend adding language about data collection, cookies/local storage, and third-party data enrichment to your privacy policy.</p>
 
   <h2>data retention</h2>
   <p>visitor event data is retained for 90 days by default. enriched profiles are retained for as long as your account is active. you can delete any or all data from your dashboard settings at any time.</p>
@@ -136,8 +142,14 @@
   <h2>security</h2>
   <p>all data is encrypted in transit (tls) and at rest. we use supabase for storage, which is soc 2 compliant. we follow the principle of least privilege — only the services that need your data can access it.</p>
 
-  <h2>gdpr and ccpa</h2>
-  <p>if you're in the eu or california, you have the right to access, correct, and delete your personal data. email us at <a href="mailto:hello@getbeam.fyi">hello@getbeam.fyi</a> and we'll sort it out fast.</p>
+  <h2>gdpr</h2>
+  <p>beam's person-level identification is restricted to US-based IP addresses only. we do not resolve visitors from the EU or UK.</p>
+  <p>if you believe your data has been processed and you're in the EU, email us at <a href="mailto:hello@getbeam.fyi">hello@getbeam.fyi</a> and we'll handle your access, correction, or deletion request within 30 days.</p>
+
+  <h2>ccpa / us state privacy laws</h2>
+  <p>if you're a california resident, you have the right to know what personal data we collect, request deletion, and opt out of the sale of your data.</p>
+  <p>beam does not sell personal data in the traditional sense, but identity resolution may constitute a "sale" under CCPA's broad definition. to opt out: email <a href="mailto:hello@getbeam.fyi">hello@getbeam.fyi</a> with subject "Do Not Sell My Information".</p>
+  <p>we do not respond to Do Not Track browser signals at this time, as there is no industry standard for compliance.</p>
 
   <h2>cookies</h2>
   <p>beam uses minimal cookies: one session cookie to keep you logged in, and one analytics cookie to measure basic usage (no third-party trackers). the beam tracking pixel on your site uses first-party storage only.</p>
@@ -151,5 +163,6 @@
   <p class="updated">last updated: june 2026</p>
 </div>
 
+<script src="https://retarget-agent-production.up.railway.app/pixel/tracker.js" data-site="beam_getbeam_fyi" data-api="https://retarget-agent-production.up.railway.app" defer></script>
 </body>
 </html>
