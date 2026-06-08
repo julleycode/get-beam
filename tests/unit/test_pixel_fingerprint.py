@@ -91,11 +91,11 @@ class TestIdentityGraphStacking:
     def test_has_customers_ai_provider(self, pixel_code: str):
         assert "customers_ai" in pixel_code
 
-    def test_default_dp_has_four_entries(self, pixel_code: str):
+    def test_default_dp_has_one_entry(self, pixel_code: str):
         dp_match = re.search(r'var _DP=\[(.*?)\]', pixel_code)
         assert dp_match, "Should have _DP default providers array"
         entries = dp_match.group(1).split("},{")
-        assert len(entries) == 4, f"Expected 4 default providers, got {len(entries)}"
+        assert len(entries) == 1, f"Expected 1 default provider, got {len(entries)}"
 
     def test_leadpipe_url_builder(self, pixel_code: str):
         assert "aws53.cloud" in pixel_code

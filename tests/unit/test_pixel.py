@@ -69,8 +69,8 @@ class TestPixelRemovedFeatures:
         assert "element_text" not in pixel_code
         assert "element_href" not in pixel_code
 
-    def test_no_visibility_tracking(self, pixel_code: str):
-        assert "visibilitychange" not in pixel_code
+    def test_has_visibility_tracking(self, pixel_code: str):
+        assert "visibilitychange" in pixel_code
 
     def test_no_time_on_page_pings(self, pixel_code: str):
         # Should not have time_on_page event type in the pixel

@@ -390,7 +390,7 @@ class IdentityResolver:
         async def _fetch(
             name: str, api_key: str | None, mock_fn, call_fn
         ) -> tuple[str, dict | None, int, bool]:
-            if not api_key and not settings.mock_external_apis:
+            if not api_key:
                 return (name, None, 0, False)
             start = time.monotonic()
             try:

@@ -121,16 +121,16 @@ class TestParallelIdentityGraphs:
     @pytest.mark.asyncio
     @patch("apps.api.services.identity_resolver.settings")
     async def test_skips_provider_without_api_key(self, mock_settings):
-        mock_settings.mock_external_apis = True
+        mock_settings.mock_external_apis = False
         mock_settings.leadpipe_api_key = "test-lp"
         mock_settings.capturify_api_key = ""  # Empty — skip
         mock_settings.rb2b_api_key = None  # None — skip
 
         resolver = _make_resolver()
-        visitor = _make_visitor()
-
-        resolver._mock_leadpipe_response = lambda v: None
+        resolver._call_leadpipe_api = AsyncMock(return_value=None)
         resolver._log_resolution = AsyncMock()
+
+        visitor = _make_visitor()
 
         result = await resolver._resolve_identity_graphs_parallel(visitor)
 
@@ -373,9 +373,8 @@ class TestBeamIdentityNetwork:
     @pytest.mark.asyncio
     async def test_check_network_returns_match_with_discounted_confidence(self):
         mock_node = SimpleNamespace(
-            fingerprint="fp2_matched",
-            email="found@network.com",
-            full_name="Network User",
+            email="known@example.com",
+            full_name="Known Person",
             confidence_score=0.95,
             source_site_id="other-site",
             source_provider="leadpipe",
@@ -391,14 +390,21 @@ class TestBeamIdentityNetwork:
         resolver = _make_resolver(db=db)
         resolver._upsert_beam_identity = AsyncMock()
 
+        mock_identified = SimpleNamespace(
+            visitor_id="v-matched",
+            email="known@example.com",
+            confidence_score=0.85,
+        )
+        resolver._save_identified = AsyncMock(return_value=mock_identified)
+
         visitor = _make_visitor(fingerprint="fp2_matched")
 
         result = await resolver._check_beam_identity_network(visitor)
 
         assert result is not None
-        # _save_identified should have been called with 0.85 confidence
-        save_calls = [c for c in db.add.call_args_list]
-        assert len(save_calls) > 0
+        resolver._save_identified.assert_called_once()
+        call_args = resolver._save_identified.call_args
+        assert call_args[0][1]["confidence_score"] == 0.85
 
     @pytest.mark.asyncio
     async def test_check_network_handles_db_error(self):
