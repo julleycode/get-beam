@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
+import { useAuth } from "@clerk/nextjs";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -61,8 +62,6 @@ function NavLink({
  * Isolated in its own component so useAuth() is always called (no conditional hooks).
  */
 function ClerkSignOutButton() {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { useAuth } = require("@clerk/nextjs");
   const { signOut } = useAuth();
   return (
     <Button
@@ -100,8 +99,6 @@ function LegacySignOutButton() {
  * Only rendered when Clerk is configured.
  */
 function ClerkAuthGuard() {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { useAuth } = require("@clerk/nextjs");
   const { isSignedIn } = useAuth();
   const router = useRouter();
 

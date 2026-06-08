@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, BillingInterval } from "@/lib/api";
 import { PixelInstallGuide } from "@/components/pixel-install-guide";
@@ -374,7 +374,7 @@ export default function OnboardingPage() {
 
                   {/* Signals by category */}
                   {(() => {
-                    const categories = [...new Set(detectionSignals.map(s => s.category))];
+                    const categories = Array.from(new Set(detectionSignals.map(s => s.category)));
                     return categories.map(cat => (
                       <div key={cat}>
                         <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">{cat}</h4>

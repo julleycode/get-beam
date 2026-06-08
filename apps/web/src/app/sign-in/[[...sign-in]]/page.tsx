@@ -1,7 +1,6 @@
 "use client";
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const { SignIn } = require("@clerk/nextjs");
+import { SignIn } from "@clerk/nextjs";
 
 export default function SignInPage() {
   return (
