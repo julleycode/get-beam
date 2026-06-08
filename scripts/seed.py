@@ -82,12 +82,19 @@ async def seed() -> None:
             time_on_page = random.uniform(10, 120)
             visited = random.sample(pages, random.randint(1, 5))
 
+            ref = random.choice(["google.com", "twitter.com", "linkedin.com", None])
+            src = random.choice(["google", "twitter", None])
+            med = random.choice(["organic", "social", "email", "cpc", None])
             intent = calculate_intent_score(
+                first_seen=now - timedelta(hours=hours_ago + 24),
                 last_seen=now - timedelta(hours=hours_ago),
                 total_sessions=sessions,
                 max_scroll_depth=scroll,
                 avg_time_on_page=time_on_page,
                 pages_visited=visited,
+                top_referrer=ref,
+                utm_source=src,
+                utm_medium=med,
             )
 
             visitor = Visitor(
@@ -100,8 +107,8 @@ async def seed() -> None:
                 avg_time_on_page=time_on_page,
                 max_scroll_depth=scroll,
                 pages_visited=visited,
-                top_referrer=random.choice(["google.com", "twitter.com", "linkedin.com", None]),
-                utm_source=random.choice(["google", "twitter", None]),
+                top_referrer=ref,
+                utm_source=src,
                 country_code="US",
                 device_type=random.choice(["desktop", "mobile", "tablet"]),
                 intent_score=intent,

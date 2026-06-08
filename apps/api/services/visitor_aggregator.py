@@ -10,32 +10,95 @@ from apps.api.models.visitor import Visitor
 
 logger = structlog.get_logger()
 
-HIGH_INTENT_KEYWORDS: list[str] = [
-    "pricing", "checkout", "signup", "demo", "contact", "buy", "subscribe", "plan",
-    "enterprise", "book", "plans", "quote",
-]
+FUNNEL_STAGES: dict[int, list[str]] = {
+    1: ["home", "blog", "about"],
+    2: ["features", "how-it-works", "use-cases", "integrations"],
+    3: ["pricing", "plans", "comparison", "demo", "contact"],
+    4: ["signup", "checkout", "buy", "subscribe", "trial"],
+}
+
+SOCIAL_DOMAINS = ("twitter", "facebook", "linkedin", "x.com", "t.co", "fb.com")
+SEARCH_DOMAINS = ("google", "bing", "duckduckgo", "yahoo", "baidu")
+
+
+def _is_homepage(page: str) -> bool:
+    from urllib.parse import urlparse
+    try:
+        path = urlparse(page).path if "://" in page else page
+    except Exception:
+        path = page
+    return path.rstrip("/") == ""
+
+
+def _classify_funnel_stages(pages_visited: list[str]) -> set[int]:
+    stages_hit: set[int] = set()
+    for page in pages_visited:
+        if _is_homepage(page):
+            stages_hit.add(1)
+            continue
+        lower = page.lower()
+        for stage, keywords in FUNNEL_STAGES.items():
+            if any(kw in lower for kw in keywords):
+                stages_hit.add(stage)
+    return stages_hit
+
+
+def _score_referrer(
+    top_referrer: str | None,
+    utm_source: str | None,
+    utm_medium: str | None,
+) -> float:
+    medium = (utm_medium or "").lower()
+    ref = (top_referrer or "").lower()
+    source = (utm_source or "").lower()
+
+    if medium in ("cpc", "ppc", "paid"):
+        return 3.0
+    if medium == "email":
+        return 8.0
+    if medium == "social" or any(d in ref for d in SOCIAL_DOMAINS):
+        return 3.0
+
+    if any(d in ref for d in SEARCH_DOMAINS) or any(d in source for d in SEARCH_DOMAINS):
+        return 10.0
+    if not ref or ref == "direct":
+        return 10.0
+
+    if ref:
+        return 5.0
+
+    return 0.0
+
+
+def _decay_multiplier(last_seen: datetime) -> float:
+    now = datetime.now(timezone.utc)
+    if last_seen.tzinfo is None:
+        now = datetime.utcnow()
+    hours = (now - last_seen).total_seconds() / 3600
+
+    if hours < 24:
+        return 1.0
+    if hours < 168:
+        return 0.9
+    if hours < 720:
+        return 0.7
+    if hours < 2160:
+        return 0.4
+    return 0.2
 
 
 def calculate_intent_score(
+    first_seen: datetime,
     last_seen: datetime,
     total_sessions: int,
     max_scroll_depth: int,
     avg_time_on_page: float,
     pages_visited: list[str],
+    top_referrer: str | None = None,
+    utm_source: str | None = None,
+    utm_medium: str | None = None,
 ) -> float:
     score = 0.0
-    now = datetime.now(timezone.utc)
-    # Handle both naive and aware datetimes
-    if last_seen.tzinfo is None:
-        now = datetime.utcnow()
-    hours_since_last = (now - last_seen).total_seconds() / 3600
-
-    if hours_since_last < 24:
-        score += 30
-    elif hours_since_last < 72:
-        score += 20
-    elif hours_since_last < 168:
-        score += 10
 
     if total_sessions >= 3:
         score += 25
@@ -44,13 +107,37 @@ def calculate_intent_score(
 
     if max_scroll_depth >= 75:
         score += 15
+
     if avg_time_on_page > 60:
         score += 10
 
-    if any(kw in page.lower() for page in pages_visited for kw in HIGH_INTENT_KEYWORDS):
-        score += 20
+    if total_sessions >= 2:
+        if first_seen.tzinfo is None:
+            fs = first_seen
+            ls = last_seen.replace(tzinfo=None) if last_seen.tzinfo else last_seen
+        else:
+            fs = first_seen
+            ls = last_seen if last_seen.tzinfo else last_seen.replace(tzinfo=first_seen.tzinfo)
+        span_days = max((ls - fs).total_seconds() / 86400, 0)
+        avg_gap = span_days / max(total_sessions - 1, 1)
+        if avg_gap < 2:
+            score += 15
+        elif avg_gap < 5:
+            score += 8
 
-    return min(score, 100.0)
+    stages = _classify_funnel_stages(pages_visited)
+    stage_count = len(stages)
+    if stage_count >= 4:
+        score += 15
+    elif stage_count == 3:
+        score += 10
+    elif stage_count == 2:
+        score += 5
+
+    score += _score_referrer(top_referrer, utm_source, utm_medium)
+
+    decay = _decay_multiplier(last_seen)
+    return min(score * decay, 100.0)
 
 
 def _strip_tz(dt: datetime) -> datetime:
@@ -83,11 +170,15 @@ async def _upsert_visitor(
         avg_time_on_page = 0.0
 
     intent = calculate_intent_score(
+        first_seen=first_seen.replace(tzinfo=timezone.utc) if first_seen.tzinfo is None else first_seen,
         last_seen=last_seen.replace(tzinfo=timezone.utc) if last_seen.tzinfo is None else last_seen,
         total_sessions=total_sessions,
         max_scroll_depth=max_scroll_depth,
         avg_time_on_page=avg_time_on_page,
         pages_visited=pages_visited or [],
+        top_referrer=top_referrer,
+        utm_source=utm_source,
+        utm_medium=utm_medium,
     )
 
     first_seen = _strip_tz(first_seen)
@@ -283,7 +374,12 @@ async def _upsert_company(
             "total_visitors": text("companies.total_visitors + 1"),
             "total_sessions": text("companies.total_sessions + EXCLUDED.total_sessions"),
             "total_pageviews": text("companies.total_pageviews + EXCLUDED.total_pageviews"),
-            "intent_score": text("GREATEST(companies.intent_score, EXCLUDED.intent_score)"),
+            "intent_score": text(
+                "LEAST("
+                "  GREATEST(companies.intent_score, EXCLUDED.intent_score)"
+                "  + LEAST(companies.intent_score, EXCLUDED.intent_score) * 0.3,"
+                "  100)"
+            ),
             "last_seen": text("GREATEST(companies.last_seen, EXCLUDED.last_seen)"),
             "updated_at": datetime.utcnow(),
         },
