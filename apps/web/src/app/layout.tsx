@@ -20,24 +20,15 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-
-  const content = (
-    <html lang="en">
-      <body className={cn(inter.variable, fraunces.variable, "font-sans antialiased")}>
-        {hasClerk && <ClerkTokenSync />}
-        <Providers>{children}</Providers>
-        <Analytics />
-      </body>
-    </html>
+  return (
+    <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up">
+      <html lang="en">
+        <body className={cn(inter.variable, fraunces.variable, "font-sans antialiased")}>
+          <ClerkTokenSync />
+          <Providers>{children}</Providers>
+          <Analytics />
+        </body>
+      </html>
+    </ClerkProvider>
   );
-
-  if (hasClerk) {
-    return (
-      <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up">
-        {content}
-      </ClerkProvider>
-    );
-  }
-  return content;
 }
