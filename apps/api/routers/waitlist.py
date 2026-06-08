@@ -56,6 +56,7 @@ async def list_waitlist(
         "counts": {
             "pending": counts.get("pending", 0),
             "approved": counts.get("approved", 0),
+            "granted": counts.get("granted", 0),
             "rejected": counts.get("rejected", 0),
         },
     }
@@ -132,6 +133,34 @@ async def approve_waitlist(
     return {"status": "approved", "id": str(signup.id)}
 
 
+@router.patch("/{signup_id}/grant")
+async def grant_waitlist(
+    signup_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Grant a beta slot — decrements the public slot counter.
+
+    Does NOT send any email or invite to the user. Purely controls
+    the landing page "X spots left" counter.
+    """
+    result = await db.execute(
+        select(WaitlistSignup).where(WaitlistSignup.id == signup_id)
+    )
+    signup = result.scalar_one_or_none()
+    if not signup:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signup not found")
+
+    if signup.status == "granted":
+        return {"status": "already_granted", "id": str(signup.id)}
+
+    signup.status = "granted"
+    await db.commit()
+
+    logger.info("waitlist_granted", email=signup.email)
+    return {"status": "granted", "id": str(signup.id)}
+
+
 @router.patch("/{signup_id}/reject")
 async def reject_waitlist(
     signup_id: uuid.UUID,
@@ -151,3 +180,25 @@ async def reject_waitlist(
 
     logger.info("waitlist_rejected", email=signup.email)
     return {"status": "rejected", "id": str(signup.id)}
+
+
+@router.delete("/{signup_id}")
+async def delete_waitlist(
+    signup_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Permanently delete a waitlist entry (for cleaning up test data)."""
+    result = await db.execute(
+        select(WaitlistSignup).where(WaitlistSignup.id == signup_id)
+    )
+    signup = result.scalar_one_or_none()
+    if not signup:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Signup not found")
+
+    email = signup.email
+    await db.delete(signup)
+    await db.commit()
+
+    logger.info("waitlist_deleted", email=email)
+    return {"status": "deleted", "id": str(signup_id)}

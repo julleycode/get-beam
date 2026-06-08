@@ -21,6 +21,7 @@ function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
     pending: "bg-yellow-100 text-yellow-800",
     approved: "bg-green-100 text-green-800",
+    granted: "bg-pink-100 text-pink-800",
     rejected: "bg-red-100 text-red-800",
   };
   return (
@@ -36,7 +37,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function WaitlistPage() {
   const [signups, setSignups] = useState<WaitlistSignup[]>([]);
-  const [counts, setCounts] = useState({ pending: 0, approved: 0, rejected: 0 });
+  const [counts, setCounts] = useState({ pending: 0, approved: 0, granted: 0, rejected: 0 });
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
 
@@ -68,6 +69,18 @@ export default function WaitlistPage() {
     }
   }
 
+  async function handleGrant(id: string) {
+    setActing(id);
+    try {
+      await api.grantWaitlist(id);
+      await fetchData();
+    } catch (err) {
+      console.error("Grant failed", err);
+    } finally {
+      setActing(null);
+    }
+  }
+
   async function handleReject(id: string) {
     setActing(id);
     try {
@@ -75,6 +88,18 @@ export default function WaitlistPage() {
       await fetchData();
     } catch (err) {
       console.error("Reject failed", err);
+    } finally {
+      setActing(null);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setActing(id);
+    try {
+      await api.deleteWaitlist(id);
+      await fetchData();
+    } catch (err) {
+      console.error("Delete failed", err);
     } finally {
       setActing(null);
     }
@@ -103,6 +128,10 @@ export default function WaitlistPage() {
       <div className="flex gap-4 text-sm">
         <span className="text-yellow-700 font-medium">
           {counts.pending} pending
+        </span>
+        <span className="text-muted-foreground">&middot;</span>
+        <span className="text-pink-700 font-medium">
+          {counts.granted} granted
         </span>
         <span className="text-muted-foreground">&middot;</span>
         <span className="text-green-700 font-medium">
@@ -156,33 +185,57 @@ export default function WaitlistPage() {
                     <StatusBadge status={s.status} />
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {s.status === "pending" && (
-                      <div className="flex gap-2 justify-end">
-                        <Button
-                          size="sm"
-                          variant="default"
-                          className="bg-green-600 hover:bg-green-700 text-white h-7 text-xs"
-                          disabled={acting === s.id}
-                          onClick={() => handleApprove(s.id)}
-                        >
-                          {acting === s.id ? "..." : "Approve"}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 text-xs text-red-600 border-red-200 hover:bg-red-50"
-                          disabled={acting === s.id}
-                          onClick={() => handleReject(s.id)}
-                        >
-                          Reject
-                        </Button>
-                      </div>
-                    )}
-                    {s.status === "approved" && (
-                      <span className="text-xs text-muted-foreground">
-                        invited {timeAgo(s.approved_at)}
-                      </span>
-                    )}
+                    <div className="flex gap-2 justify-end items-center">
+                      {s.status === "pending" && (
+                        <>
+                          <Button
+                            size="sm"
+                            className="bg-pink-600 hover:bg-pink-700 text-white h-7 text-xs"
+                            disabled={acting === s.id}
+                            onClick={() => handleGrant(s.id)}
+                          >
+                            {acting === s.id ? "..." : "Grant"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="default"
+                            className="bg-green-600 hover:bg-green-700 text-white h-7 text-xs"
+                            disabled={acting === s.id}
+                            onClick={() => handleApprove(s.id)}
+                          >
+                            {acting === s.id ? "..." : "Approve"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs text-red-600 border-red-200 hover:bg-red-50"
+                            disabled={acting === s.id}
+                            onClick={() => handleReject(s.id)}
+                          >
+                            Reject
+                          </Button>
+                        </>
+                      )}
+                      {s.status === "approved" && (
+                        <span className="text-xs text-muted-foreground">
+                          invited {timeAgo(s.approved_at)}
+                        </span>
+                      )}
+                      {s.status === "granted" && (
+                        <span className="text-xs text-pink-600">
+                          slot taken
+                        </span>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs text-muted-foreground hover:text-red-600"
+                        disabled={acting === s.id}
+                        onClick={() => handleDelete(s.id)}
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}

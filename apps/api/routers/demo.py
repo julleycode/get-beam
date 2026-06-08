@@ -584,18 +584,22 @@ BETA_TOTAL_SLOTS = 20
 
 @router.get("/beta-slots")
 async def beta_slots() -> dict:
-    """Public endpoint: how many private-beta slots remain."""
+    """Public endpoint: how many private-beta slots remain.
+
+    Only counts entries explicitly granted by admin — pending signups
+    do not affect the counter.
+    """
     try:
         from apps.api.models.waitlist import WaitlistSignup
         async with async_session() as db:
             result = await db.execute(
                 select(WaitlistSignup).where(
-                    WaitlistSignup.status.in_(["approved", "pending"])
+                    WaitlistSignup.status == "granted"
                 )
             )
             taken = len(result.scalars().all())
     except Exception:
-        taken = 2  # fallback if DB unreachable
+        taken = 0
 
     remaining = max(0, BETA_TOTAL_SLOTS - taken)
     return {"total": BETA_TOTAL_SLOTS, "taken": taken, "remaining": remaining}

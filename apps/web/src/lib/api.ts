@@ -449,10 +449,24 @@ class ApiClient {
     );
   }
 
+  async grantWaitlist(id: string) {
+    return this.request<{ status: string; id: string }>(
+      `/api/v1/waitlist/${id}/grant`,
+      { method: "PATCH" }
+    );
+  }
+
   async rejectWaitlist(id: string) {
     return this.request<{ status: string; id: string }>(
       `/api/v1/waitlist/${id}/reject`,
       { method: "PATCH" }
+    );
+  }
+
+  async deleteWaitlist(id: string) {
+    return this.request<{ status: string; id: string }>(
+      `/api/v1/waitlist/${id}`,
+      { method: "DELETE" }
     );
   }
 
@@ -702,6 +716,7 @@ export interface WaitlistListResponse {
   counts: {
     pending: number;
     approved: number;
+    granted: number;
     rejected: number;
   };
 }
