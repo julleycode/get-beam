@@ -62,14 +62,21 @@ async def trigger_segmentation(
         return {"status": "not_enough", "message": f"Need at least 3 enriched visitors, have {len(visitors)}"}
 
     # Run segmentation synchronously (no Celery/Redis needed for MVP)
-    segments = await run_segmentation(
-        db=db,
-        site_id=site_id,
-        site_name=site.name,
-        site_description=site.description or "",
-        site_category=site.category or "",
-        visitors=visitors,
-    )
+    try:
+        segments = await run_segmentation(
+            db=db,
+            site_id=site_id,
+            site_name=site.name,
+            site_description=site.description or "",
+            site_category=site.category or "",
+            visitors=visitors,
+        )
+    except Exception:
+        logger.exception("segmentation_failed", site_id=site_id)
+        raise HTTPException(
+            status_code=502,
+            detail="Segmentation failed — the AI service returned an error. Please try again.",
+        )
 
     logger.info("segmentation_triggered", site_id=site_id, segments=len(segments))
     return {

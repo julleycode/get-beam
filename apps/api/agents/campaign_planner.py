@@ -123,6 +123,11 @@ async def plan_campaign(
         connected_accounts_info=accounts_info,
     )
 
+    if not settings.anthropic_api_key:
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY is not configured — cannot plan campaign"
+        )
+
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
     message = client.messages.create(
         model="claude-sonnet-4-20250514",

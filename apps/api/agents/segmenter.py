@@ -130,6 +130,11 @@ async def run_segmentation(
         visitor_profiles_json=json.dumps(profiles, indent=2, default=str),
     )
 
+    if not settings.anthropic_api_key:
+        raise RuntimeError(
+            "ANTHROPIC_API_KEY is not configured — cannot run segmentation"
+        )
+
     client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     message = await client.messages.create(
         model="claude-sonnet-4-20250514",

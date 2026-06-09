@@ -108,12 +108,19 @@ async def create_campaign_from_segment(
         for a in accts_result.scalars().all()
     ]
 
-    campaign = await plan_campaign(
-        db=db,
-        segment=segment,
-        visitor_profiles=profiles,
-        connected_accounts=connected,
-    )
+    try:
+        campaign = await plan_campaign(
+            db=db,
+            segment=segment,
+            visitor_profiles=profiles,
+            connected_accounts=connected,
+        )
+    except Exception:
+        logger.exception("campaign_planning_failed", segment_id=segment_id)
+        raise HTTPException(
+            status_code=502,
+            detail="Campaign planning failed — the AI service returned an error. Please try again.",
+        )
 
     logger.info(
         "campaign_created",
