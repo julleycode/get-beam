@@ -47,7 +47,7 @@ function CallbackContent() {
 
       <Link
         href="/dashboard/social-accounts"
-        className="inline-block mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm"
+        className="inline-block mt-4 px-4 py-2 bg-[#FF3366] text-white rounded-lg hover:bg-[#E51F50] text-sm"
       >
         Back to Accounts
       </Link>

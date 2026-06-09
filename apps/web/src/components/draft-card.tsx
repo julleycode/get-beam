@@ -60,7 +60,7 @@ export function DraftCard({
                   ? "bg-blue-50 text-blue-600"
                   : draft.strategy === "conversational"
                     ? "bg-green-50 text-green-600"
-                    : "bg-purple-50 text-purple-600"
+                    : "bg-[#FFF1F5] text-[#FF3366]"
               }`}
             >
               {draft.strategy_label}
@@ -72,7 +72,7 @@ export function DraftCard({
           <textarea
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
-            className="w-full border border-gray-300 rounded-md p-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            className="w-full border border-gray-300 rounded-md p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5C82]"
             rows={3}
           />
         ) : (
@@ -92,7 +92,7 @@ export function DraftCard({
                   onEdit(draft.id, editText);
                   setEditing(false);
                 }}
-                className="text-xs px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+                className="text-xs px-3 py-1.5 rounded-md bg-[#FF3366] text-white hover:bg-[#E51F50]"
               >
                 Save
               </button>

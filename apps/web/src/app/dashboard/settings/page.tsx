@@ -20,7 +20,7 @@ const PROVIDERS = [
     name: "OpenRouter",
     description: "AI replies — 100+ models (Grok, Llama, GPT-4o-mini, etc.)",
     docsUrl: "https://openrouter.ai/keys",
-    color: "text-purple-600",
+    color: "text-[#FF3366]",
   },
   {
     id: "proxycurl",

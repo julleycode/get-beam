@@ -40,7 +40,7 @@ export function PostCard({ post, onGenerateDraft, loading }: PostCardProps) {
             href={post.post_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs text-indigo-500 hover:underline"
+            className="text-xs text-[#FF5C82] hover:underline"
           >
             View original
           </a>
@@ -51,7 +51,7 @@ export function PostCard({ post, onGenerateDraft, loading }: PostCardProps) {
           className={
             post.commented
               ? "text-xs px-3 py-1.5 rounded-md bg-green-50 text-green-600 cursor-default"
-              : "text-xs px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+              : "text-xs px-3 py-1.5 rounded-md bg-[#FF3366] text-white hover:bg-[#E51F50] disabled:opacity-50"
           }
         >
           {post.commented ? "Commented" : loading ? "Generating..." : "Generate Reply"}

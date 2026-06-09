@@ -129,7 +129,7 @@ function BeamLoopWidget() {
             <span className="text-green-600 font-bold">{roi.new_visitors_attributed}</span>
             {" new visitors"}
             <span className="text-muted-foreground mx-2">→</span>
-            <span className="text-purple-600 font-bold">{roi.identified_from_engagement}</span>
+            <span className="text-[#FF3366] font-bold">{roi.identified_from_engagement}</span>
             {" identified"}
           </p>
         ) : (

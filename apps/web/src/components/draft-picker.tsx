@@ -22,7 +22,7 @@ const STRATEGY_ICONS: Record<string, string> = {
 const STRATEGY_COLORS: Record<string, string> = {
   direct: "border-blue-300 bg-blue-50",
   conversational: "border-green-300 bg-green-50",
-  thought_provoking: "border-purple-300 bg-purple-50",
+  thought_provoking: "border-[#FFA8BD] bg-[#FFF1F5]",
 };
 
 export function DraftPicker({
@@ -60,12 +60,12 @@ export function DraftPicker({
   if (drafts.length === 1) {
     const draft = drafts[0];
     return (
-      <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 space-y-3">
+      <div className="bg-[#FFF1F5] border border-[#FFCCD8] rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <PlatformBadge platform={draft.platform} />
             {draft.strategy_label && (
-              <span className="text-xs text-indigo-600 font-medium">
+              <span className="text-xs text-[#FF3366] font-medium">
                 {draft.strategy_label}
               </span>
             )}
@@ -88,13 +88,13 @@ export function DraftPicker({
             <textarea
               value={editText}
               onChange={(e) => setEditText(e.target.value)}
-              className="w-full border border-gray-300 rounded-md p-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full border border-gray-300 rounded-md p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5C82]"
               rows={3}
             />
             <div className="flex gap-2">
               <button
                 onClick={() => handleSaveEdit(draft.id)}
-                className="text-xs px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+                className="text-xs px-3 py-1.5 rounded-md bg-[#FF3366] text-white hover:bg-[#E51F50]"
               >
                 Save
               </button>
@@ -143,13 +143,13 @@ export function DraftPicker({
 
   // Multi-draft (learning mode) — card selection view
   return (
-    <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 space-y-3">
+    <div className="bg-[#FFF1F5] border border-[#FFCCD8] rounded-lg p-4 space-y-3">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-indigo-900">
+          <span className="text-sm font-medium text-[#8F0F30]">
             Pick your favorite reply
           </span>
-          <span className="text-xs text-indigo-500 bg-indigo-100 px-2 py-0.5 rounded-full">
+          <span className="text-xs text-[#FF5C82] bg-[#FFE3EA] px-2 py-0.5 rounded-full">
             {mode === "learning"
               ? `Learning (${voice_example_count}/5 examples)`
               : "Checking preference"}
@@ -173,7 +173,7 @@ export function DraftPicker({
             <div
               key={draft.id}
               className={`rounded-lg border-2 p-3 transition-all ${strategyColor} ${
-                selectedId === draft.id ? "ring-2 ring-indigo-500" : ""
+                selectedId === draft.id ? "ring-2 ring-[#FF5C82]" : ""
               }`}
             >
               <div className="flex items-center gap-2 mb-2">
@@ -183,7 +183,7 @@ export function DraftPicker({
                       ? "bg-blue-500"
                       : draft.strategy === "conversational"
                         ? "bg-green-500"
-                        : "bg-purple-500"
+                        : "bg-[#FF5C82]"
                   }`}
                 >
                   {STRATEGY_ICONS[draft.strategy || ""] || "?"}
@@ -198,13 +198,13 @@ export function DraftPicker({
                   <textarea
                     value={editText}
                     onChange={(e) => setEditText(e.target.value)}
-                    className="w-full border border-gray-300 rounded-md p-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full border border-gray-300 rounded-md p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5C82]"
                     rows={2}
                   />
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleSaveEdit(draft.id)}
-                      className="text-xs px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700"
+                      className="text-xs px-3 py-1.5 rounded-md bg-[#FF3366] text-white hover:bg-[#E51F50]"
                     >
                       Save
                     </button>

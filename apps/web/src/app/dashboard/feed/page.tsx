@@ -226,14 +226,14 @@ export default function FeedPage() {
         <div className="flex gap-2">
           <button
             onClick={() => setShowImport(!showImport)}
-            className="text-sm px-4 py-2 rounded-md border border-indigo-300 text-indigo-600 hover:bg-indigo-50"
+            className="text-sm px-4 py-2 rounded-md border border-[#FFA8BD] text-[#FF3366] hover:bg-[#FFF1F5]"
           >
             + Import Post
           </button>
           <button
             onClick={() => syncMutation.mutate()}
             disabled={syncMutation.isPending}
-            className="text-sm px-4 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+            className="text-sm px-4 py-2 rounded-md bg-[#FF3366] text-white hover:bg-[#E51F50] disabled:opacity-50"
           >
             {syncMutation.isPending ? "Syncing..." : "Sync Now"}
           </button>
@@ -241,8 +241,8 @@ export default function FeedPage() {
       </div>
 
       {showImport && (
-        <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 space-y-3">
-          <p className="text-sm font-medium text-indigo-900">
+        <div className="bg-[#FFF1F5] border border-[#FFCCD8] rounded-lg p-4 space-y-3">
+          <p className="text-sm font-medium text-[#8F0F30]">
             Paste a tweet/post URL to add it to your feed and generate a reply
           </p>
           <input
@@ -250,25 +250,25 @@ export default function FeedPage() {
             placeholder="https://x.com/user/status/123456..."
             value={importUrl}
             onChange={(e) => setImportUrl(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-indigo-200 rounded-md bg-white"
+            className="w-full px-3 py-2 text-sm border border-[#FFCCD8] rounded-md bg-white"
           />
           <input
             type="text"
             placeholder="Author name (e.g. Elon Musk @elonmusk)"
             value={importAuthor}
             onChange={(e) => setImportAuthor(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-indigo-200 rounded-md bg-white"
+            className="w-full px-3 py-2 text-sm border border-[#FFCCD8] rounded-md bg-white"
           />
           <textarea
             placeholder="Paste the post content here..."
             value={importContent}
             onChange={(e) => setImportContent(e.target.value)}
             rows={3}
-            className="w-full px-3 py-2 text-sm border border-indigo-200 rounded-md bg-white resize-none"
+            className="w-full px-3 py-2 text-sm border border-[#FFCCD8] rounded-md bg-white resize-none"
           />
           <div className="flex items-center justify-between">
             {importUrl && (
-              <span className="text-xs text-indigo-600 bg-indigo-100 px-2 py-1 rounded">
+              <span className="text-xs text-[#FF3366] bg-[#FFE3EA] px-2 py-1 rounded">
                 Detected: {detectPlatform(importUrl)}
               </span>
             )}
@@ -282,7 +282,7 @@ export default function FeedPage() {
               <button
                 onClick={handleImport}
                 disabled={!importUrl.trim()}
-                className="text-sm px-4 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
+                className="text-sm px-4 py-1.5 rounded-md bg-[#FF3366] text-white hover:bg-[#E51F50] disabled:opacity-50"
               >
                 Import & Add to Feed
               </button>
@@ -300,7 +300,7 @@ export default function FeedPage() {
               onClick={() => { setSource(s.value); setPage(1); }}
               className={`text-sm px-4 py-2 rounded-lg font-medium transition-colors ${
                 source === s.value
-                  ? "bg-indigo-600 text-white shadow-sm"
+                  ? "bg-[#FF3366] text-white shadow-sm"
                   : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
               }`}
             >
@@ -317,7 +317,7 @@ export default function FeedPage() {
               onClick={() => { setPlatform(p); setPage(1); }}
               className={`text-xs px-3 py-1.5 rounded-full border ${
                 platform === p
-                  ? "bg-indigo-600 text-white border-indigo-600"
+                  ? "bg-[#FF3366] text-white border-[#FF3366]"
                   : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
               }`}
             >

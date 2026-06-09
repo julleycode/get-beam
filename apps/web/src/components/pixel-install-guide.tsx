@@ -26,7 +26,7 @@ const PLATFORM_COLORS: Record<string, string> = {
   wordpress: "bg-blue-900/30 text-blue-400 border-blue-800",
   wix: "bg-yellow-900/30 text-yellow-400 border-yellow-800",
   squarespace: "bg-gray-800/50 text-gray-300 border-gray-700",
-  webflow: "bg-indigo-900/30 text-indigo-400 border-indigo-800",
+  webflow: "bg-[#8F0F30]/30 text-[#FF7D9C] border-[#B31543]",
   unknown: "bg-gray-800/50 text-gray-400 border-gray-700",
 };
 

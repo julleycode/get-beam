@@ -59,7 +59,7 @@ export default function DraftsPage() {
             onClick={() => setTab(t.value)}
             className={`text-sm px-3 py-1.5 rounded-t-md ${
               tab === t.value
-                ? "bg-indigo-600 text-white"
+                ? "bg-[#FF3366] text-white"
                 : "text-gray-500 hover:text-gray-700"
             }`}
           >
