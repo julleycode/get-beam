@@ -641,6 +641,11 @@ footer.legal a:hover { color: var(--ink); }
   transition: opacity 0.22s ease;
 }
 .frm-overlay[hidden] { display: none; }
+/* The form and success cards swap via the [hidden] attribute. Without this,
+   .frm-card's display:flex overrides [hidden], so both render stacked and the
+   thank-you peeks under the form. This makes the success its own clean popup
+   that only appears after submit. */
+.frm-card[hidden] { display: none !important; }
 .frm-overlay.open {
   opacity: 1;
   pointer-events: auto;
