@@ -197,3 +197,18 @@ async def get_current_user(
             detail="User not found",
         )
     return user
+
+
+async def require_admin(
+    user: User = Depends(get_current_user),
+) -> User:
+    """Require the authenticated user to have admin privileges.
+
+    Raises 403 if the user is authenticated but not an admin.
+    """
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return user

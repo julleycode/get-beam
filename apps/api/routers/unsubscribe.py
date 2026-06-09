@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.models.database import get_db
 from apps.api.models.visitor import IdentifiedVisitor
 from apps.api.models.visitor_email import VisitorEmail
+from apps.api.services.link_decorator import decode_unsubscribe_token
 
 logger = structlog.get_logger()
 
@@ -52,14 +53,23 @@ _SUCCESS_HTML = """\
 
 @router.get("/unsubscribe", response_class=HTMLResponse)
 async def unsubscribe(
-    email: str = Query(..., description="Email address to unsubscribe"),
+    t: str = Query(..., description="Signed unsubscribe token"),
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
     """Mark a visitor as do-not-email.
 
-    Always returns the success page regardless of whether the email exists
-    in our database — never leak email-existence information.
+    The email is recovered from the signed token `t` — never from a raw
+    query param — so a caller cannot suppress an address they don't own.
+    Always returns the success page regardless of whether the token is valid
+    or the email exists, so we never leak token/email-existence information.
     """
+    email = decode_unsubscribe_token(t)
+    if not email:
+        # Invalid/forged/expired token: do nothing, but return the same
+        # generic success page so we don't reveal that the token was bad.
+        logger.info("unsubscribe_invalid_token")
+        return HTMLResponse(content=_SUCCESS_HTML)
+
     email_lower = email.strip().lower()
 
     try:

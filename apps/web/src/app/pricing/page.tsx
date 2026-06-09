@@ -127,7 +127,7 @@ export default function PricingPage() {
             Beam
           </Link>
           <div className="flex items-center gap-3">
-            <Link href="/login">
+            <Link href="/sign-in">
               <Button variant="ghost" size="sm">
                 Sign in
               </Button>

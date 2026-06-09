@@ -23,7 +23,7 @@ from apps.api.models.beam_identity import BeamIdentityNode  # noqa: F401 — reg
 from apps.api.models.waitlist import WaitlistSignup  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
-from apps.api.routers import billing, engagement, waitlist, unsubscribe
+from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -50,6 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS tone_preference VARCHAR(50) DEFAULT 'casual'",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(200)",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE",
             "ALTER TABLE users ALTER COLUMN hashed_password DROP NOT NULL",
             # Pre-merge tables: add updated_at inherited from Base
             "ALTER TABLE events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
@@ -238,6 +239,9 @@ app.include_router(waitlist.router, prefix="/api/v1/waitlist", tags=["waitlist"]
 
 # ── Public unsubscribe (CAN-SPAM compliance, no auth) ──
 app.include_router(unsubscribe.router, tags=["unsubscribe"])
+
+# ── Provider webhooks (SendGrid bounce → do_not_email; secret-token auth) ──
+app.include_router(webhooks.router, tags=["webhooks"])
 
 
 @app.get("/health")

@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.dependencies import get_current_user
+from apps.api.dependencies import require_admin
 from apps.api.models.database import get_db
 from apps.api.models.user import User
 from apps.api.models.waitlist import WaitlistSignup
@@ -22,7 +22,7 @@ router = APIRouter(tags=["waitlist"])
 
 @router.get("/")
 async def list_waitlist(
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """List all waitlist signups (newest first)."""
@@ -47,7 +47,6 @@ async def list_waitlist(
                 "email": s.email,
                 "site_url": s.site_url,
                 "status": s.status,
-                "invite_token": s.invite_token,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
                 "approved_at": s.approved_at.isoformat() if s.approved_at else None,
             }
@@ -65,7 +64,7 @@ async def list_waitlist(
 @router.patch("/{signup_id}/approve")
 async def approve_waitlist(
     signup_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Approve a waitlist signup — generates invite token and sends invite email."""
@@ -136,7 +135,7 @@ async def approve_waitlist(
 @router.patch("/{signup_id}/grant")
 async def grant_waitlist(
     signup_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Grant a beta slot — decrements the public slot counter.
@@ -164,7 +163,7 @@ async def grant_waitlist(
 @router.patch("/{signup_id}/reject")
 async def reject_waitlist(
     signup_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Reject a waitlist signup."""
@@ -185,7 +184,7 @@ async def reject_waitlist(
 @router.delete("/{signup_id}")
 async def delete_waitlist(
     signup_id: uuid.UUID,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Permanently delete a waitlist entry (for cleaning up test data)."""

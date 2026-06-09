@@ -67,3 +67,21 @@ def decode_bid(bid: str) -> str | None:
     except Exception as exc:
         logger.warning("link_decorator_decode_error", error=str(exc))
         return None
+
+
+def generate_unsubscribe_token(email: str) -> str:
+    """Encrypt an email address into a signed, URL-safe unsubscribe token.
+
+    Same Fernet instance/key as generate_bid. Raises RuntimeError if
+    ENCRYPTION_KEY is not configured.
+    """
+    return generate_bid(email)
+
+
+def decode_unsubscribe_token(token: str) -> str | None:
+    """Decode a signed unsubscribe token back to an email address.
+
+    Returns None if the token is invalid, forged, tampered, expired, or the
+    key is not configured — never raises.
+    """
+    return decode_bid(token)
