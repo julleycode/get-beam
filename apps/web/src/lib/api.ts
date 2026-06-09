@@ -470,6 +470,13 @@ class ApiClient {
     );
   }
 
+  // Public: validate an invite token before showing the signup form
+  async validateInvite(token: string) {
+    return this.request<{ valid: boolean; email?: string | null }>(
+      `/api/v1/waitlist/validate-invite?token=${encodeURIComponent(token)}`
+    );
+  }
+
   // ── Billing ────────────────────────────────────────────
   async createCheckout(plan: BillingPlan, interval: BillingInterval) {
     return this.request<{ checkout_url: string }>("/api/v1/billing/checkout", {

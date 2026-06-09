@@ -61,6 +61,29 @@ async def list_waitlist(
     }
 
 
+@router.get("/validate-invite")
+async def validate_invite(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Public: check an invite token. Returns {valid, email} when the token maps
+    to an approved/granted waitlist signup — used to gate the signup page so only
+    invited people can create an account. No auth (runs before the account exists).
+    """
+    if not token:
+        return {"valid": False}
+    result = await db.execute(
+        select(WaitlistSignup).where(
+            WaitlistSignup.invite_token == token,
+            WaitlistSignup.status.in_(["approved", "granted"]),
+        )
+    )
+    signup = result.scalar_one_or_none()
+    if not signup:
+        return {"valid": False}
+    return {"valid": True, "email": signup.email}
+
+
 @router.patch("/{signup_id}/approve")
 async def approve_waitlist(
     signup_id: uuid.UUID,
