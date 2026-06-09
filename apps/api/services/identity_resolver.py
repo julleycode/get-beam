@@ -265,6 +265,18 @@ class IdentityResolver:
         3.  Hunter (domain → employee emails)
         4.  Apollo (domain → contact)
         """
+        # ── Pre-waterfall: check prior signals (form capture, fingerprint) ──
+        # These are free, high-confidence, and work on residential IPs, so they
+        # run BEFORE the 30-day recency gate and the daily budget — a visitor who
+        # failed a paid lookup but LATER submits an email via a form must still be
+        # identified, not skipped for 30 days.
+        result = await self._check_prior_signals(visitor)
+        if result:
+            return result
+
+        # ── Paid provider waterfall gates ──
+        # The 30-day recency skip and daily budget only guard the PAID providers
+        # below, not the free prior-signal path above.
         if await self.was_recently_attempted(visitor.site_id, visitor.visitor_id):
             logger.info("resolution_skipped_recent_attempt", visitor_id=visitor.visitor_id[:8])
             return None
@@ -272,12 +284,6 @@ class IdentityResolver:
         if not await self.check_daily_budget(visitor.site_id):
             logger.warning("resolution_budget_exhausted", site_id=visitor.site_id)
             return None
-
-        # ── Pre-waterfall: check prior signals (form capture, fingerprint) ──
-        # These don't count against the daily budget and work on residential IPs.
-        result = await self._check_prior_signals(visitor)
-        if result:
-            return result
 
         if not getattr(visitor, "ip_address", None):
             logger.info("resolution_skipped_no_ip", visitor_id=visitor.visitor_id[:8])

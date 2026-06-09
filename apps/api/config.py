@@ -77,6 +77,7 @@ class Settings(BaseSettings):
     default_ai_model: str = "deepseek/deepseek-v4-flash:free"  # free tier — good for social replies
     resend_api_key: str = ""  # deprecated — use SendGrid
     sendgrid_api_key: str = ""
+    sendgrid_webhook_secret: str = ""  # shared secret for the SendGrid event webhook URL
 
     # ─── Identity Graph (person-level from IP) ───
     rb2b_api_key: str = ""          # RB2B API Suite — IP → hashed email → person (US traffic)

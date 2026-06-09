@@ -1,7 +1,11 @@
+from html import escape
+from urllib.parse import quote
+
 import httpx
 import structlog
 
 from apps.api.config import settings
+from apps.api.services.link_decorator import generate_unsubscribe_token
 
 logger = structlog.get_logger()
 
@@ -19,12 +23,13 @@ class EmailSender:
         unsubscribe_url: str | None = None,
     ) -> dict:
         if not unsubscribe_url:
-            unsubscribe_url = f"{settings.api_base_url}/unsubscribe?email={to_email}"
+            token = generate_unsubscribe_token(to_email)
+            unsubscribe_url = f"{settings.api_base_url}/unsubscribe?t={quote(token, safe='')}"
 
         full_html = f"""{body_html}
 <br/><br/>
 <p style="font-size:12px;color:#999;">
-    <a href="{unsubscribe_url}">Unsubscribe</a> from future emails.
+    <a href="{escape(unsubscribe_url, quote=True)}">Unsubscribe</a> from future emails.
 </p>"""
 
         payload = {

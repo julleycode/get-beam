@@ -7,10 +7,11 @@ ANY IP (residential, public WiFi, mobile) — not just business IPs.
 """
 
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import structlog
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from slowapi.util import get_remote_address
 
 from pydantic import BaseModel
@@ -23,6 +24,7 @@ from apps.api.models.visitor import Visitor
 from apps.api.routers.social_auth import limiter
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.platform_detector import detect_platform
+from apps.api.services.redis_client import get_redis
 
 logger = structlog.get_logger()
 
@@ -76,6 +78,34 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else ""
 
 
+# Global daily cap on real-provider demo calls (identity graphs + LLM tokens),
+# shared across every cost-bearing demo endpoint. Bounds total spend regardless
+# of per-IP slowapi limits, which key on a client-spoofable X-Forwarded-For.
+# Fails OPEN (allows the call) if Redis is unreachable so the public onboarding
+# demo never hard-breaks.
+_DEMO_DAILY_BUDGET = 50
+
+
+async def _enforce_demo_budget() -> None:
+    """Raise 429 once the global daily demo budget is exhausted (fails open on Redis error)."""
+    try:
+        redis = get_redis()
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        key = f"demo:budget:{day}"
+        count = await redis.incr(key)
+        if count == 1:
+            await redis.expire(key, 86400)
+        if count > _DEMO_DAILY_BUDGET:
+            raise HTTPException(
+                status_code=429,
+                detail="Demo limit reached for today — join the waitlist for full access.",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("demo_budget_check_failed_open", error=str(exc))
+
+
 @router.post("/identify")
 @limiter.limit("6/minute")
 async def demo_identify(request: Request, body: IdentifyBody = IdentifyBody()) -> dict:
@@ -89,6 +119,7 @@ async def demo_identify(request: Request, body: IdentifyBody = IdentifyBody()) -
     check whether the pixel already recorded a visit with that same
     fingerprint — proving the pixel detected the onboarding user.
     """
+    await _enforce_demo_budget()
     ip = _client_ip(request)
     base: dict = {"matched": False, "ip": ip, "providers_tried": []}
     if not ip:
@@ -260,6 +291,7 @@ async def demo_identify_by_email(request: Request, body: EmailIdentifyRequest) -
     verifiable data (LinkedIn URL, Twitter handle, job title, company) —
     never fabricated profiles.
     """
+    await _enforce_demo_budget()
     email = body.email.strip().lower()
     base: dict = {"matched": False, "email": email}
 
@@ -305,6 +337,7 @@ async def demo_social_posts(request: Request, body: SocialPostsRequest) -> dict:
     Uses Twitter API v2 (if bearer token configured) to pull actual tweets.
     Never returns fake data — returns empty list if API unavailable.
     """
+    await _enforce_demo_budget()
     posts: list[dict] = []
 
     handle = (body.twitter_handle or "").lstrip("@").strip()
@@ -389,6 +422,7 @@ async def demo_generate_draft(request: Request, body: DraftRequest) -> dict:
     When recent_post is provided, the draft references the visitor's
     actual social post — not generic outreach.
     """
+    await _enforce_demo_budget()
     name = body.visitor_name.strip() or "this visitor"
     first = name.split()[0].lower() if name != "this visitor" else "there"
 

@@ -1,8 +1,9 @@
 import json
+import re
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -304,29 +305,48 @@ async def shopify_connect(
     return {"install_url": install_url}
 
 
+_SHOPIFY_SHOP_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9-]*\.myshopify\.com$")
+
+
 @router.get("/shopify/callback")
 async def shopify_callback(
+    request: Request,
     shop: str = Query(...),
     code: str = Query(...),
     state: str = Query(...),  # site_id
     db: AsyncSession = Depends(get_db),
 ) -> RedirectResponse:
     """Handle Shopify OAuth callback — install ScriptTag and redirect to dashboard."""
-    site_id = state
-    try:
-        from apps.api.services.shopify_integration import handle_oauth_callback
+    from apps.api.services.shopify_integration import handle_oauth_callback, verify_hmac
 
+    # Verify the HMAC signature so only Shopify-originated callbacks proceed.
+    if not verify_hmac(dict(request.query_params)):
+        logger.warning("shopify_callback_bad_hmac", shop=shop)
+        raise HTTPException(status_code=400, detail="Invalid HMAC signature")
+
+    # Validate the attacker-controlled `shop` param before any outbound call (SSRF guard).
+    if not _SHOPIFY_SHOP_RE.match(shop):
+        logger.warning("shopify_callback_bad_shop", shop=shop)
+        raise HTTPException(status_code=400, detail="Invalid shop domain")
+
+    site_id = state
+
+    # Confirm the referenced site exists before processing.
+    result = await db.execute(
+        select(Site).where(Site.site_id == site_id)
+    )
+    site = result.scalar_one_or_none()
+    if not site:
+        logger.warning("shopify_callback_unknown_site", shop=shop, site_id=site_id)
+        raise HTTPException(status_code=400, detail="Invalid state")
+
+    try:
         await handle_oauth_callback(shop, code, site_id)
 
         # Mark pixel as verified
-        result = await db.execute(
-            select(Site).where(Site.site_id == site_id)
-        )
-        site = result.scalar_one_or_none()
-        if site:
-            site.pixel_verified = True
-            site.detected_platform = "shopify"
-            await db.commit()
+        site.pixel_verified = True
+        site.detected_platform = "shopify"
+        await db.commit()
 
         logger.info("shopify_connected", shop=shop, site_id=site_id)
     except Exception as e:
