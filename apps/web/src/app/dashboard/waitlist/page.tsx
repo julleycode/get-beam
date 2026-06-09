@@ -190,20 +190,23 @@ export default function WaitlistPage() {
                         <>
                           <Button
                             size="sm"
-                            className="bg-pink-600 hover:bg-pink-700 text-white h-7 text-xs"
-                            disabled={acting === s.id}
-                            onClick={() => handleGrant(s.id)}
-                          >
-                            {acting === s.id ? "..." : "Grant"}
-                          </Button>
-                          <Button
-                            size="sm"
                             variant="default"
                             className="bg-green-600 hover:bg-green-700 text-white h-7 text-xs"
                             disabled={acting === s.id}
                             onClick={() => handleApprove(s.id)}
+                            title="Emails this person their invite link and lets them create an account."
                           >
-                            {acting === s.id ? "..." : "Approve"}
+                            {acting === s.id ? "..." : "Invite"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 text-xs"
+                            disabled={acting === s.id}
+                            onClick={() => handleGrant(s.id)}
+                            title="Marks a slot taken on the landing-page counter only. Does NOT email or give access."
+                          >
+                            {acting === s.id ? "..." : "Reserve"}
                           </Button>
                           <Button
                             size="sm"
