@@ -232,7 +232,7 @@ class TestParallelIPCompany:
             ipinfo_called = True
             return None
 
-        resolver._call_pdl_ip_api = track_pdl
+        resolver._call_pdl_ip_enrich = track_pdl
         resolver._call_ipinfo_api = track_ipinfo
         resolver._log_resolution = AsyncMock()
 
@@ -256,7 +256,7 @@ class TestParallelIPCompany:
         async def ipinfo_result(v):
             return "ipinfo-company.com"
 
-        resolver._call_pdl_ip_api = pdl_result
+        resolver._call_pdl_ip_enrich = pdl_result
         resolver._call_ipinfo_api = ipinfo_result
         resolver._log_resolution = AsyncMock()
 
@@ -279,7 +279,7 @@ class TestParallelIPCompany:
         async def ipinfo_fallback(v):
             return "fallback.com"
 
-        resolver._call_pdl_ip_api = pdl_none
+        resolver._call_pdl_ip_enrich = pdl_none
         resolver._call_ipinfo_api = ipinfo_fallback
         resolver._log_resolution = AsyncMock()
 
@@ -302,7 +302,7 @@ class TestParallelIPCompany:
         async def ipinfo_none(v):
             return None
 
-        resolver._call_pdl_ip_api = pdl_result
+        resolver._call_pdl_ip_enrich = pdl_result
         resolver._call_ipinfo_api = ipinfo_none
         resolver._log_resolution = AsyncMock()
 

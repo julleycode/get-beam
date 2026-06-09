@@ -156,10 +156,10 @@ jobs:
                   await conn.run_sync(Base.metadata.create_all)
               async with async_session() as db:
                   from sqlalchemy import select
-                  exists = await db.execute(select(User).where(User.email == 'demo@retargetagent.com'))
+                  exists = await db.execute(select(User).where(User.email == 'demo@getbeam.fyi'))
                   if not exists.scalar_one_or_none():
-                      pw = bcrypt.hashpw(b'demo1234', bcrypt.gensalt()).decode()
-                      db.add(User(email='demo@retargetagent.com', hashed_password=pw, full_name='Demo User'))
+                      pw = bcrypt.hashpw(b'password123', bcrypt.gensalt()).decode()
+                      db.add(User(email='demo@getbeam.fyi', hashed_password=pw, full_name='Demo User'))
                       await db.commit()
           asyncio.run(seed())
           "
