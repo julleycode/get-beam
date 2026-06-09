@@ -124,27 +124,25 @@ async def demo_identify(request: Request, body: IdentifyBody = IdentifyBody()) -
 
     # ── Step 0: Identity Graphs in parallel (works on ANY IP) ──
 
-    async def _try_graph(name: str, call_fn, mock_fn) -> tuple[str, dict | None]:
+    async def _try_graph(name: str, call_fn) -> tuple[str, dict | None]:
         try:
-            if settings.mock_external_apis:
-                return name, mock_fn(stub)
             return name, await call_fn(stub)
         except Exception as e:
             logger.warning("demo_identity_graph_error", provider=name, error=str(e))
             return name, None
 
     graph_tasks = []
-    if settings.leadpipe_api_key or settings.mock_external_apis:
+    if settings.leadpipe_api_key:
         graph_tasks.append(_try_graph(
-            "leadpipe", resolver._call_leadpipe_api, resolver._mock_leadpipe_response,
+            "leadpipe", resolver._call_leadpipe_api,
         ))
-    if settings.capturify_api_key or settings.mock_external_apis:
+    if settings.capturify_api_key:
         graph_tasks.append(_try_graph(
-            "capturify", resolver._call_capturify_api, resolver._mock_capturify_response,
+            "capturify", resolver._call_capturify_api,
         ))
-    if settings.rb2b_api_key or settings.mock_external_apis:
+    if settings.rb2b_api_key:
         graph_tasks.append(_try_graph(
-            "rb2b", resolver._call_rb2b_api, resolver._mock_rb2b_response,
+            "rb2b", resolver._call_rb2b_api,
         ))
 
     best_match: dict | None = None
@@ -314,7 +312,7 @@ async def demo_social_posts(request: Request, body: SocialPostsRequest) -> dict:
         return {"posts": [], "source": "none"}
 
     # Real Twitter API call
-    if settings.twitter_bearer_token and not settings.mock_external_apis:
+    if settings.twitter_bearer_token:
         try:
             import httpx
             async with httpx.AsyncClient(timeout=10.0) as client:
@@ -414,7 +412,7 @@ async def demo_generate_draft(request: Request, body: DraftRequest) -> dict:
         )
 
     # Try Claude API (direct)
-    if settings.anthropic_api_key and not settings.mock_external_apis:
+    if settings.anthropic_api_key:
         try:
             import httpx
             async with httpx.AsyncClient(timeout=8.0) as client:
@@ -440,7 +438,7 @@ async def demo_generate_draft(request: Request, body: DraftRequest) -> dict:
             logger.warning("demo_generate_draft_anthropic_error", error=str(e))
 
     # Try OpenRouter (fallback — supports 100+ models)
-    if settings.openrouter_api_key and not settings.mock_external_apis:
+    if settings.openrouter_api_key:
         try:
             import httpx
             async with httpx.AsyncClient(timeout=8.0) as client:

@@ -41,14 +41,6 @@ _TWITTER_API = "https://api.twitter.com/2"
 class TwitterService(PlatformService):
     # ── OAuth (PKCE with S256) ───────────────────────────
     async def get_auth_url(self, state: str) -> str:
-        if settings.mock_social_oauth:
-            # In mock mode, redirect straight to our callback with a fake code
-            params = urlencode({
-                "code": f"mock_code_{uuid.uuid4().hex[:8]}",
-                "state": state,
-            })
-            return f"{settings.api_base_url}/api/v1/social/callback/twitter?{params}"
-
         code_verifier = generate_code_verifier()
         code_challenge = generate_code_challenge(code_verifier)
         await store_code_verifier(state, code_verifier)
@@ -65,9 +57,6 @@ class TwitterService(PlatformService):
         return f"{_TWITTER_AUTH_URL}?{urlencode(params)}"
 
     async def exchange_code(self, code: str, state: str = "") -> OAuthTokens:
-        if settings.mock_social_oauth:
-            return self._mock_tokens()
-
         # Retrieve the code_verifier stored during get_auth_url
         code_verifier = await get_code_verifier(state) if state else None
         if not code_verifier:
@@ -108,9 +97,6 @@ class TwitterService(PlatformService):
         )
 
     async def refresh_tokens(self, refresh_token: str) -> OAuthTokens:
-        if settings.mock_social_oauth:
-            return self._mock_tokens()
-
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 _TWITTER_TOKEN_URL,
@@ -139,9 +125,6 @@ class TwitterService(PlatformService):
     async def fetch_feed(
         self, access_token: str, *, limit: int = 20
     ) -> list[FeedPost]:
-        if settings.mock_social_oauth:
-            return self._mock_feed(limit)
-
         # ── Primary: Playwright browser scraping (free, reliable) ──
         try:
             from apps.api.services.platforms.twitter_browser import (
@@ -254,11 +237,6 @@ class TwitterService(PlatformService):
     async def post_comment(
         self, access_token: str, platform_post_id: str, text: str
     ) -> str:
-        if settings.mock_social_oauth:
-            mock_id = f"mock_reply_{uuid.uuid4().hex[:8]}"
-            logger.info("mock_twitter_reply", post_id=platform_post_id, reply_id=mock_id)
-            return mock_id
-
         headers = {"Authorization": f"Bearer {access_token}"}
 
         async with httpx.AsyncClient(timeout=10) as client:
@@ -303,9 +281,6 @@ class TwitterService(PlatformService):
         """
         if not handles:
             return []
-
-        if settings.mock_social_oauth:
-            return self._mock_visitor_feed(handles, limit)
 
         # Build query: "from:handle1 OR from:handle2 OR ..."
         # Twitter search supports up to ~512 chars in query

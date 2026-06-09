@@ -1,6 +1,5 @@
 """Instagram Graph API integration (via Meta / Facebook app)."""
 
-import uuid
 from datetime import datetime, timezone
 
 from urllib.parse import urlencode
@@ -33,10 +32,6 @@ _IG_API = "https://graph.facebook.com/v19.0"
 
 class InstagramService(PlatformService):
     async def get_auth_url(self, state: str) -> str:
-        if settings.mock_social_oauth:
-            params = urlencode({"code": f"mock_code_{state[:8]}", "state": state})
-            return f"{settings.api_base_url}/api/v1/social/callback/instagram?{params}"
-
         params = {
             "client_id": settings.facebook_app_id,
             "redirect_uri": settings.instagram_redirect_uri,
@@ -47,9 +42,6 @@ class InstagramService(PlatformService):
         return f"{_IG_AUTH_URL}?{urlencode(params)}"
 
     async def exchange_code(self, code: str, state: str = "") -> OAuthTokens:
-        if settings.mock_social_oauth:
-            return self._mock_tokens()
-
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
                 _IG_TOKEN_URL,
@@ -73,16 +65,11 @@ class InstagramService(PlatformService):
         )
 
     async def refresh_tokens(self, refresh_token: str) -> OAuthTokens:
-        if settings.mock_social_oauth:
-            return self._mock_tokens()
         raise NotImplementedError("IG uses long-lived tokens via Facebook")
 
     async def fetch_feed(
         self, access_token: str, *, limit: int = 20
     ) -> list[FeedPost]:
-        if settings.mock_social_oauth:
-            return self._mock_feed(limit)
-
         # IG Graph API: fetch recent media with comments enabled
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
@@ -123,11 +110,6 @@ class InstagramService(PlatformService):
     async def post_comment(
         self, access_token: str, platform_post_id: str, text: str
     ) -> str:
-        if settings.mock_social_oauth:
-            mock_id = f"mock_ig_comment_{uuid.uuid4().hex[:8]}"
-            logger.info("mock_ig_comment", post_id=platform_post_id, comment_id=mock_id)
-            return mock_id
-
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 f"{_IG_API}/{platform_post_id}/comments",
@@ -156,32 +138,3 @@ class InstagramService(PlatformService):
                     return r2.json()
         return {"id": "unknown", "username": "unknown"}
 
-    @staticmethod
-    def _mock_tokens() -> OAuthTokens:
-        return OAuthTokens(
-            access_token=f"mock_ig_token_{uuid.uuid4().hex[:8]}",
-            scopes=["instagram_basic", "instagram_manage_comments"],
-            platform_user_id="mock_ig_200",
-            username="mock_ig_user",
-        )
-
-    @staticmethod
-    def _mock_feed(limit: int) -> list[FeedPost]:
-        now = datetime.now(timezone.utc)
-        samples = [
-            ("Morning coffee and code", "coffeecoder", "https://picsum.photos/400"),
-            ("New product photoshoot!", "brandbuilder", "https://picsum.photos/401"),
-            ("Behind the scenes at the studio", "creativestudio", "https://picsum.photos/402"),
-        ]
-        return [
-            FeedPost(
-                platform_post_id=f"mock_ig_post_{i}",
-                author_name=username,
-                author_username=username,
-                content=text,
-                post_url=f"https://instagram.com/p/mock_{i}",
-                posted_at=now,
-                media_urls=[url],
-            )
-            for i, (text, username, url) in enumerate(samples[:limit])
-        ]

@@ -125,9 +125,6 @@ async def test_api_key(
 
 async def _test_key(provider: str, api_key: str) -> bool:
     """Make a lightweight test call to verify the API key works."""
-    if settings.mock_external_apis:
-        return True
-
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             if provider == "proxycurl":

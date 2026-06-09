@@ -32,7 +32,6 @@ jobs:
       - name: Run unit tests
         env:
           APP_ENV: test
-          MOCK_EXTERNAL_APIS: "true"
           DATABASE_URL: "postgresql+asyncpg://localhost/test"
           REDIS_URL: "redis://localhost:6379/15"
         run: |
@@ -83,7 +82,6 @@ jobs:
       - name: Run integration tests
         env:
           APP_ENV: test
-          MOCK_EXTERNAL_APIS: "true"
           DATABASE_URL: "postgresql+asyncpg://retarget:retarget_dev@localhost:5432/retarget_agent_test"
           REDIS_URL: "redis://localhost:6379/15"
         run: |
@@ -172,7 +170,6 @@ jobs:
           DATABASE_URL: "postgresql+asyncpg://retarget:retarget_dev@localhost:5432/retarget_agent"
           REDIS_URL: "redis://localhost:6379/0"
           APP_ENV: test
-          MOCK_EXTERNAL_APIS: "true"
         run: npx playwright test
 
       - name: Upload test results on failure

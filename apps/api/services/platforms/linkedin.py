@@ -1,6 +1,5 @@
 """LinkedIn API integration (posts + comments only, DMs require partnership)."""
 
-import uuid
 from datetime import datetime, timezone
 
 from urllib.parse import urlencode
@@ -33,10 +32,6 @@ _LI_API = "https://api.linkedin.com/v2"
 
 class LinkedInService(PlatformService):
     async def get_auth_url(self, state: str) -> str:
-        if settings.mock_social_oauth:
-            params = urlencode({"code": f"mock_code_{state[:8]}", "state": state})
-            return f"{settings.api_base_url}/api/v1/social/callback/linkedin?{params}"
-
         params = {
             "response_type": "code",
             "client_id": settings.linkedin_client_id,
@@ -47,9 +42,6 @@ class LinkedInService(PlatformService):
         return f"{_LI_AUTH_URL}?{urlencode(params)}"
 
     async def exchange_code(self, code: str, state: str = "") -> OAuthTokens:
-        if settings.mock_social_oauth:
-            return self._mock_tokens()
-
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 _LI_TOKEN_URL,
@@ -75,9 +67,6 @@ class LinkedInService(PlatformService):
         )
 
     async def refresh_tokens(self, refresh_token: str) -> OAuthTokens:
-        if settings.mock_social_oauth:
-            return self._mock_tokens()
-
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 _LI_TOKEN_URL,
@@ -99,9 +88,6 @@ class LinkedInService(PlatformService):
     async def fetch_feed(
         self, access_token: str, *, limit: int = 20
     ) -> list[FeedPost]:
-        if settings.mock_social_oauth:
-            return self._mock_feed(limit)
-
         # LinkedIn feed API is restricted; use posts endpoint for own network
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.get(
@@ -140,11 +126,6 @@ class LinkedInService(PlatformService):
     async def post_comment(
         self, access_token: str, platform_post_id: str, text: str
     ) -> str:
-        if settings.mock_social_oauth:
-            mock_id = f"mock_li_comment_{uuid.uuid4().hex[:8]}"
-            logger.info("mock_li_comment", post_id=platform_post_id, comment_id=mock_id)
-            return mock_id
-
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 f"{_LI_API}/socialActions/{platform_post_id}/comments",
@@ -169,32 +150,3 @@ class LinkedInService(PlatformService):
             resp.raise_for_status()
             return resp.json()
 
-    @staticmethod
-    def _mock_tokens() -> OAuthTokens:
-        return OAuthTokens(
-            access_token=f"mock_li_token_{uuid.uuid4().hex[:8]}",
-            refresh_token=f"mock_li_refresh_{uuid.uuid4().hex[:8]}",
-            scopes=["r_liteprofile", "w_member_social"],
-            platform_user_id="mock_li_300",
-            username="Mock LinkedIn User",
-        )
-
-    @staticmethod
-    def _mock_feed(limit: int) -> list[FeedPost]:
-        now = datetime.now(timezone.utc)
-        samples = [
-            ("Excited to announce I just joined Google!", "Alex Rivera"),
-            ("5 lessons from scaling a startup to $1M ARR", "Jordan Kim"),
-            ("The future of AI in enterprise software", "Priya Sharma"),
-        ]
-        return [
-            FeedPost(
-                platform_post_id=f"mock_li_post_{i}",
-                author_name=name,
-                author_username=name.lower().replace(" ", "-"),
-                content=text,
-                post_url=f"https://linkedin.com/feed/update/mock_{i}",
-                posted_at=now,
-            )
-            for i, (text, name) in enumerate(samples[:limit])
-        ]

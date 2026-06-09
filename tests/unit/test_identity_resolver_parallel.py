@@ -52,7 +52,6 @@ class TestParallelIdentityGraphs:
     @pytest.mark.asyncio
     @patch("apps.api.services.identity_resolver.settings")
     async def test_all_three_graphs_called_in_parallel(self, mock_settings):
-        mock_settings.mock_external_apis = True
         mock_settings.leadpipe_api_key = "test-lp"
         mock_settings.capturify_api_key = "test-cap"
         mock_settings.rb2b_api_key = "test-rb2b"
@@ -62,19 +61,15 @@ class TestParallelIdentityGraphs:
 
         call_times = []
 
-        original_mock_lp = resolver._mock_leadpipe_response
-        original_mock_cap = resolver._mock_capturify_response
-        original_mock_rb2b = resolver._mock_rb2b_response
-
-        def timed_mock(original, name):
-            def wrapper(v):
+        async def timed_mock(name):
+            async def wrapper(v):
                 call_times.append((name, time.monotonic()))
                 return None  # No match
             return wrapper
 
-        resolver._mock_leadpipe_response = timed_mock(original_mock_lp, "leadpipe")
-        resolver._mock_capturify_response = timed_mock(original_mock_cap, "capturify")
-        resolver._mock_rb2b_response = timed_mock(original_mock_rb2b, "rb2b")
+        resolver._call_leadpipe_api = await timed_mock("leadpipe")
+        resolver._call_capturify_api = await timed_mock("capturify")
+        resolver._call_rb2b_api = await timed_mock("rb2b")
 
         result = await resolver._resolve_identity_graphs_parallel(visitor)
 
@@ -86,7 +81,6 @@ class TestParallelIdentityGraphs:
     @pytest.mark.asyncio
     @patch("apps.api.services.identity_resolver.settings")
     async def test_first_match_wins(self, mock_settings):
-        mock_settings.mock_external_apis = True
         mock_settings.leadpipe_api_key = "test-lp"
         mock_settings.capturify_api_key = "test-cap"
         mock_settings.rb2b_api_key = "test-rb2b"
@@ -94,17 +88,26 @@ class TestParallelIdentityGraphs:
         resolver = _make_resolver()
         visitor = _make_visitor()
 
-        resolver._mock_leadpipe_response = lambda v: None  # No match
-        resolver._mock_capturify_response = lambda v: {
-            "email": "cap@test.com",
-            "full_name": "Cap User",
-            "confidence_score": 0.9,
-        }
-        resolver._mock_rb2b_response = lambda v: {
-            "email": "rb2b@test.com",
-            "full_name": "RB2B User",
-            "confidence_score": 0.85,
-        }
+        async def no_match(v):
+            return None
+
+        async def cap_match(v):
+            return {
+                "email": "cap@test.com",
+                "full_name": "Cap User",
+                "confidence_score": 0.9,
+            }
+
+        async def rb2b_match(v):
+            return {
+                "email": "rb2b@test.com",
+                "full_name": "RB2B User",
+                "confidence_score": 0.85,
+            }
+
+        resolver._call_leadpipe_api = no_match
+        resolver._call_capturify_api = cap_match
+        resolver._call_rb2b_api = rb2b_match
 
         resolver._log_resolution = AsyncMock()
         resolver._save_identified = AsyncMock(return_value="identified-capturify")
@@ -121,7 +124,7 @@ class TestParallelIdentityGraphs:
     @pytest.mark.asyncio
     @patch("apps.api.services.identity_resolver.settings")
     async def test_skips_provider_without_api_key(self, mock_settings):
-        mock_settings.mock_external_apis = False
+
         mock_settings.leadpipe_api_key = "test-lp"
         mock_settings.capturify_api_key = ""  # Empty — skip
         mock_settings.rb2b_api_key = None  # None — skip
@@ -140,7 +143,7 @@ class TestParallelIdentityGraphs:
     @pytest.mark.asyncio
     @patch("apps.api.services.identity_resolver.settings")
     async def test_timeout_doesnt_block_others(self, mock_settings):
-        mock_settings.mock_external_apis = False
+
         mock_settings.leadpipe_api_key = "test-lp"
         mock_settings.capturify_api_key = "test-cap"
         mock_settings.rb2b_api_key = "test-rb2b"
@@ -175,7 +178,7 @@ class TestParallelIdentityGraphs:
     @pytest.mark.asyncio
     @patch("apps.api.services.identity_resolver.settings")
     async def test_exception_in_one_provider_doesnt_crash(self, mock_settings):
-        mock_settings.mock_external_apis = False
+
         mock_settings.leadpipe_api_key = "test-lp"
         mock_settings.capturify_api_key = "test-cap"
         mock_settings.rb2b_api_key = "test-rb2b"
@@ -210,7 +213,8 @@ class TestParallelIPCompany:
     @pytest.mark.asyncio
     @patch("apps.api.services.identity_resolver.settings")
     async def test_both_providers_called(self, mock_settings):
-        mock_settings.mock_external_apis = True
+        mock_settings.pdl_api_key = "test-pdl"
+        mock_settings.ipinfo_token = "test-ipinfo"
 
         resolver = _make_resolver()
         visitor = _make_visitor()
@@ -218,21 +222,18 @@ class TestParallelIPCompany:
         pdl_called = False
         ipinfo_called = False
 
-        original_pdl = resolver._mock_pdl_response
-        original_ipinfo = resolver._mock_ipinfo_response
-
-        def track_pdl(v):
+        async def track_pdl(v):
             nonlocal pdl_called
             pdl_called = True
             return None
 
-        def track_ipinfo(v):
+        async def track_ipinfo(v):
             nonlocal ipinfo_called
             ipinfo_called = True
             return None
 
-        resolver._mock_pdl_response = track_pdl
-        resolver._mock_ipinfo_response = track_ipinfo
+        resolver._call_pdl_ip_api = track_pdl
+        resolver._call_ipinfo_api = track_ipinfo
         resolver._log_resolution = AsyncMock()
 
         result = await resolver._resolve_ip_company_parallel(visitor)
@@ -243,13 +244,20 @@ class TestParallelIPCompany:
     @pytest.mark.asyncio
     @patch("apps.api.services.identity_resolver.settings")
     async def test_pdl_preferred_over_ipinfo(self, mock_settings):
-        mock_settings.mock_external_apis = True
+        mock_settings.pdl_api_key = "test-pdl"
+        mock_settings.ipinfo_token = "test-ipinfo"
 
         resolver = _make_resolver()
         visitor = _make_visitor()
 
-        resolver._mock_pdl_response = lambda v: "pdl-company.com"
-        resolver._mock_ipinfo_response = lambda v: "ipinfo-company.com"
+        async def pdl_result(v):
+            return "pdl-company.com"
+
+        async def ipinfo_result(v):
+            return "ipinfo-company.com"
+
+        resolver._call_pdl_ip_api = pdl_result
+        resolver._call_ipinfo_api = ipinfo_result
         resolver._log_resolution = AsyncMock()
 
         result = await resolver._resolve_ip_company_parallel(visitor)
@@ -259,13 +267,20 @@ class TestParallelIPCompany:
     @pytest.mark.asyncio
     @patch("apps.api.services.identity_resolver.settings")
     async def test_ipinfo_fallback_when_pdl_fails(self, mock_settings):
-        mock_settings.mock_external_apis = True
+        mock_settings.pdl_api_key = "test-pdl"
+        mock_settings.ipinfo_token = "test-ipinfo"
 
         resolver = _make_resolver()
         visitor = _make_visitor()
 
-        resolver._mock_pdl_response = lambda v: None
-        resolver._mock_ipinfo_response = lambda v: "fallback.com"
+        async def pdl_none(v):
+            return None
+
+        async def ipinfo_fallback(v):
+            return "fallback.com"
+
+        resolver._call_pdl_ip_api = pdl_none
+        resolver._call_ipinfo_api = ipinfo_fallback
         resolver._log_resolution = AsyncMock()
 
         result = await resolver._resolve_ip_company_parallel(visitor)
@@ -275,13 +290,20 @@ class TestParallelIPCompany:
     @pytest.mark.asyncio
     @patch("apps.api.services.identity_resolver.settings")
     async def test_both_log_resolution(self, mock_settings):
-        mock_settings.mock_external_apis = True
+        mock_settings.pdl_api_key = "test-pdl"
+        mock_settings.ipinfo_token = "test-ipinfo"
 
         resolver = _make_resolver()
         visitor = _make_visitor()
 
-        resolver._mock_pdl_response = lambda v: "some.com"
-        resolver._mock_ipinfo_response = lambda v: None
+        async def pdl_result(v):
+            return "some.com"
+
+        async def ipinfo_none(v):
+            return None
+
+        resolver._call_pdl_ip_api = pdl_result
+        resolver._call_ipinfo_api = ipinfo_none
         resolver._log_resolution = AsyncMock()
 
         await resolver._resolve_ip_company_parallel(visitor)

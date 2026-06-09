@@ -25,12 +25,6 @@ class Settings(BaseSettings):
                 "set one of these to secure authentication"
             )
 
-        if self.mock_external_apis:
-            violations.append("MOCK_EXTERNAL_APIS=true in production — enrichment/identity data will be fake")
-
-        if self.mock_social_oauth:
-            violations.append("MOCK_SOCIAL_OAUTH=true in production — social OAuth flows will be mocked")
-
         if not self.token_encryption_key:
             violations.append("TOKEN_ENCRYPTION_KEY is empty — OAuth tokens cannot be encrypted at rest")
 
@@ -145,8 +139,6 @@ class Settings(BaseSettings):
     stripe_portal_config_id: str = ""        # Optional Stripe Portal Configuration ID
 
     # ─── Feature flags ───
-    mock_external_apis: bool = True          # Enrichment/identity APIs (PDL, IPinfo, etc.)
-    mock_social_oauth: bool = True           # Social OAuth (Twitter, Facebook, etc.)
     sync_interval_minutes: int = 60
 
     # ─── Rate limits ───

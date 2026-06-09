@@ -103,6 +103,5 @@ Failed E2E runs upload screenshots + traces as artifacts for debugging.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `APP_ENV` | `test` | Identifies test environment |
-| `MOCK_EXTERNAL_APIS` | `true` | Prevents calling real APIs |
 | `DATABASE_URL` | `...localhost:5432/retarget_agent_test` | Test database |
 | `REDIS_URL` | `redis://localhost:6379/15` | Redis DB 15 for test isolation |

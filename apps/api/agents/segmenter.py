@@ -130,19 +130,16 @@ async def run_segmentation(
         visitor_profiles_json=json.dumps(profiles, indent=2, default=str),
     )
 
-    if settings.mock_external_apis:
-        result = _mock_segmentation(profiles)
-    else:
-        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-        message = await client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        first = message.content[0]
-        if not isinstance(first, TextBlock):
-            raise ValueError(f"Unexpected content block type: {type(first)}")
-        result = json.loads(first.text)
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    message = await client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=4096,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    first = message.content[0]
+    if not isinstance(first, TextBlock):
+        raise ValueError(f"Unexpected content block type: {type(first)}")
+    result = json.loads(first.text)
 
     segments: list[Segment] = []
     for seg_data in result.get("segments", []):

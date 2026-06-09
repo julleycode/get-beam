@@ -103,14 +103,6 @@ async def create_checkout_session(
     if body.interval not in ("monthly", "yearly"):
         raise HTTPException(status_code=400, detail="interval must be 'monthly' or 'yearly'")
 
-    if settings.mock_external_apis:
-        mock_url = (
-            f"https://mock-stripe.com/checkout"
-            f"?plan={body.plan}&interval={body.interval}&session={uuid.uuid4().hex}"
-        )
-        logger.info("stripe_checkout_mock", user_id=str(user.id), plan=body.plan)
-        return CheckoutResponse(checkout_url=mock_url)
-
     price_id = _resolve_price_id(body.plan, body.interval)
 
     import stripe
@@ -141,11 +133,6 @@ async def create_portal_session(
     db: AsyncSession = Depends(get_db),
 ) -> PortalResponse:
     """Create a Stripe Customer Portal session and return the redirect URL."""
-    if settings.mock_external_apis:
-        mock_url = f"https://mock-stripe.com/portal?session={uuid.uuid4().hex}"
-        logger.info("stripe_portal_mock", user_id=str(user.id))
-        return PortalResponse(portal_url=mock_url)
-
     if not user.stripe_customer_id:
         raise HTTPException(
             status_code=400,
@@ -190,18 +177,6 @@ async def stripe_webhook(
 ) -> dict:
     """Stripe webhook — NO auth required. Verified via Stripe signature."""
     payload = await request.body()
-
-    if settings.mock_external_apis:
-        # In mock mode, accept raw JSON and process as-is for testing
-        import json as _json
-
-        try:
-            event = _json.loads(payload)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid JSON payload")
-        logger.info("stripe_webhook_mock", event_type=event.get("type"))
-        await _handle_webhook_event(event, db)
-        return {"received": True}
 
     if not stripe_signature:
         raise HTTPException(status_code=400, detail="Missing Stripe-Signature header")

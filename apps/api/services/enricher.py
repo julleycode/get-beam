@@ -11,7 +11,6 @@ System-level API keys (PDL, Proxycurl) are used automatically.
 BYOK keys (user-provided) extend coverage when system keys are absent.
 """
 
-import random
 from datetime import datetime, timezone
 
 import anthropic
@@ -280,9 +279,6 @@ class Enricher:
         a call with an empty key which would mark the visitor permanently failed).
         Retries up to 3× on transient errors (5xx, 429, timeouts).
         """
-        if settings.mock_external_apis:
-            return self._mock_pdl_enrichment(email)
-
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 "https://api.peopledatalabs.com/v5/person/enrich",
@@ -315,9 +311,6 @@ class Enricher:
         return None
 
     async def _enrich_proxycurl(self, linkedin_url: str, *, api_key: str) -> dict:
-        if settings.mock_external_apis:
-            return self._mock_proxycurl_enrichment()
-
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 resp = await client.get(
@@ -337,9 +330,6 @@ class Enricher:
         return {}
 
     async def _enrich_twitter(self, handle: str, *, api_key: str) -> dict:
-        if settings.mock_external_apis:
-            return self._mock_twitter_enrichment()
-
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 resp = await client.get(
@@ -356,60 +346,6 @@ class Enricher:
             except httpx.HTTPError as e:
                 logger.error("twitter_error", error=str(e))
         return {}
-
-    # ──────────────────────── Mock data ──────────────────────────────────
-
-    def _mock_pdl_enrichment(self, email: str) -> dict:
-        titles = ["CTO", "VP Engineering", "Product Manager", "Founder", "Growth Lead", "Software Engineer"]
-        companies = ["TechStartup Inc", "ScaleAI Co", "CloudVenture", "DataDriven Labs", "IndieSaaS"]
-        industries = ["Technology", "SaaS", "E-commerce", "FinTech", "HealthTech"]
-        username = email.split("@")[0]
-        domain = email.split("@")[1] if "@" in email else "example.com"
-        first = username.split(".")[0].title() if "." in username else username.title()
-        last = username.split(".")[-1].title() if "." in username else "User"
-        return {
-            "full_name": f"{first} {last}" if first != last else first,
-            "job_title": random.choice(titles),
-            "company_name": random.choice(companies),
-            "company_domain": domain,
-            "company_size": random.choice(["1-10", "11-50", "51-200", "201-500"]),
-            "industry": random.choice(industries),
-            "seniority_level": random.choice(["senior", "executive", "manager", "entry"]),
-            "linkedin_url": f"https://linkedin.com/in/{username}",
-            "twitter_handle": username.replace(".", ""),
-            "facebook_url": f"https://facebook.com/{username.replace('.', '')}" if random.random() > 0.4 else None,
-            "github_url": f"https://github.com/{username.replace('.', '')}" if random.random() > 0.5 else None,
-            "city": random.choice(["San Francisco", "New York", "London", "Ho Chi Minh City"]),
-            "country": random.choice(["US", "UK", "VN", "SG"]),
-        }
-
-    def _mock_proxycurl_enrichment(self) -> dict:
-        headlines = [
-            "Building the future of SaaS",
-            "Engineering Leader | Startup Advisor",
-            "Product-led growth enthusiast",
-            "Full-stack developer & indie maker",
-        ]
-        return {
-            "linkedin_headline": random.choice(headlines),
-            "linkedin_summary": "Passionate about building products that solve real problems.",
-            "linkedin_follower_count": random.randint(200, 5000),
-        }
-
-    def _mock_twitter_enrichment(self) -> dict:
-        bios = [
-            "Building stuff. Shipping fast.",
-            "Founder @startup. Ex-FAANG.",
-            "Product & growth. DMs open.",
-            "Code, coffee, startups.",
-        ]
-        return {
-            "twitter_bio": random.choice(bios),
-            "twitter_follower_count": random.randint(100, 10000),
-            "twitter_recent_topics": random.sample(
-                ["AI", "startups", "SaaS", "growth", "coding", "product"], 3
-            ),
-        }
 
     # ──────────────── Deep Research (Claude API + web search) ─────────────
 
@@ -467,48 +403,45 @@ CRITICAL RULES:
 
 Write a comprehensive but honest profile analysis. Use a direct, conversational tone — not corporate."""
 
-        if settings.mock_external_apis:
-            research_text = self._mock_deep_research(name, identified.email)
-        else:
-            if not settings.anthropic_api_key:
-                logger.warning("deep_research_skipped_no_api_key")
+        if not settings.anthropic_api_key:
+            logger.warning("deep_research_skipped_no_api_key")
+            return {
+                "status": "error",
+                "message": "Anthropic API key not configured. Set ANTHROPIC_API_KEY to enable deep research.",
+            }
+
+        try:
+            client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+            response = await client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=16384,
+                tools=[{
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 10,
+                }],
+                messages=[{"role": "user", "content": prompt}],
+            )
+
+            research_text = ""
+            for block in response.content:
+                if hasattr(block, "text"):
+                    research_text += block.text + "\n"
+
+            if not research_text.strip():
+                logger.warning("deep_research_empty_response", visitor_id=visitor.visitor_id[:8])
                 return {
-                    "status": "error",
-                    "message": "Anthropic API key not configured. Set ANTHROPIC_API_KEY to enable deep research.",
+                    "status": "partial",
+                    "message": "Deep research returned no results.",
                 }
 
-            try:
-                client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-                response = await client.messages.create(
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=16384,
-                    tools=[{
-                        "type": "web_search_20250305",
-                        "name": "web_search",
-                        "max_uses": 10,
-                    }],
-                    messages=[{"role": "user", "content": prompt}],
-                )
-
-                research_text = ""
-                for block in response.content:
-                    if hasattr(block, "text"):
-                        research_text += block.text + "\n"
-
-                if not research_text.strip():
-                    logger.warning("deep_research_empty_response", visitor_id=visitor.visitor_id[:8])
-                    return {
-                        "status": "partial",
-                        "message": "Deep research returned no results.",
-                    }
-
-                research_text = research_text.strip()
-            except anthropic.APIError as e:
-                logger.error("deep_research_api_error", error=str(e), visitor_id=visitor.visitor_id[:8])
-                return {
-                    "status": "error",
-                    "message": f"Claude API error: {e.message}",
-                }
+            research_text = research_text.strip()
+        except anthropic.APIError as e:
+            logger.error("deep_research_api_error", error=str(e), visitor_id=visitor.visitor_id[:8])
+            return {
+                "status": "error",
+                "message": f"Claude API error: {e.message}",
+            }
 
         if not profile:
             profile = EnrichmentProfile(
@@ -543,29 +476,6 @@ Write a comprehensive but honest profile analysis. Use a direct, conversational 
             "message": "Deep research completed.",
             "social_context": profile.social_context,
         }
-
-    @staticmethod
-    def _mock_deep_research(name: str, email: str | None) -> str:
-        username = email.split("@")[0] if email else name.lower().replace(" ", "")
-        return f"""## {name} — Profile Research
-
-**Public information on this person is limited.** Here is what could be found:
-
-### Social Media Presence
-- **LinkedIn**: Profile exists but limited public details visible without connection
-- **Twitter/X**: No verified public account found matching this identity
-- **GitHub**: No public repositories found
-
-### Professional Background
-Based on limited public data, {name} appears to work in the technology space. Further details require direct outreach or additional data sources.
-
-### Honest Assessment
-This person has a relatively low public digital footprint. This could mean they:
-- Prefer privacy over public presence
-- Are early in their career
-- Operate primarily through private/professional channels
-
-**Confidence level: Low** — Most details could not be independently verified through public sources. The information above is based on what limited data was available and should be treated as preliminary."""
 
     # ──────────────────────── Legacy compat ──────────────────────────────
 

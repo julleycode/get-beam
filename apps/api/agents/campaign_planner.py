@@ -123,19 +123,16 @@ async def plan_campaign(
         connected_accounts_info=accounts_info,
     )
 
-    if settings.mock_external_apis:
-        plan = _mock_campaign_plan(segment, visitor_profiles)
-    else:
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        first = message.content[0]
-        if not isinstance(first, TextBlock):
-            raise ValueError(f"Unexpected content block type: {type(first)}")
-        plan = json.loads(first.text)
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    message = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=4096,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    first = message.content[0]
+    if not isinstance(first, TextBlock):
+        raise ValueError(f"Unexpected content block type: {type(first)}")
+    plan = json.loads(first.text)
 
     campaign = Campaign(
         site_id=segment.site_id,

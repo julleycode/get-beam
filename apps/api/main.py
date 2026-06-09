@@ -23,7 +23,7 @@ from apps.api.models.beam_identity import BeamIdentityNode  # noqa: F401 — reg
 from apps.api.models.waitlist import WaitlistSignup  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
-from apps.api.routers import billing, engagement, waitlist
+from apps.api.routers import billing, engagement, waitlist, unsubscribe
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -235,6 +235,9 @@ app.include_router(demo.router, prefix="/api/v1/demo", tags=["demo"])
 app.include_router(billing.router, prefix="/api/v1/billing", tags=["billing"])
 app.include_router(engagement.router, prefix="/api/v1/engagement", tags=["engagement"])
 app.include_router(waitlist.router, prefix="/api/v1/waitlist", tags=["waitlist"])
+
+# ── Public unsubscribe (CAN-SPAM compliance, no auth) ──
+app.include_router(unsubscribe.router, tags=["unsubscribe"])
 
 
 @app.get("/health")

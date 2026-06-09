@@ -70,9 +70,6 @@ scripts/           → Seed scripts
 - Max 50 emails/hour/site
 - Never retry failed identity resolution within 30 days
 
-## Mock Mode
-All external APIs have mock mode (env: `MOCK_EXTERNAL_APIS=true`).
-
 ## Security
 - Never hardcode API keys or secrets
 - Never log PII

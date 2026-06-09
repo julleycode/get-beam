@@ -9,9 +9,6 @@ SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send"
 
 
 class EmailSender:
-    def __init__(self) -> None:
-        self.mock = settings.mock_external_apis
-
     async def send(
         self,
         to_email: str,
@@ -29,10 +26,6 @@ class EmailSender:
 <p style="font-size:12px;color:#999;">
     <a href="{unsubscribe_url}">Unsubscribe</a> from future emails.
 </p>"""
-
-        if self.mock:
-            logger.info("email_sent_mock", to=to_email, subject=subject)
-            return {"id": "mock_email_id", "status": "sent"}
 
         payload = {
             "personalizations": [{"to": [{"email": to_email}]}],

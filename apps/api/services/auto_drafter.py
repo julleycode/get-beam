@@ -130,9 +130,6 @@ class AutoDrafter:
         user_id: uuid.UUID,
     ) -> str:
         """Generate draft text via the existing AI reply infrastructure."""
-        if settings.mock_external_apis:
-            return self._mock_draft(visitor_name, visitor_role, recent_post, platform)
-
         try:
             from apps.api.services.ai_reply import generate_draft
 

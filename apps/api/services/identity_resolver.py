@@ -12,7 +12,6 @@ Providers:
 """
 
 import asyncio
-import random
 import socket
 import time
 import uuid
@@ -218,8 +217,6 @@ class IdentityResolver:
         """Use PDL person enrich to get profile data from a known email address."""
         if not settings.people_data_labs_api_key:
             return None
-        if settings.mock_external_apis:
-            return None  # Let the caller handle mock mode — just save the email as-is
 
         start = time.monotonic()
         data: dict | None = None
@@ -289,7 +286,7 @@ class IdentityResolver:
             return None
 
         # ── VPN/Proxy/Tor detection — skip expensive lookups for masked IPs ──
-        if not settings.mock_external_apis and settings.ipinfo_token:
+        if settings.ipinfo_token:
             try:
                 from apps.api.services.company_resolver import check_ip_privacy, is_ip_suspicious
                 privacy = await check_ip_privacy(visitor.ip_address)
@@ -379,27 +376,21 @@ class IdentityResolver:
         """Run Leadpipe, Capturify, RB2B in parallel. Save first match."""
 
         providers = [
-            ("leadpipe", settings.leadpipe_api_key,
-             self._mock_leadpipe_response, self._call_leadpipe_api, 0.0),
-            ("capturify", settings.capturify_api_key,
-             self._mock_capturify_response, self._call_capturify_api, 0.0),
-            ("rb2b", settings.rb2b_api_key,
-             self._mock_rb2b_response, self._call_rb2b_api, 0.09),
+            ("leadpipe", settings.leadpipe_api_key, self._call_leadpipe_api, 0.0),
+            ("capturify", settings.capturify_api_key, self._call_capturify_api, 0.0),
+            ("rb2b", settings.rb2b_api_key, self._call_rb2b_api, 0.09),
         ]
 
         async def _fetch(
-            name: str, api_key: str | None, mock_fn, call_fn
+            name: str, api_key: str | None, call_fn
         ) -> tuple[str, dict | None, int, bool]:
             if not api_key:
                 return (name, None, 0, False)
             start = time.monotonic()
             try:
-                if settings.mock_external_apis:
-                    data = mock_fn(visitor)
-                else:
-                    data = await asyncio.wait_for(
-                        call_fn(visitor), timeout=self._GRAPH_TIMEOUT
-                    )
+                data = await asyncio.wait_for(
+                    call_fn(visitor), timeout=self._GRAPH_TIMEOUT
+                )
             except asyncio.TimeoutError:
                 logger.warning(
                     "identity_graph_timeout",
@@ -419,7 +410,7 @@ class IdentityResolver:
             return (name, data, elapsed, True)
 
         results = await asyncio.gather(
-            *[_fetch(n, k, m, c) for n, k, m, c, _ in providers],
+            *[_fetch(n, k, c) for n, k, c, _ in providers],
             return_exceptions=True,
         )
 
@@ -437,7 +428,7 @@ class IdentityResolver:
             name, data, elapsed, attempted = r
             if not attempted:
                 continue
-            success_cost = providers[i][4] if (not settings.mock_external_apis and data) else 0.0
+            success_cost = providers[i][3] if data else 0.0
             await self._log_resolution(
                 visitor, name, data is not None, success_cost, elapsed
             )
@@ -463,13 +454,10 @@ class IdentityResolver:
         async def _fetch_pdl() -> tuple[str | None, int]:
             start = time.monotonic()
             try:
-                if settings.mock_external_apis:
-                    domain = self._mock_pdl_response(visitor)
-                else:
-                    domain = await asyncio.wait_for(
-                        self._call_pdl_ip_enrich(visitor),
-                        timeout=self._GRAPH_TIMEOUT,
-                    )
+                domain = await asyncio.wait_for(
+                    self._call_pdl_ip_enrich(visitor),
+                    timeout=self._GRAPH_TIMEOUT,
+                )
             except asyncio.TimeoutError:
                 logger.warning("pdl_ip_timeout", visitor_id=visitor.visitor_id[:8])
                 domain = None
@@ -482,13 +470,10 @@ class IdentityResolver:
         async def _fetch_ipinfo() -> tuple[str | None, int]:
             start = time.monotonic()
             try:
-                if settings.mock_external_apis:
-                    domain = self._mock_ipinfo_response(visitor)
-                else:
-                    domain = await asyncio.wait_for(
-                        self._call_ipinfo_api(visitor),
-                        timeout=self._GRAPH_TIMEOUT,
-                    )
+                domain = await asyncio.wait_for(
+                    self._call_ipinfo_api(visitor),
+                    timeout=self._GRAPH_TIMEOUT,
+                )
             except asyncio.TimeoutError:
                 logger.warning("ipinfo_timeout", visitor_id=visitor.visitor_id[:8])
                 domain = None
@@ -502,7 +487,7 @@ class IdentityResolver:
             _fetch_pdl(), _fetch_ipinfo()
         )
 
-        pdl_cost = 0.01 if (not settings.mock_external_apis and pdl_domain) else 0.0
+        pdl_cost = 0.01 if pdl_domain else 0.0
         await self._log_resolution(
             visitor, "pdl_ip_enrich", pdl_domain is not None, pdl_cost, pdl_ms
         )
@@ -532,17 +517,13 @@ class IdentityResolver:
         We poll their API for identified visitors matching this visitor's
         page URL + timestamp window.
         """
-        if not settings.leadpipe_api_key and not settings.mock_external_apis:
+        if not settings.leadpipe_api_key:
             return None
 
         start = time.monotonic()
 
-        if settings.mock_external_apis:
-            data = self._mock_leadpipe_response(visitor)
-            success = data is not None
-        else:
-            data = await self._call_leadpipe_api(visitor)
-            success = data is not None
+        data = await self._call_leadpipe_api(visitor)
+        success = data is not None
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
         cost = 0.0  # Free trial (500 IDs)
@@ -644,25 +625,6 @@ class IdentityResolver:
             "confidence_score": 0.95,  # Identity graph = high confidence
         }
 
-    def _mock_leadpipe_response(self, visitor: Visitor) -> dict | None:
-        """Mock: ~35% chance of identity graph match."""
-        if random.random() > 0.35:
-            return None
-        first_names = ["Emma", "James", "Olivia", "Noah", "Sophia"]
-        last_names = ["Martinez", "Anderson", "Thomas", "Jackson", "White"]
-        domains = ["innovate.io", "startuplab.com", "saasworks.co"]
-        fn = random.choice(first_names)
-        ln = random.choice(last_names)
-        domain = random.choice(domains)
-        return {
-            "email": f"{fn.lower()}.{ln.lower()}@{domain}",
-            "full_name": f"{fn} {ln}",
-            "city": random.choice(["San Francisco", "London", "Berlin", "Singapore"]),
-            "region": random.choice(["CA", "England", "Berlin", "SG"]),
-            "country": random.choice(["US", "GB", "DE", "SG"]),
-            "confidence_score": 0.95,
-        }
-
     # ──────────────────── Provider: Capturify Identity Graph ────────────────────
 
     CAPTURIFY_API_BASE = "https://api.capturify.io"
@@ -673,17 +635,13 @@ class IdentityResolver:
         Capturify's JS pixel captures browser signals and matches against
         their identity graph. Claims ~60% match rate. API key required.
         """
-        if not settings.capturify_api_key and not settings.mock_external_apis:
+        if not settings.capturify_api_key:
             return None
 
         start = time.monotonic()
 
-        if settings.mock_external_apis:
-            data = self._mock_capturify_response(visitor)
-            success = data is not None
-        else:
-            data = await self._call_capturify_api(visitor)
-            success = data is not None
+        data = await self._call_capturify_api(visitor)
+        success = data is not None
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
         cost = 0.0  # Free trial (500 leads)
@@ -779,25 +737,6 @@ class IdentityResolver:
             "confidence_score": 0.90,  # Identity graph = high confidence
         }
 
-    def _mock_capturify_response(self, visitor: Visitor) -> dict | None:
-        """Mock: ~40% chance of identity graph match."""
-        if random.random() > 0.40:
-            return None
-        first_names = ["Chris", "Dana", "Morgan", "Alex", "Jordan"]
-        last_names = ["Taylor", "Rivera", "Mitchell", "Carter", "Brooks"]
-        domains = ["buildfast.io", "scaleup.com", "founderhq.co"]
-        fn = random.choice(first_names)
-        ln = random.choice(last_names)
-        domain = random.choice(domains)
-        return {
-            "email": f"{fn.lower()}.{ln.lower()}@{domain}",
-            "full_name": f"{fn} {ln}",
-            "city": random.choice(["Austin", "Denver", "Miami", "Chicago"]),
-            "region": random.choice(["TX", "CO", "FL", "IL"]),
-            "country": "US",
-            "confidence_score": 0.90,
-        }
-
     # ──────────────────── Provider: RB2B Identity Graph ────────────────────
 
     async def _try_rb2b_identify(self, visitor: Visitor) -> IdentifiedVisitor | None:
@@ -807,20 +746,16 @@ class IdentityResolver:
         Works even for residential IPs if the person is in RB2B's network.
         US traffic only. Returns actual visitor's email, not a company employee.
         """
-        if not settings.rb2b_api_key and not settings.mock_external_apis:
+        if not settings.rb2b_api_key:
             return None
 
         start = time.monotonic()
 
-        if settings.mock_external_apis:
-            data = self._mock_rb2b_response(visitor)
-            success = data is not None
-        else:
-            data = await self._call_rb2b_api(visitor)
-            success = data is not None
+        data = await self._call_rb2b_api(visitor)
+        success = data is not None
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
-        cost = 0.09 if (not settings.mock_external_apis and success) else 0.0
+        cost = 0.09 if success else 0.0
         await self._log_resolution(visitor, "rb2b_identity_graph", success, cost, elapsed_ms)
 
         if data:
@@ -916,25 +851,6 @@ class IdentityResolver:
                 "confidence_score": min(best.get("score", 0.9), 0.99),
             }
 
-    def _mock_rb2b_response(self, visitor: Visitor) -> dict | None:
-        """Mock: ~30% chance of identity graph match (simulates US B2B traffic)."""
-        if random.random() > 0.30:
-            return None
-        first_names = ["Sarah", "Mike", "Emily", "David", "Lisa"]
-        last_names = ["Johnson", "Williams", "Brown", "Davis", "Wilson"]
-        domains = ["techcorp.com", "growthstartup.io", "saascompany.com"]
-        fn = random.choice(first_names)
-        ln = random.choice(last_names)
-        domain = random.choice(domains)
-        return {
-            "email": f"{fn.lower()}.{ln.lower()}@{domain}",
-            "full_name": f"{fn} {ln}",
-            "city": random.choice(["San Francisco", "New York", "Austin", "Seattle"]),
-            "region": random.choice(["CA", "NY", "TX", "WA"]),
-            "country": "US",
-            "confidence_score": 0.95,
-        }
-
     async def _redis_has_key(self, key: str) -> bool:
         """Return True if redis has the key (exists check). Non-fatal."""
         if not self.redis:
@@ -954,15 +870,11 @@ class IdentityResolver:
         """
         start = time.monotonic()
 
-        if settings.mock_external_apis:
-            domain = self._mock_pdl_response(visitor)
-            success = domain is not None
-        else:
-            domain = await self._call_pdl_ip_enrich(visitor)
-            success = domain is not None
+        domain = await self._call_pdl_ip_enrich(visitor)
+        success = domain is not None
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
-        cost = 0.01 if (not settings.mock_external_apis and success) else 0.0
+        cost = 0.01 if success else 0.0
         await self._log_resolution(visitor, "pdl_ip_enrich", success, cost, elapsed_ms)
 
         if domain:
@@ -1037,10 +949,7 @@ class IdentityResolver:
         """Resolve IP → company domain via IPinfo. Returns domain or None."""
         start = time.monotonic()
 
-        if settings.mock_external_apis:
-            domain = self._mock_ipinfo_response(visitor)
-        else:
-            domain = await self._call_ipinfo_api(visitor)
+        domain = await self._call_ipinfo_api(visitor)
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
         cost = 0.0  # IPinfo free tier
@@ -1216,13 +1125,9 @@ class IdentityResolver:
         """Use Hunter.io to find employee emails from company domain."""
         start = time.monotonic()
 
-        if settings.mock_external_apis:
-            data = self._mock_hunter_response(visitor, domain)
-            success = data is not None
-        else:
-            offset = await self._count_identified_for_domain(visitor.site_id, domain)
-            data = await self._call_hunter_api(domain, offset=offset)
-            success = data is not None
+        offset = await self._count_identified_for_domain(visitor.site_id, domain)
+        data = await self._call_hunter_api(domain, offset=offset)
+        success = data is not None
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
         cost = 0.0  # Hunter free tier
@@ -1281,13 +1186,9 @@ class IdentityResolver:
         """Use Apollo.io to find contacts at a company domain."""
         start = time.monotonic()
 
-        if settings.mock_external_apis:
-            data = self._mock_apollo_response(visitor, company_domain)
-            success = data is not None
-        else:
-            offset = await self._count_identified_for_domain(visitor.site_id, company_domain)
-            data = await self._call_apollo_api(company_domain, offset=offset)
-            success = data is not None
+        offset = await self._count_identified_for_domain(visitor.site_id, company_domain)
+        data = await self._call_apollo_api(company_domain, offset=offset)
+        success = data is not None
 
         elapsed_ms = int((time.monotonic() - start) * 1000)
         cost = 0.0  # Apollo free tier
@@ -1533,56 +1434,3 @@ class IdentityResolver:
         self.db.add(log)
         await self.db.commit()
 
-    # ──────────────────── Mock data ────────────────────
-
-    def _mock_pdl_response(self, visitor: Visitor) -> str | None:
-        """Mock: ~60% chance of returning a company domain from IP."""
-        if random.random() > 0.60:
-            return None
-        return random.choice([
-            "acmecorp.com", "techstartup.io", "growthbase.com",
-            "saasplatform.co", "digitalagency.com", "datascience.io",
-        ])
-
-    def _mock_ipinfo_response(self, visitor: Visitor) -> str | None:
-        """Mock: ~70% chance of returning a company domain."""
-        if random.random() > 0.70:
-            return None
-        return random.choice([
-            "techstartup.com", "scaleai.co", "cloudventure.io",
-            "datadrivenlabs.com", "indiesaas.io",
-        ])
-
-    def _mock_hunter_response(self, visitor: Visitor, domain: str) -> dict | None:
-        """Mock: ~50% chance of finding an email from domain."""
-        if random.random() > 0.50:
-            return None
-        first_names = ["Alex", "Jordan", "Taylor", "Morgan", "Casey"]
-        last_names = ["Reed", "Park", "Chen", "Nguyen", "Patel"]
-        fn = random.choice(first_names)
-        ln = random.choice(last_names)
-        return {
-            "email": f"{fn.lower()}.{ln.lower()}@{domain}",
-            "full_name": f"{fn} {ln}",
-            "city": None,
-            "region": None,
-            "country": None,
-            "confidence_score": round(random.uniform(0.6, 0.9), 2),
-        }
-
-    def _mock_apollo_response(self, visitor: Visitor, domain: str) -> dict | None:
-        """Mock: ~40% chance of finding a contact."""
-        if random.random() > 0.40:
-            return None
-        first_names = ["Sam", "Riley", "Jamie", "Quinn", "Drew"]
-        last_names = ["Kim", "Lopez", "Singh", "O'Brien", "Costa"]
-        fn = random.choice(first_names)
-        ln = random.choice(last_names)
-        return {
-            "email": f"{fn.lower()}@{domain}",
-            "full_name": f"{fn} {ln}",
-            "city": random.choice(["London", "Berlin", "Tokyo", "Sydney"]),
-            "region": None,
-            "country": random.choice(["GB", "DE", "JP", "AU"]),
-            "confidence_score": 0.6,
-        }

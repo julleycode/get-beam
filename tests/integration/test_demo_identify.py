@@ -2,7 +2,6 @@
 
 Covers Phase 1 (identity graphs in demo), Phase 3 (fingerprint pre-matching).
 Requires: PostgreSQL running locally (via docker-compose).
-MOCK_EXTERNAL_APIS=true is set by conftest.py.
 """
 
 import json

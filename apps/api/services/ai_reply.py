@@ -370,8 +370,8 @@ async def generate_draft(
     # Resolve API key: user's BYOK OpenRouter key → app default → mock
     api_key = await _resolve_ai_key(db, user_id)
 
-    if settings.mock_external_apis or not api_key:
-        return _mock_draft(platform, original_content, tone, strategy)
+    if not api_key:
+        raise RuntimeError("No OpenRouter API key configured. Set OPENROUTER_API_KEY or add a BYOK key.")
 
     model = settings.default_ai_model
     try:

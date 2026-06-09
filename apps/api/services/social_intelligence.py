@@ -4,7 +4,6 @@ For identified visitors with intent_score >= 60, this service fetches their
 recent social content from:
 1. The posts table (content already scraped via EasyEngage feed)
 2. Twitter API (if bearer token configured and handle known)
-3. Mock data (when MOCK_EXTERNAL_APIS=true or APIs unavailable)
 
 Results are stored as `social_context` JSON on the EnrichmentProfile.
 """
@@ -147,8 +146,8 @@ class SocialIntelligence:
         limit: int = 5,
     ) -> list[dict]:
         """Fetch recent tweets via Twitter API v2 or return mock data."""
-        if settings.mock_external_apis or not settings.twitter_bearer_token:
-            return self._mock_tweets(handle, limit)
+        if not settings.twitter_bearer_token:
+            return []
 
         handle_clean = handle.lstrip("@")
         try:
@@ -164,11 +163,11 @@ class SocialIntelligence:
                         handle=handle_clean,
                         status=user_resp.status_code,
                     )
-                    return self._mock_tweets(handle, limit)
+                    return []
 
                 user_id = user_resp.json().get("data", {}).get("id")
                 if not user_id:
-                    return self._mock_tweets(handle, limit)
+                    return []
 
                 # Fetch recent tweets
                 tweets_resp = await client.get(
@@ -186,7 +185,7 @@ class SocialIntelligence:
                         handle=handle_clean,
                         status=tweets_resp.status_code,
                     )
-                    return self._mock_tweets(handle, limit)
+                    return []
 
                 tweets_data = tweets_resp.json().get("data", [])
                 return [
@@ -217,30 +216,3 @@ class SocialIntelligence:
 
         return detected[:5]  # Cap at 5 topics
 
-    def _mock_tweets(self, handle: str, limit: int) -> list[dict]:
-        """Return plausible mock tweets for dev/test mode."""
-        handle_clean = handle.lstrip("@")
-        mock_posts = [
-            {
-                "platform": "twitter",
-                "content": "We just hit $10K MRR with our SaaS — here's what actually worked for us",
-                "url": f"https://twitter.com/{handle_clean}/status/mock1",
-                "posted_at": "2026-06-01T10:00:00Z",
-                "author": handle_clean,
-            },
-            {
-                "platform": "twitter",
-                "content": "Hot take: most B2B outreach fails because founders don't understand their ICP",
-                "url": f"https://twitter.com/{handle_clean}/status/mock2",
-                "posted_at": "2026-05-30T14:30:00Z",
-                "author": handle_clean,
-            },
-            {
-                "platform": "twitter",
-                "content": "AI is eating sales prospecting. The founders who adapt fastest win.",
-                "url": f"https://twitter.com/{handle_clean}/status/mock3",
-                "posted_at": "2026-05-28T09:15:00Z",
-                "author": handle_clean,
-            },
-        ]
-        return mock_posts[:limit]

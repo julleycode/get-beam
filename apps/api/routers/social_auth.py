@@ -123,17 +123,16 @@ async def connect_platform(
     current_user: User = Depends(get_current_user),
 ):
     # Validate credentials are configured before sending user to OAuth
-    if not settings.mock_social_oauth:
-        required_fields = _PLATFORM_CREDENTIALS.get(platform, ())
-        missing = [f for f in required_fields if not getattr(settings, f, "")]
-        if missing:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Cannot connect to {platform.value}: missing credentials "
-                    f"({', '.join(missing)}). Add them to your .env file."
-                ),
-            )
+    required_fields = _PLATFORM_CREDENTIALS.get(platform, ())
+    missing = [f for f in required_fields if not getattr(settings, f, "")]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot connect to {platform.value}: missing credentials "
+                f"({', '.join(missing)}). Add them to your .env file."
+            ),
+        )
 
     service = get_platform_service(platform)
     state = uuid.uuid4().hex

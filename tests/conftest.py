@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 # Force test environment before anything imports settings
 os.environ.setdefault("APP_ENV", "test")
-os.environ.setdefault("MOCK_EXTERNAL_APIS", "true")
 os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+asyncpg://retarget:retarget_dev@localhost:5432/retarget_agent_test",
