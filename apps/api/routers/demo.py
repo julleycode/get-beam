@@ -618,15 +618,16 @@ BETA_TOTAL_SLOTS = 20
 async def beta_slots() -> dict:
     """Public endpoint: how many private-beta slots remain.
 
-    Only counts entries explicitly granted by admin — pending signups
-    do not affect the counter.
+    Counts anyone admitted — both 'approved' (invited with email) and 'granted'
+    (slot reserved without email) — so inviting real users honestly decrements
+    the public "spots left" counter. Pending signups do not affect it.
     """
     try:
         from apps.api.models.waitlist import WaitlistSignup
         async with async_session() as db:
             result = await db.execute(
                 select(WaitlistSignup).where(
-                    WaitlistSignup.status == "granted"
+                    WaitlistSignup.status.in_(["granted", "approved"])
                 )
             )
             taken = len(result.scalars().all())
