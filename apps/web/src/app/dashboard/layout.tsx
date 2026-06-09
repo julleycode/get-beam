@@ -99,14 +99,18 @@ function LegacySignOutButton() {
  * Only rendered when Clerk is configured.
  */
 function ClerkAuthGuard() {
-  const { isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    if (isSignedIn === false) {
+    // Only redirect once Clerk has fully resolved the session. Acting on a
+    // transient `isSignedIn === false` while Clerk is still hydrating (common
+    // with slow/rate-limited dev instances) bounces signed-in users to
+    // /sign-in, which then redirects them back out — the dashboard↔sign-in loop.
+    if (isLoaded && isSignedIn === false) {
       router.replace("/sign-in");
     }
-  }, [isSignedIn, router]);
+  }, [isLoaded, isSignedIn, router]);
 
   return null;
 }
