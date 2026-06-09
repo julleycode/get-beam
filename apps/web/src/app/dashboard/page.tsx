@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useAuth } from "@clerk/nextjs";
 import { api, Site, SiteStats, EngagementROI } from "@/lib/api";
 import {
   Card,
@@ -164,12 +165,14 @@ function DashboardContent({ onSitesLoaded }: { onSitesLoaded: (sites: Site[]) =>
 }
 
 function ClerkTokenGate({ children }: { children: React.ReactNode }) {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { getToken, isSignedIn } = require("@clerk/nextjs").useAuth();
+  // useAuth() is safe here: ClerkTokenGate is only rendered when HAS_CLERK is
+  // true (see DashboardPage), so it always runs inside <ClerkProvider>.
+  const { getToken, isSignedIn, isLoaded } = useAuth();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (isSignedIn === undefined) return;
+    // Wait for Clerk to resolve the session before deciding anything.
+    if (!isLoaded) return;
     if (!isSignedIn) {
       setReady(true);
       return;
@@ -179,7 +182,7 @@ function ClerkTokenGate({ children }: { children: React.ReactNode }) {
       if (token) api.setClerkToken(token);
       setReady(true);
     }).catch(() => setReady(true));
-  }, [isSignedIn, getToken]);
+  }, [isLoaded, isSignedIn, getToken]);
 
   if (!ready) return <p className="text-muted-foreground">Loading...</p>;
   return <>{children}</>;
