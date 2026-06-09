@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, BillingStatus, BillingInterval } from "@/lib/api";
 import {
@@ -67,7 +67,7 @@ function statusBadgeClass(status: string | null): string {
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-export default function BillingPage() {
+function BillingContent() {
   const searchParams = useSearchParams();
   const [billing, setBilling] = useState<BillingStatus | null>(null);
   const [interval, setInterval] = useState<BillingInterval>("monthly");
@@ -352,5 +352,19 @@ export default function BillingPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function BillingPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="max-w-3xl mx-auto">
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </div>
+      }
+    >
+      <BillingContent />
+    </Suspense>
   );
 }
