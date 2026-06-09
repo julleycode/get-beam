@@ -92,7 +92,7 @@ export default function SocialAccountsPage() {
                 className={`flex items-center gap-3 p-4 rounded-lg border text-left transition-colors ${
                   connected
                     ? "border-green-200 bg-green-50 cursor-default"
-                    : "border-gray-200 bg-white hover:border-indigo-300 hover:bg-indigo-50"
+                    : "border-gray-200 bg-white hover:border-[#FFA8BD] hover:bg-[#FFF1F5]"
                 }`}
               >
                 <div
