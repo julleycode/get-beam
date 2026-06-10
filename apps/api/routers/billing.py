@@ -198,7 +198,27 @@ async def stripe_webhook(
         raise HTTPException(status_code=400, detail="Webhook parse error")
 
     logger.info("stripe_webhook_received", event_type=event["type"], event_id=event["id"])
+
+    # Idempotency: Stripe delivers at-least-once and out of order. Record the
+    # event id (PK) in the same transaction as the handler's writes — a
+    # redelivery hits the PK and is skipped; a handler failure rolls the id
+    # back too, so Stripe's retry gets a clean attempt.
+    from sqlalchemy.exc import IntegrityError
+
+    from apps.api.models.stripe_event import StripeEvent
+
+    db.add(StripeEvent(id=event["id"]))
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        logger.info("stripe_webhook_duplicate_skipped", event_id=event["id"])
+        return {"received": True, "duplicate": True}
+
     await _handle_webhook_event(event, db)
+    # Handlers commit their own changes (committing the event id with them);
+    # commit here as well for event types with no handler so the id persists.
+    await db.commit()
     return {"received": True}
 
 

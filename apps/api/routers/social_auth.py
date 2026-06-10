@@ -1,17 +1,21 @@
-"""Auth router: register, login, OAuth callbacks for each platform."""
+"""Social OAuth router: per-platform connect + callback flows.
+
+The legacy /register and /login endpoints that used to live here were removed:
+they were broken in two independent ways (wrote a nonexistent
+``User.password_hash`` attribute — the column is ``hashed_password`` — and
+signed tokens with ``jwt_secret`` while the auth dependency verifies
+``app_secret_key``), had zero callers in web/e2e/tests, and duplicated the
+real auth surface in ``routers/auth.py``. Account auth is Clerk (plus the
+legacy ``/api/v1/auth`` fallback); this router only connects social accounts.
+"""
 
 import uuid
-from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from jose import jwt
-from passlib.context import CryptContext
-from slowapi.util import get_remote_address
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
@@ -20,12 +24,7 @@ from apps.api.models.database import get_db
 from apps.api.models.social_account import Platform, SocialAccount
 from apps.api.models.user import User
 from apps.api.schemas.accounts import ConnectResponse
-from apps.api.schemas.auth import (
-    LoginRequest,
-    RegisterRequest,
-    TokenResponse,
-    UserResponse,
-)
+from apps.api.schemas.auth import UserResponse
 from apps.api.services.encryption import encrypt_token
 from apps.api.services.oauth_state import store_oauth_state, validate_oauth_state
 from apps.api.services.platforms import get_platform_service
@@ -33,66 +32,6 @@ from apps.api.services.platforms import get_platform_service
 logger = structlog.get_logger()
 
 router = APIRouter(tags=["social-auth"])
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-from apps.api.services.rate_limiter import limiter
-
-
-def _create_token(user_id: str) -> str:
-    payload = {
-        "sub": user_id,
-        "exp": datetime.now(timezone.utc) + timedelta(days=7),
-    }
-    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
-
-
-# ── Register / Login ─────────────────────────────────────
-
-@router.post("/register", response_model=TokenResponse)
-@limiter.limit("5/minute")
-async def register(
-    request: Request,
-    body: RegisterRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    # Check for existing email explicitly to return 409 instead of 500
-    existing = await db.execute(select(User).where(User.email == body.email))
-    if existing.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
-        )
-
-    user = User(
-        id=uuid.uuid4(),
-        email=body.email,
-        password_hash=pwd_context.hash(body.password),
-    )
-    db.add(user)
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
-        )
-    return TokenResponse(access_token=_create_token(str(user.id)))
-
-
-@router.post("/login", response_model=TokenResponse)
-@limiter.limit("10/minute")
-async def login(
-    request: Request,
-    body: LoginRequest,
-    db: AsyncSession = Depends(get_db),
-):
-    result = await db.execute(select(User).where(User.email == body.email))
-    user = result.scalar_one_or_none()
-    if not user or not pwd_context.verify(body.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
-    return TokenResponse(access_token=_create_token(str(user.id)))
 
 
 @router.get("/me", response_model=UserResponse)

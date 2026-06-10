@@ -7,6 +7,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
+from apps.api.agents.prompt_safety import extract_json, sanitize_profiles, wrap_untrusted
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.segment import Segment, SegmentMember
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
@@ -123,11 +124,16 @@ async def run_segmentation(
 ) -> list[Segment]:
     profiles = await build_visitor_profiles(db, site_id, visitors)
 
+    # Visitor-controlled text (page URLs, bios, company names) is sanitized
+    # and explicitly delimited as untrusted before prompt insertion.
+    safe_profiles = sanitize_profiles(profiles)
     prompt = SEGMENTATION_PROMPT.format(
         site_name=site_name,
         site_description=site_description or "Not provided",
         site_category=site_category or "General",
-        visitor_profiles_json=json.dumps(profiles, indent=2, default=str),
+        visitor_profiles_json=wrap_untrusted(
+            json.dumps(safe_profiles, indent=2, default=str)
+        ),
     )
 
     if not settings.anthropic_api_key:
@@ -144,24 +150,42 @@ async def run_segmentation(
     first = message.content[0]
     if not isinstance(first, TextBlock):
         raise ValueError(f"Unexpected content block type: {type(first)}")
-    result = json.loads(first.text)
+    result = extract_json(first.text)
+
+    # Only visitor ids from the input batch may become members — the model
+    # can hallucinate ids (segment_members has no FK), and a poisoned profile
+    # could try to smuggle ids in.
+    input_ids = {v.visitor_id for v in visitors}
 
     segments: list[Segment] = []
     for seg_data in result.get("segments", []):
+        if not isinstance(seg_data, dict) or not seg_data.get("name"):
+            logger.warning("segmenter_invalid_segment_skipped", site_id=site_id)
+            continue
+        valid_ids = [
+            vid for vid in seg_data.get("visitor_ids", []) if vid in input_ids
+        ]
+        dropped = len(seg_data.get("visitor_ids", [])) - len(valid_ids)
+        if dropped:
+            logger.warning(
+                "segmenter_hallucinated_ids_dropped",
+                site_id=site_id,
+                dropped=dropped,
+            )
         segment = Segment(
             site_id=site_id,
-            name=seg_data["name"],
+            name=str(seg_data["name"])[:200],
             description=seg_data.get("description"),
             characteristics=seg_data.get("characteristics", {}),
             recommended_channels=seg_data.get("recommended_channels", []),
             messaging_angle=seg_data.get("messaging_angle"),
             priority=seg_data.get("priority", "medium"),
-            visitor_count=len(seg_data.get("visitor_ids", [])),
+            visitor_count=len(valid_ids),
         )
         db.add(segment)
         await db.flush()
 
-        for vid in seg_data.get("visitor_ids", []):
+        for vid in valid_ids:
             member = SegmentMember(
                 segment_id=segment.id,
                 visitor_id=vid,

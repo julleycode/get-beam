@@ -21,6 +21,7 @@ from apps.api.models.feature_request import FeatureRequest  # noqa: F401 — reg
 from apps.api.models.engagement_attribution import EngagementAttribution  # noqa: F401 — register for create_all
 from apps.api.models.beam_identity import BeamIdentityNode  # noqa: F401 — register for create_all
 from apps.api.models.waitlist import WaitlistSignup  # noqa: F401 — register for create_all
+from apps.api.models.stripe_event import StripeEvent  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks
@@ -54,6 +55,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "ALTER TABLE users ALTER COLUMN hashed_password DROP NOT NULL",
             # Pre-merge tables: add updated_at inherited from Base
             "ALTER TABLE events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
+            "ALTER TABLE events ADD COLUMN IF NOT EXISTS event_id VARCHAR(64)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_events_event_id ON events (event_id)",
             "ALTER TABLE sites ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
             "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
             "ALTER TABLE identified_visitors ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",

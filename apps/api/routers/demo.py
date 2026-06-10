@@ -21,7 +21,7 @@ from sqlalchemy import select
 from apps.api.config import settings
 from apps.api.models.database import async_session
 from apps.api.models.visitor import Visitor
-from apps.api.routers.social_auth import limiter
+from apps.api.services.rate_limiter import limiter
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.pii import mask_email
 from apps.api.services.platform_detector import detect_platform

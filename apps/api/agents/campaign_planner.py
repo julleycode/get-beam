@@ -6,6 +6,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
+from apps.api.agents.prompt_safety import extract_json, sanitize_profiles, wrap_untrusted
 from apps.api.models.campaign import Campaign
 from apps.api.models.segment import Segment
 
@@ -111,6 +112,9 @@ async def plan_campaign(
     else:
         accounts_info = "None — social reply/DM channels are not available"
 
+    # Visitor-controlled text (page URLs, bios, company names) is sanitized
+    # and explicitly delimited as untrusted before prompt insertion.
+    safe_profiles = sanitize_profiles(visitor_profiles)
     prompt = CAMPAIGN_PLANNING_PROMPT.format(
         segment_name=segment.name,
         segment_description=segment.description or "",
@@ -118,7 +122,9 @@ async def plan_campaign(
         characteristics_json=json.dumps(segment.characteristics, default=str),
         channels=json.dumps(segment.recommended_channels, default=str),
         messaging_angle=segment.messaging_angle or "",
-        visitor_profiles_json=json.dumps(visitor_profiles, indent=2, default=str),
+        visitor_profiles_json=wrap_untrusted(
+            json.dumps(safe_profiles, indent=2, default=str)
+        ),
         segment_id=str(segment.id),
         connected_accounts_info=accounts_info,
     )
@@ -137,12 +143,19 @@ async def plan_campaign(
     first = message.content[0]
     if not isinstance(first, TextBlock):
         raise ValueError(f"Unexpected content block type: {type(first)}")
-    plan = json.loads(first.text)
+    plan = extract_json(first.text)
+    # Defensive shape checks: touchpoints must be a list of dicts (the send
+    # path and detail UI iterate them), and the name must fit its column.
+    touchpoints = plan.get("touchpoints")
+    if not isinstance(touchpoints, list):
+        plan["touchpoints"] = []
+    else:
+        plan["touchpoints"] = [tp for tp in touchpoints if isinstance(tp, dict)]
 
     campaign = Campaign(
         site_id=segment.site_id,
         segment_id=segment.id,
-        name=plan.get("campaign_name", f"Campaign for {segment.name}"),
+        name=str(plan.get("campaign_name") or f"Campaign for {segment.name}")[:200],
         status="draft",
         plan=plan,
     )

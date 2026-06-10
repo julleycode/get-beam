@@ -161,6 +161,9 @@
 
   function pushEvent(evt) {
     evt._fp = fingerprint;
+    // Idempotency key: the server drops duplicate event_ids, so a re-sent
+    // batch (flush retry, beacon replay) can't double-count events.
+    evt.event_id = uuid();
     queue.push(evt);
     lsSet(QUEUE_KEY, JSON.stringify(queue));
   }

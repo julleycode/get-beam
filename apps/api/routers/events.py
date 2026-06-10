@@ -3,6 +3,7 @@ import json
 
 import structlog
 from fastapi import APIRouter, Depends, Request, Response
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.database import get_db, async_session
@@ -86,7 +87,8 @@ async def ingest_events(
         pass  # GeoIP failure should never block event ingestion
 
     event_rows = [
-        Event(
+        dict(
+            event_id=(event.event_id or None),
             site_id=batch.site_id,
             visitor_id=batch.visitor_id,
             event_type=event.type,
@@ -111,8 +113,17 @@ async def ingest_events(
         )
         for event in batch.events
     ]
-    db.add_all(event_rows)
+    # Idempotent insert: a re-delivered beacon batch (browser retry after tab
+    # kill, proxy replay) carries the same client-generated event_ids and is
+    # silently dropped instead of double-counting pageviews/sessions/intent.
+    # Rows with NULL event_id (older pixel builds) never conflict.
+    insert_stmt = (
+        pg_insert(Event)
+        .values(event_rows)
+        .on_conflict_do_nothing(index_elements=["event_id"])
+    )
     try:
+        await db.execute(insert_stmt)
         await db.commit()
     except Exception as exc:
         logger.exception("event_commit_failed", error=str(exc))
