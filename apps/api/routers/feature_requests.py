@@ -7,15 +7,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.dependencies import require_admin
+from apps.api.dependencies import get_current_user, require_admin
 from apps.api.models.database import get_db
-from apps.api.models.feature_request import FeatureRequest
+from apps.api.models.feature_request import FeatureRequest, FeatureRequestVote
 from apps.api.models.user import User
 from apps.api.schemas.feature_requests import (
+    BoardItemOut,
+    BoardListResponse,
+    BoardSubmit,
     FeatureRequestCreate,
     FeatureRequestListResponse,
     FeatureRequestOut,
     FeatureRequestUpdate,
+    VoteOut,
 )
 from apps.api.services.email_sender import EmailSender
 from apps.api.services.pii import mask_email
@@ -200,3 +204,151 @@ async def update_feature_request(
         await _notify_requester_status_change(req, old_status, req.status)
 
     return FeatureRequestOut.model_validate(req)
+
+
+# ── Community feature board (any logged-in user) ────────────────────────
+#
+# Redacted view of feature_requests: never exposes submitter emails or
+# admin notes (those leaked once — see PR #47). Sorted by votes so the
+# community decides what ships next.
+
+
+@router.get("/board", response_model=BoardListResponse)
+async def get_feature_board(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BoardListResponse:
+    """Logged-in only: the community feature board, most-voted first."""
+    requests_result = await db.execute(
+        select(FeatureRequest)
+        .where(FeatureRequest.status != "closed")
+        .order_by(desc(FeatureRequest.created_at))
+        .limit(200)
+    )
+    requests = list(requests_result.scalars().all())
+
+    counts_result = await db.execute(
+        select(
+            FeatureRequestVote.feature_request_id,
+            func.count().label("votes"),
+        ).group_by(FeatureRequestVote.feature_request_id)
+    )
+    counts = {row[0]: row[1] for row in counts_result.all()}
+
+    mine_result = await db.execute(
+        select(FeatureRequestVote.feature_request_id).where(
+            FeatureRequestVote.user_id == current_user.id
+        )
+    )
+    mine = {row[0] for row in mine_result.all()}
+
+    items = [
+        BoardItemOut(
+            id=req.id,
+            title=req.title,
+            detail=req.detail,
+            urgency=req.urgency,
+            status=req.status,
+            votes=counts.get(req.id, 0),
+            my_vote=req.id in mine,
+            created_at=req.created_at,
+        )
+        for req in requests
+    ]
+    # Stable sort: SQL already ordered newest-first, so equal-vote items
+    # keep that order; primary key is votes descending.
+    items.sort(key=lambda i: -i.votes)
+    return BoardListResponse(items=items, total=len(items))
+
+
+@router.post("/board", response_model=BoardItemOut, status_code=201)
+async def submit_board_request(
+    body: BoardSubmit,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BoardItemOut:
+    """Logged-in submit from the dashboard board. Auto-upvotes own request."""
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="Title is required.")
+
+    req = FeatureRequest(
+        id=uuid.uuid4(),
+        title=title[:120],
+        detail=(body.detail or "").strip() or None,
+        urgency=body.urgency if body.urgency in _ALLOWED_URGENCY else None,
+        email=current_user.email,
+        source="dashboard",
+        status="new",
+    )
+    db.add(req)
+    await db.flush()
+    # Submitter obviously wants it — start the count at 1.
+    db.add(FeatureRequestVote(feature_request_id=req.id, user_id=current_user.id))
+    await db.commit()
+    await db.refresh(req)
+
+    logger.info("board_request_created", id=str(req.id), urgency=req.urgency)
+    await _notify_admin_new_request(req)
+
+    return BoardItemOut(
+        id=req.id,
+        title=req.title,
+        detail=req.detail,
+        urgency=req.urgency,
+        status=req.status,
+        votes=1,
+        my_vote=True,
+        created_at=req.created_at,
+    )
+
+
+@router.post("/{request_id}/vote", response_model=VoteOut)
+async def toggle_vote(
+    request_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> VoteOut:
+    """Toggle the current user's upvote on a feature request."""
+    from sqlalchemy.exc import IntegrityError
+
+    req_result = await db.execute(
+        select(FeatureRequest).where(FeatureRequest.id == request_id)
+    )
+    if req_result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Feature request not found")
+
+    existing_result = await db.execute(
+        select(FeatureRequestVote).where(
+            FeatureRequestVote.feature_request_id == request_id,
+            FeatureRequestVote.user_id == current_user.id,
+        )
+    )
+    existing = existing_result.scalar_one_or_none()
+
+    if existing is not None:
+        await db.delete(existing)
+        await db.commit()
+        my_vote = False
+    else:
+        db.add(
+            FeatureRequestVote(
+                feature_request_id=request_id, user_id=current_user.id
+            )
+        )
+        try:
+            await db.commit()
+            my_vote = True
+        except IntegrityError:
+            # Concurrent double-tap: the unique constraint already recorded
+            # the vote — treat as voted.
+            await db.rollback()
+            my_vote = True
+
+    count_result = await db.execute(
+        select(func.count())
+        .select_from(FeatureRequestVote)
+        .where(FeatureRequestVote.feature_request_id == request_id)
+    )
+    votes = count_result.scalar() or 0
+    return VoteOut(request_id=request_id, votes=votes, my_vote=my_vote)

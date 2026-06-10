@@ -34,6 +34,49 @@ async function fillCreateForm(
   await page.click('button[type="submit"]');
 }
 
+/**
+ * Mock the backend platform-detection endpoint with a canned response.
+ *
+ * detect-platform fetches the target site server-side; live third-party
+ * sites made these tests flaky in CI (large pages exceed the detector's
+ * 15s fetch timeout → "unknown" → no badge). Fulfilling at the network
+ * layer keeps the full UI flow (create site → install step → guide
+ * rendering) real while making detection deterministic.
+ *
+ * The dashboard calls the API cross-origin (localhost:3000 → :8000) with
+ * an Authorization header, so the browser sends a CORS preflight — the
+ * handler must answer the OPTIONS request and include CORS headers on
+ * the fulfilled response, or the mock silently fails and the UI falls
+ * back to "unknown".
+ */
+async function mockDetectPlatform(
+  page: Page,
+  response: {
+    platform: string;
+    confidence: number;
+    has_gtm: boolean;
+    gtm_id: string | null;
+  }
+) {
+  await page.route("**/api/v1/sites/detect-platform", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          "access-control-allow-origin": "*",
+          "access-control-allow-methods": "POST, OPTIONS",
+          "access-control-allow-headers": "authorization, content-type",
+        },
+      });
+      return;
+    }
+    await route.fulfill({
+      json: response,
+      headers: { "access-control-allow-origin": "*" },
+    });
+  });
+}
+
 /** Wait for platform detection to finish (spinner disappears) */
 async function waitForDetection(page: Page) {
   // First wait for the "install" step to appear
@@ -98,7 +141,12 @@ test.describe("Onboarding — Platform Detection", () => {
   test("WordPress detection — shows Download Plugin + GTM badge", async ({
     page,
   }) => {
-    test.slow();
+    await mockDetectPlatform(page, {
+      platform: "wordpress",
+      confidence: 0.95,
+      has_gtm: true,
+      gtm_id: "GTM-TEST123",
+    });
 
     await fillCreateForm(page, "Test WordPress", "https://developer.wordpress.org");
     await waitForDetection(page);
@@ -106,6 +154,9 @@ test.describe("Onboarding — Platform Detection", () => {
     // Should show WordPress platform badge
     const badge = page.locator("span.rounded-full:has-text('WordPress')");
     await expect(badge).toBeVisible({ timeout: 5000 });
+
+    // Should show GTM badge (mock sets has_gtm + gtm_id)
+    await expect(page.locator("text=GTM: GTM-TEST123")).toBeVisible();
 
     // Should show Download Plugin button
     await expect(
@@ -119,13 +170,12 @@ test.describe("Onboarding — Platform Detection", () => {
   });
 
   test("Wix detection — shows guided steps", async ({ page }) => {
-    // Depends on a live third-party Wix site (~1.4MB page); from CI runners
-    // the fetch regularly exceeds the detector's 15s timeout → "unknown" →
-    // no badge. Failed 5/5 attempts across two runs on 2026-06-10 while
-    // passing locally. Keep it as a local smoke test; in CI it's pure noise.
-    // TODO: mock /sites/detect-platform (or use a fixture page) and re-enable.
-    test.skip(!!process.env.CI, "live third-party Wix site is flaky from CI");
-    test.slow();
+    await mockDetectPlatform(page, {
+      platform: "wix",
+      confidence: 0.9,
+      has_gtm: false,
+      gtm_id: null,
+    });
 
     await fillCreateForm(page, "Test Wix", "https://thaibaotran-growth.com");
     await waitForDetection(page);
