@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, Visitor } from "@/lib/api";
+import { TableSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { SiteSelector } from "@/components/site-selector";
 import { Badge } from "@/components/ui/badge";
@@ -103,7 +104,7 @@ export default function VisitorsPage() {
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view visitors.</p>
       ) : loading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <TableSkeleton cols={7} rows={10} />
       ) : error ? (
         <ErrorBanner
           message={`Couldn't load visitors — ${error}`}

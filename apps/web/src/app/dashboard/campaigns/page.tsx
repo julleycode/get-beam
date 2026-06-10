@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, Campaign } from "@/lib/api";
+import { TableSkeleton } from "@/components/skeletons";
 import { SiteSelector } from "@/components/site-selector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -100,7 +101,7 @@ export default function CampaignsPage() {
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view campaigns.</p>
       ) : loading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <TableSkeleton cols={4} rows={6} />
       ) : campaigns.length === 0 ? (
         <p className="text-muted-foreground">
           No campaigns yet. Campaigns are auto-generated when segments are created.

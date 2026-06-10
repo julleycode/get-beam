@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api, BillingInterval } from "@/lib/api";
+import { StatGridSkeleton } from "@/components/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import { PixelInstallGuide } from "@/components/pixel-install-guide";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -344,9 +346,11 @@ export default function OnboardingPage() {
             </CardHeader>
             <CardContent>
               {detectionLoading ? (
-                <div className="flex flex-col items-center py-8 gap-3">
-                  <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                  <p className="text-sm text-muted-foreground">Scanning your pixel signals...</p>
+                <div className="space-y-4 py-2">
+                  <StatGridSkeleton cols={3} />
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-3/4" />
+                  <Skeleton className="h-4 w-2/3" />
                 </div>
               ) : (
                 <div className="space-y-4">

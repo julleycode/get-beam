@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, BillingStatus, BillingInterval } from "@/lib/api";
+import { CardGridSkeleton, PageHeaderSkeleton } from "@/components/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Card,
   CardContent,
@@ -161,7 +163,11 @@ function BillingContent() {
         </CardHeader>
         <CardContent className="space-y-4">
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading...</p>
+            <div className="space-y-3">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
           ) : billing ? (
             <>
               <div className="flex items-center gap-3">
@@ -359,8 +365,9 @@ export default function BillingPage() {
   return (
     <Suspense
       fallback={
-        <div className="max-w-3xl mx-auto">
-          <p className="text-sm text-muted-foreground">Loading...</p>
+        <div className="max-w-3xl mx-auto space-y-6">
+          <PageHeaderSkeleton />
+          <CardGridSkeleton cards={3} cols={3} />
         </div>
       }
     >

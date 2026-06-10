@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { api, WaitlistSignup } from "@/lib/api";
+import { StatGridSkeleton, TableSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 
 function timeAgo(dateStr: string | null): string {
@@ -107,8 +108,9 @@ export default function WaitlistPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <p className="text-muted-foreground">Loading waitlist...</p>
+      <div className="space-y-6">
+        <StatGridSkeleton cols={4} />
+        <TableSkeleton cols={5} rows={8} />
       </div>
     );
   }

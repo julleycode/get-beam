@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, Site } from "@/lib/api";
+import { SelectSkeleton } from "@/components/skeletons";
 import {
   Select,
   SelectContent,
@@ -16,7 +17,9 @@ interface SiteSelectorProps {
 }
 
 export function SiteSelector({ value, onChange }: SiteSelectorProps) {
-  const [sites, setSites] = useState<Site[]>([]);
+  // null = still loading (render a skeleton, not nothing — the control
+  // popping in shifted the page header)
+  const [sites, setSites] = useState<Site[] | null>(null);
 
   useEffect(() => {
     api.listSites().then((s) => {
@@ -25,9 +28,10 @@ export function SiteSelector({ value, onChange }: SiteSelectorProps) {
       if (!value && s.length > 0) {
         onChange(s[0].site_id);
       }
-    }).catch(() => {});
+    }).catch(() => setSites([]));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  if (sites === null) return <SelectSkeleton />;
   if (sites.length === 0) return null;
 
   return (

@@ -4,13 +4,10 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { SignUp } from "@clerk/nextjs";
 import { api } from "@/lib/api";
+import { BrandSplash } from "@/components/skeletons";
 
 function Loading() {
-  return (
-    <div className="flex min-h-screen items-center justify-center">
-      <p className="text-muted-foreground">Loading...</p>
-    </div>
-  );
+  return <BrandSplash />;
 }
 
 /**

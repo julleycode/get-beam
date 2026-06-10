@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { api, Campaign } from "@/lib/api";
+import { ListCardSkeleton, PageHeaderSkeleton, StatGridSkeleton } from "@/components/skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -37,7 +38,14 @@ export default function CampaignDetailPage() {
       .finally(() => setLoading(false));
   }, [siteId, campaignId]);
 
-  if (loading) return <p className="text-muted-foreground">Loading...</p>;
+  if (loading)
+    return (
+      <div className="space-y-6">
+        <PageHeaderSkeleton />
+        <StatGridSkeleton cols={3} />
+        <ListCardSkeleton rows={3} />
+      </div>
+    );
   if (!campaign) return <p className="text-destructive">Campaign not found</p>;
 
   const touchpoints = (campaign.plan as { touchpoints?: Touchpoint[] }).touchpoints || [];

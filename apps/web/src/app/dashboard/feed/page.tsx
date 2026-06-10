@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Platform, type GenerateMultiDraftResponse } from "@/lib/api";
+import { ListCardSkeleton } from "@/components/skeletons";
 import { PostCard } from "@/components/post-card";
 import { DraftPicker } from "@/components/draft-picker";
 
@@ -343,7 +344,7 @@ export default function FeedPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-sm text-gray-400">Loading feed...</p>
+        <ListCardSkeleton rows={5} leading />
       ) : data?.posts.length === 0 ? (
         <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
           <p className="text-gray-500">No posts yet.</p>

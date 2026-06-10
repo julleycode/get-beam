@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type DraftStatus } from "@/lib/api";
+import { ListCardSkeleton } from "@/components/skeletons";
 import { DraftCard } from "@/components/draft-card";
 
 const TABS: { label: string; value: DraftStatus | undefined }[] = [
@@ -69,7 +70,7 @@ export default function DraftsPage() {
       </div>
 
       {isLoading ? (
-        <p className="text-sm text-gray-400">Loading drafts...</p>
+        <ListCardSkeleton rows={4} />
       ) : data?.drafts.length === 0 ? (
         <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
           <p className="text-gray-500">No drafts here.</p>

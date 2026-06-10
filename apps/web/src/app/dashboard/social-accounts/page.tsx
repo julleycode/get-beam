@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Platform } from "@/lib/api";
+import { ListCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { PlatformBadge } from "@/components/platform-badge";
 
@@ -47,7 +48,7 @@ export default function SocialAccountsPage() {
       <h1 className="text-2xl font-serif font-semibold tracking-tight">Connected Accounts</h1>
 
       {isLoading ? (
-        <p className="text-sm text-gray-400">Loading...</p>
+        <ListCardSkeleton rows={3} leading />
       ) : isError ? (
         <ErrorBanner
           message={`Couldn't load accounts — ${error?.message ?? "request failed"}`}
