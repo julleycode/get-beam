@@ -113,9 +113,18 @@ test.describe("Onboarding — Platform Detection", () => {
   });
 
   test("Shopify detection — shows Connect Shopify Store", async ({ page }) => {
-    test.slow(); // platform detection involves HTTP calls
+    // Detection mocked — a live large Shopify storefront (gymshark.com) was
+    // the same CI flake class as the old Wix test: the page exceeded the
+    // detector's 15s fetch timeout → "unknown" → no badge. The full UI flow
+    // (create → install step → Connect Shopify card) stays real.
+    await mockDetectPlatform(page, {
+      platform: "shopify",
+      confidence: 0.9,
+      has_gtm: false,
+      gtm_id: null,
+    });
 
-    await fillCreateForm(page, "Test Shopify", "https://gymshark.com");
+    await fillCreateForm(page, "Test Shopify", "https://example-store.com");
     await waitForDetection(page);
 
     // Should show Shopify platform badge
@@ -148,7 +157,7 @@ test.describe("Onboarding — Platform Detection", () => {
       gtm_id: "GTM-TEST123",
     });
 
-    await fillCreateForm(page, "Test WordPress", "https://developer.wordpress.org");
+    await fillCreateForm(page, "Test WordPress", "https://example-blog.com");
     await waitForDetection(page);
 
     // Should show WordPress platform badge
@@ -177,7 +186,7 @@ test.describe("Onboarding — Platform Detection", () => {
       gtm_id: null,
     });
 
-    await fillCreateForm(page, "Test Wix", "https://thaibaotran-growth.com");
+    await fillCreateForm(page, "Test Wix", "https://example-wixsite.com");
     await waitForDetection(page);
 
     // Should show Wix platform badge
