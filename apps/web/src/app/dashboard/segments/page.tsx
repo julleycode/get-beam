@@ -74,7 +74,7 @@ export default function SegmentsPage() {
         />
       ) : segments.length === 0 ? (
         <p className="text-muted-foreground">
-          No segments yet. Segments are auto-generated when 50+ visitors are enriched, or click &quot;Re-run segmentation&quot; to trigger manually.
+          No segments yet. Segments are auto-generated when 10+ new visitors are enriched, or click &quot;Re-run segmentation&quot; to trigger manually.
         </p>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">

@@ -11,6 +11,8 @@ System-level API keys (PDL, Proxycurl) are used automatically.
 BYOK keys (user-provided) extend coverage when system keys are absent.
 """
 
+import hashlib
+import json as jsonlib
 from datetime import datetime, timezone
 
 import anthropic
@@ -25,6 +27,7 @@ from apps.api.models.api_key import UserApiKey
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.services.key_vault import decrypt_key
+from apps.api.services.redis_client import get_redis
 
 logger = structlog.get_logger()
 
@@ -67,9 +70,44 @@ def calculate_completeness(profile: dict) -> float:
     return round(filled / len(ENRICHMENT_FIELDS), 2)
 
 
+# Business rule: cache enrichment API results for 7 days (cost control —
+# the same email re-identified under another visitor/site must not re-pay
+# PDL/Proxycurl/Twitter). Misses are negative-cached too: a known-missing
+# person costs as much to re-query as a hit.
+ENRICH_CACHE_TTL_SECONDS = 7 * 86400
+_CACHE_MISS_MARKER = "__no_match__"
+
+
 class Enricher:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
+
+    # ──────────────────── Redis result cache (7-day TTL) ────────────────
+
+    @staticmethod
+    async def _cache_get(key: str) -> tuple[bool, dict | None]:
+        """(hit, data) — data is None on a negative-cache hit.
+        Redis failures degrade to a miss; caching is best-effort."""
+        try:
+            raw = await get_redis().get(key)
+        except Exception:
+            return (False, None)
+        if raw is None:
+            return (False, None)
+        if raw == _CACHE_MISS_MARKER:
+            return (True, None)
+        try:
+            return (True, jsonlib.loads(raw))
+        except (ValueError, TypeError):
+            return (False, None)
+
+    @staticmethod
+    async def _cache_set(key: str, data: dict | None) -> None:
+        try:
+            raw = _CACHE_MISS_MARKER if data is None else jsonlib.dumps(data, default=str)
+            await get_redis().set(key, raw, ex=ENRICH_CACHE_TTL_SECONDS)
+        except Exception:
+            logger.debug("enrich_cache_set_failed", key=key)
 
     # ──────────────── Cascade Enrichment (Clay-style) ─────────────────
 
@@ -89,7 +127,21 @@ class Enricher:
             logger.info("enrichment_skipped_no_email", visitor_id=visitor.visitor_id[:8])
             return None
 
+        # Missing PDL key: leave the visitor's enrichment status untouched so
+        # the visitor stays retryable once the key is configured. Calling the
+        # API with an empty key 401s and used to mark everyone permanently
+        # "failed" on key-less deploys.
+        if not settings.people_data_labs_api_key:
+            logger.warning(
+                "enrichment_unavailable_no_pdl_key",
+                visitor_id=visitor.visitor_id[:8],
+            )
+            return None
+
         # ── Step 1: PDL Enrich (email → professional data) ──
+        # A transient PDL failure (timeout/5xx after retries) raises out of
+        # here and the caller leaves the status retryable; only a definitive
+        # no-match marks "failed".
         pdl_data = await self._enrich_pdl(identified.email)
         if not pdl_data:
             visitor.enrichment_status = "failed"
@@ -275,10 +327,16 @@ class Enricher:
     async def _enrich_pdl(self, email: str) -> dict | None:
         """Enrich a person record from PDL by email.
 
-        Guards for missing API key (returns None immediately — does not attempt
-        a call with an empty key which would mark the visitor permanently failed).
+        Cached in Redis for 7 days (positive and negative results) — the
+        enrich_tier1 caller guards the missing-key case.
         Retries up to 3× on transient errors (5xx, 429, timeouts).
         """
+        cache_key = f"enrich:pdl:{hashlib.sha256(email.strip().lower().encode()).hexdigest()}"
+        hit, cached = await self._cache_get(cache_key)
+        if hit:
+            logger.debug("pdl_enrich_cache_hit", match=cached is not None)
+            return cached
+
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
                 "https://api.peopledatalabs.com/v5/person/enrich",
@@ -287,7 +345,7 @@ class Enricher:
             )
             if resp.status_code == 200:
                 p = resp.json().get("data", {})
-                return {
+                data = {
                     "full_name": p.get("full_name"),
                     "job_title": p.get("job_title"),
                     "company_name": p.get("job_company_name"),
@@ -302,8 +360,11 @@ class Enricher:
                     "city": p.get("location_locality"),
                     "country": p.get("location_country"),
                 }
+                await self._cache_set(cache_key, data)
+                return data
             elif resp.status_code == 404:
                 logger.debug("pdl_enrich_no_match", email_prefix=email[:5])
+                await self._cache_set(cache_key, None)
             else:
                 logger.warning("pdl_enrich_error", status=resp.status_code)
                 if resp.status_code in _TRANSIENT_HTTP_STATUSES:
@@ -311,6 +372,10 @@ class Enricher:
         return None
 
     async def _enrich_proxycurl(self, linkedin_url: str, *, api_key: str) -> dict:
+        cache_key = f"enrich:proxycurl:{hashlib.sha256(linkedin_url.strip().lower().encode()).hexdigest()}"
+        hit, cached = await self._cache_get(cache_key)
+        if hit:
+            return cached or {}
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 resp = await client.get(
@@ -320,16 +385,24 @@ class Enricher:
                 )
                 if resp.status_code == 200:
                     p = resp.json()
-                    return {
+                    data = {
                         "linkedin_headline": p.get("headline"),
                         "linkedin_summary": p.get("summary"),
                         "linkedin_follower_count": p.get("follower_count"),
                     }
+                    await self._cache_set(cache_key, data)
+                    return data
+                if resp.status_code == 404:
+                    await self._cache_set(cache_key, None)
             except httpx.HTTPError as e:
                 logger.error("proxycurl_error", error=str(e))
         return {}
 
     async def _enrich_twitter(self, handle: str, *, api_key: str) -> dict:
+        cache_key = f"enrich:twitter:{handle.strip().lower().lstrip('@')}"
+        hit, cached = await self._cache_get(cache_key)
+        if hit:
+            return cached or {}
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 resp = await client.get(
@@ -339,10 +412,14 @@ class Enricher:
                 )
                 if resp.status_code == 200:
                     u = resp.json().get("data", {})
-                    return {
+                    data = {
                         "twitter_bio": u.get("description"),
                         "twitter_follower_count": u.get("public_metrics", {}).get("followers_count"),
                     }
+                    await self._cache_set(cache_key, data)
+                    return data
+                if resp.status_code == 404:
+                    await self._cache_set(cache_key, None)
             except httpx.HTTPError as e:
                 logger.error("twitter_error", error=str(e))
         return {}
