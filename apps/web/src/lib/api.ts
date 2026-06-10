@@ -209,7 +209,7 @@ class ApiClient {
    * idempotent per recipient — re-invoking never double-sends.
    */
   async sendCampaign(siteId: string, campaignId: string) {
-    return this.request<CampaignSendSummary>(
+    return this.request<CampaignSendResponse>(
       `/api/v1/campaigns/${siteId}/${campaignId}/send`,
       { method: "POST" }
     );
@@ -695,6 +695,12 @@ export interface CampaignSendSummary {
   skipped_already_sent: number;
   throttled: number;
   failed: number;
+}
+
+export interface CampaignSendResponse {
+  campaign_id: string;
+  status: string;
+  summary: CampaignSendSummary;
 }
 
 export interface SiteStats {

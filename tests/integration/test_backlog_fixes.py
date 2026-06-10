@@ -224,7 +224,9 @@ class TestCampaignSendGuardrails:
         url = f"/api/v1/campaigns/{campaign_setup['site_id']}/{campaign_setup['campaign_id']}/send"
         first = await test_client.post(url, headers=_auth(user_token))
         assert first.status_code == 200, first.text
-        summary = first.json()
+        body = first.json()
+        assert body["status"] == "completed"  # full unthrottled send completes
+        summary = body["summary"]
         assert summary["sent"] == 1
         assert summary["skipped_suppressed"] == 1
         assert len(sent_to) == 1 and sent_to[0].startswith("ok-")
@@ -242,7 +244,7 @@ class TestCampaignSendGuardrails:
 
         second = await test_client.post(url, headers=_auth(user_token))
         assert second.status_code == 200, second.text
-        summary2 = second.json()
+        summary2 = second.json()["summary"]
         assert summary2["sent"] == 0
         assert summary2["skipped_already_sent"] == 1
         assert len(sent_to) == 1  # no second email

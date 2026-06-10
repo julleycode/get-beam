@@ -67,7 +67,7 @@ export default function CampaignsPage() {
     setSendResult(null);
     setSendingId(campaignId);
     try {
-      const s = await api.sendCampaign(siteId, campaignId);
+      const { summary: s } = await api.sendCampaign(siteId, campaignId);
       const parts = [`${s.sent} sent`];
       if (s.skipped_suppressed) parts.push(`${s.skipped_suppressed} unsubscribed/bounced skipped`);
       if (s.skipped_already_sent) parts.push(`${s.skipped_already_sent} already sent`);

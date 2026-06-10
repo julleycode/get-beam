@@ -20,6 +20,12 @@ os.environ.setdefault(
     "postgresql+asyncpg://retarget:retarget_dev@localhost:5432/retarget_agent_test",
 )
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")  # Use DB 15 for tests
+# Fernet keys for link/token crypto (unsubscribe + _bid links, BYOK vault).
+# Real keys come from the environment in prod; tests just need valid ones.
+from cryptography.fernet import Fernet as _Fernet  # noqa: E402
+
+os.environ.setdefault("ENCRYPTION_KEY", _Fernet.generate_key().decode())
+os.environ.setdefault("TOKEN_ENCRYPTION_KEY", _Fernet.generate_key().decode())
 
 
 @pytest_asyncio.fixture
@@ -52,6 +58,11 @@ async def test_engine():
     from apps.api.models.voice_example import VoiceExample  # noqa: F401
     from apps.api.models.beam_identity import BeamIdentityNode  # noqa: F401
     from apps.api.models.visitor_email import VisitorEmail  # noqa: F401
+    # Importing the app registers EVERY model on Base.metadata (waitlist,
+    # feature requests, stripe_events, ...). Without this, table creation
+    # depends on which test imported apps.api.main first — the explicit list
+    # above goes stale silently (stripe_events was missing).
+    import apps.api.main  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
