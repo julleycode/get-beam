@@ -969,6 +969,11 @@ class IdentityResolver:
                 logger.debug("rb2b_no_email_in_profile", ip=visitor.ip_address[:8])
                 return None
 
+            # RB2B scores arrive on a 0-100 scale; ours is 0-1. Without the
+            # normalization any score > 1 pinned the confidence to 0.99.
+            raw_score = best.get("score", 0.9)
+            if isinstance(raw_score, (int, float)) and raw_score > 1:
+                raw_score = raw_score / 100.0
             return {
                 "email": email,
                 "full_name": person.get("full_name"),
@@ -978,7 +983,7 @@ class IdentityResolver:
                 "city": person.get("city"),
                 "region": person.get("state") or person.get("region"),
                 "country": person.get("country", "US"),
-                "confidence_score": min(best.get("score", 0.9), 0.99),
+                "confidence_score": max(0.0, min(float(raw_score), 0.99)),
             }
 
     async def _redis_has_key(self, key: str) -> bool:

@@ -6,7 +6,7 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
-from apps.api.agents.prompt_safety import extract_json, sanitize_profiles, wrap_untrusted
+from apps.api.agents.prompt_safety import clean_text, extract_json, sanitize_profiles, wrap_untrusted
 from apps.api.models.campaign import Campaign
 from apps.api.models.segment import Segment
 
@@ -115,13 +115,15 @@ async def plan_campaign(
     # Visitor-controlled text (page URLs, bios, company names) is sanitized
     # and explicitly delimited as untrusted before prompt insertion.
     safe_profiles = sanitize_profiles(visitor_profiles)
+    # Segment fields are themselves LLM-derived from visitor data (second-
+    # order injection vector) — delimit/cap them the same way.
     prompt = CAMPAIGN_PLANNING_PROMPT.format(
-        segment_name=segment.name,
-        segment_description=segment.description or "",
+        segment_name=clean_text(segment.name, 200),
+        segment_description=clean_text(segment.description or "", 500),
         visitor_count=segment.visitor_count,
-        characteristics_json=json.dumps(segment.characteristics, default=str),
+        characteristics_json=wrap_untrusted(json.dumps(segment.characteristics, default=str)),
         channels=json.dumps(segment.recommended_channels, default=str),
-        messaging_angle=segment.messaging_angle or "",
+        messaging_angle=clean_text(segment.messaging_angle or "", 300),
         visitor_profiles_json=wrap_untrusted(
             json.dumps(safe_profiles, indent=2, default=str)
         ),

@@ -25,7 +25,12 @@ def get_plan_limits(plan: str) -> Optional[int]:
 
 
 async def check_usage_allowed(db: AsyncSession, user_id: str) -> bool:
-    """Return True if the user is under their plan's monthly visitor limit."""
+    """Return True if the user is under their plan's monthly visitor limit.
+
+    Also performs the lazy monthly reset: there is no scheduler in this
+    deployment, so the counter rolls over the first time it's checked in a
+    new calendar month (anchored on billing_cycle_reset_at).
+    """
     result = await db.execute(select(User).where(User.id == user_id))
     user: Optional[User] = result.scalar_one_or_none()
     if user is None:
@@ -35,6 +40,22 @@ async def check_usage_allowed(db: AsyncSession, user_id: str) -> bool:
     limit = get_plan_limits(user.plan)
     if limit is None:
         return True  # Unlimited plan
+
+    now = datetime.now(timezone.utc)
+    anchor = user.billing_cycle_reset_at
+    if anchor is not None and anchor.tzinfo is None:
+        anchor = anchor.replace(tzinfo=timezone.utc)
+    if anchor is None:
+        user.billing_cycle_reset_at = now
+        await db.commit()
+    elif (now.year, now.month) != (anchor.year, anchor.month):
+        logger.info(
+            "billing_monthly_reset",
+            user_id=str(user.id),
+            previous_count=user.monthly_identified_count,
+        )
+        await reset_monthly_usage(db, user_id)
+        user.monthly_identified_count = 0
 
     allowed = user.monthly_identified_count < limit
     if not allowed:
