@@ -506,13 +506,13 @@ async def resolve_site_visitors(
         }
 
     if reset:
-        await db.execute(
-            sql_text(
-                "DELETE FROM resolution_logs WHERE site_id = :sid AND visitor_id IN "
-                "(SELECT visitor_id FROM visitors WHERE site_id = :sid AND identity_status = 'unresolvable')"
-            ),
-            {"sid": site_id},
-        )
+        # Only flip status back to anonymous. resolution_logs are immutable:
+        # both the daily identification budget and the 30-day no-retry gate
+        # are computed from them, so deleting rows here (as this endpoint
+        # used to do) let anyone loop reset+resolve to re-burn paid provider
+        # credits on the same visitors, unbounded, same day. Reset visitors
+        # become eligible again naturally once the 30-day window passes (or
+        # immediately for providers exempt from the recency gate).
         await db.execute(
             sql_text("UPDATE visitors SET identity_status = 'anonymous' WHERE site_id = :sid AND identity_status = 'unresolvable'"),
             {"sid": site_id},

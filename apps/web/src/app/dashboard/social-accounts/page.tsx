@@ -2,6 +2,7 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Platform } from "@/lib/api";
+import { ErrorBanner } from "@/components/error-banner";
 import { PlatformBadge } from "@/components/platform-badge";
 
 const ALL_PLATFORMS: { platform: Platform; label: string; color: string }[] = [
@@ -15,7 +16,7 @@ const ALL_PLATFORMS: { platform: Platform; label: string; color: string }[] = [
 export default function SocialAccountsPage() {
   const queryClient = useQueryClient();
 
-  const { data: accounts, isLoading } = useQuery({
+  const { data: accounts, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["social-accounts"],
     queryFn: () => api.getSocialAccounts(),
   });
@@ -47,6 +48,11 @@ export default function SocialAccountsPage() {
 
       {isLoading ? (
         <p className="text-sm text-gray-400">Loading...</p>
+      ) : isError ? (
+        <ErrorBanner
+          message={`Couldn't load accounts — ${error?.message ?? "request failed"}`}
+          onRetry={() => refetch()}
+        />
       ) : accounts && accounts.length > 0 ? (
         <div className="space-y-3">
           {accounts.map((account) => (

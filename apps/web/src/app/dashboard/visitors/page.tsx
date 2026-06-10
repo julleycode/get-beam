@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, Visitor } from "@/lib/api";
+import { ErrorBanner } from "@/components/error-banner";
 import { SiteSelector } from "@/components/site-selector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,10 +48,13 @@ export default function VisitorsPage() {
   const [filter, setFilter] = useState("all");
   const [sortBy, setSortBy] = useState("intent_score");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     if (!siteId) return;
     setLoading(true);
+    setError(null);
     api
       .listVisitors(siteId, {
         page,
@@ -62,9 +66,9 @@ export default function VisitorsPage() {
         setVisitors(res.visitors);
         setTotal(res.total);
       })
-      .catch(() => {})
+      .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
-  }, [siteId, page, filter, sortBy]);
+  }, [siteId, page, filter, sortBy, retryKey]);
 
   return (
     <div>
@@ -100,6 +104,11 @@ export default function VisitorsPage() {
         <p className="text-muted-foreground">Select a site to view visitors.</p>
       ) : loading ? (
         <p className="text-muted-foreground">Loading...</p>
+      ) : error ? (
+        <ErrorBanner
+          message={`Couldn't load visitors — ${error}`}
+          onRetry={() => setRetryKey((k) => k + 1)}
+        />
       ) : (
         <>
           <p className="text-sm text-muted-foreground mb-3">

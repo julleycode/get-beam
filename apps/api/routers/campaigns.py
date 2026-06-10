@@ -15,6 +15,7 @@ from apps.api.models.visitor import Visitor
 from apps.api.dependencies import get_current_user
 from apps.api.schemas.campaigns import CampaignListResponse, CampaignOut, CampaignStatusUpdate
 from apps.api.agents.campaign_planner import plan_campaign
+from apps.api.services.campaign_sender import send_campaign_emails
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -185,11 +186,69 @@ async def update_campaign_status(
         )
 
     campaign.status = body.status
+    # Naive UTC: Campaign datetime columns are TIMESTAMP WITHOUT TIME ZONE;
+    # asyncpg rejects tz-aware values for them (same pattern as
+    # visitor_aggregator). Do not pass datetime.now(timezone.utc) directly.
     if body.status == "approved":
-        campaign.approved_at = datetime.now(timezone.utc)
+        campaign.approved_at = datetime.now(timezone.utc).replace(tzinfo=None)
     elif body.status == "active":
-        campaign.started_at = datetime.now(timezone.utc)
+        campaign.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     await db.commit()
     await db.refresh(campaign)
     return CampaignOut.model_validate(campaign)
+
+
+@router.post("/{site_id}/{campaign_id}/send")
+async def send_campaign(
+    site_id: str,
+    campaign_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Send the campaign's email touchpoint to its segment audience.
+
+    Requires the campaign to be ACTIVE — the explicit human-approval gate, since
+    a campaign only reaches 'active' via a deliberate user-driven status change.
+    The send path skips do_not_email recipients, honors the per-site hourly cap,
+    injects a signed unsubscribe link (via EmailSender), and is idempotent per
+    recipient so re-invoking never double-sends.
+    """
+    site_result = await db.execute(
+        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
+    )
+    if not site_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    result = await db.execute(
+        select(Campaign).where(Campaign.id == campaign_id, Campaign.site_id == site_id)
+    )
+    campaign = result.scalar_one_or_none()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
+    if campaign.status != "active":
+        raise HTTPException(
+            status_code=400,
+            detail="Campaign must be 'active' to send. Approve and activate it first.",
+        )
+
+    try:
+        summary = await send_campaign_emails(db, campaign)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Mark completed once the full audience was processed without hitting the cap.
+    if summary["throttled"] == 0 and summary["sent"] > 0:
+        campaign.status = "completed"
+        await db.commit()
+
+    logger.info(
+        "campaign_sent",
+        campaign_id=str(campaign.id),
+        sent=summary["sent"],
+        suppressed=summary["skipped_suppressed"],
+        throttled=summary["throttled"],
+        failed=summary["failed"],
+    )
+    return {"campaign_id": str(campaign.id), "status": campaign.status, "summary": summary}

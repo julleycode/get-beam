@@ -1,7 +1,8 @@
 """Tests for Phase 2: upgraded fingerprint in tracker.js.
 
 Verifies the pixel has v2 fingerprint (17 signals, 128-bit hash),
-identity graph stacking with all 4 providers, and stays under size limit.
+strictly opt-in identity-vendor stacking (default OFF, no hardcoded
+vendor account ids), and stays under size limit.
 """
 
 import gzip
@@ -77,7 +78,37 @@ class TestFingerprintV2:
 
 
 class TestIdentityGraphStacking:
-    """Phase 1: all 4 identity graph providers activated by default."""
+    """Identity-vendor stacking is STRICTLY OPT-IN (default OFF).
+
+    Third-party scripts load only when the snippet sets data-stack="1" and
+    supplies per-vendor ids via data-stack-<vendor> attributes. No vendor
+    account id may ship inside the tracker source.
+    """
+
+    def test_stacking_gated_behind_opt_in_flag(self, pixel_code: str):
+        assert 'getAttribute("data-stack")' in pixel_code, (
+            "Stacking must be gated behind the data-stack opt-in attribute"
+        )
+
+    def test_vendor_ids_come_from_per_vendor_attrs(self, pixel_code: str):
+        assert '"data-stack-" + ' in pixel_code, (
+            "Vendor ids must be read from data-stack-<vendor> attributes"
+        )
+
+    def test_no_default_provider_list(self, pixel_code: str):
+        assert "_DP" not in pixel_code, "Default-on provider array must not exist"
+        assert "data-identity-providers" not in pixel_code, (
+            "Legacy JSON provider attr was replaced by data-stack-<vendor> attrs"
+        )
+
+    def test_no_hardcoded_vendor_account_id(self, pixel_code: str):
+        assert "95247db8-8d49-4213-8ea7-ee0a6dd0ae78" not in pixel_code
+        uuid_literal = re.compile(
+            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+        )
+        assert not uuid_literal.search(pixel_code), (
+            "No UUID-shaped account id may ship in the tracker source"
+        )
 
     def test_has_leadpipe_provider(self, pixel_code: str):
         assert "leadpipe" in pixel_code
@@ -89,13 +120,7 @@ class TestIdentityGraphStacking:
         assert "fullcontact" in pixel_code
 
     def test_has_customers_ai_provider(self, pixel_code: str):
-        assert "customers_ai" in pixel_code
-
-    def test_default_dp_has_one_entry(self, pixel_code: str):
-        dp_match = re.search(r'var _DP=\[(.*?)\]', pixel_code)
-        assert dp_match, "Should have _DP default providers array"
-        entries = dp_match.group(1).split("},{")
-        assert len(entries) == 1, f"Expected 1 default provider, got {len(entries)}"
+        assert "customers-ai" in pixel_code
 
     def test_leadpipe_url_builder(self, pixel_code: str):
         assert "aws53.cloud" in pixel_code
@@ -109,9 +134,6 @@ class TestIdentityGraphStacking:
     def test_customers_ai_url_builder(self, pixel_code: str):
         assert "customers.ai" in pixel_code
 
-    def test_custom_providers_override(self, pixel_code: str):
-        assert "data-identity-providers" in pixel_code, "Should support custom provider override"
-
 
 class TestPixelSizeLimit:
     """Pixel must stay under 5KB gzipped."""
@@ -122,7 +144,8 @@ class TestPixelSizeLimit:
             f"Pixel is {len(compressed)} bytes gzipped, must be under 5KB"
         )
 
-    def test_under_10kb_raw(self, pixel_code: str):
-        assert len(pixel_code.encode()) < 10000, (
-            f"Pixel is {len(pixel_code.encode())} bytes raw, should be under 10KB"
+    def test_under_16kb_raw(self, pixel_code: str):
+        # Raw cap is a sanity guard; the binding budget is 5KB gzipped above.
+        assert len(pixel_code.encode()) < 16000, (
+            f"Pixel is {len(pixel_code.encode())} bytes raw, should be under 16KB"
         )

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 import { api, Site, SiteStats, EngagementROI } from "@/lib/api";
+import { ErrorBanner } from "@/components/error-banner";
 import {
   Card,
   CardContent,
@@ -146,7 +147,15 @@ function BeamLoopWidget() {
   );
 }
 
-function DashboardContent({ onSitesLoaded }: { onSitesLoaded: (sites: Site[]) => void }) {
+function DashboardContent({
+  onSitesLoaded,
+  onError,
+  retryKey,
+}: {
+  onSitesLoaded: (sites: Site[]) => void;
+  onError: (message: string) => void;
+  retryKey: number;
+}) {
   const router = useRouter();
 
   useEffect(() => {
@@ -158,8 +167,8 @@ function DashboardContent({ onSitesLoaded }: { onSitesLoaded: (sites: Site[]) =>
           router.push("/dashboard/onboarding");
         }
       })
-      .catch(() => {});
-  }, [router, onSitesLoaded]);
+      .catch((e: Error) => onError(e.message));
+  }, [router, onSitesLoaded, onError, retryKey]);
 
   return null;
 }
@@ -191,6 +200,8 @@ function ClerkTokenGate({ children }: { children: React.ReactNode }) {
 export default function DashboardPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   const handleSites = useState(() => (s: Site[]) => {
     setSites(s);
@@ -199,8 +210,20 @@ export default function DashboardPage() {
 
   const content = (
     <>
-      <DashboardContent onSitesLoaded={handleSites} />
-      {!loaded ? (
+      <DashboardContent
+        onSitesLoaded={handleSites}
+        onError={setError}
+        retryKey={retryKey}
+      />
+      {error ? (
+        <ErrorBanner
+          message={`Couldn't load your sites — ${error}`}
+          onRetry={() => {
+            setError(null);
+            setRetryKey((k) => k + 1);
+          }}
+        />
+      ) : !loaded ? (
         <p className="text-muted-foreground">Loading...</p>
       ) : (
         <div>

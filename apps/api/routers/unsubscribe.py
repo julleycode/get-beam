@@ -7,7 +7,7 @@ required because users click this from their email client.
 import structlog
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import HTMLResponse
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.database import get_db
@@ -73,10 +73,12 @@ async def unsubscribe(
     email_lower = email.strip().lower()
 
     try:
-        # 1. Check identified_visitors table (email is a direct column)
+        # 1. Check identified_visitors table (email is a direct column).
+        # Case-insensitive: stored emails may be mixed case (provider-supplied),
+        # so a plain equality against the lowercased input would miss them.
         result = await db.execute(
             select(IdentifiedVisitor).where(
-                IdentifiedVisitor.email == email_lower,
+                func.lower(IdentifiedVisitor.email) == email_lower,
             )
         )
         visitors = result.scalars().all()
@@ -94,7 +96,7 @@ async def unsubscribe(
             # 2. Check visitor_emails table (emails may be in a related table)
             ve_result = await db.execute(
                 select(VisitorEmail).where(
-                    VisitorEmail.email == email_lower,
+                    func.lower(VisitorEmail.email) == email_lower,
                 )
             )
             visitor_emails = ve_result.scalars().all()

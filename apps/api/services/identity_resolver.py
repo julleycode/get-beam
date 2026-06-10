@@ -511,6 +511,114 @@ class IdentityResolver:
             )
         return domain
 
+    # ──────────────── Helper: Identity-graph record matching ────────────────
+
+    # A provider record may only be attached to a visitor when its IP matches
+    # AND it was captured within this window of the visitor's own activity.
+    # Identity-graph feeds are account-wide (latest N identifications across
+    # ALL traffic), so bare IP equality risks attaching the wrong human —
+    # e.g. CGNAT/office IPs shared by many people across hours or days.
+    _IDENTITY_MATCH_WINDOW = timedelta(minutes=30)
+
+    # Field-name variants providers use for the record capture timestamp
+    # (same flexible-variant style as the ip/ipAddress/ip_address handling).
+    _RECORD_TIMESTAMP_FIELDS = (
+        "timestamp",
+        "capturedAt",
+        "captured_at",
+        "createdAt",
+        "created_at",
+        "identifiedAt",
+        "identified_at",
+        "lastSeen",
+        "last_seen",
+        "seenAt",
+        "seen_at",
+        "visitedAt",
+        "visited_at",
+        "date",
+    )
+
+    @classmethod
+    def _parse_record_timestamp(cls, record: dict) -> datetime | None:
+        """Best-effort parse of an identification record's capture time (UTC).
+
+        Accepts ISO-8601 strings (with or without 'Z'/offset) and epoch
+        seconds/milliseconds. Returns a timezone-aware UTC datetime, or None
+        when no usable timestamp field exists on the record.
+        """
+        for field in cls._RECORD_TIMESTAMP_FIELDS:
+            raw = record.get(field)
+            if raw is None or isinstance(raw, bool):
+                continue
+            if isinstance(raw, (int, float)):
+                ts = float(raw)
+                if ts > 1e12:  # epoch milliseconds
+                    ts /= 1000.0
+                try:
+                    return datetime.fromtimestamp(ts, tz=timezone.utc)
+                except (OverflowError, OSError, ValueError):
+                    continue
+            if isinstance(raw, str) and raw.strip():
+                try:
+                    parsed = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed.astimezone(timezone.utc)
+        return None
+
+    @staticmethod
+    def _visitor_activity_utc(visitor: Visitor) -> datetime:
+        """The visitor's most recent activity as an aware UTC datetime.
+
+        Visitor.last_seen is stored naive-UTC; fall back to "now" if missing.
+        """
+        last_seen = getattr(visitor, "last_seen", None)
+        if isinstance(last_seen, datetime):
+            if last_seen.tzinfo is None:
+                return last_seen.replace(tzinfo=timezone.utc)
+            return last_seen.astimezone(timezone.utc)
+        return datetime.now(timezone.utc)
+
+    def _record_matches_visitor(
+        self, record: dict, visitor: Visitor, provider: str
+    ) -> tuple[bool, bool]:
+        """Decide whether an identity-graph record belongs to this visitor.
+
+        Returns (matched, weak):
+          - (False, False): record is not this visitor (IP mismatch, or
+            timestamped outside the recency window) — caller must skip it.
+          - (True, False):  IP matches AND record timestamp is within
+            _IDENTITY_MATCH_WINDOW of the visitor's activity — strong match.
+          - (True, True):   IP matches but the record has no usable timestamp —
+            weak evidence; caller must cap confidence at <= 0.6.
+        """
+        record_ts = self._parse_record_timestamp(record)
+        if record_ts is None:
+            logger.warning(
+                "weak_ip_only_match",
+                provider=provider,
+                visitor_id=visitor.visitor_id[:8],
+                detail="record has no usable timestamp; IP equality only",
+            )
+            return (True, True)
+
+        delta = abs(record_ts - self._visitor_activity_utc(visitor))
+        if delta > self._IDENTITY_MATCH_WINDOW:
+            logger.debug(
+                "identity_graph_record_outside_window",
+                provider=provider,
+                visitor_id=visitor.visitor_id[:8],
+                delta_minutes=int(delta.total_seconds() // 60),
+            )
+            return (False, False)
+        return (True, False)
+
+    # Confidence ceiling for IP-only matches (no record timestamp available)
+    _WEAK_MATCH_MAX_CONFIDENCE = 0.6
+
     # ──────────────────── Provider: Leadpipe Identity Graph ────────────────────
 
     LEADPIPE_API_BASE = "https://api.aws53.cloud"
@@ -579,32 +687,34 @@ class IdentityResolver:
                 logger.debug("leadpipe_no_matches")
                 return None
 
-            # Find a match by IP address or page URL containing site domain
-            site_domain = None
-            if hasattr(visitor, "site_id"):
-                # Try to extract site domain from visitor's pages
-                pages = getattr(visitor, "pages_visited", []) or []
-                if pages:
-                    from urllib.parse import urlparse
-                    try:
-                        site_domain = urlparse(pages[0]).netloc
-                    except Exception:
-                        pass
-
+            # The feed is account-wide (latest N identifications across ALL
+            # traffic), so a record may only attach to this visitor on IP
+            # equality AND recency (_record_matches_visitor). The old
+            # "page URL contains site domain" fallback attached arbitrary
+            # humans and is intentionally gone.
             for lp_visitor in visitors_data:
-                lp_email = lp_visitor.get("email") or lp_visitor.get("emails", [None])[0] if isinstance(lp_visitor.get("emails"), list) and lp_visitor.get("emails") else lp_visitor.get("email")
+                lp_email = lp_visitor.get("email")
+                if not lp_email and isinstance(lp_visitor.get("emails"), list) and lp_visitor.get("emails"):
+                    lp_email = lp_visitor["emails"][0]
                 if not lp_email:
                     continue
 
-                # Match by IP if available
                 lp_ip = lp_visitor.get("ip") or lp_visitor.get("ipAddress")
-                if lp_ip and lp_ip == visitor.ip_address:
-                    return self._parse_leadpipe_person(lp_visitor)
+                if not lp_ip or lp_ip != visitor.ip_address:
+                    continue
 
-                # Match by page URL containing our site domain
-                lp_pages = lp_visitor.get("pagesViewed") or lp_visitor.get("pages") or []
-                if site_domain and any(site_domain in str(p) for p in lp_pages):
-                    return self._parse_leadpipe_person(lp_visitor)
+                matched, weak = self._record_matches_visitor(
+                    lp_visitor, visitor, "leadpipe"
+                )
+                if not matched:
+                    continue
+
+                person = self._parse_leadpipe_person(lp_visitor)
+                if weak:
+                    person["confidence_score"] = min(
+                        person["confidence_score"], self._WEAK_MATCH_MAX_CONFIDENCE
+                    )
+                return person
 
             logger.debug("leadpipe_no_ip_match", ip=visitor.ip_address[:8])
             return None
@@ -704,15 +814,29 @@ class IdentityResolver:
                 logger.debug("capturify_empty_response")
                 return None
 
+            # Account-wide feed: require IP equality AND recency, same as
+            # Leadpipe (see _record_matches_visitor).
             for cap_visitor in visitors_data:
-                # Match by IP address
                 cap_ip = (
                     cap_visitor.get("ip")
                     or cap_visitor.get("ipAddress")
                     or cap_visitor.get("ip_address")
                 )
-                if cap_ip and cap_ip == visitor.ip_address:
-                    return self._parse_capturify_person(cap_visitor)
+                if not cap_ip or cap_ip != visitor.ip_address:
+                    continue
+
+                matched, weak = self._record_matches_visitor(
+                    cap_visitor, visitor, "capturify"
+                )
+                if not matched:
+                    continue
+
+                person = self._parse_capturify_person(cap_visitor)
+                if weak:
+                    person["confidence_score"] = min(
+                        person["confidence_score"], self._WEAK_MATCH_MAX_CONFIDENCE
+                    )
+                return person
 
             logger.debug("capturify_no_ip_match", ip=visitor.ip_address[:8])
             return None
@@ -1256,6 +1380,12 @@ class IdentityResolver:
         """
         email = data.get("email")
         if email:
+            # Normalize before any persistence: providers return mixed-case
+            # addresses, while suppression (unsubscribe/bounce) and dedup
+            # match on lowercase. Single choke point — every provider's
+            # result passes through here.
+            email = email.strip().lower()
+            data["email"] = email
             from apps.api.services.email_validator import validate_email
             is_valid, reason = await validate_email(email)
             if not is_valid:
@@ -1274,7 +1404,9 @@ class IdentityResolver:
             existing_by_email = await self.db.execute(
                 select(IdentifiedVisitor).where(
                     IdentifiedVisitor.site_id == visitor.site_id,
-                    IdentifiedVisitor.email == data["email"],
+                    # lower() on the column too: rows saved before email
+                    # normalization may be mixed case.
+                    func.lower(IdentifiedVisitor.email) == data["email"],
                     IdentifiedVisitor.visitor_id != visitor.visitor_id,
                 )
             )

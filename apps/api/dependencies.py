@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.config import settings
 from apps.api.models.database import get_db
 from apps.api.models.user import User
+from apps.api.services.pii import mask_email
 
 logger = structlog.get_logger()
 
@@ -145,7 +146,7 @@ async def get_current_user(
                     logger.info(
                         "clerk_user_auto_created",
                         clerk_id=clerk_user_id,
-                        email=email,
+                        email=mask_email(email),
                     )
 
             return user

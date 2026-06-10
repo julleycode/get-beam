@@ -17,7 +17,10 @@ SEGMENTATION_THRESHOLD = 10
 
 @celery_app.task(name="apps.api.tasks.segmentation_tasks.check_segmentation_triggers")
 def check_segmentation_triggers() -> dict:
-    return asyncio.get_event_loop().run_until_complete(_check_triggers())
+    # asyncio.run (not get_event_loop().run_until_complete): reusing the
+    # worker's loop across tasks breaks asyncpg ("attached to a different
+    # loop") after the first task.
+    return asyncio.run(_check_triggers())
 
 
 async def _check_triggers() -> dict:
@@ -28,15 +31,20 @@ async def _check_triggers() -> dict:
     triggered = 0
     for site in sites:
         async with async_session() as db:
+            # Count only NEW (unsegmented) enriched visitors. Counting all
+            # enriched visitors made this hourly task re-run segmentation —
+            # and re-pay 3-6 Claude calls — forever once a site crossed the
+            # threshold, flooding segments/campaigns with duplicates.
             count_result = await db.execute(
                 select(func.count()).select_from(Visitor).where(
                     Visitor.site_id == site.site_id,
                     Visitor.enrichment_status == "enriched",
+                    Visitor.segmented == False,  # noqa: E712
                 )
             )
-            enriched_count = count_result.scalar() or 0
+            new_enriched_count = count_result.scalar() or 0
 
-            if enriched_count >= SEGMENTATION_THRESHOLD:
+            if new_enriched_count >= SEGMENTATION_THRESHOLD:
                 await _run_segmentation_for_site(db, site)
                 triggered += 1
 
@@ -51,6 +59,8 @@ async def _run_segmentation_for_site(db, site: Site) -> None:
         ).order_by(Visitor.intent_score.desc()).limit(50)
     )
     visitors = list(result.scalars().all())
+    if not visitors:
+        return
 
     segments = await run_segmentation(
         db=db,
@@ -73,12 +83,27 @@ async def _run_segmentation_for_site(db, site: Site) -> None:
         if segment_profiles:
             await plan_campaign(db, segment, segment_profiles)
 
+    # Mark the processed visitors segmented in the same session so the next
+    # hourly tick doesn't count them as "new" and re-bill the AI calls.
+    from sqlalchemy import update
+
+    await db.execute(
+        update(Visitor)
+        .where(
+            Visitor.site_id == site.site_id,
+            Visitor.visitor_id.in_([v.visitor_id for v in visitors]),
+        )
+        .values(segmented=True)
+    )
+    await db.commit()
+
     logger.info("segmentation_triggered", site_id=site.site_id, segments=len(segments))
 
 
 @celery_app.task(name="apps.api.tasks.segmentation_tasks.run_segmentation_manual")
 def run_segmentation_manual(site_id: str) -> dict:
-    return asyncio.get_event_loop().run_until_complete(_run_manual(site_id))
+    # asyncio.run — see check_segmentation_triggers.
+    return asyncio.run(_run_manual(site_id))
 
 
 async def _run_manual(site_id: str) -> dict:

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, Site, ApiKeyInfo } from "@/lib/api";
+import { ErrorBanner } from "@/components/error-banner";
 import { SiteSelector } from "@/components/site-selector";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +43,8 @@ export default function SettingsPage() {
   const searchParams = useSearchParams();
   const [siteId, setSiteId] = useState(searchParams.get("site") || "");
   const [site, setSite] = useState<Site | null>(null);
+  const [siteError, setSiteError] = useState<string | null>(null);
+  const [siteRetryKey, setSiteRetryKey] = useState(0);
   const [snippet, setSnippet] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -59,21 +62,32 @@ export default function SettingsPage() {
   const [addKeyValue, setAddKeyValue] = useState("");
   const [addingKey, setAddingKey] = useState(false);
   const [keyError, setKeyError] = useState("");
+  const [keysLoadError, setKeysLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!siteId) return;
-    api.getSite(siteId).then(setSite).catch(() => {});
+    setSiteError(null);
+    api
+      .getSite(siteId)
+      .then(setSite)
+      .catch((e: Error) => setSiteError(e.message));
     api
       .getPixelSnippet(siteId)
       .then((r) => setSnippet(r.snippet))
       .catch(() => {});
     setVerifyResult(null);
-  }, [siteId]);
+  }, [siteId, siteRetryKey]);
 
   // Load API keys (not site-specific)
-  useEffect(() => {
-    api.listApiKeys().then(setApiKeys).catch(() => {});
-  }, []);
+  function loadApiKeys() {
+    setKeysLoadError(null);
+    api
+      .listApiKeys()
+      .then(setApiKeys)
+      .catch((e: Error) => setKeysLoadError(e.message));
+  }
+
+  useEffect(loadApiKeys, []);
 
   function handleCopy() {
     navigator.clipboard.writeText(snippet);
@@ -147,7 +161,12 @@ export default function SettingsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Existing keys */}
-          {apiKeys.length > 0 ? (
+          {keysLoadError ? (
+            <ErrorBanner
+              message={`Couldn't load API keys — ${keysLoadError}`}
+              onRetry={loadApiKeys}
+            />
+          ) : apiKeys.length > 0 ? (
             <div className="space-y-2">
               {apiKeys.map((key) => {
                 const provider = PROVIDERS.find((p) => p.id === key.provider);
@@ -261,6 +280,11 @@ export default function SettingsPage() {
 
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view settings.</p>
+      ) : siteError ? (
+        <ErrorBanner
+          message={`Couldn't load site settings — ${siteError}`}
+          onRetry={() => setSiteRetryKey((k) => k + 1)}
+        />
       ) : !site ? (
         <p className="text-muted-foreground">Loading...</p>
       ) : (

@@ -167,10 +167,18 @@ async def _process_signal_events(db: AsyncSession, batch: EventBatch) -> None:
 
     # Persist fingerprint from events onto the visitor row (best-effort)
     # Any event with _fp set is sufficient; we use the first one found.
+    # The pixel emits "fp2_<hash128>" (apps/pixel/src/tracker.js); older pixel
+    # builds emitted "fp_<hash>" — accept both. Cap at the visitors.fingerprint
+    # column length (64) so a malformed value can't fail the UPDATE.
     fp_value: str | None = None
     for event in batch.events:
         raw_fp = event.fp
-        if raw_fp and isinstance(raw_fp, str) and raw_fp.startswith("fp_"):
+        if (
+            raw_fp
+            and isinstance(raw_fp, str)
+            and raw_fp.startswith(("fp_", "fp2_"))
+            and len(raw_fp) <= 64
+        ):
             fp_value = raw_fp
             break
 

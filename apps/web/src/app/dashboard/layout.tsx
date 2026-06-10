@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
@@ -24,12 +24,18 @@ const EASYENGAGE_ITEMS = [
   { href: "/dashboard/social-accounts", label: "Social Accounts" },
 ];
 
-const BOTTOM_ITEMS = [
+// adminOnly items are hidden until /auth/me confirms is_admin (no flash for
+// non-admins while loading — the backend rejects non-admins on those pages).
+const BOTTOM_ITEMS: { href: string; label: string; adminOnly?: boolean }[] = [
   { href: "/dashboard/billing", label: "Billing" },
-  { href: "/dashboard/waitlist", label: "Waitlist" },
-  { href: "/dashboard/feature-requests", label: "Feature Requests" },
+  { href: "/dashboard/waitlist", label: "Waitlist", adminOnly: true },
+  { href: "/dashboard/feature-requests", label: "Feature Requests", adminOnly: true },
   { href: "/dashboard/settings", label: "Settings" },
 ];
+
+// Set by the sign-up page so the invite token survives Clerk's multi-step
+// signup flow (see sign-up/[[...sign-up]]/page.tsx).
+const INVITE_TOKEN_KEY = "beam_invite";
 
 function NavLink({
   href,
@@ -101,6 +107,7 @@ function LegacySignOutButton() {
 function ClerkAuthGuard() {
   const { isLoaded, isSignedIn } = useAuth();
   const router = useRouter();
+  const consumeAttempted = useRef(false);
 
   useEffect(() => {
     // Only redirect once Clerk has fully resolved the session. Acting on a
@@ -111,6 +118,35 @@ function ClerkAuthGuard() {
       router.replace("/sign-in");
     }
   }, [isLoaded, isSignedIn, router]);
+
+  useEffect(() => {
+    // Mark the invite token used on the first signed-in dashboard visit so a
+    // forwarded invite link can't mint unlimited accounts. One attempt per
+    // mount; on terminal outcomes (consumed/invalid) the token is discarded,
+    // on transient failures it stays for a later visit.
+    if (!isLoaded || !isSignedIn || consumeAttempted.current) return;
+    let inviteToken: string | null = null;
+    try {
+      inviteToken = sessionStorage.getItem(INVITE_TOKEN_KEY);
+    } catch {
+      return; // sessionStorage blocked — nothing to consume
+    }
+    if (!inviteToken) return;
+    if (!api.getToken()) return; // API token not synced yet; retry next mount
+    consumeAttempted.current = true;
+    api
+      .consumeInvite(inviteToken)
+      .then(() => {
+        try {
+          sessionStorage.removeItem(INVITE_TOKEN_KEY);
+        } catch {
+          /* ignore */
+        }
+      })
+      .catch((err) => {
+        console.warn("consume-invite failed (will retry next visit)", err);
+      });
+  }, [isLoaded, isSignedIn]);
 
   return null;
 }
@@ -123,6 +159,7 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
   const [userEmail, setUserEmail] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
     const token = api.getToken();
@@ -133,7 +170,10 @@ export default function DashboardLayout({
     }
     api
       .getMe()
-      .then((u) => setUserEmail(u.email))
+      .then((u) => {
+        setUserEmail(u.email);
+        setIsAdmin(u.is_admin === true);
+      })
       .catch(() => {
         if (!HAS_CLERK) {
           api.clearToken();
@@ -186,9 +226,16 @@ export default function DashboardLayout({
 
           <div className="flex-1" />
 
-          {BOTTOM_ITEMS.map((item) => (
-            <NavLink key={item.href} {...item} pathname={pathname} />
-          ))}
+          {BOTTOM_ITEMS.filter((item) => !item.adminOnly || isAdmin).map(
+            (item) => (
+              <NavLink
+                key={item.href}
+                href={item.href}
+                label={item.label}
+                pathname={pathname}
+              />
+            )
+          )}
         </nav>
         <Separator className="my-2" />
         {HAS_CLERK ? <ClerkSignOutButton /> : <LegacySignOutButton />}
