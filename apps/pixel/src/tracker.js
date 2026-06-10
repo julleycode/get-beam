@@ -165,26 +165,49 @@
     lsSet(QUEUE_KEY, JSON.stringify(queue));
   }
 
+  // Drop the first n queued events only AFTER the transport confirmed them.
+  // Events queued while a send was in flight survive for the next flush.
+  function confirmSent(n) {
+    queue = queue.slice(n);
+    if (queue.length === 0) lsDel(QUEUE_KEY);
+    else lsSet(QUEUE_KEY, JSON.stringify(queue));
+  }
+
+  var xhrInFlight = false;
+
   function flush() {
     if (queue.length === 0) return;
 
-    var batch = queue.splice(0);
-    lsDel(QUEUE_KEY);
-
+    var batch = queue.slice(0);
     var payload = JSON.stringify({
       site_id: SITE_ID,
       visitor_id: visitorId,
       events: batch
     });
 
-    if (navigator.sendBeacon) {
-      navigator.sendBeacon(ENDPOINT, new Blob([payload], { type: "text/plain" }));
-    } else {
-      var xhr = new XMLHttpRequest();
-      xhr.open("POST", ENDPOINT, true);
-      xhr.setRequestHeader("Content-Type", "application/json");
-      xhr.send(payload);
+    // sendBeacon returns true only when the browser accepted the payload for
+    // delivery — that's the strongest confirmation it offers, so clear then.
+    // false (payload too large / too many in-flight beacons) falls through to
+    // XHR. The old code cleared queue + localStorage BEFORE sending, which
+    // silently and permanently lost events on any failure.
+    if (navigator.sendBeacon &&
+        navigator.sendBeacon(ENDPOINT, new Blob([payload], { type: "text/plain" }))) {
+      confirmSent(batch.length);
+      return;
     }
+
+    if (xhrInFlight) return; // one XHR at a time; retry on next interval
+    xhrInFlight = true;
+    var xhr = new XMLHttpRequest();
+    xhr.open("POST", ENDPOINT, true);
+    xhr.setRequestHeader("Content-Type", "application/json");
+    xhr.onload = function() {
+      xhrInFlight = false;
+      if (xhr.status >= 200 && xhr.status < 300) confirmSent(batch.length);
+      // non-2xx: keep queue + localStorage and retry on the next interval
+    };
+    xhr.onerror = xhr.ontimeout = function() { xhrInFlight = false; };
+    xhr.send(payload);
   }
 
   // --- Pageview ---
@@ -244,6 +267,65 @@
   // Track initial pageview
   trackPageview();
 
+  // --- Engagement signals: scroll depth, time on page, clicks ---
+  // Intent scoring awards points for scroll>=75 and time>60s; without these
+  // emitters those columns stay 0 and single-session visitors can never
+  // reach the identity-resolution threshold.
+
+  var pageStart = Date.now();
+  var maxDepth = 0;
+  var clickCount = 0;
+
+  function scrollDepth() {
+    try {
+      var doc = document.documentElement;
+      var total = Math.max(doc.scrollHeight, document.body ? document.body.scrollHeight : 0);
+      if (!total) return 0;
+      var seen = (window.pageYOffset || doc.scrollTop || 0) + window.innerHeight;
+      var pct = Math.round((seen / total) * 100);
+      return pct > 100 ? 100 : pct;
+    } catch (e) { return 0; }
+  }
+
+  window.addEventListener("scroll", function() {
+    var d = scrollDepth();
+    if (d > maxDepth) maxDepth = d;
+  }, { passive: true });
+
+  document.addEventListener("click", function(e) {
+    try {
+      if (clickCount >= 25) return; // bound payload per page
+      var el = e.target && e.target.closest ? e.target.closest("a,button") : null;
+      if (!el) return;
+      clickCount++;
+      pushEvent({
+        type: "click",
+        element_text: (el.textContent || "").trim().slice(0, 80),
+        element_href: el.href || "",
+        url: window.location.href,
+        ts: now()
+      });
+    } catch (err) {}
+  }, true);
+
+  // Emit accumulated scroll + time for the page being left (SPA nav, tab
+  // hide, unload). Counters reset after emit, so repeated hide/show cycles
+  // produce additive time chunks instead of double-counting.
+  function emitPageSignals(url) {
+    var secs = Math.round((Date.now() - pageStart) / 1000);
+    if (secs > 0) {
+      pushEvent({ type: "time_on_page", seconds: secs > 7200 ? 7200 : secs, url: url, ts: now() });
+    }
+    var d = scrollDepth();
+    if (d > maxDepth) maxDepth = d;
+    if (maxDepth > 0) {
+      pushEvent({ type: "scroll", depth: maxDepth, url: url, ts: now() });
+    }
+    pageStart = Date.now();
+    maxDepth = 0;
+    clickCount = 0;
+  }
+
   // --- SPA Navigation Tracking ---
 
   var lastUrl = window.location.href;
@@ -251,6 +333,7 @@
   function onNavigation() {
     var currentUrl = window.location.href;
     if (currentUrl !== lastUrl) {
+      emitPageSignals(lastUrl); // close out the page we're leaving
       lastUrl = currentUrl;
       trackPageview();
     }
@@ -279,17 +362,37 @@
 
   setInterval(flush, BATCH_INTERVAL);
 
-  window.addEventListener("beforeunload", flush);
-  window.addEventListener("pagehide", flush);
+  function leavePage() {
+    emitPageSignals(window.location.href);
+    flush();
+  }
+
+  window.addEventListener("beforeunload", leavePage);
+  window.addEventListener("pagehide", leavePage);
   document.addEventListener("visibilitychange", function() {
-    if (document.visibilityState === "hidden") flush();
+    if (document.visibilityState === "hidden") leavePage();
   });
 
-  // --- Identity graph pixel stacking ---
-  var _DP=[{t:"leadpipe",id:"95247db8-8d49-4213-8ea7-ee0a6dd0ae78"}];
-  var _PU={leadpipe:function(d){return"https://leadpipe.aws53.cloud/p/"+d+".js"},capturify:function(d){return"https://app.capturify.io/pixel/"+d+".js"},fullcontact:function(d){return"https://app.fullcontact.com/tag/"+d+".js"},customers_ai:function(d){return"https://app.customers.ai/pixel/"+d+"/xray.js"}};
-  var _pa=script.getAttribute("data-identity-providers"),_lp=script.getAttribute("data-lp"),_pv=_DP;
-  if(_pa){try{_pv=JSON.parse(_pa)}catch(e){}}
-  if(_lp&&!_pa){_pv=_pv.concat([{t:"leadpipe",id:_lp}])}
-  for(var _i=0;_i<_pv.length;_i++){var _p=_pv[_i],_fn=_PU[_p.t||_p.type];if(_fn&&(_p.id)){var _s=document.createElement("script");_s.src=_fn(_p.id);_s.async=true;document.head.appendChild(_s)}}
+  // --- Identity-vendor pixel stacking (STRICTLY OPT-IN, default OFF) ---
+  // Loads a third-party identity script ONLY when the install snippet sets
+  // data-stack="1" AND supplies that vendor's id via data-stack-<vendor>,
+  // e.g. data-stack-leadpipe="<account-id>". Vendors without an id are
+  // skipped. No vendor account id ships in this file.
+  if (script.getAttribute("data-stack") === "1") {
+    var vendorUrls = {
+      "leadpipe": function(d) { return "https://leadpipe.aws53.cloud/p/" + d + ".js"; },
+      "capturify": function(d) { return "https://app.capturify.io/pixel/" + d + ".js"; },
+      "fullcontact": function(d) { return "https://app.fullcontact.com/tag/" + d + ".js"; },
+      "customers-ai": function(d) { return "https://app.customers.ai/pixel/" + d + "/xray.js"; }
+    };
+    for (var vk in vendorUrls) {
+      var vendorId = script.getAttribute("data-stack-" + vk);
+      if (vendorId) {
+        var vs = document.createElement("script");
+        vs.src = vendorUrls[vk](encodeURIComponent(vendorId));
+        vs.async = true;
+        document.head.appendChild(vs);
+      }
+    }
+  }
 })();

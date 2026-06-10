@@ -23,6 +23,7 @@ from apps.api.models.database import async_session
 from apps.api.models.visitor import Visitor
 from apps.api.routers.social_auth import limiter
 from apps.api.services.identity_resolver import IdentityResolver
+from apps.api.services.pii import mask_email
 from apps.api.services.platform_detector import detect_platform
 from apps.api.services.redis_client import get_redis
 
@@ -522,7 +523,7 @@ async def join_waitlist(request: Request, body: WaitlistRequest) -> dict:
     if not email or "@" not in email:
         return {"status": "invalid"}
 
-    logger.info("waitlist_signup", email=email)
+    logger.info("waitlist_signup", email=mask_email(email))
 
     # Store in waitlist_signups table (upsert: ignore duplicate emails)
     try:
@@ -583,7 +584,7 @@ async def join_waitlist(request: Request, body: WaitlistRequest) -> dict:
             from_email="hello@getbeam.fyi",
         )
     except Exception as e:
-        logger.warning("waitlist_confirmation_email_failed", email=email, error=str(e))
+        logger.warning("waitlist_confirmation_email_failed", email=mask_email(email), error=str(e))
 
     # Send notification to admin
     try:

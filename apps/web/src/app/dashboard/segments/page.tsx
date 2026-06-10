@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, Segment } from "@/lib/api";
+import { ErrorBanner } from "@/components/error-banner";
 import { SiteSelector } from "@/components/site-selector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,12 +22,18 @@ export default function SegmentsPage() {
   const [siteId, setSiteId] = useState(searchParams.get("site") || "");
   const [segments, setSegments] = useState<Segment[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [triggering, setTriggering] = useState(false);
 
   function loadSegments() {
     if (!siteId) return;
     setLoading(true);
-    api.listSegments(siteId).then((r) => setSegments(r.segments)).catch(() => {}).finally(() => setLoading(false));
+    setError(null);
+    api
+      .listSegments(siteId)
+      .then((r) => setSegments(r.segments))
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
   }
 
   useEffect(loadSegments, [siteId]);
@@ -60,6 +67,11 @@ export default function SegmentsPage() {
         <p className="text-muted-foreground">Select a site to view segments.</p>
       ) : loading ? (
         <p className="text-muted-foreground">Loading...</p>
+      ) : error ? (
+        <ErrorBanner
+          message={`Couldn't load segments — ${error}`}
+          onRetry={loadSegments}
+        />
       ) : segments.length === 0 ? (
         <p className="text-muted-foreground">
           No segments yet. Segments are auto-generated when 50+ visitors are enriched, or click &quot;Re-run segmentation&quot; to trigger manually.

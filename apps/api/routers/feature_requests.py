@@ -1,4 +1,4 @@
-"""Feature requests — public submit, owner-only listing + status management."""
+"""Feature requests — public submit, admin-only listing + status management."""
 
 import uuid
 
@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.dependencies import get_current_user
+from apps.api.dependencies import require_admin
 from apps.api.models.database import get_db
 from apps.api.models.feature_request import FeatureRequest
 from apps.api.models.user import User
@@ -18,6 +18,7 @@ from apps.api.schemas.feature_requests import (
     FeatureRequestUpdate,
 )
 from apps.api.services.email_sender import EmailSender
+from apps.api.services.pii import mask_email
 
 logger = structlog.get_logger()
 
@@ -97,7 +98,7 @@ async def _notify_requester_status_change(
             from_name="Beam",
         )
     except Exception:
-        logger.warning("requester_notification_failed", request_id=str(req.id), email=req.email)
+        logger.warning("requester_notification_failed", request_id=str(req.id), email=mask_email(req.email))
 
 
 @router.post("", response_model=FeatureRequestOut, status_code=201)
@@ -138,10 +139,10 @@ async def list_feature_requests(
     status: str | None = Query(None, description="Filter by status: new / planned / shipped / closed"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> FeatureRequestListResponse:
-    """Owner-only — view submitted feature requests (auth required)."""
+    """Admin-only — view submitted feature requests (contains requester emails)."""
     query = select(FeatureRequest)
     count_query = select(func.count()).select_from(FeatureRequest)
     if status:
@@ -162,10 +163,10 @@ async def list_feature_requests(
 async def update_feature_request(
     request_id: uuid.UUID,
     body: FeatureRequestUpdate,
-    _user: User = Depends(get_current_user),
+    _user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> FeatureRequestOut:
-    """Owner-only — update status and/or admin note on a feature request."""
+    """Admin-only — update status and/or admin note on a feature request."""
     result = await db.execute(select(FeatureRequest).where(FeatureRequest.id == request_id))
     req = result.scalar_one_or_none()
     if not req:

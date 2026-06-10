@@ -13,7 +13,7 @@ import hmac
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import update
+from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
@@ -60,9 +60,11 @@ async def sendgrid_events(
             continue
         if event_type == "bounce" and (ev.get("type") or "bounce").lower() not in _HARD_BOUNCE_TYPES:
             continue
+        # Case-insensitive: stored emails may be mixed case (provider-supplied);
+        # `email` is already stripped + lowercased above.
         await db.execute(
             update(IdentifiedVisitor)
-            .where(IdentifiedVisitor.email == email)
+            .where(func.lower(IdentifiedVisitor.email) == email)
             .values(do_not_email=True)
         )
         suppressed += 1

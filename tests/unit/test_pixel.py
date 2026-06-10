@@ -65,26 +65,33 @@ class TestPixelRemovedFeatures:
         assert "getScrollPercent" not in pixel_code
         assert "scrollThresholds" not in pixel_code
 
-    def test_no_click_tracking(self, pixel_code: str):
-        assert "element_text" not in pixel_code
-        assert "element_href" not in pixel_code
+    def test_click_tracking_bounded(self, pixel_code: str):
+        # Click tracking is back (intent signal) but must stay bounded so a
+        # click-happy page can't flood the batch payload.
+        assert "element_text" in pixel_code
+        assert "element_href" in pixel_code
+        assert "clickCount >= 25" in pixel_code
 
     def test_has_visibility_tracking(self, pixel_code: str):
         assert "visibilitychange" in pixel_code
 
-    def test_no_time_on_page_pings(self, pixel_code: str):
-        # Should not have time_on_page event type in the pixel
-        # (the schema still accepts it from old data, but pixel shouldn't send it)
-        assert '"time_on_page"' not in pixel_code
+    def test_emits_engagement_signals(self, pixel_code: str):
+        # Intent scoring needs scroll depth + time on page (+15 / +10 points);
+        # without these emitters single-session visitors can never reach the
+        # >=40 identity-resolution threshold.
+        assert '"time_on_page"' in pixel_code
+        assert '"scroll"' in pixel_code
+        assert '"click"' in pixel_code
 
 
 class TestPixelSize:
     """Pixel should be small and efficient."""
 
-    def test_under_10kb(self, pixel_code: str):
-        # Bumped to 10KB raw after fingerprint v2 (17 signals, canvas, WebGL)
-        # Gzipped size is the real constraint (under 5KB) — tested in test_pixel_fingerprint.py
-        assert len(pixel_code.encode()) < 10000, f"Pixel is {len(pixel_code.encode())} bytes, should be under 10KB"
+    def test_under_16kb(self, pixel_code: str):
+        # Bumped to 16KB raw after engagement emitters (scroll/time/click) +
+        # confirm-before-clear flush. Gzipped size is the real product
+        # constraint (under 5KB per CLAUDE.md) — tested in test_pixel_fingerprint.py
+        assert len(pixel_code.encode()) < 16000, f"Pixel is {len(pixel_code.encode())} bytes, should be under 16KB"
 
     def test_is_iife(self, pixel_code: str):
         """Should be wrapped in an IIFE for isolation."""

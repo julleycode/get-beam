@@ -78,3 +78,48 @@ class TestAutomationTools:
     ])
     def test_detects_automation_tools(self, ua: str):
         assert is_bot(ua) is True
+
+
+class TestInAppBrowsers:
+    """Real-world social in-app browser UAs are humans, NOT bots."""
+
+    @pytest.mark.parametrize("ua", [
+        # Snapchat in-app browser on iPhone
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/21F90 Snapchat/13.0.0.0 (like Safari/8617.1.17.0.4)",
+        # Instagram in-app browser on Android
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/124.0.0.0 Mobile Safari/537.36 Instagram 320.0.0.42.101",
+        # Facebook (FBAV/FBAN) in-app browser on iPhone
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/21E236 [FBAN/FBIOS;FBAV/460.0.0.31.106;FBDV/iPhone15,3;FBMD/iPhone;FBSN/iOS;FBSV/17.4.1]",
+        # TikTok in-app browser on Android
+        "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/123.0.0.0 Mobile Safari/537.36 musical_ly_2023.0 JsSdk/1.0 NetType/WIFI Channel/googleplay AppName/musical_ly",
+        # LINE in-app browser on iPhone
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1 Line/13.12.0",
+        # WeChat (MicroMessenger) in-app browser on Android
+        "Mozilla/5.0 (Linux; Android 12; Mi 10) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/107.0.5304.141 Mobile Safari/537.36 XWEB/5023 MMWEBSDK/20230504 MicroMessenger/8.0.37",
+    ])
+    def test_in_app_browsers_are_not_bots(self, ua: str):
+        assert is_bot(ua) is False
+
+    def test_snapchat_link_preview_without_mobile_marker_is_bot(self):
+        # Snapchat's server-side URL preview fetcher has no Mobile/iPhone/Android
+        # marker — must still be caught by the \bsnap pattern.
+        assert is_bot("Snapchat/1.0 (+https://www.snapchat.com/web-crawler)") is True
+
+
+class TestWordBoundaryTokens:
+    """Broad tokens (java, preview, embed) must be word-bounded."""
+
+    def test_javascript_in_ua_is_not_bot(self):
+        # "java" as a substring of "javascript" must NOT match
+        assert is_bot(
+            "Mozilla/5.0 (compatible; MyApp; javascript enabled) AppleWebKit/537.36"
+        ) is False
+
+    def test_java_http_client_is_bot(self):
+        assert is_bot("Java/17.0.1 (Oracle Corporation; HttpClient)") is True
+
+    def test_preview_bot_is_still_detected(self):
+        assert is_bot("Mozilla/5.0 (compatible; Link Preview Service/1.0)") is True
+
+    def test_embed_fetcher_is_still_detected(self):
+        assert is_bot("Mozilla/5.0 (compatible; Embedly/0.2; +https://embed.ly)") is True

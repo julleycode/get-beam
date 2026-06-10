@@ -26,16 +26,27 @@ export default function ExportsPage() {
   const [segments, setSegments] = useState<Segment[]>([]);
   const [selectedSegment, setSelectedSegment] = useState("");
   const [platform, setPlatform] = useState("meta");
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!siteId) return;
     api.listSegments(siteId).then((r) => setSegments(r.segments)).catch(() => {});
   }, [siteId]);
 
-  function handleExport() {
+  async function handleExport() {
     if (!selectedSegment || !siteId) return;
-    const url = api.getExportUrl(siteId, selectedSegment, platform);
-    window.open(url, "_blank");
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      await api.downloadExport(siteId, selectedSegment, platform);
+    } catch (err) {
+      setDownloadError(
+        err instanceof Error ? err.message : "Failed to download export"
+      );
+    } finally {
+      setDownloading(false);
+    }
   }
 
   return (
@@ -88,10 +99,14 @@ export default function ExportsPage() {
           <Button
             className="w-full"
             onClick={handleExport}
-            disabled={!selectedSegment}
+            disabled={!selectedSegment || downloading}
           >
-            Download CSV
+            {downloading ? "Downloading..." : "Download CSV"}
           </Button>
+
+          {downloadError && (
+            <p className="text-sm text-destructive">{downloadError}</p>
+          )}
         </CardContent>
       </Card>
     </div>

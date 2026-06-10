@@ -105,6 +105,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS context_summary VARCHAR(500)",
             # Feature requests: admin note for status management
             "ALTER TABLE feature_requests ADD COLUMN IF NOT EXISTS admin_note TEXT",
+            # Waitlist: one-use invite tokens (consumed at signup)
+            "ALTER TABLE waitlist_signups ADD COLUMN IF NOT EXISTS used_at TIMESTAMP WITH TIME ZONE",
+            "ALTER TABLE waitlist_signups ADD COLUMN IF NOT EXISTS used_by_clerk_user_id VARCHAR(255)",
         ]:
             try:
                 await conn.execute(__import__("sqlalchemy").text(stmt))

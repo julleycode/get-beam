@@ -31,6 +31,11 @@ async def _get_segment_visitors(
             select(IdentifiedVisitor).where(
                 IdentifiedVisitor.site_id == member.site_id,
                 IdentifiedVisitor.visitor_id == member.visitor_id,
+                # Compliance: never export unsubscribed / hard-bounced contacts
+                # to ad audiences. IS NOT TRUE also keeps non-suppressed rows if
+                # the column were ever NULL (it is NOT NULL per the model; this
+                # form is just defensive against schema drift).
+                IdentifiedVisitor.do_not_email.is_not(True),
             )
         )
         identified = id_result.scalar_one_or_none()

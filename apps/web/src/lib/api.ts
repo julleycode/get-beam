@@ -96,9 +96,12 @@ class ApiClient {
   }
 
   async getMe() {
-    return this.request<{ id: string; email: string; full_name: string | null }>(
-      "/api/v1/auth/me"
-    );
+    return this.request<{
+      id: string;
+      email: string;
+      full_name: string | null;
+      is_admin?: boolean;
+    }>("/api/v1/auth/me");
   }
 
   // Feature requests (submitted from the landing page FAB)
@@ -273,9 +276,32 @@ class ApiClient {
     return `${API_BASE}/api/v1/sites/${siteId}/wordpress-plugin`;
   }
 
-  // Exports
-  getExportUrl(siteId: string, segmentId: string, platform: string): string {
-    return `${API_BASE}/api/v1/exports/${siteId}/${segmentId}?platform=${platform}`;
+  // Exports — authenticated blob download (the endpoint requires a Bearer
+  // token, so a plain link/window.open would 401)
+  async downloadExport(
+    siteId: string,
+    segmentId: string,
+    platform: string
+  ): Promise<void> {
+    const token = this.getToken();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    const res = await fetch(
+      `${API_BASE}/api/v1/exports/${siteId}/${segmentId}?platform=${platform}`,
+      { headers }
+    );
+    if (!res.ok) throw new Error("Failed to download export");
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${platform}_audience_${segmentId.slice(0, 8)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   // BYOK API Keys
@@ -475,6 +501,38 @@ class ApiClient {
     return this.request<{ valid: boolean; email?: string | null }>(
       `/api/v1/waitlist/validate-invite?token=${encodeURIComponent(token)}`
     );
+  }
+
+  /**
+   * Consume an invite token after first sign-in. Returns "consumed" on
+   * success and "invalid" on 404 (unknown token, or already used by another
+   * user) — both terminal, so callers can discard the stored token. Throws on
+   * transient failures (network, 5xx) so callers can retry on a later visit.
+   * Idempotent for the same user.
+   */
+  async consumeInvite(token: string): Promise<"consumed" | "invalid"> {
+    const authToken = this.getToken();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (authToken) {
+      headers["Authorization"] = `Bearer ${authToken}`;
+    }
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/api/v1/waitlist/consume-invite`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ token }),
+      });
+    } catch (err) {
+      throw new Error(
+        `Network error: unable to reach API (${(err as Error).message})`
+      );
+    }
+    if (res.status === 404) return "invalid";
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+    return "consumed";
   }
 
   // ── Billing ────────────────────────────────────────────

@@ -1,23 +1,43 @@
 """Admin waitlist management endpoints."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.dependencies import require_admin
+from apps.api.dependencies import get_current_user, require_admin
 from apps.api.models.database import get_db
 from apps.api.models.user import User
 from apps.api.models.waitlist import WaitlistSignup
+from apps.api.schemas.waitlist import ConsumeInviteRequest
 from apps.api.services.link_decorator import generate_bid
 from apps.api.services.email_sender import EmailSender
+from apps.api.services.pii import mask_email
 
 logger = structlog.get_logger()
 
 router = APIRouter(tags=["waitlist"])
+
+INVITE_TTL_DAYS = 14
+
+
+def _invite_expired(approved_at: datetime | None) -> bool:
+    """True if the invite was approved more than INVITE_TTL_DAYS ago.
+
+    Rows with no approved_at (shouldn't happen — approve always sets it
+    alongside invite_token) are treated as non-expired rather than locking
+    out a legitimately issued token.
+    """
+    if approved_at is None:
+        return False
+    # Column is timestamptz; asyncpg returns tz-aware values. Normalize just
+    # in case a driver/test DB hands back a naive datetime (stored as UTC).
+    if approved_at.tzinfo is None:
+        approved_at = approved_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - approved_at > timedelta(days=INVITE_TTL_DAYS)
 
 
 @router.get("/")
@@ -69,6 +89,9 @@ async def validate_invite(
     """Public: check an invite token. Returns {valid, email} when the token maps
     to an approved/granted waitlist signup — used to gate the signup page so only
     invited people can create an account. No auth (runs before the account exists).
+
+    Already-consumed and expired (>INVITE_TTL_DAYS since approval) tokens are
+    rejected with the same response shape as invalid ones — no enumeration.
     """
     if not token:
         return {"valid": False}
@@ -81,7 +104,58 @@ async def validate_invite(
     signup = result.scalar_one_or_none()
     if not signup:
         return {"valid": False}
+    if signup.used_at is not None or _invite_expired(signup.approved_at):
+        return {"valid": False}
     return {"valid": True, "email": signup.email}
+
+
+@router.post("/consume-invite")
+async def consume_invite(
+    body: ConsumeInviteRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Mark an invite token as used by the authenticated user (one-use enforcement).
+
+    Called right after account creation. Idempotent for the same user (retries
+    return {"consumed": true}). Invalid, expired, or already-used-by-another-user
+    tokens all get the same generic 404 — no token/email enumeration.
+    """
+    token = body.token.strip()
+    not_found = HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found"
+    )
+    if not token:
+        raise not_found
+
+    result = await db.execute(
+        select(WaitlistSignup).where(
+            WaitlistSignup.invite_token == token,
+            WaitlistSignup.status.in_(["approved", "granted"]),
+        )
+    )
+    signup = result.scalar_one_or_none()
+    if not signup or _invite_expired(signup.approved_at):
+        raise not_found
+
+    consumer_id: str = user.clerk_user_id or str(user.id)
+
+    if signup.used_at is not None:
+        if signup.used_by_clerk_user_id == consumer_id:
+            # Same user retrying (e.g. page refresh after signup) — idempotent.
+            return {"consumed": True}
+        logger.warning(
+            "waitlist_invite_reuse_blocked", signup_id=str(signup.id)
+        )
+        raise not_found
+
+    # used_at is timestamptz (like approved_at) — tz-aware value is correct here.
+    signup.used_at = datetime.now(timezone.utc)
+    signup.used_by_clerk_user_id = consumer_id
+    await db.commit()
+
+    logger.info("waitlist_invite_consumed", signup_id=str(signup.id))
+    return {"consumed": True}
 
 
 @router.patch("/{signup_id}/approve")
@@ -107,7 +181,7 @@ async def approve_waitlist(
     except RuntimeError:
         # Fallback: use a UUID-based token if encryption key is not configured
         invite_token = str(uuid.uuid4())
-        logger.warning("waitlist_approve_no_encryption_key", email=signup.email)
+        logger.warning("waitlist_approve_no_encryption_key", email=mask_email(signup.email))
 
     signup.status = "approved"
     signup.invite_token = invite_token
@@ -148,9 +222,9 @@ async def approve_waitlist(
             from_name="Beam",
             from_email="hello@getbeam.fyi",
         )
-        logger.info("waitlist_invite_sent", email=signup.email)
+        logger.info("waitlist_invite_sent", email=mask_email(signup.email))
     except Exception as e:
-        logger.warning("waitlist_invite_email_failed", email=signup.email, error=str(e))
+        logger.warning("waitlist_invite_email_failed", email=mask_email(signup.email), error=str(e))
 
     return {"status": "approved", "id": str(signup.id)}
 
@@ -179,7 +253,7 @@ async def grant_waitlist(
     signup.status = "granted"
     await db.commit()
 
-    logger.info("waitlist_granted", email=signup.email)
+    logger.info("waitlist_granted", email=mask_email(signup.email))
     return {"status": "granted", "id": str(signup.id)}
 
 
@@ -200,7 +274,7 @@ async def reject_waitlist(
     signup.status = "rejected"
     await db.commit()
 
-    logger.info("waitlist_rejected", email=signup.email)
+    logger.info("waitlist_rejected", email=mask_email(signup.email))
     return {"status": "rejected", "id": str(signup.id)}
 
 
@@ -222,5 +296,5 @@ async def delete_waitlist(
     await db.delete(signup)
     await db.commit()
 
-    logger.info("waitlist_deleted", email=email)
+    logger.info("waitlist_deleted", email=mask_email(email))
     return {"status": "deleted", "id": str(signup_id)}
