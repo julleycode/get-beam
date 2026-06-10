@@ -86,7 +86,7 @@ async def test_client(test_engine) -> AsyncGenerator[AsyncClient, None]:
     """
     from apps.api.main import app
     from apps.api.models.database import get_db
-    from apps.api.routers.social_auth import limiter
+    from apps.api.services.rate_limiter import limiter
 
     test_session_factory = async_sessionmaker(
         test_engine, class_=AsyncSession, expire_on_commit=False

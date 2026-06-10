@@ -20,6 +20,8 @@ class Event(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     type: str = Field(..., pattern="^(pageview|scroll|time_on_page|click|visibility|form_email_capture|utm_identify)$")
+    # Client-generated idempotency key; duplicates are dropped at insert.
+    event_id: str | None = Field(None, max_length=64)
     url: str | None = None
     referrer: str | None = None
     utm: UTMParams | None = None

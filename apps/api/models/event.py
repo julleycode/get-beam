@@ -12,6 +12,11 @@ class Event(Base):
     __tablename__ = "events"
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
+    # Client-generated idempotency key (pixel UUID). Unique when present;
+    # NULL for events from older pixel builds (PG unique indexes allow
+    # multiple NULLs). Lets ingest drop re-delivered beacon batches instead
+    # of double-counting pageviews/sessions/intent.
+    event_id: str = Column(String(64), nullable=True)
     site_id: str = Column(String(50), nullable=False)
     visitor_id: str = Column(String(100), nullable=False)
     event_type: str = Column(String(30), nullable=False)
@@ -35,6 +40,7 @@ class Event(Base):
     created_at: datetime = Column(DateTime, default=func.now(), nullable=False)
 
     __table_args__ = (
+        Index("uq_events_event_id", "event_id", unique=True),
         Index("ix_events_site_visitor", "site_id", "visitor_id"),
         Index("ix_events_site_created", "site_id", "created_at"),
         Index("ix_events_created", "created_at"),
