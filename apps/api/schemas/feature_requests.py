@@ -34,3 +34,36 @@ class FeatureRequestOut(BaseModel):
 class FeatureRequestListResponse(BaseModel):
     requests: list[FeatureRequestOut]
     total: int
+
+
+# ── Community feature board (logged-in users) ──────────────────────────
+
+
+class BoardSubmit(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    detail: str | None = Field(default=None, max_length=2000)
+    urgency: str | None = Field(default=None, max_length=20)
+
+
+class BoardItemOut(BaseModel):
+    """Redacted public view — never exposes submitter email or admin notes."""
+
+    id: uuid.UUID
+    title: str
+    detail: str | None
+    urgency: str | None
+    status: str
+    votes: int
+    my_vote: bool
+    created_at: datetime
+
+
+class BoardListResponse(BaseModel):
+    items: list[BoardItemOut]
+    total: int
+
+
+class VoteOut(BaseModel):
+    request_id: uuid.UUID
+    votes: int
+    my_vote: bool

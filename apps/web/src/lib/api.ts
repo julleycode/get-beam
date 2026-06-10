@@ -117,6 +117,25 @@ class ApiClient {
     });
   }
 
+  // Community feature board (logged-in users)
+  async getFeatureBoard() {
+    return this.request<FeatureBoardResponse>("/api/v1/feature-requests/board");
+  }
+
+  async submitBoardRequest(data: { title: string; detail?: string; urgency?: string }) {
+    return this.request<FeatureBoardItem>("/api/v1/feature-requests/board", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async voteFeature(requestId: string) {
+    return this.request<FeatureVoteResult>(
+      `/api/v1/feature-requests/${requestId}/vote`,
+      { method: "POST" }
+    );
+  }
+
   // Sites
   async createSite(name: string, url: string, description?: string, category?: string) {
     return this.request<Site>("/api/v1/sites/", {
@@ -593,6 +612,28 @@ export interface FeatureRequest {
   admin_note: string | null;
   created_at: string;
   updated_at: string | null;
+}
+
+export interface FeatureBoardItem {
+  id: string;
+  title: string;
+  detail: string | null;
+  urgency: string | null;
+  status: string;
+  votes: number;
+  my_vote: boolean;
+  created_at: string;
+}
+
+export interface FeatureBoardResponse {
+  items: FeatureBoardItem[];
+  total: number;
+}
+
+export interface FeatureVoteResult {
+  request_id: string;
+  votes: number;
+  my_vote: boolean;
 }
 
 export interface FeatureRequestListResponse {
