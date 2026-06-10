@@ -31,6 +31,9 @@ export default function CampaignsPage() {
   const [siteId, setSiteId] = useState(searchParams.get("site") || "");
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [sendResult, setSendResult] = useState<string | null>(null);
 
   function loadCampaigns() {
     if (!siteId) return;
@@ -41,10 +44,42 @@ export default function CampaignsPage() {
   useEffect(loadCampaigns, [siteId]);
 
   async function handleStatusChange(campaignId: string, newStatus: string) {
+    setActionError(null);
     try {
       await api.updateCampaignStatus(siteId, campaignId, newStatus);
       loadCampaigns();
-    } catch {
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Action failed");
+    }
+  }
+
+  async function handleSend(campaignId: string, campaignName: string) {
+    // Real emails go out — make the user confirm explicitly.
+    if (
+      !window.confirm(
+        `Send "${campaignName}" emails to this campaign's audience now? ` +
+          "Unsubscribed and bounced contacts are skipped automatically."
+      )
+    ) {
+      return;
+    }
+    setActionError(null);
+    setSendResult(null);
+    setSendingId(campaignId);
+    try {
+      const s = await api.sendCampaign(siteId, campaignId);
+      const parts = [`${s.sent} sent`];
+      if (s.skipped_suppressed) parts.push(`${s.skipped_suppressed} unsubscribed/bounced skipped`);
+      if (s.skipped_already_sent) parts.push(`${s.skipped_already_sent} already sent`);
+      if (s.skipped_no_email) parts.push(`${s.skipped_no_email} without email`);
+      if (s.throttled) parts.push(`${s.throttled} deferred by hourly cap — send again later`);
+      if (s.failed) parts.push(`${s.failed} failed`);
+      setSendResult(`"${campaignName}": ${parts.join(", ")} (audience ${s.total_audience}).`);
+      loadCampaigns();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Send failed");
+    } finally {
+      setSendingId(null);
     }
   }
 
@@ -54,6 +89,13 @@ export default function CampaignsPage() {
         <h2 className="text-2xl font-serif font-semibold tracking-tight">Campaigns</h2>
         <SiteSelector value={siteId} onChange={setSiteId} />
       </div>
+
+      {actionError && (
+        <p className="mb-3 text-sm text-destructive">{actionError}</p>
+      )}
+      {sendResult && (
+        <p className="mb-3 text-sm rounded-md bg-secondary px-3 py-2">{sendResult}</p>
+      )}
 
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view campaigns.</p>
@@ -110,13 +152,23 @@ export default function CampaignsPage() {
                       </Button>
                     )}
                     {c.status === "active" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleStatusChange(c.id, "paused")}
-                      >
-                        Pause
-                      </Button>
+                      <>
+                        <Button
+                          size="sm"
+                          disabled={sendingId !== null}
+                          onClick={() => handleSend(c.id, c.name)}
+                        >
+                          {sendingId === c.id ? "Sending..." : "Send emails"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={sendingId === c.id}
+                          onClick={() => handleStatusChange(c.id, "paused")}
+                        >
+                          Pause
+                        </Button>
+                      </>
                     )}
                     {c.status === "paused" && (
                       <Button

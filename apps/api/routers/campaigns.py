@@ -186,10 +186,13 @@ async def update_campaign_status(
         )
 
     campaign.status = body.status
+    # Naive UTC: Campaign datetime columns are TIMESTAMP WITHOUT TIME ZONE;
+    # asyncpg rejects tz-aware values for them (same pattern as
+    # visitor_aggregator). Do not pass datetime.now(timezone.utc) directly.
     if body.status == "approved":
-        campaign.approved_at = datetime.now(timezone.utc)
+        campaign.approved_at = datetime.now(timezone.utc).replace(tzinfo=None)
     elif body.status == "active":
-        campaign.started_at = datetime.now(timezone.utc)
+        campaign.started_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
     await db.commit()
     await db.refresh(campaign)

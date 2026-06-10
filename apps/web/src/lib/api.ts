@@ -202,6 +202,19 @@ class ApiClient {
     );
   }
 
+  /**
+   * Send the campaign's email touchpoint to its segment audience.
+   * Backend requires status === "active" (human-approval gate), skips
+   * do_not_email recipients, honors the per-site hourly cap, and is
+   * idempotent per recipient — re-invoking never double-sends.
+   */
+  async sendCampaign(siteId: string, campaignId: string) {
+    return this.request<CampaignSendSummary>(
+      `/api/v1/campaigns/${siteId}/${campaignId}/send`,
+      { method: "POST" }
+    );
+  }
+
   // Platform Detection & Pixel Install
   async detectPlatform(url: string) {
     return this.request<{
@@ -672,6 +685,16 @@ export interface Campaign {
 export interface CampaignListResponse {
   campaigns: Campaign[];
   total: number;
+}
+
+export interface CampaignSendSummary {
+  total_audience: number;
+  sent: number;
+  skipped_no_email: number;
+  skipped_suppressed: number;
+  skipped_already_sent: number;
+  throttled: number;
+  failed: number;
 }
 
 export interface SiteStats {

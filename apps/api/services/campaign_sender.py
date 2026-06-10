@@ -125,7 +125,8 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
                 touchpoint_order=order,
                 status="sent",
                 content={"subject": subject},
-                sent_at=datetime.now(timezone.utc),
+                # Naive UTC — CampaignTouchpoint.sent_at is a naive column.
+                sent_at=datetime.now(timezone.utc).replace(tzinfo=None),
             )
         )
         await db.commit()
