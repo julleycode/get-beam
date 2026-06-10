@@ -19,10 +19,31 @@ const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 function SiteCard({ site }: { site: Site }) {
   const [stats, setStats] = useState<SiteStats | null>(null);
+  // Local pixel status so a successful re-verify flips the card immediately
+  // without refetching the whole site list.
+  const [pixelVerified, setPixelVerified] = useState(site.pixel_verified);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
 
   useEffect(() => {
     api.getVisitorStats(site.site_id).then(setStats).catch(() => {});
   }, [site.site_id]);
+
+  async function handleVerify() {
+    setVerifying(true);
+    setVerifyMessage(null);
+    try {
+      const result = await api.verifyPixel(site.site_id);
+      setPixelVerified(result.verified);
+      if (!result.verified) {
+        setVerifyMessage(result.message || "Pixel not detected yet — check the install snippet in Settings.");
+      }
+    } catch (err) {
+      setVerifyMessage(err instanceof Error ? err.message : "Verification failed — try again.");
+    } finally {
+      setVerifying(false);
+    }
+  }
 
   return (
     <Card>
@@ -62,18 +83,30 @@ function SiteCard({ site }: { site: Site }) {
           </p>
         )}
 
-        {/* Pixel status */}
-        <div className="flex items-center gap-1.5 text-xs">
-          {site.pixel_verified ? (
-            <>
-              <span className="h-2 w-2 rounded-full bg-green-500" />
-              <span className="text-muted-foreground">Pixel active</span>
-            </>
-          ) : (
-            <>
-              <span className="h-2 w-2 rounded-full bg-yellow-500" />
-              <span className="text-muted-foreground">Pixel not verified</span>
-            </>
+        {/* Pixel status + re-verify */}
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5 text-xs">
+            {pixelVerified ? (
+              <>
+                <span className="h-2 w-2 rounded-full bg-green-500" />
+                <span className="text-muted-foreground">Pixel active</span>
+              </>
+            ) : (
+              <>
+                <span className="h-2 w-2 rounded-full bg-yellow-500" />
+                <span className="font-medium text-yellow-700">Pixel not verified</span>
+                <button
+                  onClick={handleVerify}
+                  disabled={verifying}
+                  className="ml-1 rounded-full border border-yellow-400 bg-yellow-50 px-2.5 py-0.5 text-[11px] font-medium text-yellow-800 transition-colors hover:bg-yellow-100 disabled:opacity-60"
+                >
+                  {verifying ? "Checking..." : "Re-verify"}
+                </button>
+              </>
+            )}
+          </div>
+          {verifyMessage && !pixelVerified && (
+            <p className="text-[11px] text-muted-foreground">{verifyMessage}</p>
           )}
         </div>
 
