@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { api, FeatureRequest } from "@/lib/api";
+import { ListCardSkeleton } from "@/components/skeletons";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -138,7 +139,7 @@ export default function FeatureRequestsPage() {
         </div>
       </div>
 
-      {loading && <p className="text-muted-foreground">Loading…</p>}
+      {loading && <ListCardSkeleton rows={4} />}
       {error && <p className="text-destructive">Failed to load: {error}</p>}
 
       {!loading && !error && requests.length === 0 && (

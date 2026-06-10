@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, Segment } from "@/lib/api";
+import { CardGridSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { SiteSelector } from "@/components/site-selector";
 import { Badge } from "@/components/ui/badge";
@@ -66,7 +67,7 @@ export default function SegmentsPage() {
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view segments.</p>
       ) : loading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <CardGridSkeleton cards={4} cols={2} />
       ) : error ? (
         <ErrorBanner
           message={`Couldn't load segments — ${error}`}

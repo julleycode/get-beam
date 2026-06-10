@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 import { api, Site, SiteStats, EngagementROI } from "@/lib/api";
+import { SiteCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import {
   Card,
@@ -16,6 +17,16 @@ import {
 import { Button } from "@/components/ui/button";
 
 const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+function OverviewSkeleton() {
+  return (
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      <SiteCardSkeleton />
+      <SiteCardSkeleton />
+      <SiteCardSkeleton />
+    </div>
+  );
+}
 
 function SiteCard({ site }: { site: Site }) {
   const [stats, setStats] = useState<SiteStats | null>(null);
@@ -226,7 +237,7 @@ function ClerkTokenGate({ children }: { children: React.ReactNode }) {
     }).catch(() => setReady(true));
   }, [isLoaded, isSignedIn, getToken]);
 
-  if (!ready) return <p className="text-muted-foreground">Loading...</p>;
+  if (!ready) return <OverviewSkeleton />;
   return <>{children}</>;
 }
 
@@ -257,7 +268,7 @@ export default function DashboardPage() {
           }}
         />
       ) : !loaded ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <OverviewSkeleton />
       ) : (
         <div>
           <div className="flex items-center justify-between mb-6">

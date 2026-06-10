@@ -5,6 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
 import { api } from "@/lib/api";
+import { BeamLogo } from "@/components/beam-logo";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 
@@ -191,19 +192,7 @@ export default function DashboardLayout({
       <aside className="w-56 border-r border-[rgba(43,37,48,0.08)] bg-card p-4 flex flex-col">
         <div className="mb-6">
           <h1 className="text-xl font-serif font-semibold tracking-tight flex items-center gap-2">
-            <svg viewBox="0 0 100 64" className="inline-block w-7 shrink-0" aria-hidden="true">
-              <defs>
-                <linearGradient id="beamSidebarGrad" x1="0" y1="0" x2="1" y2="0.35">
-                  <stop offset="0" stopColor="#FF6B9D" />
-                  <stop offset="0.55" stopColor="#FF3366" />
-                  <stop offset="1" stopColor="#FF7FA8" />
-                </linearGradient>
-              </defs>
-              <path d="M26,15 Q26,32 90,32 Q26,32 26,49 Q26,32 9,32 Q26,32 26,15 Z" fill="url(#beamSidebarGrad)" />
-              <circle cx="26" cy="32" r="3.4" fill="#fff" opacity="0.92" />
-              <path d="M82,21 Q84,25 88,25 Q84,25 82,29 Q80,25 76,25 Q80,25 82,21 Z" fill="url(#beamSidebarGrad)" opacity="0.85" />
-              <circle cx="89" cy="40" r="2.1" fill="url(#beamSidebarGrad)" opacity="0.7" />
-            </svg>
+            <BeamLogo />
             Beam
           </h1>
           <p className="text-xs text-muted-foreground truncate mt-1">{userEmail}</p>

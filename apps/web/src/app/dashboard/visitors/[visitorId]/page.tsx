@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { api, VisitorDetail } from "@/lib/api";
+import { CardGridSkeleton, PageHeaderSkeleton, StatGridSkeleton } from "@/components/skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -80,7 +81,14 @@ export default function VisitorDetailPage() {
     }
   }
 
-  if (loading) return <p className="text-muted-foreground">Loading...</p>;
+  if (loading)
+    return (
+      <div className="space-y-6">
+        <PageHeaderSkeleton />
+        <StatGridSkeleton cols={3} />
+        <CardGridSkeleton cards={2} cols={1} />
+      </div>
+    );
   if (!visitor) return <p className="text-destructive">Visitor not found</p>;
 
   const completeness = visitor.enrichment_completeness ?? 0;

@@ -4,15 +4,12 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import { api } from "@/lib/api";
+import { BrandSplash } from "@/components/skeletons";
 
 const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 function Loading() {
-  return (
-    <div className="flex min-h-screen items-center justify-center">
-      <p className="text-muted-foreground">Loading...</p>
-    </div>
-  );
+  return <BrandSplash />;
 }
 
 /**

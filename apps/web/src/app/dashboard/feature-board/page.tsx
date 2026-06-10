@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, FeatureBoardItem } from "@/lib/api";
+import { ListCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -144,7 +145,7 @@ export default function FeatureBoardPage() {
       )}
 
       {isLoading ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <ListCardSkeleton rows={4} leading />
       ) : isError ? (
         <ErrorBanner
           message={`Couldn't load the board — ${error?.message ?? "request failed"}`}

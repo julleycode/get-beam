@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, Site, ApiKeyInfo } from "@/lib/api";
+import { FormCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { SiteSelector } from "@/components/site-selector";
 import { Button } from "@/components/ui/button";
@@ -286,7 +287,10 @@ export default function SettingsPage() {
           onRetry={() => setSiteRetryKey((k) => k + 1)}
         />
       ) : !site ? (
-        <p className="text-muted-foreground">Loading...</p>
+        <div className="space-y-6">
+          <FormCardSkeleton />
+          <FormCardSkeleton fields={2} />
+        </div>
       ) : (
         <>
           <Card>
