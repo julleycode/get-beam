@@ -72,15 +72,17 @@ class IdentityResolver:
             self.redis = redis_client
 
     async def check_daily_budget(self, site_id: str) -> bool:
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        result = await self.db.execute(
-            select(func.count()).select_from(ResolutionLog).where(
-                ResolutionLog.site_id == site_id,
-                ResolutionLog.created_at >= today_start,
-            )
-        )
-        count = result.scalar() or 0
-        return count < settings.default_daily_resolution_budget
+        """Daily attempt budget: distinct visitors tried today vs the
+        per-site cap (Site.daily_resolution_budget, default 50).
+
+        Previously counted ResolutionLog ROWS against the global default —
+        each visitor writes one row per provider tried (2-8 rows), so the
+        budget exhausted after ~3-8 visitors and the per-site setting was
+        ignored entirely.
+        """
+        from apps.api.services.usage_limits import check_resolution_attempt_budget
+
+        return await check_resolution_attempt_budget(self.db, site_id)
 
     async def was_recently_attempted(self, site_id: str, visitor_id: str) -> bool:
         cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)

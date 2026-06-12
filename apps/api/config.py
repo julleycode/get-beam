@@ -141,9 +141,10 @@ class Settings(BaseSettings):
 
     # ─── Feature flags ───
     sync_interval_minutes: int = 60
+    resolution_sweep_interval_minutes: int = 30  # APScheduler identity-resolution sweep cadence
 
     # ─── Rate limits ───
-    default_daily_resolution_budget: int = 20   # Free tier: 20 identifications/day (BYOK = unlimited)
+    default_daily_resolution_budget: int = 50   # Free tier: 50 visitor identifications/day per site (BYOK = unlimited)
     default_daily_enrichment_budget: int = 3    # Free tier: 3 deep research/day (BYOK = unlimited)
     max_emails_per_hour_per_site: int = 50
 

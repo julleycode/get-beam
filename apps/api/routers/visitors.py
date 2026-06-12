@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
@@ -9,14 +10,23 @@ from apps.api.models.database import async_session, get_db
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.site import Site
 from apps.api.models.user import User
-from apps.api.models.visitor import IdentifiedVisitor, Visitor
+from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog, Visitor
 from apps.api.dependencies import get_current_user
-from apps.api.schemas.visitors import ManualIdentifyRequest, VisitorDetailOut, VisitorListResponse, VisitorOut
+from apps.api.schemas.visitors import (
+    ManualIdentifyRequest,
+    VisitorDetailOut,
+    VisitorListResponse,
+    VisitorOut,
+    VisitorStatsResponse,
+)
+from apps.api.services.billing import check_usage_allowed
 from apps.api.services.enricher import Enricher
-from apps.api.services.identity_resolver import IdentityResolver
-from apps.api.services.billing import check_usage_allowed, increment_usage
-from apps.api.services.segmentation_trigger import check_and_trigger_segmentation
-from apps.api.services.usage_limits import check_enrich_budget, check_identify_budget
+from apps.api.services.resolution_runner import run_resolution_for_site
+from apps.api.services.usage_limits import (
+    check_enrich_budget,
+    check_identify_budget,
+    check_resolution_attempt_budget,
+)
 
 logger = structlog.get_logger()
 
@@ -73,13 +83,14 @@ async def list_visitors(
     return VisitorListResponse(visitors=visitors, total=total, page=page, page_size=page_size)
 
 
-@router.get("/{site_id}/stats")
+@router.get("/{site_id}/stats", response_model=VisitorStatsResponse)
 async def get_visitor_stats(
     site_id: str,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-) -> dict:
-    """Get enrichment and identity stats for a site."""
+) -> VisitorStatsResponse:
+    """Get enrichment and identity stats for a site, including the
+    segmentation-trigger progress count and the daily identification quota."""
     await _verify_site_access(db, site_id, user)
 
     # Total visitors
@@ -115,12 +126,40 @@ async def get_visitor_stats(
     )
     could_enrich_more = partial_r.scalar() or 0
 
-    return {
-        "total_visitors": total,
-        "identified": identified,
-        "enriched": enriched,
-        "could_enrich_more": could_enrich_more,
-    }
+    # The count auto-segmentation actually checks: enriched AND not yet
+    # segmented (segmentation_trigger.SEGMENTATION_THRESHOLD = 10).
+    unsegmented_r = await db.execute(
+        select(func.count()).select_from(Visitor).where(
+            Visitor.site_id == site_id,
+            Visitor.enrichment_status == "enriched",
+            Visitor.segmented == False,  # noqa: E712
+        )
+    )
+    enriched_unsegmented = unsegmented_r.scalar() or 0
+
+    # Anonymous visitors eligible for the next resolution run
+    eligible_r = await db.execute(
+        select(func.count()).select_from(Visitor).where(
+            Visitor.site_id == site_id,
+            Visitor.identity_status == "anonymous",
+            Visitor.intent_score >= 40,
+        )
+    )
+    eligible_for_resolution = eligible_r.scalar() or 0
+
+    budget = await check_identify_budget(db, site_id, user.id)
+
+    return VisitorStatsResponse(
+        total_visitors=total,
+        identified=identified,
+        enriched=enriched,
+        could_enrich_more=could_enrich_more,
+        enriched_unsegmented=enriched_unsegmented,
+        eligible_for_resolution=eligible_for_resolution,
+        identify_used_today=budget["used"],
+        identify_daily_limit=budget["limit"],
+        identify_is_byok=budget["is_byok"],
+    )
 
 
 @router.delete("/{site_id}/{visitor_id}/data")
@@ -227,6 +266,30 @@ async def cleanup_test_visitors(
     }
 
 
+async def _resolution_skip_reason(
+    db: AsyncSession, site: Site, visitor: Visitor, last_attempt: datetime | None
+) -> str:
+    """Best-effort explanation for why an anonymous visitor hasn't resolved.
+
+    Mirrors the gates in IdentityResolver.resolve() / run_resolution_for_site,
+    checked in the order the pipeline applies them. "awaiting_next_run" means
+    fully eligible — just waiting on the next sweep or a manual resolve.
+    """
+    if visitor.intent_score < 40:
+        return "below_intent_threshold"
+    if not visitor.ip_address:
+        return "no_ip_address"
+    if last_attempt is not None:
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+        if last_attempt >= cutoff:
+            return "recently_attempted"
+    if not await check_resolution_attempt_budget(db, site.site_id):
+        return "daily_budget_exhausted"
+    if not await check_usage_allowed(db, site.user_id):
+        return "monthly_plan_limit_reached"
+    return "awaiting_next_run"
+
+
 @router.get("/{site_id}/{visitor_id}", response_model=VisitorDetailOut)
 async def get_visitor_detail(
     site_id: str,
@@ -234,7 +297,7 @@ async def get_visitor_detail(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> VisitorDetailOut:
-    await _verify_site_access(db, site_id, user)
+    site = await _verify_site_access(db, site_id, user)
 
     result = await db.execute(
         select(Visitor).where(Visitor.site_id == site_id, Visitor.visitor_id == visitor_id)
@@ -244,6 +307,22 @@ async def get_visitor_detail(
         raise HTTPException(status_code=404, detail="Visitor not found")
 
     data = VisitorOut.model_validate(visitor).model_dump()
+
+    # Resolution observability: latest attempt + skip reason for stuck visitors
+    logs_result = await db.execute(
+        select(ResolutionLog).where(
+            ResolutionLog.site_id == site_id,
+            ResolutionLog.visitor_id == visitor_id,
+        ).order_by(ResolutionLog.created_at.desc()).limit(10)
+    )
+    logs = list(logs_result.scalars().all())
+    if logs:
+        data["last_resolution_attempt"] = logs[0].created_at
+        data["resolution_providers_tried"] = list(dict.fromkeys(l.provider for l in logs))
+    if visitor.identity_status == "anonymous":
+        data["resolution_skip_reason"] = await _resolution_skip_reason(
+            db, site, visitor, logs[0].created_at if logs else None
+        )
 
     id_result = await db.execute(
         select(IdentifiedVisitor).where(
@@ -439,68 +518,19 @@ async def manual_identify_visitor(
 
 
 async def _run_resolution_job(site_id: str, max_resolve: int = 20) -> None:
-    """Background worker: resolve + enrich eligible visitors for a site.
+    """Background trigger for the trigger-agnostic resolution runner.
 
     Runs AFTER the HTTP response is sent, in its own DB session (the
     request-scoped session is already closed by the time this runs).
-    Each visitor is resolved in isolation so one failure can't abort the batch.
+    All resolution logic lives in services/resolution_runner.py — shared
+    with the APScheduler sweep and any future Celery/cron worker.
     """
     async with async_session() as db:
-        result = await db.execute(
-            select(Visitor).where(
-                Visitor.site_id == site_id,
-                Visitor.identity_status == "anonymous",
-                Visitor.intent_score >= 40,
-            ).order_by(Visitor.intent_score.desc()).limit(max_resolve)
-        )
-        visitors = list(result.scalars().all())
-        if not visitors:
-            return
-
         site_result = await db.execute(select(Site).where(Site.site_id == site_id))
         site = site_result.scalar_one_or_none()
         if site is None:
             return
-
-        resolver = IdentityResolver(db)
-        enricher = Enricher(db)
-        resolved = 0
-        enriched = 0
-
-        for visitor in visitors:
-            # Monthly plan limit (free=10, pro=50): the live path previously
-            # never consulted billing, so free-tier users got unlimited
-            # identifications and the usage counter stayed at 0.
-            if not await check_usage_allowed(db, site.user_id):
-                logger.info(
-                    "resolution_stopped_plan_limit",
-                    site_id=site_id,
-                    resolved_before_stop=resolved,
-                )
-                break
-            try:
-                identified = await resolver.resolve(visitor)
-                if identified:
-                    resolved += 1
-                    await increment_usage(db, site.user_id)
-                    profile = await enricher.enrich_tier1(visitor, identified)
-                    if profile:
-                        enriched += 1
-            except Exception as e:
-                logger.warning("resolve_visitor_error", visitor_id=visitor.visitor_id, error=str(e))
-
-        logger.info(
-            "resolution_job_complete",
-            site_id=site_id, processed=len(visitors), resolved=resolved, enriched=enriched,
-        )
-
-        # Documented rule: auto-segment at 10+ new enriched visitors. This is
-        # the live path's only segmentation hook (the Celery one is dormant).
-        if enriched:
-            try:
-                await check_and_trigger_segmentation(db, site_id)
-            except Exception as e:
-                logger.warning("auto_segmentation_failed", site_id=site_id, error=str(e))
+        await run_resolution_for_site(db, site, max_resolve=max_resolve)
 
 
 @router.post("/{site_id}/resolve")
@@ -513,7 +543,8 @@ async def resolve_site_visitors(
 ) -> dict:
     """Queue identity resolution + Tier 1 enrichment for eligible visitors.
 
-    Daily cap: 20 identifications/day (free tier). BYOK all APIs to unlock unlimited.
+    Daily cap: Site.daily_resolution_budget identifications/day (default 50,
+    free tier). BYOK all APIs to unlock unlimited.
     """
     from sqlalchemy import text as sql_text
 

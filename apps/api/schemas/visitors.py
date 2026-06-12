@@ -46,6 +46,25 @@ class VisitorDetailOut(VisitorOut):
     confidence_score: float | None = None
     social_context: dict | None = None
     auto_draft_count: int | None = None
+    # Resolution observability — why is this visitor still anonymous?
+    last_resolution_attempt: datetime | None = None
+    resolution_providers_tried: list[str] | None = None
+    resolution_skip_reason: str | None = None  # below_intent_threshold | no_ip_address | recently_attempted | daily_budget_exhausted | monthly_plan_limit_reached | awaiting_next_run
+
+
+class VisitorStatsResponse(BaseModel):
+    total_visitors: int
+    identified: int
+    enriched: int
+    could_enrich_more: int
+    # Count feeding the auto-segmentation trigger (enriched AND not yet segmented)
+    enriched_unsegmented: int
+    # Anonymous visitors at intent >= 40, waiting on the next resolution run
+    eligible_for_resolution: int
+    # Daily identification quota (limit is None for BYOK = unlimited)
+    identify_used_today: int
+    identify_daily_limit: int | None
+    identify_is_byok: bool
 
 
 class VisitorListResponse(BaseModel):
