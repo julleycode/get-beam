@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { api, Segment } from "@/lib/api";
+import { EmptyState } from "@/components/empty-state";
 import { SiteSelector } from "@/components/site-selector";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,6 +58,17 @@ export default function ExportsPage() {
         <SiteSelector value={siteId} onChange={setSiteId} />
       </div>
 
+      {siteId && segments.length === 0 ? (
+        <EmptyState
+          title="Nothing to export yet"
+          description="Exports turn segments into CSV audiences for Meta, Google, and LinkedIn ads. Once you have segments, they'll appear here automatically."
+          action={
+            <Button asChild variant="outline">
+              <Link href={`/dashboard/segments?site=${siteId}`}>View segments</Link>
+            </Button>
+          }
+        />
+      ) : (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Export segment for ads</CardTitle>
@@ -109,6 +122,7 @@ export default function ExportsPage() {
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

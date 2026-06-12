@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { api, Campaign } from "@/lib/api";
 import { TableSkeleton } from "@/components/skeletons";
+import { EmptyState } from "@/components/empty-state";
 import { SiteSelector } from "@/components/site-selector";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -103,9 +104,15 @@ export default function CampaignsPage() {
       ) : loading ? (
         <TableSkeleton cols={4} rows={6} />
       ) : campaigns.length === 0 ? (
-        <p className="text-muted-foreground">
-          No campaigns yet. Campaigns are auto-generated when segments are created.
-        </p>
+        <EmptyState
+          title="No campaigns yet"
+          description="Campaigns are drafted automatically whenever a segment is created — you'll review and approve every send before anything goes out."
+          action={
+            <Button asChild variant="outline">
+              <Link href={`/dashboard/segments?site=${siteId}`}>View segments</Link>
+            </Button>
+          }
+        />
       ) : (
         <Table>
           <TableHeader>

@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { api, Segment } from "@/lib/api";
+import Link from "next/link";
+import { api, Segment, SiteStats } from "@/lib/api";
 import { CardGridSkeleton } from "@/components/skeletons";
+import { EmptyState } from "@/components/empty-state";
 import { ErrorBanner } from "@/components/error-banner";
 import { SiteSelector } from "@/components/site-selector";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +24,7 @@ export default function SegmentsPage() {
   const searchParams = useSearchParams();
   const [siteId, setSiteId] = useState(searchParams.get("site") || "");
   const [segments, setSegments] = useState<Segment[]>([]);
+  const [stats, setStats] = useState<SiteStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [triggering, setTriggering] = useState(false);
@@ -38,6 +41,18 @@ export default function SegmentsPage() {
   }
 
   useEffect(loadSegments, [siteId]);
+
+  // Powers the empty state's "X of 10" progress bar — non-blocking.
+  useEffect(() => {
+    if (!siteId) {
+      setStats(null);
+      return;
+    }
+    api
+      .getVisitorStats(siteId)
+      .then(setStats)
+      .catch(() => setStats(null));
+  }, [siteId]);
 
   async function handleTrigger() {
     setTriggering(true);
@@ -74,9 +89,27 @@ export default function SegmentsPage() {
           onRetry={loadSegments}
         />
       ) : segments.length === 0 ? (
-        <p className="text-muted-foreground">
-          No segments yet. Segments are auto-generated when 10+ new visitors are enriched, or click &quot;Re-run segmentation&quot; to trigger manually.
-        </p>
+        <EmptyState
+          title="No segments yet"
+          description={
+            <>
+              Beam groups visitors into segments automatically once{" "}
+              <strong>10 newly enriched visitors</strong> accumulate. Each segment ships with
+              recommended channels and a messaging angle — or click &quot;Re-run
+              segmentation&quot; to trigger manually.
+            </>
+          }
+          progress={{
+            current: stats?.enriched_unsegmented ?? stats?.enriched ?? 0,
+            target: 10,
+            label: "enriched visitors toward your next segments",
+          }}
+          action={
+            <Button asChild variant="outline">
+              <Link href={`/dashboard/visitors?site=${siteId}`}>View visitors</Link>
+            </Button>
+          }
+        />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {segments.map((seg) => (
