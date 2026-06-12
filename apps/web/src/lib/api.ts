@@ -191,6 +191,12 @@ class ApiClient {
     return this.request<SiteStats>(`/api/v1/visitors/${siteId}/stats`);
   }
 
+  async resolveSiteVisitors(siteId: string) {
+    return this.request<ResolveSiteResult>(`/api/v1/visitors/${siteId}/resolve`, {
+      method: "POST",
+    });
+  }
+
   // Segments
   async listSegments(siteId: string) {
     return this.request<SegmentListResponse>(`/api/v1/segments/${siteId}`);
@@ -749,6 +755,27 @@ export interface SiteStats {
   identified: number;
   enriched: number;
   could_enrich_more: number;
+  // Optional: present once the API ships the beta-feedback stats extension.
+  // Defensive `?` so an older API deploy can't break the frontend.
+  enriched_unsegmented?: number;
+  eligible_for_resolution?: number;
+  identify_used_today?: number;
+  identify_daily_limit?: number | null;
+  identify_is_byok?: boolean;
+}
+
+// POST /visitors/{siteId}/resolve — shape varies by status:
+// "started" carries queued/used_today/daily_limit; "limit_reached" carries
+// used/limit; "no_eligible" is message-only.
+export interface ResolveSiteResult {
+  status: string;
+  message: string;
+  queued?: number;
+  used_today?: number;
+  daily_limit?: number | null;
+  is_byok?: boolean;
+  used?: number;
+  limit?: number | null;
 }
 
 export interface ApiKeyInfo {

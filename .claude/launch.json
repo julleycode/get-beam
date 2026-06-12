@@ -14,6 +14,21 @@
       "port": 3000,
       "autoPort": true,
       "cwd": "apps/web"
+    },
+    {
+      "name": "web-local-stack",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=",
+        "CLERK_SECRET_KEY=",
+        "NEXT_PUBLIC_API_URL=http://localhost:8000",
+        "npm",
+        "run",
+        "dev"
+      ],
+      "port": 3000,
+      "autoPort": true,
+      "cwd": "apps/web"
     }
   ]
 }

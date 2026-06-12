@@ -45,3 +45,56 @@ test.describe("Visitor Detail Page", () => {
     expect(pageContent).toBeTruthy();
   });
 });
+
+test.describe("Pipeline Explainer", () => {
+  test("shows the pipeline explainer card", async ({ page }) => {
+    await page.goto("/dashboard/visitors");
+    await expect(
+      page.locator("text=How Beam turns visitors into campaigns").first()
+    ).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("dismiss persists across reload", async ({ page }) => {
+    await page.goto("/dashboard/visitors");
+    await expect(
+      page.locator("text=How Beam turns visitors into campaigns").first()
+    ).toBeVisible({ timeout: 15_000 });
+
+    await page.locator('button[aria-label="Dismiss"]').first().click();
+    await expect(
+      page.locator("text=How Beam turns visitors into campaigns")
+    ).not.toBeVisible();
+
+    await page.reload();
+    // Page renders, explainer stays gone (localStorage flag)
+    await expect(page.locator("h2:has-text('Visitor')").first()).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(
+      page.locator("text=How Beam turns visitors into campaigns")
+    ).not.toBeVisible();
+  });
+});
+
+test.describe("Column Tooltips", () => {
+  test("intent header shows scoring explanation on hover", async ({ page }) => {
+    await page.goto("/dashboard/visitors");
+    // Table headers render once the auto-selected site's list loads
+    const intentHead = page.locator("th:has-text('Intent')").first();
+    await expect(intentHead).toBeVisible({ timeout: 15_000 });
+
+    await intentHead.locator("span[tabindex='0']").first().hover();
+    await expect(
+      page.locator("text=unlocks identification").first()
+    ).toBeVisible({ timeout: 15_000 });
+  });
+});
+
+test.describe("Resolve Now", () => {
+  test("resolve button renders with a site selected", async ({ page }) => {
+    await page.goto("/dashboard/visitors");
+    await expect(
+      page.locator("button:has-text('Resolve now')").first()
+    ).toBeVisible({ timeout: 15_000 });
+  });
+});
