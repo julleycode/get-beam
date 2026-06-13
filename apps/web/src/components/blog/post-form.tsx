@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Markdown } from "@/components/blog/markdown";
+import { SeoPanel } from "@/components/blog/seo-panel";
 
 interface PostFormProps {
   initial?: BlogPostAdmin;
@@ -53,6 +54,8 @@ export function PostForm({
   const [metaDescription, setMetaDescription] = useState(initial?.meta_description ?? "");
   const [canonicalUrl, setCanonicalUrl] = useState(initial?.canonical_url ?? "");
   const [ogImageUrl, setOgImageUrl] = useState(initial?.og_image_url ?? "");
+  // Author-time only — drives the live SEO checklist; not persisted yet.
+  const [focusKeyword, setFocusKeyword] = useState("");
   const [touched, setTouched] = useState(false);
 
   const titleError = touched && title.trim().length === 0;
@@ -92,6 +95,19 @@ export function PostForm({
             aria-invalid={titleError}
           />
           {titleError && <p className="text-xs text-red-600">Title is required.</p>}
+        </Field>
+
+        <Field
+          label="Focus keyword"
+          htmlFor="focus-keyword"
+          hint="The phrase you want this post to rank for. Drives the SEO checklist on the right."
+        >
+          <Input
+            id="focus-keyword"
+            value={focusKeyword}
+            onChange={(e) => setFocusKeyword(e.target.value)}
+            placeholder="website visitor identification"
+          />
         </Field>
 
         <Field label="Slug" htmlFor="slug" hint="Leave blank to auto-generate from the title.">
@@ -159,17 +175,31 @@ export function PostForm({
         </Button>
       </div>
 
-      {/* Live preview */}
-      <div className="lg:sticky lg:top-6 lg:self-start">
-        <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          Preview
-        </p>
-        <div className="rounded-xl border border-[rgba(43,37,48,0.08)] bg-card p-6">
-          <h1 className="font-serif text-2xl font-semibold tracking-tight">
-            {title || "Untitled"}
-          </h1>
-          <div className="mt-4">
-            <Markdown>{body || "_Nothing to preview yet._"}</Markdown>
+      {/* SEO assistant + live preview */}
+      <div className="space-y-5 lg:sticky lg:top-6 lg:self-start">
+        <SeoPanel
+          input={{
+            title,
+            slug,
+            metaTitle,
+            metaDescription,
+            excerpt,
+            body,
+            focusKeyword,
+          }}
+        />
+
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Preview
+          </p>
+          <div className="rounded-xl border border-[rgba(43,37,48,0.08)] bg-card p-6">
+            <h1 className="font-serif text-2xl font-semibold tracking-tight">
+              {title || "Untitled"}
+            </h1>
+            <div className="mt-4">
+              <Markdown>{body || "_Nothing to preview yet._"}</Markdown>
+            </div>
           </div>
         </div>
       </div>

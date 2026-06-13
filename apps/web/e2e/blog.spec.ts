@@ -117,4 +117,28 @@ test.describe("Blog — admin editor", () => {
       timeout: 15_000,
     });
   });
+
+  test("SEO assistant scores the post as you write", async ({ page, request }) => {
+    const token = await getAdminToken(request);
+    await page.goto("/");
+    await page.evaluate((t) => localStorage.setItem("auth_token", t), token);
+    await page.goto("/dashboard/blog/new");
+
+    // Empty editor → poor score.
+    await expect(page.getByText("SEO score")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Needs work")).toBeVisible({ timeout: 15_000 });
+
+    // Filling title + focus keyword + a solid body lifts the score out of "poor".
+    await page.fill("#title", "Website Visitor Identification: A Practical Guide");
+    await page.fill("#focus-keyword", "website visitor identification");
+    await page.fill(
+      "#body",
+      "Website visitor identification turns anonymous traffic into named companies.\n\n" +
+        "## How website visitor identification works\n\n" +
+        "Reverse IP lookup matches a visit to a company and intent signals reveal buyers. ".repeat(40) +
+        "\n\n[Read our guide](/blog)."
+    );
+
+    await expect(page.getByText("Needs work")).toBeHidden({ timeout: 15_000 });
+  });
 });
