@@ -584,9 +584,101 @@ class ApiClient {
   async getBillingStatus() {
     return this.request<BillingStatus>("/api/v1/billing/status");
   }
+
+  // ── Blog CMS ──────────────────────────────────────────
+  async getBlogPosts(limit = 20, offset = 0) {
+    return this.request<BlogPostListResponse>(
+      `/api/v1/blog/posts?limit=${limit}&offset=${offset}`
+    );
+  }
+
+  async getAdminPosts(limit = 50, offset = 0) {
+    return this.request<BlogPostAdminListResponse>(
+      `/api/v1/blog/admin/posts?limit=${limit}&offset=${offset}`
+    );
+  }
+
+  async createPost(data: BlogPostInput) {
+    return this.request<BlogPostAdmin>("/api/v1/blog/posts", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updatePost(id: string, data: BlogPostInput) {
+    return this.request<BlogPostAdmin>(`/api/v1/blog/posts/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async publishPost(id: string) {
+    return this.request<BlogPostAdmin>(`/api/v1/blog/posts/${id}/publish`, {
+      method: "POST",
+    });
+  }
+
+  async unpublishPost(id: string) {
+    return this.request<BlogPostAdmin>(`/api/v1/blog/posts/${id}/unpublish`, {
+      method: "POST",
+    });
+  }
+
+  async deletePost(id: string) {
+    return this.request<void>(`/api/v1/blog/posts/${id}`, { method: "DELETE" });
+  }
 }
 
 export const api = new ApiClient();
+
+// ── Blog CMS types ──────────────────────────────────────
+export interface BlogPost {
+  id: string;
+  slug: string;
+  title: string;
+  excerpt: string | null;
+  body_markdown: string;
+  author_name: string;
+  cover_image_url: string | null;
+  tags: string[] | null;
+  meta_title: string | null;
+  meta_description: string | null;
+  canonical_url: string | null;
+  og_image_url: string | null;
+  reading_time_minutes: number | null;
+  published_at: string | null;
+  created_at: string;
+}
+
+export interface BlogPostAdmin extends BlogPost {
+  status: string;
+  site_id: string | null;
+  updated_at: string | null;
+}
+
+export interface BlogPostListResponse {
+  posts: BlogPost[];
+  total: number;
+}
+
+export interface BlogPostAdminListResponse {
+  posts: BlogPostAdmin[];
+  total: number;
+}
+
+export interface BlogPostInput {
+  title: string;
+  body_markdown?: string;
+  excerpt?: string | null;
+  author_name?: string | null;
+  cover_image_url?: string | null;
+  tags?: string[] | null;
+  slug?: string | null;
+  meta_title?: string | null;
+  meta_description?: string | null;
+  canonical_url?: string | null;
+  og_image_url?: string | null;
+}
 
 // Types
 export interface Site {

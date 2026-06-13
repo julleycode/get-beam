@@ -28,6 +28,7 @@ const EASYENGAGE_ITEMS = [
 // adminOnly items are hidden until /auth/me confirms is_admin (no flash for
 // non-admins while loading — the backend rejects non-admins on those pages).
 const BOTTOM_ITEMS: { href: string; label: string; adminOnly?: boolean }[] = [
+  { href: "/dashboard/blog", label: "Blog", adminOnly: true },
   { href: "/dashboard/feature-board", label: "Feature Board" },
   { href: "/dashboard/billing", label: "Billing" },
   { href: "/dashboard/waitlist", label: "Waitlist", adminOnly: true },
