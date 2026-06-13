@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { BeamLogo } from "@/components/beam-logo";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
@@ -154,6 +155,48 @@ function ClerkAuthGuard() {
   return null;
 }
 
+/**
+ * Resolves the Clerk session token onto the API client BEFORE rendering the
+ * gated page content, so a page's first data fetch on cold load carries auth
+ * instead of racing ClerkTokenSync (previously only the Overview page did this;
+ * inner pages could fire a token-less first request). Only rendered when Clerk
+ * is configured, so useAuth() is always inside <ClerkProvider>. Never acts on
+ * isSignedIn before isLoaded — acting early bounces signed-in users to
+ * /sign-in (the dashboard↔sign-in loop guarded against in ClerkAuthGuard).
+ */
+function ClerkTokenGate({ children }: { children: React.ReactNode }) {
+  const { getToken, isSignedIn, isLoaded } = useAuth();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (!isSignedIn) {
+      // Not signed in: let ClerkAuthGuard handle the redirect; don't block here.
+      setReady(true);
+      return;
+    }
+    getToken()
+      .then((token: string | null) => {
+        if (token) api.setClerkToken(token);
+      })
+      .finally(() => setReady(true));
+  }, [isLoaded, isSignedIn, getToken]);
+
+  if (!ready) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <Skeleton className="h-32 rounded-lg" />
+          <Skeleton className="h-32 rounded-lg" />
+          <Skeleton className="h-32 rounded-lg" />
+        </div>
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
+
 export default function DashboardLayout({
   children,
 }: {
@@ -206,7 +249,9 @@ export default function DashboardLayout({
             Exit to dashboard
           </Link>
         </header>
-        <main className="flex-1 overflow-auto p-6">{children}</main>
+        <main className="flex-1 overflow-auto p-6">
+          {HAS_CLERK ? <ClerkTokenGate>{children}</ClerkTokenGate> : children}
+        </main>
       </div>
     );
   }
@@ -257,7 +302,9 @@ export default function DashboardLayout({
         <Separator className="my-2" />
         {HAS_CLERK ? <ClerkSignOutButton /> : <LegacySignOutButton />}
       </aside>
-      <main className="flex-1 p-6 overflow-auto">{children}</main>
+      <main className="flex-1 p-6 overflow-auto">
+        {HAS_CLERK ? <ClerkTokenGate>{children}</ClerkTokenGate> : children}
+      </main>
     </div>
   );
 }

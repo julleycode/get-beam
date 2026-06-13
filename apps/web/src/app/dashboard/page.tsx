@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useAuth } from "@clerk/nextjs";
 import { api, Site, SiteStats, EngagementROI } from "@/lib/api";
 import { SiteCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
@@ -15,8 +14,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-
-const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 function OverviewSkeleton() {
   return (
@@ -223,30 +220,6 @@ function DashboardContent({
   return null;
 }
 
-function ClerkTokenGate({ children }: { children: React.ReactNode }) {
-  // useAuth() is safe here: ClerkTokenGate is only rendered when HAS_CLERK is
-  // true (see DashboardPage), so it always runs inside <ClerkProvider>.
-  const { getToken, isSignedIn, isLoaded } = useAuth();
-  const [ready, setReady] = useState(false);
-
-  useEffect(() => {
-    // Wait for Clerk to resolve the session before deciding anything.
-    if (!isLoaded) return;
-    if (!isSignedIn) {
-      setReady(true);
-      return;
-    }
-
-    getToken().then((token: string | null) => {
-      if (token) api.setClerkToken(token);
-      setReady(true);
-    }).catch(() => setReady(true));
-  }, [isLoaded, isSignedIn, getToken]);
-
-  if (!ready) return <OverviewSkeleton />;
-  return <>{children}</>;
-}
-
 export default function DashboardPage() {
   const [sites, setSites] = useState<Site[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -296,9 +269,7 @@ export default function DashboardPage() {
     </>
   );
 
-  if (HAS_CLERK) {
-    return <ClerkTokenGate>{content}</ClerkTokenGate>;
-  }
-
+  // The Clerk token gate now lives in the dashboard layout (ClerkTokenGate),
+  // so every page — not just Overview — waits for the token before fetching.
   return content;
 }
