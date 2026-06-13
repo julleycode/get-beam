@@ -40,6 +40,7 @@ export function PixelInstallGuide({
 }: PixelInstallGuideProps) {
   const guide = getGuide(platform);
   const [copied, setCopied] = useState(false);
+  const [promptCopied, setPromptCopied] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{
     status: string;
@@ -52,6 +53,31 @@ export function PixelInstallGuide({
     navigator.clipboard.writeText(snippet);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  }
+
+  // Hand the whole install to an AI coding agent. This is the answer to "CLI
+  // would be nice" — vibe coders get one-shot setup from their editor without
+  // pulling the product out of the dashboard.
+  function handleCopyPrompt() {
+    const steps = guide.steps
+      .map((s, i) => `${i + 1}. ${s.title} — ${s.description}`)
+      .join("\n");
+    const platformLabel = platform === "unknown" ? "website" : guide.name;
+    const prompt = [
+      `Install the Beam tracking pixel on my ${platformLabel}.`,
+      ``,
+      `Add this snippet right before the closing </head> tag:`,
+      snippet,
+      ``,
+      `Install steps:`,
+      steps,
+      guide.note ? `\nNote: ${guide.note}` : ``,
+    ]
+      .join("\n")
+      .trim();
+    navigator.clipboard.writeText(prompt);
+    setPromptCopied(true);
+    setTimeout(() => setPromptCopied(false), 2000);
   }
 
   async function handleVerify() {
@@ -199,6 +225,20 @@ export function PixelInstallGuide({
               >
                 {copied ? "Copied!" : "Copy"}
               </Button>
+            </div>
+            <div className="mt-3 flex flex-col gap-1.5">
+              <Button
+                variant="secondary"
+                size="sm"
+                className="w-full sm:w-auto"
+                onClick={handleCopyPrompt}
+              >
+                {promptCopied ? "Prompt copied ✓" : "Copy prompt to Claude"}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Paste into Cursor, Claude Code, or any AI coding agent — it has
+                the snippet plus the install steps for your site.
+              </p>
             </div>
           </CardContent>
         </Card>

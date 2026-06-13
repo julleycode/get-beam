@@ -184,6 +184,32 @@ export default function DashboardLayout({
       });
   }, [router]);
 
+  // During onboarding we strip the full nav: a half-finished setup that gets
+  // interrupted by an accidental "Overview" click strands the user with no way
+  // back to verification. Show only the brand + one deliberate exit instead.
+  const isOnboarding = pathname === "/dashboard/onboarding";
+
+  if (isOnboarding) {
+    return (
+      <div className="flex min-h-screen flex-col">
+        {HAS_CLERK && <ClerkAuthGuard />}
+        <header className="flex items-center justify-between border-b border-[rgba(43,37,48,0.08)] bg-card px-6 py-3">
+          <h1 className="text-xl font-serif font-semibold tracking-tight flex items-center gap-2">
+            <BeamLogo />
+            Beam
+          </h1>
+          <Link
+            href="/dashboard"
+            className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+          >
+            Exit to dashboard
+          </Link>
+        </header>
+        <main className="flex-1 overflow-auto p-6">{children}</main>
+      </div>
+    );
+  }
+
   return (
     <div className="flex min-h-screen">
       {/* Clerk auth guard (only when Clerk is active) */}

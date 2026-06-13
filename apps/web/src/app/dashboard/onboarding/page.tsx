@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api, BillingInterval } from "@/lib/api";
 import { StatGridSkeleton } from "@/components/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -78,8 +78,9 @@ const PLANS = [
   },
 ];
 
-export default function OnboardingPage() {
+function OnboardingFlow() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [step, setStep] = useState<Step>("create");
   const [name, setName] = useState("");
@@ -101,6 +102,31 @@ export default function OnboardingPage() {
   const [detectionSignals, setDetectionSignals] = useState<DetectionSignal[]>([]);
   const [detectionLoading, setDetectionLoading] = useState(false);
   const [totalVisitors, setTotalVisitors] = useState(0);
+
+  // Resume an interrupted setup: ?site=<id>&step=install drops the user straight
+  // back into the install/verify step for a site they already created, instead
+  // of forcing them to create a brand-new site (the original soft-lock).
+  const resumeSite = searchParams.get("site");
+  const resumeStep = searchParams.get("step");
+
+  useEffect(() => {
+    if (!resumeSite || resumeStep !== "install") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const pixel = await api.getPixelSnippet(resumeSite);
+        if (cancelled) return;
+        setSiteId(resumeSite);
+        setSnippet(pixel.snippet);
+        setStep("install");
+      } catch {
+        // Bad/expired site id — leave the user on the create step to start over.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [resumeSite, resumeStep]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -552,5 +578,19 @@ export default function OnboardingPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="max-w-2xl mx-auto py-12 text-center text-sm text-muted-foreground">
+          Loading…
+        </div>
+      }
+    >
+      <OnboardingFlow />
+    </Suspense>
   );
 }
