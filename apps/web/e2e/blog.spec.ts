@@ -73,6 +73,28 @@ test.describe("Blog — public pages", () => {
     const res = await page.goto("/blog/this-slug-does-not-exist");
     expect(res?.status()).toBe(404);
   });
+
+  test("tag hub page filters posts by tag", async ({ page, request }) => {
+    const token = await getAdminToken(request);
+    const ts = Date.now();
+    const tag = `e2e-tag-${ts}`;
+    const created = await request.post(`${API_BASE}/api/v1/blog/posts`, {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { title: `Tagged Post ${ts}`, tags: [tag], body_markdown: "Body." },
+    });
+    const post = await created.json();
+    await request.post(`${API_BASE}/api/v1/blog/posts/${post.id}/publish`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    await page.goto(`/blog/tag/${tag}`);
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(tag, {
+      timeout: 15_000,
+    });
+    await expect(
+      page.getByRole("link", { name: `Tagged Post ${ts}` })
+    ).toBeVisible({ timeout: 15_000 });
+  });
 });
 
 // ─── Admin editor ──────────────────────────────────────────

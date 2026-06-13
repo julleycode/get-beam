@@ -53,16 +53,19 @@ async def list_published_posts(
     db: AsyncSession = Depends(get_db),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    tag: str | None = Query(default=None),
 ) -> BlogPostListResponse:
-    """Published posts, newest first."""
-    where = BlogPost.status == "published"
+    """Published posts, newest first. Optionally filtered to a single tag."""
+    conds = [BlogPost.status == "published"]
+    if tag:
+        conds.append(BlogPost.tags.contains([tag]))
     total = (
-        await db.execute(select(func.count()).select_from(BlogPost).where(where))
+        await db.execute(select(func.count()).select_from(BlogPost).where(*conds))
     ).scalar_one()
     rows = (
         await db.execute(
             select(BlogPost)
-            .where(where)
+            .where(*conds)
             .order_by(desc(BlogPost.published_at))
             .limit(limit)
             .offset(offset)

@@ -5,7 +5,7 @@ import { SITE_URL, fetchPublishedPosts } from "@/lib/blog-fetch";
 export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const posts = await fetchPublishedPosts();
+  const posts = await fetchPublishedPosts(200);
 
   const staticRoutes: MetadataRoute.Sitemap = [
     { url: `${SITE_URL}/`, changeFrequency: "weekly", priority: 1 },
@@ -20,5 +20,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.7,
   }));
 
-  return [...staticRoutes, ...postRoutes];
+  const tags = Array.from(new Set(posts.flatMap((p) => p.tags ?? []))).sort();
+  const tagRoutes: MetadataRoute.Sitemap = tags.map((tag) => ({
+    url: `${SITE_URL}/blog/tag/${encodeURIComponent(tag)}`,
+    changeFrequency: "weekly",
+    priority: 0.5,
+  }));
+
+  return [...staticRoutes, ...postRoutes, ...tagRoutes];
 }

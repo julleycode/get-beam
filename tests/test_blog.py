@@ -140,3 +140,28 @@ async def test_admin_list_returns_all_statuses(admin_client: AsyncClient) -> Non
 async def test_admin_list_requires_auth(test_client: AsyncClient) -> None:
     """No override → require_admin runs → no token → 401."""
     assert (await test_client.get("/api/v1/blog/admin/posts")).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_public_list_filters_by_tag(admin_client: AsyncClient) -> None:
+    a = (
+        await admin_client.post(
+            "/api/v1/blog/posts", json={"title": "Tagged Alpha", "tags": ["seo", "alpha"]}
+        )
+    ).json()
+    b = (
+        await admin_client.post(
+            "/api/v1/blog/posts", json={"title": "Tagged Beta", "tags": ["seo", "beta"]}
+        )
+    ).json()
+    await admin_client.post(f"/api/v1/blog/posts/{a['id']}/publish")
+    await admin_client.post(f"/api/v1/blog/posts/{b['id']}/publish")
+
+    seo = (await admin_client.get("/api/v1/blog/posts?tag=seo")).json()
+    seo_slugs = {p["slug"] for p in seo["posts"]}
+    assert {"tagged-alpha", "tagged-beta"} <= seo_slugs
+
+    alpha = (await admin_client.get("/api/v1/blog/posts?tag=alpha")).json()
+    alpha_slugs = {p["slug"] for p in alpha["posts"]}
+    assert "tagged-alpha" in alpha_slugs
+    assert "tagged-beta" not in alpha_slugs

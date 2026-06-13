@@ -106,6 +106,20 @@ export default async function BlogPostPage({ params }: Params) {
         )}
       </div>
 
+      {post.tags && post.tags.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {post.tags.map((t) => (
+            <a
+              key={t}
+              href={`/blog/tag/${encodeURIComponent(t)}`}
+              className="rounded-full bg-secondary px-2.5 py-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+            >
+              {t}
+            </a>
+          ))}
+        </div>
+      )}
+
       {post.cover_image_url && (
         // Plain <img> avoids next/image remote-host config (P2 scope decision).
         // eslint-disable-next-line @next/next/no-img-element
