@@ -56,7 +56,10 @@ async def upload_image(data: bytes, content_type: str) -> str:
         logger.info("blog_image_mock_upload", path=path)
         return public_url(path)
 
-    base = settings.supabase_url.rstrip("/")
+    # Strip whitespace/newlines — a pasted env var commonly carries a trailing
+    # newline, which is an illegal HTTP header value (h11 LocalProtocolError).
+    key = settings.supabase_service_role_key.strip()
+    base = settings.supabase_url.strip().rstrip("/")
     url = f"{base}/storage/v1/object/{settings.supabase_storage_bucket}/{path}"
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -64,15 +67,27 @@ async def upload_image(data: bytes, content_type: str) -> str:
                 url,
                 content=data,
                 headers={
-                    "Authorization": f"Bearer {settings.supabase_service_role_key}",
+                    # Supabase's gateway needs BOTH headers. The new `sb_secret_`
+                    # keys are rejected with Authorization alone — `apikey` routes
+                    # + authorizes the request.
+                    "apikey": key,
+                    "Authorization": f"Bearer {key}",
                     "Content-Type": content_type,
                     "x-upsert": "true",
                 },
             )
         resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text[:160].replace("\n", " ")
+        logger.warning(
+            "blog_image_upload_failed",
+            status=exc.response.status_code,
+            body=exc.response.text[:300],
+        )
+        raise UploadError(f"Supabase {exc.response.status_code}: {detail}") from exc
     except httpx.HTTPError as exc:
         logger.warning("blog_image_upload_failed", error=str(exc))
-        raise UploadError("Image upload failed") from exc
+        raise UploadError(f"Cannot reach Supabase ({type(exc).__name__})") from exc
 
     logger.info("blog_image_uploaded", path=path)
     return public_url(path)
