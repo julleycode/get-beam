@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { api, Visitor } from "@/lib/api";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { TableSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { SiteSelector } from "@/components/site-selector";
@@ -44,33 +45,24 @@ function intentColor(score: number): string {
 export default function VisitorsPage() {
   const searchParams = useSearchParams();
   const [siteId, setSiteId] = useState(searchParams.get("site") || "");
-  const [visitors, setVisitors] = useState<Visitor[]>([]);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState("all");
   const [sortBy, setSortBy] = useState("intent_score");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [retryKey, setRetryKey] = useState(0);
 
-  useEffect(() => {
-    if (!siteId) return;
-    setLoading(true);
-    setError(null);
-    api
-      .listVisitors(siteId, {
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ["visitors", siteId, page, filter, sortBy],
+    queryFn: () =>
+      api.listVisitors(siteId, {
         page,
         page_size: 50,
         identity_status: filter === "all" ? undefined : filter,
         sort_by: sortBy,
-      })
-      .then((res) => {
-        setVisitors(res.visitors);
-        setTotal(res.total);
-      })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [siteId, page, filter, sortBy, retryKey]);
+      }),
+    enabled: !!siteId,
+  });
+
+  const visitors = data?.visitors ?? [];
+  const total = data?.total ?? 0;
 
   return (
     <div>
@@ -106,12 +98,12 @@ export default function VisitorsPage() {
 
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view visitors.</p>
-      ) : loading ? (
+      ) : isLoading ? (
         <TableSkeleton cols={7} rows={10} />
-      ) : error ? (
+      ) : isError ? (
         <ErrorBanner
-          message={`Couldn't load visitors — ${error}`}
-          onRetry={() => setRetryKey((k) => k + 1)}
+          message={`Couldn't load visitors — ${error instanceof Error ? error.message : "unknown error"}`}
+          onRetry={() => refetch()}
         />
       ) : (
         <>

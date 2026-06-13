@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { api, Campaign } from "@/lib/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { TableSkeleton } from "@/components/skeletons";
 import { SiteSelector } from "@/components/site-selector";
 import { Badge } from "@/components/ui/badge";
@@ -30,25 +31,27 @@ function statusVariant(status: string) {
 export default function CampaignsPage() {
   const searchParams = useSearchParams();
   const [siteId, setSiteId] = useState(searchParams.get("site") || "");
-  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-  const [loading, setLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [sendResult, setSendResult] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
-  function loadCampaigns() {
-    if (!siteId) return;
-    setLoading(true);
-    api.listCampaigns(siteId).then((r) => setCampaigns(r.campaigns)).catch(() => {}).finally(() => setLoading(false));
+  const { data, isLoading } = useQuery({
+    queryKey: ["campaigns", siteId],
+    queryFn: () => api.listCampaigns(siteId),
+    enabled: !!siteId,
+  });
+  const campaigns = data?.campaigns ?? [];
+
+  function reload() {
+    queryClient.invalidateQueries({ queryKey: ["campaigns", siteId] });
   }
-
-  useEffect(loadCampaigns, [siteId]);
 
   async function handleStatusChange(campaignId: string, newStatus: string) {
     setActionError(null);
     try {
       await api.updateCampaignStatus(siteId, campaignId, newStatus);
-      loadCampaigns();
+      reload();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Action failed");
     }
@@ -76,7 +79,7 @@ export default function CampaignsPage() {
       if (s.throttled) parts.push(`${s.throttled} deferred by hourly cap — send again later`);
       if (s.failed) parts.push(`${s.failed} failed`);
       setSendResult(`"${campaignName}": ${parts.join(", ")} (audience ${s.total_audience}).`);
-      loadCampaigns();
+      reload();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Send failed");
     } finally {
@@ -100,7 +103,7 @@ export default function CampaignsPage() {
 
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view campaigns.</p>
-      ) : loading ? (
+      ) : isLoading ? (
         <TableSkeleton cols={4} rows={6} />
       ) : campaigns.length === 0 ? (
         <p className="text-muted-foreground">

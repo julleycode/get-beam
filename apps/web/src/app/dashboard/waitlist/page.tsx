@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import { api, WaitlistSignup } from "@/lib/api";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { StatGridSkeleton, TableSkeleton } from "@/components/skeletons";
 import { Button } from "@/components/ui/button";
 
@@ -37,76 +38,38 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function WaitlistPage() {
-  const [signups, setSignups] = useState<WaitlistSignup[]>([]);
-  const [counts, setCounts] = useState({ pending: 0, approved: 0, granted: 0, rejected: 0 });
-  const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
-  const fetchData = useCallback(async () => {
-    try {
-      const data = await api.getWaitlist();
-      setSignups(data.signups);
-      setCounts(data.counts);
-    } catch (err) {
-      console.error("Failed to load waitlist", err);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const { data, isLoading } = useQuery({
+    queryKey: ["waitlist"],
+    queryFn: () => api.getWaitlist(),
+  });
+  const signups = data?.signups ?? [];
+  const counts = data?.counts ?? { pending: 0, approved: 0, granted: 0, rejected: 0 };
 
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+  function reload() {
+    return queryClient.invalidateQueries({ queryKey: ["waitlist"] });
+  }
 
-  async function handleApprove(id: string) {
+  async function runAction(id: string, action: () => Promise<unknown>, label: string) {
     setActing(id);
     try {
-      await api.approveWaitlist(id);
-      await fetchData();
+      await action();
+      await reload();
     } catch (err) {
-      console.error("Approve failed", err);
+      console.error(`${label} failed`, err);
     } finally {
       setActing(null);
     }
   }
 
-  async function handleGrant(id: string) {
-    setActing(id);
-    try {
-      await api.grantWaitlist(id);
-      await fetchData();
-    } catch (err) {
-      console.error("Grant failed", err);
-    } finally {
-      setActing(null);
-    }
-  }
+  const handleApprove = (id: string) => runAction(id, () => api.approveWaitlist(id), "Approve");
+  const handleGrant = (id: string) => runAction(id, () => api.grantWaitlist(id), "Grant");
+  const handleReject = (id: string) => runAction(id, () => api.rejectWaitlist(id), "Reject");
+  const handleDelete = (id: string) => runAction(id, () => api.deleteWaitlist(id), "Delete");
 
-  async function handleReject(id: string) {
-    setActing(id);
-    try {
-      await api.rejectWaitlist(id);
-      await fetchData();
-    } catch (err) {
-      console.error("Reject failed", err);
-    } finally {
-      setActing(null);
-    }
-  }
-
-  async function handleDelete(id: string) {
-    setActing(id);
-    try {
-      await api.deleteWaitlist(id);
-      await fetchData();
-    } catch (err) {
-      console.error("Delete failed", err);
-    } finally {
-      setActing(null);
-    }
-  }
-
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="space-y-6">
         <StatGridSkeleton cols={4} />

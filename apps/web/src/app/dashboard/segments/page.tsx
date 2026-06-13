@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { api, Segment } from "@/lib/api";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { CardGridSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { SiteSelector } from "@/components/site-selector";
@@ -21,29 +22,25 @@ function priorityColor(priority: string) {
 export default function SegmentsPage() {
   const searchParams = useSearchParams();
   const [siteId, setSiteId] = useState(searchParams.get("site") || "");
-  const [segments, setSegments] = useState<Segment[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [triggering, setTriggering] = useState(false);
+  const queryClient = useQueryClient();
 
-  function loadSegments() {
-    if (!siteId) return;
-    setLoading(true);
-    setError(null);
-    api
-      .listSegments(siteId)
-      .then((r) => setSegments(r.segments))
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }
-
-  useEffect(loadSegments, [siteId]);
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ["segments", siteId],
+    queryFn: () => api.listSegments(siteId),
+    enabled: !!siteId,
+  });
+  const segments = data?.segments ?? [];
 
   async function handleTrigger() {
     setTriggering(true);
     try {
       await api.triggerSegmentation(siteId);
-      setTimeout(loadSegments, 3000);
+      // Segmentation runs async on the backend — give it a moment, then refetch.
+      setTimeout(
+        () => queryClient.invalidateQueries({ queryKey: ["segments", siteId] }),
+        3000
+      );
     } catch {
     } finally {
       setTriggering(false);
@@ -66,12 +63,12 @@ export default function SegmentsPage() {
 
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view segments.</p>
-      ) : loading ? (
+      ) : isLoading ? (
         <CardGridSkeleton cards={4} cols={2} />
-      ) : error ? (
+      ) : isError ? (
         <ErrorBanner
-          message={`Couldn't load segments — ${error}`}
-          onRetry={loadSegments}
+          message={`Couldn't load segments — ${error instanceof Error ? error.message : "unknown error"}`}
+          onRetry={() => refetch()}
         />
       ) : segments.length === 0 ? (
         <p className="text-muted-foreground">
