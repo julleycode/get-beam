@@ -73,6 +73,28 @@ test.describe("Blog — public pages", () => {
     const res = await page.goto("/blog/this-slug-does-not-exist");
     expect(res?.status()).toBe(404);
   });
+
+  test("tag hub page filters posts by tag", async ({ page, request }) => {
+    const token = await getAdminToken(request);
+    const ts = Date.now();
+    const tag = `e2e-tag-${ts}`;
+    const created = await request.post(`${API_BASE}/api/v1/blog/posts`, {
+      headers: { Authorization: `Bearer ${token}` },
+      data: { title: `Tagged Post ${ts}`, tags: [tag], body_markdown: "Body." },
+    });
+    const post = await created.json();
+    await request.post(`${API_BASE}/api/v1/blog/posts/${post.id}/publish`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    await page.goto(`/blog/tag/${tag}`);
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(tag, {
+      timeout: 15_000,
+    });
+    await expect(
+      page.getByRole("link", { name: `Tagged Post ${ts}` })
+    ).toBeVisible({ timeout: 15_000 });
+  });
 });
 
 // ─── Admin editor ──────────────────────────────────────────
@@ -116,5 +138,29 @@ test.describe("Blog — admin editor", () => {
     await expect(page.getByRole("link", { name: title })).toBeVisible({
       timeout: 15_000,
     });
+  });
+
+  test("SEO assistant scores the post as you write", async ({ page, request }) => {
+    const token = await getAdminToken(request);
+    await page.goto("/");
+    await page.evaluate((t) => localStorage.setItem("auth_token", t), token);
+    await page.goto("/dashboard/blog/new");
+
+    // Empty editor → poor score.
+    await expect(page.getByText("SEO score")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("Needs work")).toBeVisible({ timeout: 15_000 });
+
+    // Filling title + focus keyword + a solid body lifts the score out of "poor".
+    await page.fill("#title", "Website Visitor Identification: A Practical Guide");
+    await page.fill("#focus-keyword", "website visitor identification");
+    await page.fill(
+      "#body",
+      "Website visitor identification turns anonymous traffic into named companies.\n\n" +
+        "## How website visitor identification works\n\n" +
+        "Reverse IP lookup matches a visit to a company and intent signals reveal buyers. ".repeat(40) +
+        "\n\n[Read our guide](/blog)."
+    );
+
+    await expect(page.getByText("Needs work")).toBeHidden({ timeout: 15_000 });
   });
 });

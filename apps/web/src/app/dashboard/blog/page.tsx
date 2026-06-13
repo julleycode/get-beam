@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, type BlogPostAdmin } from "@/lib/api";
@@ -8,6 +9,9 @@ import { ErrorBanner } from "@/components/error-banner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+
+type StatusFilter = "all" | "published" | "draft";
 
 const QUERY_KEY = ["admin-blog"];
 
@@ -45,6 +49,34 @@ export default function BlogAdminPage() {
 
   const busy = publish.isPending || unpublish.isPending || remove.isPending;
 
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [search, setSearch] = useState("");
+
+  const posts = data?.posts ?? [];
+  const counts = {
+    all: posts.length,
+    published: posts.filter((p) => p.status === "published").length,
+    draft: posts.filter((p) => p.status !== "published").length,
+  };
+  const q = search.trim().toLowerCase();
+  const filtered = posts.filter((p) => {
+    const matchesStatus =
+      statusFilter === "all"
+        ? true
+        : statusFilter === "published"
+          ? p.status === "published"
+          : p.status !== "published";
+    const matchesSearch =
+      !q || p.title.toLowerCase().includes(q) || p.slug.toLowerCase().includes(q);
+    return matchesStatus && matchesSearch;
+  });
+
+  const FILTERS: { key: StatusFilter; label: string }[] = [
+    { key: "all", label: `All (${counts.all})` },
+    { key: "published", label: `Published (${counts.published})` },
+    { key: "draft", label: `Drafts (${counts.draft})` },
+  ];
+
   return (
     <div className="mx-auto max-w-3xl">
       <div className="mb-6 flex items-center justify-between">
@@ -61,13 +93,42 @@ export default function BlogAdminPage() {
         <ErrorBanner message={(error as Error)?.message || "Failed to load posts."} onRetry={refetch} />
       )}
 
+      {!isLoading && posts.length > 0 && (
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex gap-1.5">
+            {FILTERS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => setStatusFilter(f.key)}
+                className={`rounded-full px-3 py-1 text-sm transition-colors ${
+                  statusFilter === f.key
+                    ? "bg-[hsl(345,100%,60%)] text-white"
+                    : "bg-secondary text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search title or slug…"
+            className="sm:max-w-xs"
+          />
+        </div>
+      )}
+
       {isLoading ? (
         <ListCardSkeleton />
-      ) : !data || data.posts.length === 0 ? (
+      ) : posts.length === 0 ? (
         <p className="text-muted-foreground">No posts yet. Create your first one.</p>
+      ) : filtered.length === 0 ? (
+        <p className="text-muted-foreground">No posts match this filter.</p>
       ) : (
         <ul className="space-y-3">
-          {data.posts.map((post: BlogPostAdmin) => (
+          {filtered.map((post: BlogPostAdmin) => (
             <li key={post.id}>
               <Card>
                 <CardContent className="flex items-center justify-between gap-4 p-4">

@@ -191,6 +191,12 @@ class ApiClient {
     return this.request<SiteStats>(`/api/v1/visitors/${siteId}/stats`);
   }
 
+  async getBrowserBreakdown(siteId: string, windowDays = 30) {
+    return this.request<BrowserBreakdown>(
+      `/api/v1/sites/${siteId}/browser-breakdown?window_days=${windowDays}`
+    );
+  }
+
   // Segments
   async listSegments(siteId: string) {
     return this.request<SegmentListResponse>(`/api/v1/segments/${siteId}`);
@@ -834,6 +840,30 @@ export interface CampaignSendResponse {
   campaign_id: string;
   status: string;
   summary: CampaignSendSummary;
+}
+
+export interface BrowserRow {
+  browser: string;
+  captured: number;
+  identified: number;
+  identification_rate: number;
+  share: number;
+}
+
+export interface SafariCoverage {
+  actual_share: number;
+  expected_share: number;
+  coverage_ratio: number | null;
+  status: "ok" | "watch" | "likely_blocked" | "insufficient_data";
+  message: string;
+}
+
+export interface BrowserBreakdown {
+  site_id: string;
+  window_days: number;
+  total_visitors: number;
+  browsers: BrowserRow[];
+  safari_coverage: SafariCoverage;
 }
 
 export interface SiteStats {

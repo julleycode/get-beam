@@ -18,12 +18,16 @@ export const SITE_URL = (
 
 const REVALIDATE_SECONDS = 300;
 
-export async function fetchPublishedPosts(limit = 50): Promise<BlogPost[]> {
+export async function fetchPublishedPosts(
+  limit = 50,
+  tag?: string
+): Promise<BlogPost[]> {
   try {
-    const res = await fetch(
-      `${API_BASE}/api/v1/blog/posts?limit=${limit}`,
-      { cache: "no-store" }
-    );
+    const qs = new URLSearchParams({ limit: String(limit) });
+    if (tag) qs.set("tag", tag);
+    const res = await fetch(`${API_BASE}/api/v1/blog/posts?${qs.toString()}`, {
+      cache: "no-store",
+    });
     if (!res.ok) return [];
     const data = (await res.json()) as BlogPostListResponse;
     return data.posts;
@@ -32,7 +36,6 @@ export async function fetchPublishedPosts(limit = 50): Promise<BlogPost[]> {
     return [];
   }
 }
-
 export async function fetchPublishedPost(slug: string): Promise<BlogPost | null> {
   try {
     const res = await fetch(
