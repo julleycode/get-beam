@@ -47,3 +47,10 @@ clickhouse-connect==0.8.3
 
 # Browser automation (Playwright installed separately via --with-deps)
 playwright==1.49.1
+
+# OSINT email→account scanners (manual, behind ENABLE_OSINT_SCAN). NOTE: this is
+# the file the Dockerfile installs from — keep OSINT deps here, not only in
+# apps/api/requirements.txt, or the prod image won't have them.
+user-scanner==1.4.0.1  # email → 103 sites existence + rich extra (username/avatar/joined)
+holehe==1.61           # email → 121 sites existence (megadose/holehe)
+maigret==0.6.1         # username → 3000+ sites profile URLs (HEAVY: pulls Flask/ipython/lxml/curl_cffi)
