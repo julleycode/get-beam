@@ -16,6 +16,7 @@ if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
     "/sign-in(.*)",
     "/sign-up(.*)",
     "/pricing(.*)",
+    "/blog(.*)",    // public marketing blog (SEO). /dashboard/blog stays protected.
   ]);
   middleware = clerkMiddleware((auth: () => { protect: () => void }, request: NextRequest) => {
     if (!isPublicRoute(request)) {
