@@ -1,8 +1,13 @@
 import type { BlogPost, BlogPostListResponse } from "@/lib/api";
 
 // Server-side fetchers for the PUBLIC blog. These hit P1's public endpoints
-// (no auth) and use ISR. Distinct from the browser `api` singleton, which
-// carries the user's bearer token and runs client-side.
+// (no auth). Distinct from the browser `api` singleton, which carries the
+// user's bearer token and runs client-side.
+//
+// The list is fetched fresh (no-store) so a publish/unpublish shows on /blog
+// immediately — a cached list would lag the publish by the revalidate window.
+// Individual post pages keep a short ISR window (they change rarely, and a
+// brand-new slug renders on-demand anyway).
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -17,7 +22,7 @@ export async function fetchPublishedPosts(limit = 50): Promise<BlogPost[]> {
   try {
     const res = await fetch(
       `${API_BASE}/api/v1/blog/posts?limit=${limit}`,
-      { next: { revalidate: REVALIDATE_SECONDS } }
+      { cache: "no-store" }
     );
     if (!res.ok) return [];
     const data = (await res.json()) as BlogPostListResponse;

@@ -1,7 +1,8 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL, fetchPublishedPosts } from "@/lib/blog-fetch";
 
-export const revalidate = 300;
+// Dynamic: reflects the current published set (no-store fetch).
+export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const posts = await fetchPublishedPosts();

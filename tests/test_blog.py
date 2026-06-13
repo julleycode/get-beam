@@ -119,3 +119,24 @@ async def test_admin_write_requires_auth(test_client: AsyncClient) -> None:
 @pytest.mark.asyncio
 async def test_get_unknown_slug_404(test_client: AsyncClient) -> None:
     assert (await test_client.get("/api/v1/blog/posts/nonexistent")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_admin_list_returns_all_statuses(admin_client: AsyncClient) -> None:
+    await _create(admin_client, title="Admin List Draft")
+    published = await _create(admin_client, title="Admin List Published")
+    await admin_client.post(f"/api/v1/blog/posts/{published['id']}/publish")
+
+    resp = await admin_client.get("/api/v1/blog/admin/posts")
+    assert resp.status_code == 200
+    body = resp.json()
+    by_slug = {p["slug"]: p["status"] for p in body["posts"]}
+    assert by_slug.get("admin-list-draft") == "draft"
+    assert by_slug.get("admin-list-published") == "published"
+    assert body["total"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_admin_list_requires_auth(test_client: AsyncClient) -> None:
+    """No override → require_admin runs → no token → 401."""
+    assert (await test_client.get("/api/v1/blog/admin/posts")).status_code == 401

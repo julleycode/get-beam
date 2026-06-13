@@ -150,7 +150,7 @@ jobs:
           import asyncio, bcrypt
           from apps.api.models.database import engine, Base, async_session
           from apps.api.models.user import User
-          from apps.api.models import social_account, post, message, campaign, draft, enrichment, segment, voice_example  # noqa
+          from apps.api.models import social_account, post, message, campaign, draft, enrichment, segment, voice_example, blog_post  # noqa
           async def seed():
               async with engine.begin() as conn:
                   await conn.run_sync(Base.metadata.create_all)
@@ -160,6 +160,11 @@ jobs:
                   if not exists.scalar_one_or_none():
                       pw = bcrypt.hashpw(b'password123', bcrypt.gensalt()).decode()
                       db.add(User(email='demo@getbeam.fyi', hashed_password=pw, full_name='Demo User'))
+                      await db.commit()
+                  admin = await db.execute(select(User).where(User.email == 'admin@getbeam.fyi'))
+                  if not admin.scalar_one_or_none():
+                      pw = bcrypt.hashpw(b'password123', bcrypt.gensalt()).decode()
+                      db.add(User(email='admin@getbeam.fyi', hashed_password=pw, full_name='Admin User', is_admin=True))
                       await db.commit()
           asyncio.run(seed())
           "

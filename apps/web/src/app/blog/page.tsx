@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { fetchPublishedPosts } from "@/lib/blog-fetch";
 
-export const revalidate = 300;
+// Dynamic: the list is fetched no-store so newly published/unpublished posts
+// show immediately rather than lagging an ISR window.
+export const dynamic = "force-dynamic";
 
 function formatDate(iso: string | null): string {
   if (!iso) return "";
