@@ -77,3 +77,26 @@ def resolve_seo_meta(
 
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def publish_due_posts(db: AsyncSession) -> int:
+    """Publish any `scheduled` posts whose `scheduled_for` time has passed.
+
+    Trigger-agnostic — called by the APScheduler job, but works from any
+    caller (cron, manual). Returns the number of posts published.
+    """
+    now = now_utc()
+    due = (
+        await db.execute(
+            select(BlogPost).where(
+                BlogPost.status == "scheduled", BlogPost.scheduled_for <= now
+            )
+        )
+    ).scalars().all()
+    for post in due:
+        post.status = "published"
+        if post.published_at is None:
+            post.published_at = now
+    if due:
+        await db.commit()
+    return len(due)

@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
-import type { BlogPostAdmin, BlogPostInput } from "@/lib/api";
+import { useRef, useState } from "react";
+import { api, type BlogPostAdmin, type BlogPostInput } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Markdown } from "@/components/blog/markdown";
 import { SeoPanel } from "@/components/blog/seo-panel";
+import { MarkdownToolbar } from "@/components/blog/markdown-toolbar";
 
 interface PostFormProps {
   initial?: BlogPostAdmin;
@@ -57,8 +58,28 @@ export function PostForm({
   // Author-time only — drives the live SEO checklist; not persisted yet.
   const [focusKeyword, setFocusKeyword] = useState("");
   const [touched, setTouched] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
 
   const titleError = touched && title.trim().length === 0;
+
+  async function uploadAndApply(
+    file: File | undefined,
+    apply: (url: string) => void
+  ): Promise<void> {
+    if (!file) return;
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const { url } = await api.uploadImage(file);
+      apply(url);
+    } catch (err) {
+      setUploadError((err as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -129,13 +150,32 @@ export function PostForm({
         </Field>
 
         <Field label="Body (Markdown)" htmlFor="body">
+          <MarkdownToolbar textareaRef={bodyRef} value={body} onChange={setBody} />
           <Textarea
+            ref={bodyRef}
             id="body"
             value={body}
             onChange={(e) => setBody(e.target.value)}
             rows={16}
-            className="font-mono text-[13px]"
+            className="rounded-t-none font-mono text-[13px]"
           />
+          <div className="flex items-center gap-2 text-xs">
+            <label className="cursor-pointer rounded-md border border-[rgba(43,37,48,0.16)] px-2 py-1 hover:bg-secondary">
+              {uploading ? "Uploading…" : "Upload image"}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                disabled={uploading}
+                onChange={(e) =>
+                  uploadAndApply(e.target.files?.[0], (url) =>
+                    setBody((b) => `${b}\n\n![](${url})\n`)
+                  )
+                }
+              />
+            </label>
+            <span className="text-muted-foreground">Inserts markdown at the end.</span>
+          </div>
         </Field>
 
         <Field label="Tags" htmlFor="tags" hint="Comma-separated.">
@@ -150,8 +190,35 @@ export function PostForm({
         <details className="rounded-lg border border-[rgba(43,37,48,0.12)] p-4">
           <summary className="cursor-pointer text-sm font-medium">SEO &amp; images</summary>
           <div className="mt-4 space-y-4">
-            <Field label="Cover image URL" htmlFor="cover">
-              <Input id="cover" value={coverImageUrl} onChange={(e) => setCoverImageUrl(e.target.value)} />
+            <Field label="Cover image" htmlFor="cover" hint="Paste a URL or upload an image.">
+              <div className="space-y-2">
+                <Input
+                  id="cover"
+                  value={coverImageUrl}
+                  onChange={(e) => setCoverImageUrl(e.target.value)}
+                  placeholder="https://… or upload"
+                />
+                <div className="flex items-center gap-2">
+                  <label className="cursor-pointer rounded-md border border-[rgba(43,37,48,0.16)] px-2 py-1 text-xs hover:bg-secondary">
+                    {uploading ? "Uploading…" : "Upload cover"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={uploading}
+                      onChange={(e) => uploadAndApply(e.target.files?.[0], setCoverImageUrl)}
+                    />
+                  </label>
+                  {coverImageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={coverImageUrl}
+                      alt="cover preview"
+                      className="h-8 w-12 rounded border border-[rgba(43,37,48,0.12)] object-cover"
+                    />
+                  )}
+                </div>
+              </div>
             </Field>
             <Field label="Meta title" htmlFor="meta-title" hint="Falls back to title.">
               <Input id="meta-title" value={metaTitle} onChange={(e) => setMetaTitle(e.target.value)} />
@@ -168,6 +235,7 @@ export function PostForm({
           </div>
         </details>
 
+        {uploadError && <p className="text-sm text-red-600">Image upload: {uploadError}</p>}
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <Button type="submit" disabled={submitting}>

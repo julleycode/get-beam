@@ -630,8 +630,33 @@ class ApiClient {
     });
   }
 
+  async schedulePost(id: string, scheduledFor: string) {
+    return this.request<BlogPostAdmin>(`/api/v1/blog/posts/${id}/schedule`, {
+      method: "POST",
+      body: JSON.stringify({ scheduled_for: scheduledFor }),
+    });
+  }
+
   async deletePost(id: string) {
     return this.request<void>(`/api/v1/blog/posts/${id}`, { method: "DELETE" });
+  }
+
+  async uploadImage(file: File): Promise<{ url: string }> {
+    // Multipart — must NOT set Content-Type (browser sets the boundary), so
+    // this bypasses the JSON `request` helper.
+    const token = this.getToken();
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_BASE}/api/v1/blog/upload`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Upload failed: ${res.status}`);
+    }
+    return res.json() as Promise<{ url: string }>;
   }
 }
 
@@ -660,6 +685,7 @@ export interface BlogPostAdmin extends BlogPost {
   status: string;
   site_id: string | null;
   updated_at: string | null;
+  scheduled_for: string | null;
 }
 
 export interface BlogPostListResponse {

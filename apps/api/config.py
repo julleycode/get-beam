@@ -97,6 +97,11 @@ class Settings(BaseSettings):
     shopify_api_key: str = ""
     shopify_api_secret: str = ""
 
+    # Supabase Storage (blog image uploads). No service-role key → mock mode.
+    supabase_url: str = ""
+    supabase_service_role_key: str = ""
+    supabase_storage_bucket: str = "blog-images"
+
     # ─── OAuth Credentials (EasyEngage) ───
     twitter_client_id: str = ""
     twitter_client_secret: str = ""
