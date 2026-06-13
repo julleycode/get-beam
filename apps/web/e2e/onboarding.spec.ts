@@ -199,7 +199,9 @@ test.describe("Onboarding — Platform Detection", () => {
 
     // Should show code snippet
     await expect(page.locator("text=Code Snippet")).toBeVisible();
-    await expect(page.locator('button:has-text("Copy")')).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Copy", exact: true })
+    ).toBeVisible();
 
     // Should have Verify button
     await expect(
@@ -219,7 +221,9 @@ test.describe("Onboarding — Platform Detection", () => {
 
     // Should show code snippet for manual install
     await expect(page.locator("text=Code Snippet")).toBeVisible();
-    await expect(page.locator('button:has-text("Copy")')).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Copy", exact: true })
+    ).toBeVisible();
 
     // Should have Verify button
     await expect(
@@ -267,7 +271,7 @@ test.describe("Onboarding — Platform Detection", () => {
     await waitForDetection(page);
 
     // Click copy button
-    const copyBtn = page.locator('button:has-text("Copy")');
+    const copyBtn = page.getByRole("button", { name: "Copy", exact: true });
     await copyBtn.click();
 
     // Button should change to "Copied!"

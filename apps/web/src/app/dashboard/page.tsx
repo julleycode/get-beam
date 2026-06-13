@@ -113,6 +113,12 @@ function SiteCard({ site }: { site: Site }) {
                 >
                   {verifying ? "Checking..." : "Re-verify"}
                 </button>
+                <Link
+                  href={`/dashboard/onboarding?site=${site.site_id}&step=install`}
+                  className="ml-1 text-[11px] font-medium text-yellow-800 underline-offset-2 hover:underline"
+                >
+                  Finish setup →
+                </Link>
               </>
             )}
           </div>
