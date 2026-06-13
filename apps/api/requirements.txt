@@ -28,3 +28,7 @@ pyjwt[crypto]==2.9.0
 pytest==8.3.3
 pytest-asyncio==0.24.0
 pytest-httpx==0.32.0
+# ─── OSINT email→account scanners (manual, behind ENABLE_OSINT_SCAN) ───
+user-scanner==1.4.0.1  # email → 103 sites existence + rich `extra` (username/avatar/joined). holehe successor. pulls httpx[http2]
+holehe==1.61           # email → 121 sites existence (megadose/holehe). pulls trio/bs4/termcolor/tqdm
+maigret==0.6.1         # username → 3000+ sites profile URLs (pipeline stage B). HEAVY (pulls Flask/ipython/lxml/curl_cffi/tor libs)

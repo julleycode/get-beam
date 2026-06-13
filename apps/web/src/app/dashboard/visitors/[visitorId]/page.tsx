@@ -42,11 +42,11 @@ export default function VisitorDetailPage() {
   const [visitor, setVisitor] = useState<VisitorDetail | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Enrich state
-  const [enriching, setEnriching] = useState(false);
-  const [enrichResult, setEnrichResult] = useState<{
+  // Deep-dive research (the full pipeline) — the single research action.
+  const [resolving, setResolving] = useState(false);
+  const [resolveResult, setResolveResult] = useState<{
     status: string;
-    message: string;
+    message?: string;
   } | null>(null);
 
   useEffect(() => {
@@ -58,26 +58,35 @@ export default function VisitorDetailPage() {
       .finally(() => setLoading(false));
   }, [siteId, visitorId]);
 
-  async function handleEnrich() {
+  async function handleResolveSocial(force = false) {
     if (!siteId || !visitorId) return;
-    setEnriching(true);
-    setEnrichResult(null);
+    setResolving(true);
+    setResolveResult(null);
 
     try {
-      const result = await api.enrichVisitor(siteId, visitorId);
-      setEnrichResult({ status: result.status, message: result.message });
+      const result = await api.resolveSocial(siteId, visitorId, force);
+      setResolveResult({ status: result.status, message: result.message });
 
-      if (result.status === "enriched") {
+      if (result.status === "started" || result.status === "scanning") {
+        const deadline = Date.now() + 120_000; // pipeline can take longer
+        while (Date.now() < deadline) {
+          await new Promise((r) => setTimeout(r, 5000));
+          const updated = await api.getVisitor(siteId, visitorId);
+          setVisitor(updated);
+          const st = updated.social_context?.social_resolution?.status;
+          if (st && st !== "scanning") break;
+        }
+      } else {
         const updated = await api.getVisitor(siteId, visitorId);
         setVisitor(updated);
       }
     } catch (err) {
-      setEnrichResult({
+      setResolveResult({
         status: "error",
-        message: err instanceof Error ? err.message : "Enrichment failed",
+        message: err instanceof Error ? err.message : "Social resolution failed",
       });
     } finally {
-      setEnriching(false);
+      setResolving(false);
     }
   }
 
@@ -93,7 +102,16 @@ export default function VisitorDetailPage() {
 
   const completeness = visitor.enrichment_completeness ?? 0;
   const hasDeepResearch = !!visitor.social_context?.deep_research;
-  const canEnrich = visitor.identity_status !== "anonymous" && !hasDeepResearch;
+
+  const osint = visitor.social_context?.osint_scan;
+  const canOsint = visitor.identity_status !== "anonymous";
+  const osintAccounts = osint?.accounts ?? [];
+  const osintProfiles = osintAccounts.filter((a) => a.kind === "profile");
+  const osintRegistered = osintAccounts.filter((a) => a.kind !== "profile");
+
+  const resolution = visitor.social_context?.social_resolution;
+  const resolveBusy = resolving || resolution?.status === "scanning";
+  const resolvedProfiles = resolution?.profiles ?? [];
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -218,13 +236,15 @@ export default function VisitorDetailPage() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle className="text-base">Enrichment</CardTitle>
-              {canEnrich && (
+              {canOsint && (
                 <Button
                   size="sm"
-                  onClick={handleEnrich}
-                  disabled={enriching}
+                  onClick={() =>
+                    handleResolveSocial(resolution?.status === "complete")
+                  }
+                  disabled={resolveBusy}
                 >
-                  {enriching ? (
+                  {resolveBusy ? (
                     <>
                       <svg
                         className="mr-2 h-4 w-4 animate-spin"
@@ -247,8 +267,10 @@ export default function VisitorDetailPage() {
                       </svg>
                       Researching...
                     </>
+                  ) : resolution ? (
+                    "Re-research"
                   ) : (
-                    "Enrich"
+                    "Deep-dive research"
                   )}
                 </Button>
               )}
@@ -257,19 +279,19 @@ export default function VisitorDetailPage() {
           <CardContent className="space-y-4">
             <CompletenessBar value={completeness} />
 
-            {enrichResult && (
+            {(resolveResult?.message || resolution?.message) && (
               <p
                 className={`text-xs ${
-                  enrichResult.status === "enriched"
-                    ? "text-green-500"
-                    : enrichResult.status === "error"
-                      ? "text-destructive"
-                      : enrichResult.status === "limit_reached"
-                        ? "text-yellow-600"
-                        : "text-muted-foreground"
+                  resolveResult?.status === "error" ||
+                  resolution?.status === "error"
+                    ? "text-destructive"
+                    : resolveResult?.status === "limit_reached" ||
+                        resolveResult?.status === "disabled"
+                      ? "text-yellow-600"
+                      : "text-muted-foreground"
                 }`}
               >
-                {enrichResult.message}
+                {resolveResult?.message || resolution?.message}
               </p>
             )}
 
@@ -378,6 +400,228 @@ export default function VisitorDetailPage() {
                 return <p key={i} className="text-sm leading-relaxed">{line}</p>;
               })}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Social Profiles Card — full pipeline (OSINT + Maigret + rules → paid → AI) */}
+      {canOsint && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Social Profiles</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {(resolveResult?.message || resolution?.message) && (
+              <p
+                className={`text-xs ${
+                  resolution?.status === "error" ||
+                  resolveResult?.status === "error"
+                    ? "text-destructive"
+                    : resolveResult?.status === "limit_reached" ||
+                        resolveResult?.status === "disabled"
+                      ? "text-yellow-600"
+                      : "text-muted-foreground"
+                }`}
+              >
+                {resolveResult?.message || resolution?.message}
+              </p>
+            )}
+
+            {resolvedProfiles.length > 0 && (
+              <div className="space-y-2">
+                {resolvedProfiles.map((p, i) => {
+                  const username = (p.extra?.username ||
+                    p.extra?.name) as string | undefined;
+                  const isPaid = p.source_engine.includes("osint-industries");
+                  return (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between gap-2 text-sm"
+                    >
+                      <span className="truncate max-w-[300px]">
+                        {p.url ? (
+                          <a
+                            href={p.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >
+                            {p.site_name}
+                          </a>
+                        ) : (
+                          p.site_name
+                        )}
+                        {username && (
+                          <span className="text-muted-foreground"> · {username}</span>
+                        )}
+                      </span>
+                      <span className="flex shrink-0 items-center gap-1">
+                        {isPaid && (
+                          <Badge className="text-[10px]">Paid</Badge>
+                        )}
+                        <Badge
+                          variant="outline"
+                          className={`text-[10px] ${
+                            p.confidence === "confirmed"
+                              ? "text-green-600"
+                              : p.confidence === "likely"
+                                ? "text-blue-600"
+                                : "text-yellow-600"
+                          }`}
+                        >
+                          {p.confidence}
+                        </Badge>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {resolution?.status === "complete" &&
+              resolvedProfiles.length === 0 && (
+                <p className="text-xs text-muted-foreground italic">
+                  No social profiles resolved for this email.
+                </p>
+              )}
+            {!resolution && !resolveResult && (
+              <p className="text-xs text-muted-foreground italic">
+                Click &quot;Deep-dive research&quot; (Enrichment card above) to
+                resolve real social profiles — free OSINT + Maigret + rules, then
+                AI, then paid lookup only if needed.
+              </p>
+            )}
+
+            {resolution?.status === "complete" && (
+              <p className="text-[11px] text-muted-foreground border-t pt-2">
+                Stages: {(resolution.stages_run ?? []).join(" → ") || "—"}
+                {resolution.paid?.used ? " · paid lookup used (1 credit)" : ""}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* OSINT Accounts Card — free stacked engines (user-scanner + holehe) */}
+      {canOsint && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">
+              OSINT Accounts
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                (raw — from Deep-dive research)
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {osint?.message && (
+              <p
+                className={`text-xs ${
+                  osint?.status === "error"
+                    ? "text-destructive"
+                    : "text-muted-foreground"
+                }`}
+              >
+                {osint.message}
+              </p>
+            )}
+
+            {osint?.summary &&
+              (osint.status === "complete" || osint.status === "cached") && (
+                <p className="text-xs text-muted-foreground">
+                  Checked {osint.summary.checked ?? 0}/{osint.summary.total ?? 0}{" "}
+                  sites · {osint.summary.profile_count ?? 0} with details ·{" "}
+                  {osint.summary.registered_count ?? 0} registration(s)
+                  {osint.summary.partial ? " · partial (time cap reached)" : ""}
+                </p>
+              )}
+
+            {/* Profiles with a real handle/detail surfaced by the engine */}
+            {osintProfiles.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  Profiles found
+                </p>
+                {osintProfiles.map((a, i) => {
+                  const username = (a.extra?.username || a.extra?.name) as
+                    | string
+                    | undefined;
+                  return (
+                    <div
+                      key={i}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <span className="truncate max-w-[320px]">
+                        {a.url ? (
+                          <a
+                            href={a.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >
+                            {a.site_name}
+                          </a>
+                        ) : (
+                          a.site_name
+                        )}
+                        {username && (
+                          <span className="text-muted-foreground">
+                            {" "}
+                            · {username}
+                          </span>
+                        )}
+                      </span>
+                      <Badge variant="secondary" className="text-[10px]">
+                        {a.source_engine}
+                      </Badge>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Registered-on: existence only — NO profile link (honest) */}
+            {osintRegistered.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-muted-foreground">
+                  Registered on ({osintRegistered.length})
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {osintRegistered.map((a, i) => (
+                    <Badge
+                      key={i}
+                      variant="outline"
+                      className="text-[11px] font-normal"
+                    >
+                      {a.site_name}
+                    </Badge>
+                  ))}
+                </div>
+                <p className="text-[11px] text-muted-foreground italic">
+                  Email is registered on these sites (account exists; no public
+                  profile detail returned).
+                </p>
+              </div>
+            )}
+
+            {(osint?.status === "complete" || osint?.status === "cached") &&
+              osintAccounts.length === 0 && (
+                <p className="text-xs text-muted-foreground italic">
+                  No accounts found for this email.
+                </p>
+              )}
+            {!osint && (
+              <p className="text-xs text-muted-foreground italic">
+                Run &quot;Deep-dive research&quot; to populate this — which sites
+                this email is registered on (free OSINT engines).
+              </p>
+            )}
+
+            <p className="text-[10px] text-muted-foreground/70 border-t pt-2">
+              Existence checks use public password-reset/registration signals
+              (OSINT) — a legal gray area under some sites&apos; ToS. Use
+              responsibly on your own audience.
+            </p>
           </CardContent>
         </Card>
       )}

@@ -150,6 +150,24 @@ class Settings(BaseSettings):
     sync_interval_minutes: int = 60
     resolution_sweep_interval_minutes: int = 30  # APScheduler identity-resolution sweep cadence
 
+    # ─── OSINT account scanner (manual per-visitor; free stacked engines) ───
+    enable_osint_scan: bool = False             # master gate — off in prod until explicitly enabled
+    osint_engines: str = "user-scanner,holehe"  # comma-separated engines to run (drop one to disable it)
+    osint_scan_concurrency: int = 10            # max simultaneous outbound site checks (asyncio.Semaphore)
+    osint_scan_per_module_timeout: float = 8.0  # per-site check timeout (seconds)
+    osint_scan_wall_clock_cap: float = 45.0     # overall scan budget; partial results returned past this
+    osint_scan_skip_categories: str = "adult,nsfw,porn"  # category names to skip (NSFW)
+    osint_scan_daily_budget: int = 5            # free scans/day/site (BYOK = unlimited)
+    # Maigret (username→profile, stage B)
+    osint_maigret_top_sites: int = 500          # check top-N ranked sites (3000 total)
+    osint_maigret_parse: bool = True            # fetch+parse hit pages (real name/bio, fewer soft-404s; slower)
+    # GHunt (Gmail dossier, stage D — opt-in; disabled until cookies provided)
+    ghunt_cookies_b64: str = ""                 # base64 GHunt creds.json; empty = stage D off
+    # Paid fallback (OSINT Industries, stage F — auto when free+AI come up empty)
+    osint_industries_api_key: str = ""          # system key; empty = paid fallback off
+    osint_paid_min_profiles: int = 1            # run paid only if free+AI found fewer than this
+    osint_paid_daily_budget: int = 10           # hard cap on paid lookups/day/site (credit guard)
+
     # ─── Rate limits ───
     default_daily_resolution_budget: int = 50   # Free tier: 50 visitor identifications/day per site (BYOK = unlimited)
     default_daily_enrichment_budget: int = 3    # Free tier: 3 deep research/day (BYOK = unlimited)

@@ -17,6 +17,7 @@ from apps.api.models.api_key import UserApiKey
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.site import Site
 from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog
+from apps.api.services.redis_client import get_redis
 
 logger = structlog.get_logger()
 
@@ -159,3 +160,93 @@ async def check_enrich_budget(
 def missing_byok_providers(user_providers: set[str]) -> set[str]:
     """Return which BYOK providers the user is still missing."""
     return BYOK_REQUIRED_PROVIDERS - user_providers
+
+
+# ─────────────────── OSINT account-scan daily budget ───────────────────
+# OSINT scans are free (no paid provider) but slow + IP-block-prone, so we cap
+# them per site/day via a Redis counter rather than a DB table (no migration).
+
+
+def _osint_count_key(site_id: str) -> str:
+    day = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return f"osint:count:{site_id}:{day}"
+
+
+async def get_osint_usage(site_id: str) -> int:
+    """OSINT scans started today for a site (Redis counter). Fail-open to 0."""
+    try:
+        raw = await get_redis().get(_osint_count_key(site_id))
+        return int(raw or 0)
+    except Exception:
+        return 0
+
+
+async def increment_osint_usage(site_id: str) -> None:
+    """Bump today's OSINT scan counter (2-day TTL so it self-expires)."""
+    try:
+        redis = get_redis()
+        key = _osint_count_key(site_id)
+        count = await redis.incr(key)
+        if count == 1:
+            await redis.expire(key, 2 * 86400)
+    except Exception:
+        logger.debug("osint_usage_increment_failed", site_id=site_id)
+
+
+async def check_osint_budget(
+    db: AsyncSession, site_id: str, user_id: uuid.UUID
+) -> dict:
+    """Check if a site can run another OSINT scan today.
+
+    Returns {"allowed": bool, "used": int, "limit": int | None, "is_byok": bool}.
+    BYOK users are uncapped (consistent with the other meters).
+    """
+    byok = await is_full_byok(db, user_id)
+    used = await get_osint_usage(site_id)
+    limit = settings.osint_scan_daily_budget
+
+    if byok:
+        return {"allowed": True, "used": used, "limit": None, "is_byok": True}
+
+    return {
+        "allowed": used < limit,
+        "used": used,
+        "limit": limit,
+        "is_byok": False,
+    }
+
+
+# ─────────────── Paid OSINT (OSINT Industries) daily credit guard ───────────────
+# Hard cap on billable paid lookups/site/day — protects against runaway credit
+# burn even when the pipeline auto-triggers the paid fallback. NOT BYOK-exempt:
+# the paid key is a SYSTEM key (operator pays), so the cap always applies.
+
+
+def _osint_paid_count_key(site_id: str) -> str:
+    day = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return f"osint:paid:count:{site_id}:{day}"
+
+
+async def get_osint_paid_usage(site_id: str) -> int:
+    try:
+        raw = await get_redis().get(_osint_paid_count_key(site_id))
+        return int(raw or 0)
+    except Exception:
+        # Redis down → fail CLOSED for the paid path (don't risk burning credits).
+        return settings.osint_paid_daily_budget
+
+
+async def increment_osint_paid_usage(site_id: str) -> None:
+    try:
+        redis = get_redis()
+        key = _osint_paid_count_key(site_id)
+        count = await redis.incr(key)
+        if count == 1:
+            await redis.expire(key, 2 * 86400)
+    except Exception:
+        logger.debug("osint_paid_usage_increment_failed", site_id=site_id)
+
+
+async def osint_paid_budget_left(site_id: str) -> bool:
+    """True while the site still has paid-lookup budget today."""
+    return await get_osint_paid_usage(site_id) < settings.osint_paid_daily_budget

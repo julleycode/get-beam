@@ -426,16 +426,83 @@ class Enricher:
 
     # ──────────────── Deep Research (Claude API + web search) ─────────────
 
+    @staticmethod
+    def _format_osint_seed(seed: dict | None) -> str:
+        """Turn OSINT findings into a grounding seed block for the prompt.
+
+        Accepts either a raw social_context blob (with osint_scan /
+        social_resolution sub-keys) or a flat {accounts, profiles} dict.
+        Returns "" when there is nothing useful to seed.
+        """
+        if not isinstance(seed, dict):
+            return ""
+        accounts: list = []
+        for key in ("osint_scan", "social_resolution"):
+            sub = seed.get(key)
+            if isinstance(sub, dict):
+                accounts += sub.get("accounts") or []
+                accounts += sub.get("profiles") or []
+        accounts += seed.get("accounts") or []
+        accounts += seed.get("profiles") or []
+        if not accounts:
+            return ""
+
+        profiles: list[str] = []
+        registered: list[str] = []
+        seen: set = set()
+        for a in accounts:
+            if not isinstance(a, dict):
+                continue
+            site = a.get("site_name") or a.get("platform") or ""
+            url = a.get("url")
+            uname = (a.get("extra") or {}).get("username") or a.get("handle")
+            dedup = (site.lower(), (url or "").lower())
+            if not site or dedup in seen:
+                continue
+            seen.add(dedup)
+            if a.get("kind") == "profile" or url:
+                label = site
+                if uname:
+                    label += f" (@{uname})"
+                if url:
+                    label += f" — {url}"
+                profiles.append(label)
+            else:
+                registered.append(site)
+
+        lines: list[str] = []
+        if profiles:
+            lines.append("Likely/known profiles (verify and expand — do NOT contradict these):")
+            lines += [f"- {p}" for p in profiles[:40]]
+        if registered:
+            lines.append(
+                "Email is also registered on (try to find the handles): "
+                + ", ".join(sorted(set(registered))[:40])
+            )
+        if not lines:
+            return ""
+        return (
+            "\n# Verified accounts found via OSINT (use as starting points):\n"
+            + "\n".join(lines)
+            + "\n"
+        )
+
     async def deep_research(
         self,
         visitor: Visitor,
         identified: IdentifiedVisitor,
         profile: EnrichmentProfile | None = None,
+        osint_seed: dict | None = None,
     ) -> dict:
-        """Use Claude API with web search to research visitor's social media presence.
+        """Use Gemini + web search to research a visitor's social-media presence.
+
+        When `osint_seed` (or an earlier OSINT scan written to social_context) is
+        present, it is injected into the grounded prompt as verified starting
+        points so the model resolves real handles instead of guessing blind.
 
         Returns {"status": ..., "social_context": ..., "message": ...}.
-        Stores results in EnrichmentProfile.social_context JSONB field.
+        Stores results in EnrichmentProfile.social_context (read-modify-write —
+        preserves osint_scan / social_resolution sub-keys).
         """
         if not profile:
             profile = await self._get_existing_profile(visitor)
@@ -460,10 +527,15 @@ class Enricher:
 
         person_context = "\n".join(context_lines)
 
+        seed_block = self._format_osint_seed(
+            osint_seed if osint_seed is not None
+            else (profile.social_context if profile else None)
+        )
+
         prompt = f"""Deep-dive research about this person's online presence and social media activity.
 
 {person_context}
-
+{seed_block}
 Your task:
 1. Find ALL social media profiles (Twitter/X, LinkedIn, GitHub, Instagram, YouTube, TikTok, personal blog/website, Substack, newsletter)
 2. Determine which platforms they are MOST active on — with evidence (follower counts, posting frequency, engagement)
@@ -515,11 +587,14 @@ Write a comprehensive but honest profile analysis. Use a direct, conversational 
             self.db.add(profile)
 
         now = datetime.now(timezone.utc)
-        profile.social_context = {
+        # Read-modify-write: keep osint_scan / social_resolution sub-keys intact.
+        merged = dict(profile.social_context or {})
+        merged.update({
             "deep_research": research_text,
             "researched_at": now.isoformat(),
             "model": settings.gemini_model,
-        }
+        })
+        profile.social_context = merged
         profile.social_context_updated_at = now
 
         if profile.enrichment_completeness < 0.5:
