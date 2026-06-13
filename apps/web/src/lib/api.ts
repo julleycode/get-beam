@@ -3,10 +3,17 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 class ApiClient {
   private token: string | null = null;
   private clerkToken: string | null = null;
+  // Fetches a FRESH Clerk token on demand (Clerk's getToken). Used to retry
+  // once on 401 when the cached token has expired (~60s TTL).
+  private clerkTokenGetter: (() => Promise<string | null>) | null = null;
 
   // ── Clerk token (primary, set by ClerkTokenSync) ────
   setClerkToken(token: string | null) {
     this.clerkToken = token;
+  }
+
+  setClerkTokenGetter(fn: (() => Promise<string | null>) | null) {
+    this.clerkTokenGetter = fn;
   }
 
   // ── Legacy token (localStorage fallback) ────────────
@@ -37,7 +44,8 @@ class ApiClient {
 
   private async request<T>(
     path: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    _retried = false
   ): Promise<T> {
     const token = this.getToken();
     const headers: Record<string, string> = {
@@ -58,6 +66,19 @@ class ApiClient {
       throw new Error(
         `Network error: unable to reach API (${(err as Error).message})`
       );
+    }
+
+    // Cached Clerk token expired (~60s TTL) → fetch a fresh one and retry once.
+    if (res.status === 401 && !_retried && this.clerkTokenGetter) {
+      try {
+        const fresh = await this.clerkTokenGetter();
+        if (fresh) {
+          this.setClerkToken(fresh);
+          return this.request<T>(path, options, true);
+        }
+      } catch {
+        // fall through to the standard 401 handling below
+      }
     }
 
     if (res.status === 401) {
@@ -644,14 +665,31 @@ class ApiClient {
   async uploadImage(file: File): Promise<{ url: string }> {
     // Multipart — must NOT set Content-Type (browser sets the boundary), so
     // this bypasses the JSON `request` helper.
-    const token = this.getToken();
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch(`${API_BASE}/api/v1/blog/upload`, {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: form,
-    });
+
+    const send = (token: string | null) =>
+      fetch(`${API_BASE}/api/v1/blog/upload`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      });
+
+    let res = await send(this.getToken());
+
+    // Cached Clerk token expired → fetch a fresh one and retry once.
+    if (res.status === 401 && this.clerkTokenGetter) {
+      try {
+        const fresh = await this.clerkTokenGetter();
+        if (fresh) {
+          this.setClerkToken(fresh);
+          res = await send(fresh);
+        }
+      } catch {
+        // fall through to the error handling below
+      }
+    }
+
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error(body.detail || `Upload failed: ${res.status}`);

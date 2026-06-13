@@ -14,8 +14,13 @@ export function ClerkTokenSync() {
   useEffect(() => {
     if (!isSignedIn) {
       api.setClerkToken(null);
+      api.setClerkTokenGetter(null);
       return;
     }
+
+    // Let the API client fetch a FRESH token on demand to retry once on 401
+    // (the cached token expires after ~60s; a slow form sits past that).
+    api.setClerkTokenGetter(() => getToken());
 
     let cancelled = false;
 
