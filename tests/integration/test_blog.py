@@ -15,6 +15,8 @@ from apps.api.dependencies import require_admin
 from apps.api.main import app
 from apps.api.models.user import User
 
+pytestmark = pytest.mark.integration
+
 
 @pytest_asyncio.fixture
 async def admin_client(test_client: AsyncClient) -> AsyncClient:
