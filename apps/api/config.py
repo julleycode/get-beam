@@ -149,10 +149,14 @@ class Settings(BaseSettings):
     # ─── Feature flags ───
     sync_interval_minutes: int = 60
     resolution_sweep_interval_minutes: int = 30  # APScheduler identity-resolution sweep cadence
+    # Data retention (GDPR data minimization / privacy-policy 90-day promise):
+    # raw events older than this are auto-purged. Enriched profiles are kept.
+    event_retention_days: int = 90
+    retention_purge_interval_hours: int = 24  # daily purge sweep
 
     # ─── OSINT account scanner (manual per-visitor; free stacked engines) ───
     enable_osint_scan: bool = False             # master gate — off in prod until explicitly enabled
-    osint_engines: str = "user-scanner,holehe"  # comma-separated engines to run (drop one to disable it)
+    osint_engines: str = "user-scanner,holehe,maigret"  # comma-separated engines to run (drop one to disable it). "maigret" is a username-stage engine (social_resolver), not an email-scan adapter.
     osint_scan_concurrency: int = 10            # max simultaneous outbound site checks (asyncio.Semaphore)
     osint_scan_per_module_timeout: float = 8.0  # per-site check timeout (seconds)
     osint_scan_wall_clock_cap: float = 45.0     # overall scan budget; partial results returned past this

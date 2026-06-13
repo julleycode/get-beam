@@ -201,6 +201,24 @@ def test_get_scanners_drops_unavailable(monkeypatch):
     assert names == ["user-scanner"]
 
 
+def test_get_scanners_skips_maigret_silently(monkeypatch):
+    """maigret is a username-stage engine (social_resolver), not an email-scan
+    adapter — get_scanners() must skip it WITHOUT a spurious unknown-engine warn.
+    This matches the new config default 'user-scanner,holehe,maigret'."""
+    monkeypatch.setattr(osc.settings, "osint_engines", "user-scanner,holehe,maigret")
+    monkeypatch.setattr(osc.UserScannerAdapter, "_available", lambda self: True)
+    monkeypatch.setattr(osc.HoleheAdapter, "_available", lambda self: True)
+
+    warnings: list[tuple] = []
+    monkeypatch.setattr(osc.logger, "warning", lambda *a, **k: warnings.append((a, k)))
+
+    names = [a.name for a in osc.get_scanners()]
+    assert names == ["user-scanner", "holehe"]  # maigret not an email adapter
+    # no "unknown engine" warning for the pipeline-only name
+    assert not any(a and a[0] == "osint_unknown_engine" for a, _ in warnings)
+    assert "maigret" in osc._PIPELINE_ONLY_ENGINES
+
+
 def test_adapter_is_available_swallows_import_error(monkeypatch):
     def boom(self):
         raise ImportError("no module")

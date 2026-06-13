@@ -756,9 +756,61 @@ class ApiClient {
     }
     return res.json() as Promise<{ url: string }>;
   }
+
+  // ── Known contacts (the owner's existing-customer list, stored hashed) ──
+  async uploadKnownContacts(siteId: string, file: File): Promise<KnownUploadResult> {
+    // Multipart — bypass the JSON request helper (browser sets the boundary).
+    const form = new FormData();
+    form.append("file", file);
+
+    const send = (token: string | null) =>
+      fetch(`${API_BASE}/api/v1/sites/${siteId}/known-contacts/upload`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      });
+
+    let res = await send(this.getToken());
+    if (res.status === 401 && this.clerkTokenGetter) {
+      try {
+        const fresh = await this.clerkTokenGetter();
+        if (fresh) {
+          this.setClerkToken(fresh);
+          res = await send(fresh);
+        }
+      } catch {
+        // fall through to the error handling below
+      }
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Upload failed: ${res.status}`);
+    }
+    return res.json() as Promise<KnownUploadResult>;
+  }
+
+  async getKnownCount(siteId: string) {
+    return this.request<{ count: number }>(
+      `/api/v1/sites/${siteId}/known-contacts/count`
+    );
+  }
+
+  async clearKnownContacts(siteId: string) {
+    return this.request<{ deleted: number }>(
+      `/api/v1/sites/${siteId}/known-contacts`,
+      { method: "DELETE" }
+    );
+  }
 }
 
 export const api = new ApiClient();
+
+export interface KnownUploadResult {
+  inserted: number;
+  skipped: number;
+  total: number;
+  truncated: boolean;
+}
 
 // ── Blog CMS types ──────────────────────────────────────
 export interface BlogPost {
@@ -885,6 +937,8 @@ export interface Visitor {
   enrichment_status: string;
   email?: string | null;
   full_name?: string | null;
+  is_known?: boolean;
+  known_source?: string | null;
 }
 
 export interface VisitorDetail extends Visitor {
@@ -915,7 +969,8 @@ export interface SocialResolution {
   status: "scanning" | "complete" | "error" | "not_identified";
   resolved_at?: string;
   stages_run?: string[];
-  profiles?: OsintAccount[];
+  profiles?: OsintAccount[]; // verified = confirmed + likely
+  guesses?: OsintAccount[]; // unverified guesses (collapsed in UI)
   paid?: {
     used: boolean;
     provider: string;
@@ -925,7 +980,9 @@ export interface SocialResolution {
   };
   summary?: {
     profile_count?: number;
-    free_profile_count?: number;
+    confirmed_count?: number;
+    likely_count?: number;
+    guess_count?: number;
     candidates_used?: string[];
   };
   message?: string;

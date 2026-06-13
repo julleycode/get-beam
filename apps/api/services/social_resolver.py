@@ -27,7 +27,11 @@ from apps.api.config import settings
 from apps.api.services import maigret_engine, paid_osint
 from apps.api.services.enricher import Enricher
 from apps.api.services.osint_scanner import OsintAccount, _dedupe, run_osint_scan
-from apps.api.services.social_rules import derive_username_candidates, resolve_via_rules
+from apps.api.services.social_rules import (
+    derive_username_candidates,
+    name_matches,
+    resolve_via_rules,
+)
 from apps.api.services.usage_limits import (
     increment_osint_paid_usage,
     osint_paid_budget_left,
@@ -69,12 +73,73 @@ def _canon_site(name: str | None) -> str:
     return _SITE_ALIASES.get(name.strip().lower(), name)
 
 
-def _boost_agreement(accounts: list[OsintAccount]) -> None:
-    """Profiles confirmed by ≥2 distinct engines → confidence='confirmed'."""
+# Sources that are keyed by the EMAIL (so the handle belongs to THIS person):
+# PDL enrich, OSINT Industries, and user-scanner's email-scan (extra.username).
+_EMAIL_KEYED = {"user-scanner", "pdl", "osint-industries"}
+
+
+def _registered_sites(osint_blob: dict) -> set[str]:
+    """Canon, lowercased site names where the EMAIL is registered (right person)."""
+    sites: set[str] = set()
+    for a in osint_blob.get("accounts", []):
+        if a.get("kind") == "registered" and a.get("site_name"):
+            sites.add(_canon_site(a["site_name"]).lower())
+    return sites
+
+
+def _classify(acc: OsintAccount, full_name: str | None, registered_sites: set[str]) -> str:
+    """Identity-based confidence — does this profile belong to the TARGET person?
+
+    confirmed = email-keyed source OR the profile's real name matches full_name.
+    likely    = username from a known handle, OR the site is one the email is
+                registered on (they use it) — but the handle isn't identity-verified.
+    guess     = a guessed username, unverified, on a site we can't tie to them.
+    """
+    engines = {e.strip() for e in (acc.source_engine or "").split(",") if e.strip()}
+    if engines & _EMAIL_KEYED:
+        return "confirmed"
+    extra = acc.extra or {}
+    pname = extra.get("name") or extra.get("fullname") or extra.get("full_name")
+    if pname and name_matches(pname, full_name):
+        return "confirmed"
+    if extra.get("cand_source") == "known":
+        return "likely"
+    if _canon_site(acc.site_name).lower() in registered_sites:
+        return "likely"
+    return "guess"
+
+
+def _verify_identity(
+    accounts: list[OsintAccount], full_name: str | None, registered_sites: set[str]
+) -> None:
     for a in accounts:
-        engines = {e for e in (a.source_engine or "").split(",") if e}
-        if len(engines) >= 2:
-            a.confidence = "confirmed"
+        a.confidence = _classify(a, full_name, registered_sites)
+
+
+def _slug(url: str | None) -> str | None:
+    if not url:
+        return None
+    seg = url.rstrip("/").split("/")[-1].split("?")[0]
+    return seg or None
+
+
+def _pdl_accounts(profile) -> list[OsintAccount]:
+    """Email-keyed handles PDL/Proxycurl already wrote to the profile → confirmed."""
+    out: list[OsintAccount] = []
+    li = getattr(profile, "linkedin_url", None)
+    if li:
+        out.append(OsintAccount("LinkedIn", "professional", li, "profile",
+                                 "confirmed", "pdl", {"username": _slug(li) or ""}))
+    tw = getattr(profile, "twitter_handle", None)
+    if tw:
+        h = tw.lstrip("@")
+        out.append(OsintAccount("X", "social", f"https://x.com/{h}", "profile",
+                                 "confirmed", "pdl", {"username": h}))
+    gh = getattr(profile, "github_url", None)
+    if gh:
+        out.append(OsintAccount("GitHub", "dev", gh, "profile",
+                                 "confirmed", "pdl", {"username": _slug(gh) or ""}))
+    return out
 
 
 async def resolve_social(db, *, visitor, identified, profile, run_gemini: bool = True) -> dict:
@@ -141,18 +206,29 @@ async def resolve_social(db, *, visitor, identified, profile, run_gemini: bool =
         if isinstance(r, list):
             resolved_accounts.extend(x for x in r if isinstance(x, OsintAccount))
 
-    # Unified profile set = OSINT profile-kind hits + Maigret + rule-base.
-    profile_accounts = [a for a in osint_accounts if a.kind == "profile"] + resolved_accounts
-    for a in profile_accounts:  # canonicalize so cross-engine hits merge
+    # Email-keyed signals: PDL handles already on the profile + the set of sites
+    # the EMAIL is registered on (used to verify identity / narrow).
+    pdl_accounts = _pdl_accounts(profile)
+    registered_sites = _registered_sites(osint_blob)
+    full_name = identified.full_name if identified else None
+
+    # Unified set = PDL handles + OSINT profile-kind hits + Maigret + rule-base.
+    profile_accounts = (
+        pdl_accounts
+        + [a for a in osint_accounts if a.kind == "profile"]
+        + resolved_accounts
+    )
+    for a in profile_accounts:  # canonicalize so cross-engine hits merge/cross-confirm
         a.site_name = _canon_site(a.site_name)
     unified = _dedupe(profile_accounts)
-    free_profile_count = len(unified)
+    _verify_identity(unified, full_name, registered_sites)
+    confirmed_count = sum(1 for a in unified if a.confidence == "confirmed")
 
-    # ── Stage F: paid fallback (AUTO, guarded) ──
+    # ── Stage F: paid fallback — AUTO only when too few CONFIRMED profiles ──
     paid_info = {"used": False, "provider": "osint-industries", "found": 0,
                  "cached": False, "error": None}
     if (
-        free_profile_count < settings.osint_paid_min_profiles
+        confirmed_count < settings.osint_paid_min_profiles
         and paid_osint.is_configured()
     ):
         if await osint_paid_budget_left(visitor.site_id):
@@ -163,6 +239,8 @@ async def resolve_social(db, *, visitor, identified, profile, run_gemini: bool =
             for a in paid_accounts:
                 a.site_name = _canon_site(a.site_name)
             unified = _dedupe(unified + paid_accounts)
+            _verify_identity(unified, full_name, registered_sites)
+            confirmed_count = sum(1 for a in unified if a.confidence == "confirmed")
             paid_info = {
                 "used": bool(pr.get("used")), "provider": "osint-industries",
                 "found": pr.get("found", 0), "cached": bool(pr.get("cached")),
@@ -172,24 +250,31 @@ async def resolve_social(db, *, visitor, identified, profile, run_gemini: bool =
         else:
             paid_info["error"] = "daily paid budget reached"
 
-    # Profiles agreed on by ≥2 distinct engines are upgraded to "confirmed".
-    _boost_agreement(unified)
+    # ── Narrow: keep verified (confirmed + likely); collapse pure guesses ──
+    verified = [a for a in unified if a.confidence in ("confirmed", "likely")]
+    verified.sort(key=lambda a: 0 if a.confidence == "confirmed" else 1)
+    guesses = [a for a in unified if a.confidence == "guess"]
+    likely_count = len(verified) - confirmed_count
 
     # ── Build + persist social_resolution (preserve osint_scan + deep_research) ──
     blob = {
         "status": "complete",
         "resolved_at": datetime.now(timezone.utc).isoformat(),
         "stages_run": stages,
-        "profiles": [a.to_dict() for a in unified],
+        "profiles": [a.to_dict() for a in verified],
+        "guesses": [a.to_dict() for a in guesses],
         "paid": paid_info,
         "summary": {
-            "profile_count": len(unified),
-            "free_profile_count": free_profile_count,
+            "profile_count": len(verified),
+            "confirmed_count": confirmed_count,
+            "likely_count": likely_count,
+            "guess_count": len(guesses),
             "candidates_used": [c["username"] for c in candidates],
         },
         "message": (
-            f"Resolved {len(unified)} social profile(s)."
-            + (" Paid lookup used." if paid_info["used"] else "")
+            f"{confirmed_count} verified profile(s), {likely_count} likely"
+            + (f", {len(guesses)} unverified guess(es)" if guesses else "")
+            + (" · paid lookup used" if paid_info["used"] else "")
         ),
     }
     merged = dict(profile.social_context or {})
@@ -210,10 +295,11 @@ async def resolve_social(db, *, visitor, identified, profile, run_gemini: bool =
             logger.warning("resolve_social_gemini_failed", error=str(e))
 
     logger.info(
-        "resolve_social_done", email_prefix=email[:5], profiles=len(unified),
+        "resolve_social_done", email_prefix=email[:5], verified=len(verified),
+        confirmed=confirmed_count, guesses=len(guesses),
         paid_used=paid_info["used"], stages=stages,
     )
     return {
-        "status": "complete", "profiles": len(unified),
+        "status": "complete", "profiles": len(verified), "confirmed": confirmed_count,
         "paid_used": paid_info["used"], "stages": stages, "message": blob["message"],
     }

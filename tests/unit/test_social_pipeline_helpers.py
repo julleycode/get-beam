@@ -64,7 +64,7 @@ def test_candidates_capped_and_valid():
     cands = derive_username_candidates(
         "a.very.long.name.here@x.com", full_name="A Very Long Name Here",
     )
-    assert len(cands) <= 8
+    assert len(cands) <= 12
     for c in cands:
         assert 2 <= len(c["username"]) <= 30
 

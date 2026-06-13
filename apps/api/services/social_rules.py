@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+import unicodedata
 
 import httpx
 import structlog
@@ -65,6 +66,34 @@ def _slug_from_url(url: str | None) -> str | None:
     return seg or None
 
 
+def _name_tokens(s: str | None) -> list[str]:
+    """Lowercased, diacritic-stripped name tokens (Nguyễn → nguyen)."""
+    if not s:
+        return []
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return re.findall(r"[a-z0-9]+", s.lower())
+
+
+def name_matches(profile_name: str | None, full_name: str | None) -> bool:
+    """True if a profile's display name plausibly belongs to the target person.
+
+    Requires ≥2 shared name tokens (a single shared token like a common surname
+    "nguyen" is far too weak), or a concatenation containment for handle-style
+    names with no spaces (e.g. "nathannguyennhat" ⊂ "Nathan Nguyen Nhat").
+    """
+    pt = _name_tokens(profile_name)
+    ft = _name_tokens(full_name)
+    if not pt or not ft:
+        return False
+    if len(set(pt) & set(ft)) >= 2:
+        return True
+    pc, fc = "".join(pt), "".join(ft)
+    if len(pc) >= 6 and len(fc) >= 6 and (pc in fc or fc in pc):
+        return True
+    return False
+
+
 def derive_username_candidates(
     email: str,
     *,
@@ -72,47 +101,52 @@ def derive_username_candidates(
     github_url: str | None = None,
     full_name: str | None = None,
 ) -> list[dict]:
-    """Return candidate usernames with provenance, highest-signal first.
+    """Candidate usernames with provenance, highest-signal first.
 
-    Each item: {"username": str, "known": bool}. `known=True` means it came from a
-    real handle (twitter/github) → downstream uses higher confidence.
+    Each item: {"username", "known": bool, "source"}. source ∈
+    {"known" (real handle), "name" (from full name), "email" (local-part)}.
+    NAME-derived candidates come before the email local-part — a person's handle
+    rarely matches their email prefix (the root cause of the wrong-person bug).
     """
     seen: set[str] = set()
     out: list[dict] = []
 
-    def add(raw: str | None, known: bool):
+    def add(raw: str | None, source: str):
         if not raw:
             return
         u = _norm(raw)
         if not u or u in seen or not _USERNAME_RE.match(u):
             return
         seen.add(u)
-        out.append({"username": u, "known": known})
+        out.append({"username": u, "known": source == "known", "source": source})
 
-    # Known handles first (highest signal).
+    # 1) Known real handles (highest signal — email-keyed via PDL/enrichment).
     if twitter_handle:
-        add(twitter_handle.lstrip("@"), True)
-    add(_slug_from_url(github_url), True)
+        add(twitter_handle.lstrip("@"), "known")
+    add(_slug_from_url(github_url), "known")
 
-    # Email local-part + simple variants (only if not a generic mailbox).
+    # 2) Name-derived patterns (the realistic source of a personal handle).
+    toks = _name_tokens(full_name)
+    if len(toks) >= 2:
+        f, l = toks[0], toks[-1]
+        rest = "".join(toks[1:])  # e.g. "nguyennhat"
+        allc = "".join(toks)  # "nathannguyennhat"
+        for cand in (
+            f + l, l + f, allc,
+            f + "." + l, f + "_" + l, f + "-" + l,
+            "-".join(toks), ".".join(toks),
+            f + rest, f + "-" + rest, f + "." + rest,
+            f[0] + l, f + l[0],
+        ):
+            add(cand, "name")
+
+    # 3) Email local-part (weakest — usually NOT the person's handle).
     local = (email or "").split("@")[0]
     if local and _norm(local) not in _GENERIC_LOCALS:
-        add(local, False)
-        add(local.replace(".", ""), False)
-        add(local.replace(".", "_"), False)
-        add(local.replace("_", "."), False)
+        add(local, "email")
+        add(local.replace(".", ""), "email")
 
-    # Name-derived (first.last / firstlast).
-    if full_name:
-        parts = [p for p in re.split(r"\s+", full_name.strip()) if p]
-        if len(parts) >= 2:
-            f, l = _norm(parts[0]), _norm(parts[-1])
-            if f and l:
-                add(f + l, False)
-                add(f + "." + l, False)
-                add(f + "_" + l, False)
-
-    return out[:8]  # cap the fan-out
+    return out[:12]  # cap the fan-out (verification filters the rest)
 
 
 async def resolve_via_rules(
@@ -157,9 +191,10 @@ async def resolve_via_rules(
                 category="social",
                 url=url,
                 kind="profile",
+                # Provisional — the resolver's identity check recomputes this.
                 confidence="likely" if cand["known"] else "guess",
                 source_engine="rule-base",
-                extra={"username": username},
+                extra={"username": username, "cand_source": cand.get("source", "name")},
             )
 
         tasks = [

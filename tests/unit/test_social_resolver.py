@@ -38,9 +38,14 @@ class _FakeEnricher:
         return {"status": "enriched"}
 
 
-def _profile_acc(site, engine="maigret", username="jdoe"):
+def _profile_acc(site, engine="maigret", username="jdoe", name="John Doe", cand_source="name"):
+    """A maigret-style profile. By default its extracted `name` matches the test
+    full_name ("John Doe") → identity-verified → confirmed."""
+    extra = {"username": username, "cand_source": cand_source}
+    if name:
+        extra["name"] = name
     return OsintAccount(site, "social", f"https://{site.lower()}.com/{username}",
-                        "profile", "likely", engine, {"username": username})
+                        "profile", "likely", engine, extra)
 
 
 class _Knobs:
@@ -97,11 +102,12 @@ def wired(monkeypatch):
     return k
 
 
-def _run(profile_social=None):
+def _run(profile_social=None, linkedin_url=None, twitter_handle=None, github_url=None):
     db = _FakeDB()
     visitor = _Obj(site_id="s1", visitor_id="v1")
     identified = _Obj(email="jdoe@example.com", full_name="John Doe")
-    profile = _Obj(social_context=profile_social, twitter_handle=None, github_url=None)
+    profile = _Obj(social_context=profile_social, linkedin_url=linkedin_url,
+                   twitter_handle=twitter_handle, github_url=github_url)
     return db, visitor, identified, profile
 
 
@@ -173,15 +179,15 @@ async def test_preserves_deep_research_and_seeds_gemini(wired):
 
 
 @pytest.mark.asyncio
-async def test_multi_engine_agreement_confirms(wired):
-    # Maigret says "Twitter", rule-base says "X" — same platform after aliasing.
+async def test_alias_merge_and_name_confirms(wired):
+    # Maigret "Twitter" (parsed name matches) + rule-base "X" → same platform after
+    # aliasing → merge into ONE profile, confirmed via NAME match (not engine count).
     wired.maigret = [_profile_acc("Twitter", engine="maigret", username="jdoe")]
     wired.rules = [OsintAccount("X", "social", "https://x.com/jdoe", "profile",
                                 "likely", "rule-base", {"username": "jdoe"})]
     db, v, i, p = _run()
     await res.resolve_social(db, visitor=v, identified=i, profile=p)
     profiles = p.social_context["social_resolution"]["profiles"]
-    # Twitter/X collapse to ONE profile, confirmed by 2 engines.
     assert len(profiles) == 1
     assert profiles[0]["confidence"] == "confirmed"
     assert "maigret" in profiles[0]["source_engine"]
@@ -189,12 +195,83 @@ async def test_multi_engine_agreement_confirms(wired):
 
 
 @pytest.mark.asyncio
-async def test_single_engine_stays_unconfirmed(wired):
-    wired.maigret = [_profile_acc("GitHub", engine="maigret")]  # one engine only
+async def test_unverified_guess_is_filtered(wired):
+    # A profile whose extracted name does NOT match the person, on a site the email
+    # is NOT registered on → guess → kept out of `profiles`, parked in `guesses`.
+    wired.maigret = [_profile_acc("GitHub", username="someoneelse", name="Someone Else")]
+    db, v, i, p = _run()
+    out = await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    sr_blob = p.social_context["social_resolution"]
+    assert sr_blob["profiles"] == []          # not shown as a real profile
+    assert len(sr_blob["guesses"]) == 1       # collapsed under guesses
+    assert sr_blob["guesses"][0]["confidence"] == "guess"
+    assert out["confirmed"] == 0
+
+
+@pytest.mark.asyncio
+async def test_pdl_handle_is_confirmed(wired):
+    # PDL wrote a LinkedIn URL to the profile (email-keyed) → confirmed profile,
+    # no guessing needed.
+    db, v, i, p = _run(linkedin_url="https://www.linkedin.com/in/nathan-nguyennhat/")
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    profiles = p.social_context["social_resolution"]["profiles"]
+    li = [a for a in profiles if a["site_name"] == "LinkedIn"]
+    assert len(li) == 1
+    assert li[0]["confidence"] == "confirmed"
+    assert li[0]["source_engine"] == "pdl"
+
+
+@pytest.mark.asyncio
+async def test_name_match_confirms(wired):
+    # Maigret parsed a real name that matches the target → confirmed even though it
+    # came from a guessed (name-derived) username.
+    wired.maigret = [_profile_acc("GitHub", username="johndoe", name="John Doe")]
     db, v, i, p = _run()
     await res.resolve_social(db, visitor=v, identified=i, profile=p)
     prof = p.social_context["social_resolution"]["profiles"][0]
-    assert prof["confidence"] != "confirmed"  # single source → not promoted
+    assert prof["confidence"] == "confirmed"
+
+
+@pytest.mark.asyncio
+async def test_site_overlap_is_likely(wired):
+    # Profile on a site the email IS registered on, but no name match → "likely"
+    # (they use the site; the handle isn't identity-verified).
+    wired.osint_accounts = [
+        OsintAccount("GitHub", "dev", "https://github.com", "registered",
+                     "confirmed", "holehe", {}),
+    ]
+    wired.maigret = [_profile_acc("GitHub", username="ghuser", name=None)]
+    db, v, i, p = _run()
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    profs = p.social_context["social_resolution"]["profiles"]
+    gh = [a for a in profs if a["site_name"] == "GitHub"]
+    assert gh and gh[0]["confidence"] == "likely"
+
+
+def test_default_engines_include_maigret():
+    """The shipped code default must enable maigret so the username stage runs
+    without an operator manually setting OSINT_ENGINES (prod was patched via env;
+    the code default should match). Reads the class default — immune to env."""
+    from apps.api.config import Settings
+
+    assert "maigret" in Settings.model_fields["osint_engines"].default
+
+
+@pytest.mark.asyncio
+async def test_maigret_stage_runs_with_default(wired, monkeypatch):
+    """With the genuine config default (now includes maigret), the Maigret
+    username stage runs — no env-only enablement needed."""
+    from apps.api.config import Settings
+
+    monkeypatch.setattr(
+        res.settings, "osint_engines",
+        Settings.model_fields["osint_engines"].default,
+    )
+    wired.maigret = [_profile_acc("GitHub")]
+    db, v, i, p = _run()
+    out = await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    assert "maigret" in p.social_context["social_resolution"]["stages_run"]
+    assert out["profiles"] == 1
 
 
 @pytest.mark.asyncio

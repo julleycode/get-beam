@@ -117,7 +117,7 @@ async def search_usernames(
             if not url or url in seen_urls:
                 continue
             seen_urls.add(url)
-            extra = {"username": username}
+            extra = {"username": username, "cand_source": cand.get("source", "name")}
             # When parsing is on, Maigret extracts real profile fields — pull a
             # useful subset in as confirmation (a parsed page ≠ soft-404).
             ids = getattr(status, "ids_data", None) or {}

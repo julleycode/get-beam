@@ -345,12 +345,19 @@ _ADAPTER_REGISTRY: dict[str, Callable[[], OsintAdapter]] = {
     # "sherlock": SherlockAdapter, "osint-industries": OsintIndustriesAdapter,
 }
 
+# Engine names that are valid in ``settings.osint_engines`` but are NOT email-scan
+# adapters — they belong to a later pipeline stage (social_resolver). Listed here
+# so get_scanners() skips them silently instead of warning "unknown engine".
+_PIPELINE_ONLY_ENGINES = frozenset({"maigret"})
+
 
 def get_scanners() -> list[OsintAdapter]:
     """Enabled + importable adapters, per ``settings.osint_engines``."""
     enabled = [e.strip() for e in settings.osint_engines.split(",") if e.strip()]
     adapters: list[OsintAdapter] = []
     for name in enabled:
+        if name in _PIPELINE_ONLY_ENGINES:
+            continue  # handled in social_resolver, not an email-scan adapter
         factory = _ADAPTER_REGISTRY.get(name)
         if factory is None:
             logger.warning("osint_unknown_engine", engine=name)

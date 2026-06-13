@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { api, VisitorDetail } from "@/lib/api";
+import { api, OsintAccount, VisitorDetail } from "@/lib/api";
 import { CardGridSkeleton, PageHeaderSkeleton, StatGridSkeleton } from "@/components/skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,7 @@ export default function VisitorDetailPage() {
     status: string;
     message?: string;
   } | null>(null);
+  const [showGuesses, setShowGuesses] = useState(false);
 
   useEffect(() => {
     if (!siteId || !visitorId) return;
@@ -112,6 +113,54 @@ export default function VisitorDetailPage() {
   const resolution = visitor.social_context?.social_resolution;
   const resolveBusy = resolving || resolution?.status === "scanning";
   const resolvedProfiles = resolution?.profiles ?? [];
+  const confirmedProfiles = resolvedProfiles.filter(
+    (p) => p.confidence === "confirmed",
+  );
+  const likelyProfiles = resolvedProfiles.filter(
+    (p) => p.confidence !== "confirmed",
+  );
+  const guessProfiles = resolution?.guesses ?? [];
+
+  const renderProfileRow = (p: OsintAccount, i: number) => {
+    const username = (p.extra?.username || p.extra?.name) as string | undefined;
+    const isPaid = p.source_engine.includes("osint-industries");
+    return (
+      <div key={i} className="flex items-center justify-between gap-2 text-sm">
+        <span className="truncate max-w-[300px]">
+          {p.url ? (
+            <a
+              href={p.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline"
+            >
+              {p.site_name}
+            </a>
+          ) : (
+            p.site_name
+          )}
+          {username && (
+            <span className="text-muted-foreground"> · {username}</span>
+          )}
+        </span>
+        <span className="flex shrink-0 items-center gap-1">
+          {isPaid && <Badge className="text-[10px]">Paid</Badge>}
+          <Badge
+            variant="outline"
+            className={`text-[10px] ${
+              p.confidence === "confirmed"
+                ? "text-green-600"
+                : p.confidence === "likely"
+                  ? "text-yellow-600"
+                  : "text-muted-foreground"
+            }`}
+          >
+            {p.confidence}
+          </Badge>
+        </span>
+      </div>
+    );
+  };
 
   return (
     <div className="max-w-4xl space-y-6">
@@ -427,61 +476,49 @@ export default function VisitorDetailPage() {
               </p>
             )}
 
-            {resolvedProfiles.length > 0 && (
+            {confirmedProfiles.length > 0 && (
               <div className="space-y-2">
-                {resolvedProfiles.map((p, i) => {
-                  const username = (p.extra?.username ||
-                    p.extra?.name) as string | undefined;
-                  const isPaid = p.source_engine.includes("osint-industries");
-                  return (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between gap-2 text-sm"
-                    >
-                      <span className="truncate max-w-[300px]">
-                        {p.url ? (
-                          <a
-                            href={p.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-blue-600 hover:underline"
-                          >
-                            {p.site_name}
-                          </a>
-                        ) : (
-                          p.site_name
-                        )}
-                        {username && (
-                          <span className="text-muted-foreground"> · {username}</span>
-                        )}
-                      </span>
-                      <span className="flex shrink-0 items-center gap-1">
-                        {isPaid && (
-                          <Badge className="text-[10px]">Paid</Badge>
-                        )}
-                        <Badge
-                          variant="outline"
-                          className={`text-[10px] ${
-                            p.confidence === "confirmed"
-                              ? "text-green-600"
-                              : p.confidence === "likely"
-                                ? "text-blue-600"
-                                : "text-yellow-600"
-                          }`}
-                        >
-                          {p.confidence}
-                        </Badge>
-                      </span>
-                    </div>
-                  );
-                })}
+                <p className="text-xs font-semibold text-green-700">
+                  Verified profiles ({confirmedProfiles.length}) — same person
+                </p>
+                {confirmedProfiles.map(renderProfileRow)}
+              </div>
+            )}
+
+            {likelyProfiles.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold text-yellow-700">
+                  Likely — unverified ({likelyProfiles.length})
+                </p>
+                {likelyProfiles.map(renderProfileRow)}
+              </div>
+            )}
+
+            {guessProfiles.length > 0 && (
+              <div className="space-y-2 border-t pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowGuesses((v) => !v)}
+                  className="text-xs text-muted-foreground underline"
+                >
+                  {showGuesses ? "Hide" : "Show"} {guessProfiles.length} unverified
+                  guess{guessProfiles.length > 1 ? "es" : ""} (likely the wrong
+                  person)
+                </button>
+                {showGuesses && (
+                  <div className="space-y-2 opacity-70">
+                    {guessProfiles.map(renderProfileRow)}
+                  </div>
+                )}
               </div>
             )}
 
             {resolution?.status === "complete" &&
               resolvedProfiles.length === 0 && (
                 <p className="text-xs text-muted-foreground italic">
-                  No social profiles resolved for this email.
+                  No verified profiles for this email. Email-keyed providers (PDL /
+                  OSINT Industries) are the reliable source — add an OSINT
+                  Industries key to improve hard cases.
                 </p>
               )}
             {!resolution && !resolveResult && (
