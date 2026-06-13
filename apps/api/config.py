@@ -72,7 +72,9 @@ class Settings(BaseSettings):
     people_data_labs_api_key: str = ""
     fullcontact_api_key: str = ""  # deprecated — FullContact moved to B2B enterprise
     proxycurl_api_key: str = ""
-    anthropic_api_key: str = ""  # legacy — use OpenRouter instead
+    anthropic_api_key: str = ""  # legacy — replaced by Gemini (see gemini_api_key)
+    gemini_api_key: str = ""  # Google Gemini — deep research (Google Search grounding) + segmentation/campaigns
+    gemini_model: str = "gemini-2.5-flash"  # free tier + grounding; 3.x needs billing
     openrouter_api_key: str = ""  # OpenRouter.ai — single key for 100+ models
     default_ai_model: str = "deepseek/deepseek-v4-flash:free"  # free tier — good for social replies
     resend_api_key: str = ""  # deprecated — use SendGrid

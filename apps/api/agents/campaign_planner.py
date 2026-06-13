@@ -1,12 +1,11 @@
 import json
 
-import anthropic
-from anthropic.types import TextBlock
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.agents.prompt_safety import clean_text, extract_json, sanitize_profiles, wrap_untrusted
+from apps.api.services.gemini_client import gemini_generate
 from apps.api.models.campaign import Campaign
 from apps.api.models.segment import Segment
 
@@ -131,21 +130,13 @@ async def plan_campaign(
         connected_accounts_info=accounts_info,
     )
 
-    if not settings.anthropic_api_key:
+    if not settings.gemini_api_key:
         raise RuntimeError(
-            "ANTHROPIC_API_KEY is not configured — cannot plan campaign"
+            "GEMINI_API_KEY is not configured — cannot plan campaign"
         )
 
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-    message = await client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    first = message.content[0]
-    if not isinstance(first, TextBlock):
-        raise ValueError(f"Unexpected content block type: {type(first)}")
-    plan = extract_json(first.text)
+    text = await gemini_generate(prompt, max_output_tokens=4096)
+    plan = extract_json(text)
     # Defensive shape checks: touchpoints must be a list of dicts (the send
     # path and detail UI iterate them), and the name must fit its column.
     touchpoints = plan.get("touchpoints")

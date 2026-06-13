@@ -1,13 +1,12 @@
 import json
 import uuid
 
-import anthropic
-from anthropic.types import TextBlock
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.agents.prompt_safety import extract_json, sanitize_profiles, wrap_untrusted
+from apps.api.services.gemini_client import gemini_generate
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.segment import Segment, SegmentMember
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
@@ -136,21 +135,13 @@ async def run_segmentation(
         ),
     )
 
-    if not settings.anthropic_api_key:
+    if not settings.gemini_api_key:
         raise RuntimeError(
-            "ANTHROPIC_API_KEY is not configured — cannot run segmentation"
+            "GEMINI_API_KEY is not configured — cannot run segmentation"
         )
 
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-    message = await client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=4096,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    first = message.content[0]
-    if not isinstance(first, TextBlock):
-        raise ValueError(f"Unexpected content block type: {type(first)}")
-    result = extract_json(first.text)
+    text = await gemini_generate(prompt, max_output_tokens=4096)
+    result = extract_json(text)
 
     # Only visitor ids from the input batch may become members — the model
     # can hallucinate ids (segment_members has no FK), and a poisoned profile

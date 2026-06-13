@@ -15,7 +15,6 @@ import hashlib
 import json as jsonlib
 from datetime import datetime, timezone
 
-import anthropic
 import httpx
 import structlog
 from sqlalchemy import select
@@ -26,6 +25,7 @@ from apps.api.config import settings
 from apps.api.models.api_key import UserApiKey
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
+from apps.api.services.gemini_client import GeminiError, gemini_generate
 from apps.api.services.key_vault import decrypt_key
 from apps.api.services.redis_client import get_redis
 
@@ -480,45 +480,31 @@ CRITICAL RULES:
 
 Write a comprehensive but honest profile analysis. Use a direct, conversational tone — not corporate."""
 
-        if not settings.anthropic_api_key:
+        if not settings.gemini_api_key:
             logger.warning("deep_research_skipped_no_api_key")
             return {
                 "status": "error",
-                "message": "Anthropic API key not configured. Set ANTHROPIC_API_KEY to enable deep research.",
+                "message": "Gemini API key not configured. Set GEMINI_API_KEY to enable deep research.",
             }
 
         try:
-            client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
-            response = await client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=16384,
-                tools=[{
-                    "type": "web_search_20250305",
-                    "name": "web_search",
-                    "max_uses": 10,
-                }],
-                messages=[{"role": "user", "content": prompt}],
+            research_text = await gemini_generate(
+                prompt, grounding=True, max_output_tokens=16384
             )
-
-            research_text = ""
-            for block in response.content:
-                if hasattr(block, "text"):
-                    research_text += block.text + "\n"
-
-            if not research_text.strip():
-                logger.warning("deep_research_empty_response", visitor_id=visitor.visitor_id[:8])
-                return {
-                    "status": "partial",
-                    "message": "Deep research returned no results.",
-                }
-
-            research_text = research_text.strip()
-        except anthropic.APIError as e:
+        except GeminiError as e:
             logger.error("deep_research_api_error", error=str(e), visitor_id=visitor.visitor_id[:8])
             return {
                 "status": "error",
-                "message": f"Claude API error: {e.message}",
+                "message": f"Gemini API error: {e}",
             }
+
+        if not research_text.strip():
+            logger.warning("deep_research_empty_response", visitor_id=visitor.visitor_id[:8])
+            return {
+                "status": "partial",
+                "message": "Deep research returned no results.",
+            }
+        research_text = research_text.strip()
 
         if not profile:
             profile = EnrichmentProfile(
@@ -532,7 +518,7 @@ Write a comprehensive but honest profile analysis. Use a direct, conversational 
         profile.social_context = {
             "deep_research": research_text,
             "researched_at": now.isoformat(),
-            "model": "claude-sonnet-4-20250514",
+            "model": settings.gemini_model,
         }
         profile.social_context_updated_at = now
 
