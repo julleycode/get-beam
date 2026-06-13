@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { RefreshCw } from "lucide-react";
 import { api, Site, SiteStats, EngagementROI } from "@/lib/api";
 import { SiteCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
@@ -106,9 +107,11 @@ function SiteCard({ site }: { site: Site }) {
                 <button
                   onClick={handleVerify}
                   disabled={verifying}
-                  className="ml-1 rounded-full border border-yellow-400 bg-yellow-50 px-2.5 py-0.5 text-[11px] font-medium text-yellow-800 transition-colors hover:bg-yellow-100 disabled:opacity-60"
+                  title={verifying ? "Checking…" : "Re-verify pixel"}
+                  aria-label={verifying ? "Checking pixel" : "Re-verify pixel"}
+                  className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded-full border border-yellow-400 bg-yellow-50 text-yellow-800 transition-colors hover:bg-yellow-100 disabled:opacity-60"
                 >
-                  {verifying ? "Checking..." : "Re-verify"}
+                  <RefreshCw className={`h-3.5 w-3.5 ${verifying ? "animate-spin" : ""}`} />
                 </button>
                 <Link
                   href={`/dashboard/onboarding?site=${site.site_id}&step=install`}
