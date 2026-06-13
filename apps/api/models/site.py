@@ -21,5 +21,11 @@ class Site(Base):
     detected_platform: Mapped[str | None] = mapped_column(String(50))
     pixel_verified: Mapped[bool] = mapped_column(default=False)
     daily_resolution_budget: Mapped[int] = mapped_column(default=50)
+    # When False (default), the auto resolution sweep skips this site — the owner
+    # identifies visitors one at a time via the per-row Identify button. When True,
+    # the sweep auto-resolves anonymous visitors with intent >= 40.
+    auto_identify_enabled: Mapped[bool] = mapped_column(
+        default=False, nullable=False, server_default="false"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

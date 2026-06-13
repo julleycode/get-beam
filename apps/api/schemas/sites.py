@@ -20,9 +20,16 @@ class SiteOut(BaseModel):
     category: str | None
     pixel_verified: bool
     daily_resolution_budget: int
+    auto_identify_enabled: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class SiteUpdate(BaseModel):
+    """Partial site update. Only set fields are applied."""
+
+    auto_identify_enabled: bool | None = None
 
 
 class SitePixelSnippet(BaseModel):

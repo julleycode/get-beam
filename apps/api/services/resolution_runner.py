@@ -153,7 +153,12 @@ async def run_resolution_sweep() -> None:
             return
 
         try:
-            sites_result = await lock_db.execute(select(Site))
+            # Only sites that opted into auto-identify. Sites with the toggle off
+            # (the default) are resolved one visitor at a time via the per-row
+            # Identify button instead.
+            sites_result = await lock_db.execute(
+                select(Site).where(Site.auto_identify_enabled.is_(True))
+            )
             sites = list(sites_result.scalars().all())
             totals = {"processed": 0, "resolved": 0, "enriched": 0, "skipped_plan_limit": 0}
             failed_sites = 0

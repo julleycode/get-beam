@@ -173,6 +173,14 @@ class ApiClient {
     return this.request<Site>(`/api/v1/sites/${siteId}`);
   }
 
+  // Toggle the per-site auto-identify sweep on/off.
+  async setAutoIdentify(siteId: string, enabled: boolean) {
+    return this.request<Site>(`/api/v1/sites/${siteId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ auto_identify_enabled: enabled }),
+    });
+  }
+
   async getPixelSnippet(siteId: string) {
     return this.request<{ site_id: string; snippet: string }>(
       `/api/v1/sites/${siteId}/pixel`
@@ -386,6 +394,19 @@ class ApiClient {
       `/api/v1/api-keys/${provider}/test`,
       { method: "POST" }
     );
+  }
+
+  // Per-visitor identity resolution (one-click Identify on a list row).
+  // Burns one paid lookup; backend enforces the daily + monthly budgets.
+  async resolveVisitor(siteId: string, visitorId: string) {
+    return this.request<{
+      status: string;
+      message?: string;
+      email?: string | null;
+      full_name?: string | null;
+    }>(`/api/v1/visitors/${siteId}/${visitorId}/resolve`, {
+      method: "POST",
+    });
   }
 
   // Deep Research Enrichment
@@ -760,6 +781,7 @@ export interface Site {
   category: string | null;
   pixel_verified: boolean;
   daily_resolution_budget: number;
+  auto_identify_enabled: boolean;
   created_at: string;
 }
 
@@ -822,6 +844,8 @@ export interface Visitor {
   intent_score: number;
   identity_status: string;
   enrichment_status: string;
+  email?: string | null;
+  full_name?: string | null;
 }
 
 export interface VisitorDetail extends Visitor {

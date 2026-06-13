@@ -9,14 +9,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 const STATUS_STYLES: Record<
   string,
@@ -45,6 +37,28 @@ const STATUS_STYLES: Record<
 };
 
 const pct = (n: number) => `${Math.round(n * 100)}%`;
+
+// Brand-ish color per known browser; unknown browsers get a stable fallback by
+// index so two unknowns never collide.
+const BROWSER_COLORS: Record<string, string> = {
+  Chrome: "#4285F4",
+  Safari: "#06b6d4",
+  Firefox: "#f97316",
+  Edge: "#22c55e",
+  Opera: "#ef4444",
+  "Samsung Internet": "#a855f7",
+  Other: "#94a3b8",
+};
+const FALLBACK_COLORS = [
+  "#6366f1",
+  "#ec4899",
+  "#14b8a6",
+  "#eab308",
+  "#8b5cf6",
+  "#f43f5e",
+];
+const colorFor = (browser: string, index: number) =>
+  BROWSER_COLORS[browser] ?? FALLBACK_COLORS[index % FALLBACK_COLORS.length];
 
 /**
  * Per-browser capture breakdown + Safari-coverage estimate. Surfaces whether
@@ -113,31 +127,44 @@ export function BrowserCaptureCard({ siteId }: { siteId: string }) {
           </div>
         </div>
 
-        {/* Per-browser table */}
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Browser</TableHead>
-              <TableHead className="text-right">Captured</TableHead>
-              <TableHead className="text-right">Share</TableHead>
-              <TableHead className="text-right">Identified</TableHead>
-              <TableHead className="text-right">ID rate</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.browsers.map((b) => (
-              <TableRow key={b.browser}>
-                <TableCell className="font-medium">{b.browser}</TableCell>
-                <TableCell className="text-right">{b.captured}</TableCell>
-                <TableCell className="text-right">{pct(b.share)}</TableCell>
-                <TableCell className="text-right">{b.identified}</TableCell>
-                <TableCell className="text-right">
-                  {pct(b.identification_rate)}
-                </TableCell>
-              </TableRow>
+        {/* Per-browser 100% stacked bar — hover a segment for details */}
+        <div>
+          <div className="flex h-8 w-full">
+            {data.browsers.map((b, i) => (
+              <div
+                key={b.browser}
+                className="group relative h-full min-w-[3px] cursor-default border-r border-background/60 transition-opacity first:rounded-l-md last:rounded-r-md last:border-r-0 hover:opacity-90"
+                style={{
+                  width: pct(b.share),
+                  backgroundColor: colorFor(b.browser, i),
+                }}
+              >
+                {/* Tooltip — escapes the bar (no overflow-hidden on the row) */}
+                <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md group-hover:block">
+                  <div className="font-medium">{b.browser}</div>
+                  <div className="mt-0.5 text-muted-foreground">
+                    {b.captured} visitors · {pct(b.share)} · ID{" "}
+                    {pct(b.identification_rate)}
+                  </div>
+                </div>
+              </div>
             ))}
-          </TableBody>
-        </Table>
+          </div>
+
+          {/* Legend */}
+          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
+            {data.browsers.map((b, i) => (
+              <div key={b.browser} className="flex items-center gap-1.5">
+                <span
+                  className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                  style={{ backgroundColor: colorFor(b.browser, i) }}
+                />
+                <span className="font-medium">{b.browser}</span>
+                <span className="text-muted-foreground">{pct(b.share)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { TableSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
@@ -26,15 +26,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-function statusColor(status: string) {
-  switch (status) {
-    case "identified": return "default";
-    case "enriched": return "default";
-    case "anonymous": return "secondary";
-    default: return "outline";
-  }
-}
 
 function intentColor(score: number): string {
   if (score >= 70) return "text-green-600";
@@ -61,8 +52,116 @@ export default function VisitorsPage() {
     enabled: !!siteId,
   });
 
+  const { data: site } = useQuery({
+    queryKey: ["site", siteId],
+    queryFn: () => api.getSite(siteId),
+    enabled: !!siteId,
+  });
+
   const visitors = data?.visitors ?? [];
   const total = data?.total ?? 0;
+
+  const queryClient = useQueryClient();
+  // Which visitor row currently has an action in flight (per-row spinner).
+  const [actioningId, setActioningId] = useState<string | null>(null);
+  // Transient notice for non-visual outcomes (limit reached, skipped, error).
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const refreshRows = () => {
+    setActioningId(null);
+    queryClient.invalidateQueries({ queryKey: ["visitors"] });
+  };
+
+  const resolveMut = useMutation({
+    mutationFn: (visitorId: string) => api.resolveVisitor(siteId, visitorId),
+    onMutate: (visitorId) => {
+      setActioningId(visitorId);
+      setNotice(null);
+    },
+    onSuccess: (res) => {
+      // identified/unresolvable show up visually; only surface the rest.
+      if (res.status === "limit_reached" || res.status === "anonymous") {
+        setNotice(res.message ?? null);
+      }
+    },
+    onError: (e) => setNotice(e instanceof Error ? e.message : "Identify failed"),
+    onSettled: refreshRows,
+  });
+
+  const enrichMut = useMutation({
+    mutationFn: (visitorId: string) => api.enrichVisitor(siteId, visitorId),
+    onMutate: (visitorId) => {
+      setActioningId(visitorId);
+      setNotice(null);
+    },
+    onSuccess: (res) => {
+      if (res.status !== "enriched") setNotice(res.message ?? null);
+    },
+    onError: (e) => setNotice(e instanceof Error ? e.message : "Enrich failed"),
+    onSettled: refreshRows,
+  });
+
+  const autoMut = useMutation({
+    mutationFn: (enabled: boolean) => api.setAutoIdentify(siteId, enabled),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["site", siteId] }),
+  });
+
+  function renderIdentity(v: (typeof visitors)[number]) {
+    const s = v.identity_status;
+    if (s === "identified" || s === "merged") {
+      return (
+        <Badge className="border-transparent bg-green-600 text-white hover:bg-green-600">
+          Identified
+        </Badge>
+      );
+    }
+    if (s === "unresolvable" || s === "vpn_filtered") {
+      return (
+        <Badge variant="outline" className="capitalize opacity-50">
+          {s.replace("_", " ")}
+        </Badge>
+      );
+    }
+    const busy = resolveMut.isPending && actioningId === v.visitor_id;
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={busy}
+        onClick={() => resolveMut.mutate(v.visitor_id)}
+      >
+        {busy ? "Identifying…" : "Identify"}
+      </Button>
+    );
+  }
+
+  function renderEnrichment(v: (typeof visitors)[number]) {
+    const idOk = v.identity_status === "identified" || v.identity_status === "merged";
+    // Can't enrich an anonymous / unresolvable visitor — dim + disabled.
+    if (!idOk) {
+      return <span className="text-xs text-muted-foreground opacity-50">—</span>;
+    }
+    if (v.enrichment_status === "enriched") {
+      return (
+        <Badge className="border-transparent bg-green-600 text-white hover:bg-green-600">
+          Enriched
+        </Badge>
+      );
+    }
+    const busy = enrichMut.isPending && actioningId === v.visitor_id;
+    const label = v.enrichment_status === "failed" ? "Retry enrich" : "Enrich";
+    return (
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={busy}
+        onClick={() => enrichMut.mutate(v.visitor_id)}
+      >
+        {busy ? "Enriching…" : label}
+      </Button>
+    );
+  }
 
   return (
     <div>
@@ -70,6 +169,17 @@ export default function VisitorsPage() {
         <h2 className="text-2xl font-serif font-semibold tracking-tight">Visitors</h2>
         <div className="flex items-center gap-3">
           <SiteSelector value={siteId} onChange={setSiteId} />
+          {siteId && site && (
+            <Button
+              variant={site.auto_identify_enabled ? "default" : "outline"}
+              size="sm"
+              disabled={autoMut.isPending}
+              onClick={() => autoMut.mutate(!site.auto_identify_enabled)}
+              title="On = tự động nhận diện khách intent cao. Off = bấm Identify từng người."
+            >
+              Auto-identify: {site.auto_identify_enabled ? "On" : "Off"}
+            </Button>
+          )}
           <Select value={filter} onValueChange={setFilter}>
             <SelectTrigger className="w-[140px]">
               <SelectValue />
@@ -110,6 +220,9 @@ export default function VisitorsPage() {
           <p className="text-sm text-muted-foreground mb-3">
             {total} visitor{total !== 1 ? "s" : ""}
           </p>
+          {notice && (
+            <p className="mb-3 text-sm text-yellow-600">{notice}</p>
+          )}
           <Table>
             <TableHeader>
               <TableRow>
@@ -128,9 +241,22 @@ export default function VisitorsPage() {
                   <TableCell>
                     <Link
                       href={`/dashboard/visitors/${v.visitor_id}?site=${siteId}`}
-                      className="font-mono text-xs hover:underline"
+                      className="hover:underline"
                     >
-                      {v.visitor_id.slice(0, 12)}...
+                      {v.email || v.full_name ? (
+                        <div className="flex flex-col">
+                          <span className="text-sm font-medium">
+                            {v.email ?? v.full_name}
+                          </span>
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {v.visitor_id.slice(0, 12)}…
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="font-mono text-xs">
+                          {v.visitor_id.slice(0, 12)}…
+                        </span>
+                      )}
                     </Link>
                   </TableCell>
                   <TableCell className="text-sm">
@@ -143,16 +269,8 @@ export default function VisitorsPage() {
                   <TableCell className={`text-right font-medium ${intentColor(v.intent_score)}`}>
                     {Math.round(v.intent_score)}
                   </TableCell>
-                  <TableCell>
-                    <Badge variant={statusColor(v.identity_status)}>
-                      {v.identity_status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={statusColor(v.enrichment_status)}>
-                      {v.enrichment_status}
-                    </Badge>
-                  </TableCell>
+                  <TableCell>{renderIdentity(v)}</TableCell>
+                  <TableCell>{renderEnrichment(v)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

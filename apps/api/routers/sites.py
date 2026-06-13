@@ -21,6 +21,7 @@ from apps.api.schemas.sites import (
     SiteCreate,
     SiteOut,
     SitePixelSnippet,
+    SiteUpdate,
 )
 from apps.api.services.platform_detector import detect_platform
 from apps.api.services.pixel_verifier import verify_pixel
@@ -113,6 +114,29 @@ async def get_site(
     site = result.scalar_one_or_none()
     if not site:
         raise HTTPException(status_code=404, detail="Site not found")
+    return SiteOut.model_validate(site)
+
+
+@router.patch("/{site_id}", response_model=SiteOut)
+async def update_site(
+    site_id: str,
+    body: SiteUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SiteOut:
+    """Partial site update. Currently the auto-identify toggle; owner-scoped."""
+    result = await db.execute(
+        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
+    )
+    site = result.scalar_one_or_none()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    if body.auto_identify_enabled is not None:
+        site.auto_identify_enabled = body.auto_identify_enabled
+
+    await db.commit()
+    await db.refresh(site)
     return SiteOut.model_validate(site)
 
 

@@ -19,8 +19,9 @@ from apps.api.schemas.visitors import (
     VisitorOut,
     VisitorStatsResponse,
 )
-from apps.api.services.billing import check_usage_allowed
+from apps.api.services.billing import check_usage_allowed, increment_usage
 from apps.api.services.enricher import Enricher
+from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.resolution_runner import run_resolution_for_site
 from apps.api.services.usage_limits import (
     check_enrich_budget,
@@ -78,7 +79,28 @@ async def list_visitors(
     total = total_result.scalar() or 0
 
     result = await db.execute(query)
-    visitors = [VisitorOut.model_validate(v) for v in result.scalars().all()]
+    rows = list(result.scalars().all())
+    visitors = [VisitorOut.model_validate(v) for v in rows]
+
+    # Attach email/full_name from the identity table for this page's visitors.
+    # One extra query for the whole page (not N) — identified_visitors is 1:1
+    # on (site_id, visitor_id), so the map can't fan a visitor into two rows.
+    vids = [v.visitor_id for v in rows]
+    if vids:
+        id_rows = await db.execute(
+            select(
+                IdentifiedVisitor.visitor_id,
+                IdentifiedVisitor.email,
+                IdentifiedVisitor.full_name,
+            ).where(
+                IdentifiedVisitor.site_id == site_id,
+                IdentifiedVisitor.visitor_id.in_(vids),
+            )
+        )
+        id_map = {r.visitor_id: (r.email, r.full_name) for r in id_rows}
+        for v in visitors:
+            if v.visitor_id in id_map:
+                v.email, v.full_name = id_map[v.visitor_id]
 
     return VisitorListResponse(visitors=visitors, total=total, page=page, page_size=page_size)
 
@@ -441,6 +463,77 @@ async def enrich_visitor(
 
     enricher = Enricher(db)
     return await enricher.deep_research(visitor, identified, profile)
+
+
+@router.post("/{site_id}/{visitor_id}/resolve")
+async def resolve_one_visitor(
+    site_id: str,
+    visitor_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Run the identity-resolution waterfall for ONE visitor (per-row Identify).
+
+    Reuses the exact primitives of the site-wide sweep (`run_resolution_for_site`):
+    the monthly plan gate, `IdentityResolver.resolve` (which itself enforces the
+    per-site daily budget + 30-day no-retry rule and sets identity_status), a usage
+    increment on success, and Tier-1 enrichment. Idempotent: a visitor that's
+    already been processed is returned as-is without burning another paid lookup.
+    """
+    site = await _verify_site_access(db, site_id, user)
+
+    result = await db.execute(
+        select(Visitor).where(Visitor.site_id == site_id, Visitor.visitor_id == visitor_id)
+    )
+    visitor = result.scalar_one_or_none()
+    if not visitor:
+        raise HTTPException(status_code=404, detail="Visitor not found")
+
+    # Already processed → don't re-run (no extra paid lookup).
+    if visitor.identity_status != "anonymous":
+        return {"status": visitor.identity_status, "message": "Already processed."}
+
+    # Monthly plan limit (free=10/mo) — the same gate the auto sweep applies.
+    if not await check_usage_allowed(db, site.user_id):
+        return {
+            "status": "limit_reached",
+            "message": (
+                "Monthly identification limit reached for your plan. "
+                "Add your own API keys in Settings to unlock unlimited."
+            ),
+        }
+
+    identified = await IdentityResolver(db).resolve(visitor)
+
+    if identified:
+        await increment_usage(db, site.user_id)
+        try:
+            await Enricher(db).enrich_tier1(visitor, identified)
+        except Exception as e:
+            logger.warning("resolve_one_enrich_error", visitor_id=visitor_id[:8], error=str(e))
+        await db.commit()
+        return {
+            "status": "identified",
+            "email": identified.email,
+            "full_name": identified.full_name,
+        }
+
+    # resolve() set the terminal status (unresolvable / vpn_filtered) and committed,
+    # or left it anonymous when a gate skipped it (recent attempt / daily budget).
+    # Re-read the status with a fresh query (avoids lazy-load after commit).
+    status = (
+        await db.execute(
+            select(Visitor.identity_status).where(
+                Visitor.site_id == site_id, Visitor.visitor_id == visitor_id
+            )
+        )
+    ).scalar_one()
+    messages = {
+        "unresolvable": "Couldn't identify this visitor from available providers.",
+        "vpn_filtered": "Skipped — visitor is behind a VPN/proxy.",
+        "anonymous": "Not resolved — daily budget used up or attempted in the last 30 days. Try later.",
+    }
+    return {"status": status, "message": messages.get(status, "Not resolved.")}
 
 
 @router.post("/{site_id}/{visitor_id}/identify")

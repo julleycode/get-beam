@@ -23,6 +23,10 @@ class VisitorOut(BaseModel):
     intent_score: float
     identity_status: str
     enrichment_status: str
+    # Pulled from the identity table (1:1) when the visitor has been resolved.
+    # Lets the list show a real email/name instead of the opaque visitor_id.
+    email: str | None = None
+    full_name: str | None = None
 
     model_config = {"from_attributes": True}
 
