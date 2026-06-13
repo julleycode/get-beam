@@ -150,7 +150,7 @@ jobs:
           import asyncio, bcrypt
           from apps.api.models.database import engine, Base, async_session
           from apps.api.models.user import User
-          from apps.api.models import social_account, post, message, campaign, draft, enrichment, segment, voice_example, blog_post  # noqa
+          from apps.api.models import social_account, post, message, campaign, draft, enrichment, segment, voice_example, site, blog_post  # noqa
           async def seed():
               async with engine.begin() as conn:
                   await conn.run_sync(Base.metadata.create_all)
