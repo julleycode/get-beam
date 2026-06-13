@@ -185,9 +185,9 @@ function BeamLoopWidget() {
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">
-            No engagement activity yet. Approve a draft in{" "}
-            <Link href="/dashboard/engage" className="underline text-blue-600">
-              Engage
+            No engagement activity yet.{" "}
+            <Link href="/dashboard/drafts" className="underline text-blue-600">
+              Approve a draft
             </Link>{" "}
             to start the flywheel.
           </p>
