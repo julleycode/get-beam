@@ -22,4 +22,8 @@ ENV PYTHONPATH=/app
 
 EXPOSE 8000
 
-CMD uvicorn apps.api.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# Run DB migrations before serving. Prod is stamped at the Alembic baseline, so
+# this is a no-op until a new migration is added. A failing migration fails the
+# deploy (Railway keeps the previous version serving) instead of booting the app
+# against a wrong schema.
+CMD python -m alembic -c apps/api/alembic.ini upgrade head && uvicorn apps.api.main:app --host 0.0.0.0 --port ${PORT:-8000}
