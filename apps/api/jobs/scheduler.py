@@ -12,6 +12,7 @@ from apps.api.config import settings
 from apps.api.models.database import async_session
 from apps.api.services.resolution_runner import run_resolution_sweep
 from apps.api.services.sync import sync_all_accounts
+from apps.api.services import blog_service
 
 logger = structlog.get_logger()
 
@@ -47,6 +48,17 @@ async def _resolution_sweep_job() -> None:
         logger.exception("resolution_sweep_crashed")
 
 
+async def _publish_scheduled_blog_job() -> None:
+    """Periodic job: publish blog posts whose scheduled time has passed."""
+    try:
+        async with async_session() as db:
+            count = await blog_service.publish_due_posts(db)
+            if count:
+                logger.info("scheduled_blog_published", count=count)
+    except Exception:
+        logger.exception("scheduled_blog_publish_crashed")
+
+
 def start_scheduler() -> None:
     """Start the background scheduler. Call once at app startup."""
     scheduler.add_job(
@@ -61,6 +73,13 @@ def start_scheduler() -> None:
         "interval",
         minutes=settings.resolution_sweep_interval_minutes,
         id="resolution_sweep",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _publish_scheduled_blog_job,
+        "interval",
+        minutes=1,
+        id="publish_scheduled_blog",
         replace_existing=True,
     )
     scheduler.start()

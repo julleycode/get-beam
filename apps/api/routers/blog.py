@@ -7,7 +7,7 @@ expose published posts. Write + draft access requires admin.
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,9 +21,10 @@ from apps.api.schemas.blog import (
     BlogPostCreate,
     BlogPostListResponse,
     BlogPostOut,
+    BlogPostSchedule,
     BlogPostUpdate,
 )
-from apps.api.services import blog_service
+from apps.api.services import blog_service, blog_storage
 
 logger = structlog.get_logger()
 
@@ -203,6 +204,7 @@ async def publish_post(
     """Set status=published. Stamp published_at only on first publish."""
     post = await _get_or_404(db, post_id)
     post.status = "published"
+    post.scheduled_for = None
     if post.published_at is None:
         post.published_at = blog_service.now_utc()
     await db.commit()
@@ -220,10 +222,51 @@ async def unpublish_post(
     """Revert to draft. Keeps published_at for audit history."""
     post = await _get_or_404(db, post_id)
     post.status = "draft"
+    post.scheduled_for = None
     await db.commit()
     await db.refresh(post)
     logger.info("blog_post_unpublished", post_id=str(post.id), slug=post.slug)
     return BlogPostAdminOut.model_validate(post)
+
+
+@router.post("/posts/{post_id}/schedule", response_model=BlogPostAdminOut)
+async def schedule_post(
+    post_id: uuid.UUID,
+    payload: BlogPostSchedule,
+    db: AsyncSession = Depends(get_db),
+    _admin: User = Depends(require_admin),
+) -> BlogPostAdminOut:
+    """Schedule a post to auto-publish at a future time.
+
+    The `publish_due_posts` background job flips it to published once the time
+    passes. Scheduling a time in the past publishes on the job's next run.
+    """
+    post = await _get_or_404(db, post_id)
+    post.status = "scheduled"
+    post.scheduled_for = payload.scheduled_for
+    await db.commit()
+    await db.refresh(post)
+    logger.info(
+        "blog_post_scheduled",
+        post_id=str(post.id),
+        slug=post.slug,
+        scheduled_for=payload.scheduled_for.isoformat(),
+    )
+    return BlogPostAdminOut.model_validate(post)
+
+
+@router.post("/upload")
+async def upload_blog_image(
+    file: UploadFile = File(...),
+    _admin: User = Depends(require_admin),
+) -> dict[str, str]:
+    """Upload a blog image to Supabase Storage. Returns its public URL."""
+    data = await file.read()
+    try:
+        url = await blog_storage.upload_image(data, file.content_type or "")
+    except blog_storage.UploadError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    return {"url": url}
 
 
 @router.delete("/posts/{post_id}", status_code=status.HTTP_204_NO_CONTENT)

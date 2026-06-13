@@ -163,4 +163,18 @@ test.describe("Blog — admin editor", () => {
 
     await expect(page.getByText("Needs work")).toBeHidden({ timeout: 15_000 });
   });
+
+  test("markdown toolbar inserts formatting into the body", async ({ page, request }) => {
+    const token = await getAdminToken(request);
+    await page.goto("/");
+    await page.evaluate((t) => localStorage.setItem("auth_token", t), token);
+    await page.goto("/dashboard/blog/new");
+
+    await page.fill("#body", "hello");
+    await page.locator("#body").click(); // focus
+    await page.getByRole("button", { name: "Bold" }).click();
+
+    // No selection → wraps the placeholder, so the body now contains **text**.
+    await expect(page.locator("#body")).toHaveValue(/\*\*text\*\*/, { timeout: 15_000 });
+  });
 });

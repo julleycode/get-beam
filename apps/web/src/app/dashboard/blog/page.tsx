@@ -19,6 +19,9 @@ function StatusBadge({ status }: { status: string }) {
   if (status === "published") {
     return <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Published</Badge>;
   }
+  if (status === "scheduled") {
+    return <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100">Scheduled</Badge>;
+  }
   if (status === "archived") {
     return <Badge className="bg-gray-100 text-gray-600 hover:bg-gray-100">Archived</Badge>;
   }
@@ -46,11 +49,22 @@ export default function BlogAdminPage() {
     mutationFn: (id: string) => api.deletePost(id),
     onSuccess: invalidate,
   });
+  const schedule = useMutation({
+    mutationFn: ({ id, when }: { id: string; when: string }) =>
+      api.schedulePost(id, new Date(when).toISOString()),
+    onSuccess: invalidate,
+  });
 
-  const busy = publish.isPending || unpublish.isPending || remove.isPending;
+  const busy =
+    publish.isPending ||
+    unpublish.isPending ||
+    remove.isPending ||
+    schedule.isPending;
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
+  // Per-row datetime-local value for scheduling (keyed by post id).
+  const [scheduleInputs, setScheduleInputs] = useState<Record<string, string>>({});
 
   const posts = data?.posts ?? [];
   const counts = {
@@ -144,29 +158,53 @@ export default function BlogAdminPage() {
                     </div>
                     <p className="mt-1 truncate text-xs text-muted-foreground">/{post.slug}</p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    {post.status === "published" ? (
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {post.status === "published" && (
                       <>
                         <Button variant="outline" size="sm" asChild>
                           <a href={`/blog/${post.slug}`} target="_blank" rel="noreferrer">View</a>
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => unpublish.mutate(post.id)}
-                        >
+                        <Button variant="ghost" size="sm" disabled={busy} onClick={() => unpublish.mutate(post.id)}>
                           Unpublish
                         </Button>
                       </>
-                    ) : (
-                      <Button
-                        size="sm"
-                        disabled={busy}
-                        onClick={() => publish.mutate(post.id)}
-                      >
-                        Publish
-                      </Button>
+                    )}
+                    {post.status === "scheduled" && (
+                      <>
+                        <span className="hidden text-xs text-muted-foreground sm:inline">
+                          {post.scheduled_for ? new Date(post.scheduled_for).toLocaleString() : ""}
+                        </span>
+                        <Button size="sm" disabled={busy} onClick={() => publish.mutate(post.id)}>
+                          Publish now
+                        </Button>
+                        <Button variant="ghost" size="sm" disabled={busy} onClick={() => unpublish.mutate(post.id)}>
+                          Cancel
+                        </Button>
+                      </>
+                    )}
+                    {post.status !== "published" && post.status !== "scheduled" && (
+                      <>
+                        <input
+                          type="datetime-local"
+                          aria-label="Schedule date and time"
+                          value={scheduleInputs[post.id] ?? ""}
+                          onChange={(e) =>
+                            setScheduleInputs((s) => ({ ...s, [post.id]: e.target.value }))
+                          }
+                          className="rounded-md border border-[rgba(43,37,48,0.16)] bg-card px-2 py-1 text-xs"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={busy || !scheduleInputs[post.id]}
+                          onClick={() => schedule.mutate({ id: post.id, when: scheduleInputs[post.id] })}
+                        >
+                          Schedule
+                        </Button>
+                        <Button size="sm" disabled={busy} onClick={() => publish.mutate(post.id)}>
+                          Publish
+                        </Button>
+                      </>
                     )}
                     <Button
                       variant="ghost"

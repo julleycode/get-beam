@@ -15,7 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from apps.api.models.database import Base
 
 # Status values for a blog post lifecycle.
-POST_STATUSES = ("draft", "published", "archived")
+POST_STATUSES = ("draft", "scheduled", "published", "archived")
 
 
 class BlogPost(Base):
@@ -47,5 +47,10 @@ class BlogPost(Base):
     reading_time_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    # When set with status="scheduled", a background job publishes the post
+    # once this time passes.
+    scheduled_for: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )

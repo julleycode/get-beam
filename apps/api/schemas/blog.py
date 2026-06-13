@@ -65,6 +65,13 @@ class BlogPostAdminOut(BlogPostOut):
     status: str
     site_id: uuid.UUID | None
     updated_at: datetime | None
+    scheduled_for: datetime | None
+
+
+class BlogPostSchedule(BaseModel):
+    """Schedule a post to auto-publish at a future time."""
+
+    scheduled_for: datetime
 
 
 class BlogPostListResponse(BaseModel):

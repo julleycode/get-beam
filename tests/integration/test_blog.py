@@ -15,6 +15,8 @@ from apps.api.dependencies import require_admin
 from apps.api.main import app
 from apps.api.models.user import User
 
+pytestmark = pytest.mark.integration
+
 
 @pytest_asyncio.fixture
 async def admin_client(test_client: AsyncClient) -> AsyncClient:
@@ -165,3 +167,81 @@ async def test_public_list_filters_by_tag(admin_client: AsyncClient) -> None:
     alpha_slugs = {p["slug"] for p in alpha["posts"]}
     assert "tagged-alpha" in alpha_slugs
     assert "tagged-beta" not in alpha_slugs
+
+
+@pytest.mark.asyncio
+async def test_schedule_publishes_when_due(admin_client: AsyncClient, test_db) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from apps.api.services import blog_service
+
+    created = await _create(admin_client, title="Scheduled Soon")
+    past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    resp = await admin_client.post(
+        f"/api/v1/blog/posts/{created['id']}/schedule", json={"scheduled_for": past}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "scheduled"
+    # Not public while scheduled.
+    assert (await admin_client.get("/api/v1/blog/posts/scheduled-soon")).status_code == 404
+
+    published = await blog_service.publish_due_posts(test_db)
+    assert published >= 1
+    # Now live.
+    assert (await admin_client.get("/api/v1/blog/posts/scheduled-soon")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_schedule_future_stays_scheduled(admin_client: AsyncClient, test_db) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from apps.api.services import blog_service
+
+    created = await _create(admin_client, title="Scheduled Future")
+    future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    await admin_client.post(
+        f"/api/v1/blog/posts/{created['id']}/schedule", json={"scheduled_for": future}
+    )
+    await blog_service.publish_due_posts(test_db)
+    # Future schedule → not published, not public.
+    assert (await admin_client.get("/api/v1/blog/posts/scheduled-future")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_schedule_requires_auth(test_client: AsyncClient) -> None:
+    fake_id = "00000000-0000-0000-0000-000000000000"
+    resp = await test_client.post(
+        f"/api/v1/blog/posts/{fake_id}/schedule",
+        json={"scheduled_for": "2030-01-01T00:00:00Z"},
+    )
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_upload_image_mock(admin_client: AsyncClient) -> None:
+    """No service-role key in test env → mock mode returns a public URL."""
+    resp = await admin_client.post(
+        "/api/v1/blog/upload",
+        files={"file": ("photo.png", b"\x89PNG\r\n fake", "image/png")},
+    )
+    assert resp.status_code == 200, resp.text
+    url = resp.json()["url"]
+    assert "blog-images" in url and url.endswith(".png")
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_non_image(admin_client: AsyncClient) -> None:
+    resp = await admin_client.post(
+        "/api/v1/blog/upload",
+        files={"file": ("notes.txt", b"hello", "text/plain")},
+    )
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_upload_requires_auth(test_client: AsyncClient) -> None:
+    resp = await test_client.post(
+        "/api/v1/blog/upload",
+        files={"file": ("photo.png", b"data", "image/png")},
+    )
+    assert resp.status_code == 401

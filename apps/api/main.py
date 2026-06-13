@@ -112,6 +112,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             # Waitlist: one-use invite tokens (consumed at signup)
             "ALTER TABLE waitlist_signups ADD COLUMN IF NOT EXISTS used_at TIMESTAMP WITH TIME ZONE",
             "ALTER TABLE waitlist_signups ADD COLUMN IF NOT EXISTS used_by_clerk_user_id VARCHAR(255)",
+            # Blog: scheduled publishing
+            "ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMP WITH TIME ZONE",
         ]:
             try:
                 await conn.execute(__import__("sqlalchemy").text(stmt))
