@@ -56,10 +56,12 @@ async def upload_image(data: bytes, content_type: str) -> str:
         logger.info("blog_image_mock_upload", path=path)
         return public_url(path)
 
-    # Strip whitespace/newlines — a pasted env var commonly carries a trailing
-    # newline, which is an illegal HTTP header value (h11 LocalProtocolError).
-    key = settings.supabase_service_role_key.strip()
-    base = settings.supabase_url.strip().rstrip("/")
+    # Remove ALL whitespace — a pasted env var can carry a newline (even in the
+    # middle, from a wrapped paste box), which is an illegal HTTP header value
+    # (h11 LocalProtocolError). .strip() only handles the ends; keys/urls never
+    # contain internal whitespace, so collapsing it all is safe.
+    key = "".join(settings.supabase_service_role_key.split())
+    base = "".join(settings.supabase_url.split()).rstrip("/")
     url = f"{base}/storage/v1/object/{settings.supabase_storage_bucket}/{path}"
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
