@@ -7,6 +7,7 @@ import { api, Visitor } from "@/lib/api";
 import { TableSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { SiteSelector } from "@/components/site-selector";
+import { BrowserCaptureCard } from "@/components/browser-capture-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -100,6 +101,8 @@ export default function VisitorsPage() {
           </Select>
         </div>
       </div>
+
+      <BrowserCaptureCard siteId={siteId} />
 
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view visitors.</p>

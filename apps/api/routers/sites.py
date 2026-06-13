@@ -247,6 +247,29 @@ async def detection_preview(
     }
 
 
+@router.get("/{site_id}/browser-breakdown")
+async def browser_breakdown(
+    site_id: str,
+    window_days: int = 30,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Per-browser captured/identified counts + a geo-weighted Safari-coverage
+    estimate — surfaces whether ITP/content-blockers are eating Safari traffic."""
+    result = await db.execute(
+        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
+    )
+    site = result.scalar_one_or_none()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    from apps.api.services.browser_breakdown import compute_browser_breakdown
+
+    return await compute_browser_breakdown(
+        db, site_id, window_days=max(1, min(window_days, 90))
+    )
+
+
 # ──────────────────────── WordPress Plugin ─────────────────────────────
 
 
