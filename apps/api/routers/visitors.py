@@ -6,6 +6,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.config import settings
 from apps.api.models.database import async_session, get_db
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.site import Site
@@ -14,6 +15,7 @@ from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog, Visitor
 from apps.api.dependencies import get_current_user
 from apps.api.schemas.visitors import (
     ManualIdentifyRequest,
+    VisitorCountryOut,
     VisitorDetailOut,
     VisitorListResponse,
     VisitorOut,
@@ -23,10 +25,14 @@ from apps.api.services.billing import check_usage_allowed, increment_usage
 from apps.api.services.enricher import Enricher
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.resolution_runner import run_resolution_for_site
+from apps.api.services.osint_scanner import run_osint_scan
+from apps.api.services.social_resolver import resolve_social
 from apps.api.services.usage_limits import (
     check_enrich_budget,
     check_identify_budget,
+    check_osint_budget,
     check_resolution_attempt_budget,
+    increment_osint_usage,
 )
 
 logger = structlog.get_logger()
@@ -50,6 +56,12 @@ async def list_visitors(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     identity_status: str | None = None,
+    enrichment_status: str | None = None,
+    country: str | None = Query(None, max_length=5),
+    first_seen_from: datetime | None = None,
+    first_seen_to: datetime | None = None,
+    last_seen_from: datetime | None = None,
+    last_seen_to: datetime | None = None,
     min_intent: float | None = None,
     sort_by: str = "intent_score",
     user: User = Depends(get_current_user),
@@ -60,12 +72,32 @@ async def list_visitors(
     query = select(Visitor).where(Visitor.site_id == site_id)
     count_query = select(func.count()).select_from(Visitor).where(Visitor.site_id == site_id)
 
+    # Build the filter predicates once and apply the same list to both the row
+    # query and the count query, so the paginated total always matches the rows.
+    # Date bounds: *_to is EXCLUSIVE (< ) — the frontend sends the start of the
+    # day AFTER the chosen end date so the whole end day is included. first_seen
+    # / last_seen are naive (UTC) timestamps, so bounds are cut on UTC days.
+    filters = []
     if identity_status:
-        query = query.where(Visitor.identity_status == identity_status)
-        count_query = count_query.where(Visitor.identity_status == identity_status)
+        filters.append(Visitor.identity_status == identity_status)
+    if enrichment_status:
+        filters.append(Visitor.enrichment_status == enrichment_status)
+    if country:
+        filters.append(Visitor.country_code == country)
+    if first_seen_from is not None:
+        filters.append(Visitor.first_seen >= first_seen_from)
+    if first_seen_to is not None:
+        filters.append(Visitor.first_seen < first_seen_to)
+    if last_seen_from is not None:
+        filters.append(Visitor.last_seen >= last_seen_from)
+    if last_seen_to is not None:
+        filters.append(Visitor.last_seen < last_seen_to)
     if min_intent is not None:
-        query = query.where(Visitor.intent_score >= min_intent)
-        count_query = count_query.where(Visitor.intent_score >= min_intent)
+        filters.append(Visitor.intent_score >= min_intent)
+
+    for predicate in filters:
+        query = query.where(predicate)
+        count_query = count_query.where(predicate)
 
     sort_col = {
         "intent_score": Visitor.intent_score.desc(),
@@ -103,6 +135,26 @@ async def list_visitors(
                 v.email, v.full_name = id_map[v.visitor_id]
 
     return VisitorListResponse(visitors=visitors, total=total, page=page, page_size=page_size)
+
+
+@router.get("/{site_id}/countries", response_model=list[VisitorCountryOut])
+async def list_visitor_countries(
+    site_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[VisitorCountryOut]:
+    """Distinct GeoIP countries for this site's visitors, with counts, ordered
+    by count desc. Feeds the country filter dropdown on the Visitors page.
+    One cheap GROUP BY — not paginated. Defined before the /{visitor_id} route
+    so "countries" isn't swallowed as a visitor id."""
+    await _verify_site_access(db, site_id, user)
+    rows = await db.execute(
+        select(Visitor.country_code, func.count().label("count"))
+        .where(Visitor.site_id == site_id, Visitor.country_code.isnot(None))
+        .group_by(Visitor.country_code)
+        .order_by(func.count().desc())
+    )
+    return [VisitorCountryOut(country_code=r.country_code, count=r.count) for r in rows]
 
 
 async def _compute_visitor_stat_counts(db: AsyncSession, site_id: str) -> dict[str, int]:
@@ -714,6 +766,283 @@ async def resolve_site_visitors(
         "daily_limit": budget["limit"],
         "is_byok": budget["is_byok"],
         "message": f"Resolving {eligible} visitor(s) in the background. Refresh in a moment to see results.",
+    }
+
+
+async def _run_osint_scan_job(site_id: str, visitor_id: str) -> None:
+    """Background OSINT account scan for one visitor.
+
+    Runs AFTER the HTTP response, in its own DB session. Read-modify-writes
+    EnrichmentProfile.social_context under the `osint_scan` key, PRESERVING any
+    existing `deep_research` (social_context is otherwise overwritten wholesale
+    elsewhere). Does NOT touch social_context_updated_at — that column drives the
+    deep-research daily meter and an OSINT scan must not count against it.
+    """
+    async with async_session() as db:
+        id_row = await db.execute(
+            select(IdentifiedVisitor).where(
+                IdentifiedVisitor.site_id == site_id,
+                IdentifiedVisitor.visitor_id == visitor_id,
+            )
+        )
+        identified = id_row.scalar_one_or_none()
+        email = identified.email if identified else None
+
+        prof_row = await db.execute(
+            select(EnrichmentProfile).where(
+                EnrichmentProfile.site_id == site_id,
+                EnrichmentProfile.visitor_id == visitor_id,
+            )
+        )
+        profile = prof_row.scalar_one_or_none()
+        if profile is None:
+            profile = EnrichmentProfile(
+                visitor_id=visitor_id, site_id=site_id, enrichment_completeness=0.0
+            )
+            db.add(profile)
+            await db.flush()
+
+        if not email:
+            blob = {
+                "status": "not_identified", "accounts": [], "engines": [],
+                "summary": {}, "message": "Visitor has no email to scan.",
+            }
+        else:
+            try:
+                blob = await run_osint_scan(email)
+            except Exception as e:  # defensive — run_osint_scan shouldn't raise
+                logger.warning("osint_scan_job_error", visitor_id=visitor_id[:8], error=str(e))
+                blob = {
+                    "status": "error", "accounts": [], "engines": [],
+                    "summary": {}, "message": "OSINT scan failed unexpectedly.",
+                }
+
+        # Read-modify-write: reassign a NEW dict so SQLAlchemy detects the JSONB
+        # change, and keep every other social_context key (e.g. deep_research).
+        merged = dict(profile.social_context or {})
+        merged["osint_scan"] = blob
+        profile.social_context = merged
+        await db.commit()
+        logger.info(
+            "osint_scan_job_done", visitor_id=visitor_id[:8],
+            status=blob.get("status"), accounts=len(blob.get("accounts", [])),
+        )
+
+
+@router.post("/{site_id}/{visitor_id}/osint-scan")
+async def osint_scan_visitor(
+    site_id: str,
+    visitor_id: str,
+    background_tasks: BackgroundTasks,
+    force: bool = Query(False, description="Re-run even if a completed scan exists"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Run free OSINT account scanners (user-scanner + holehe) for ONE visitor.
+
+    Manual, per-visitor trigger. Existence checks rely on public reset/registration
+    signals (OSINT) — a legal gray area under some sites' ToS; use responsibly.
+    Daily cap: settings.osint_scan_daily_budget scans/site (BYOK = unlimited).
+    Results land in EnrichmentProfile.social_context['osint_scan']; the frontend
+    polls the visitor-detail endpoint while status == 'scanning'.
+    """
+    if not settings.enable_osint_scan:
+        return {"status": "disabled", "message": "OSINT scanning is not enabled."}
+
+    await _verify_site_access(db, site_id, user)
+
+    result = await db.execute(
+        select(Visitor).where(Visitor.site_id == site_id, Visitor.visitor_id == visitor_id)
+    )
+    visitor = result.scalar_one_or_none()
+    if not visitor:
+        raise HTTPException(status_code=404, detail="Visitor not found")
+
+    id_result = await db.execute(
+        select(IdentifiedVisitor).where(
+            IdentifiedVisitor.site_id == site_id,
+            IdentifiedVisitor.visitor_id == visitor_id,
+        )
+    )
+    identified = id_result.scalar_one_or_none()
+    if not identified or not identified.email:
+        return {
+            "status": "not_identified",
+            "message": "Visitor must have an email before OSINT scanning.",
+        }
+
+    prof_result = await db.execute(
+        select(EnrichmentProfile).where(
+            EnrichmentProfile.site_id == site_id,
+            EnrichmentProfile.visitor_id == visitor_id,
+        )
+    )
+    profile = prof_result.scalar_one_or_none()
+    current = (profile.social_context or {}).get("osint_scan") if profile else None
+
+    if current and current.get("status") == "scanning":
+        return {"status": "scanning", "message": "A scan is already running. Refresh shortly."}
+    if current and current.get("status") in ("complete", "cached") and not force:
+        return {
+            "status": current.get("status"),
+            "message": "Already scanned. Showing existing results (use re-scan to refresh).",
+        }
+
+    budget = await check_osint_budget(db, site_id, user.id)
+    if not budget["allowed"]:
+        return {
+            "status": "limit_reached",
+            "message": (
+                f"Daily OSINT scan limit reached ({budget['used']}/{budget['limit']}). "
+                "Add your own API keys in Settings to unlock unlimited."
+            ),
+            "used": budget["used"],
+            "limit": budget["limit"],
+        }
+
+    # Mark scanning so the polling UI shows a spinner immediately.
+    if profile is None:
+        profile = EnrichmentProfile(
+            visitor_id=visitor_id, site_id=site_id, enrichment_completeness=0.0
+        )
+        db.add(profile)
+    sc = dict(profile.social_context or {})
+    sc["osint_scan"] = {"status": "scanning", "accounts": [], "engines": [],
+                        "summary": {}, "message": "Scanning…"}
+    profile.social_context = sc
+    await db.commit()
+
+    await increment_osint_usage(site_id)
+    background_tasks.add_task(_run_osint_scan_job, site_id, visitor_id)
+
+    return {
+        "status": "started",
+        "message": "Scanning accounts in the background. Refresh in ~30–60s to see results.",
+    }
+
+
+async def _run_social_resolution_job(site_id: str, visitor_id: str) -> None:
+    """Background full social-resolution pipeline (stages A–F) for one visitor.
+
+    Owns its own session. resolve_social() persists social_context itself
+    (osint_scan + social_resolution + deep_research, read-modify-write).
+    """
+    async with async_session() as db:
+        visitor = (await db.execute(
+            select(Visitor).where(Visitor.site_id == site_id, Visitor.visitor_id == visitor_id)
+        )).scalar_one_or_none()
+        if visitor is None:
+            return
+        identified = (await db.execute(
+            select(IdentifiedVisitor).where(
+                IdentifiedVisitor.site_id == site_id,
+                IdentifiedVisitor.visitor_id == visitor_id,
+            )
+        )).scalar_one_or_none()
+        profile = (await db.execute(
+            select(EnrichmentProfile).where(
+                EnrichmentProfile.site_id == site_id,
+                EnrichmentProfile.visitor_id == visitor_id,
+            )
+        )).scalar_one_or_none()
+        if profile is None:
+            profile = EnrichmentProfile(
+                visitor_id=visitor_id, site_id=site_id, enrichment_completeness=0.0
+            )
+            db.add(profile)
+            await db.flush()
+        try:
+            await resolve_social(db, visitor=visitor, identified=identified, profile=profile)
+        except Exception as e:
+            logger.warning("social_resolution_job_error", visitor_id=visitor_id[:8], error=str(e))
+            merged = dict(profile.social_context or {})
+            merged["social_resolution"] = {
+                "status": "error", "profiles": [], "stages_run": [],
+                "message": "Social resolution failed unexpectedly.",
+            }
+            profile.social_context = merged
+            await db.commit()
+
+
+@router.post("/{site_id}/{visitor_id}/resolve-social")
+async def resolve_social_visitor(
+    site_id: str,
+    visitor_id: str,
+    background_tasks: BackgroundTasks,
+    force: bool = Query(False, description="Re-run even if a completed resolution exists"),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Full social-resolution pipeline for ONE visitor: free OSINT + Maigret +
+    rule-base → (auto paid fallback) → Gemini. Manual, per-visitor. Free daily
+    cap gates the trigger (settings.osint_scan_daily_budget); the paid stage has
+    its own separate credit cap. Results land in
+    social_context['social_resolution']; the UI polls visitor-detail while
+    status == 'scanning'.
+    """
+    if not settings.enable_osint_scan:
+        return {"status": "disabled", "message": "OSINT scanning is not enabled."}
+
+    await _verify_site_access(db, site_id, user)
+
+    visitor = (await db.execute(
+        select(Visitor).where(Visitor.site_id == site_id, Visitor.visitor_id == visitor_id)
+    )).scalar_one_or_none()
+    if not visitor:
+        raise HTTPException(status_code=404, detail="Visitor not found")
+
+    identified = (await db.execute(
+        select(IdentifiedVisitor).where(
+            IdentifiedVisitor.site_id == site_id,
+            IdentifiedVisitor.visitor_id == visitor_id,
+        )
+    )).scalar_one_or_none()
+    if not identified or not identified.email:
+        return {"status": "not_identified",
+                "message": "Visitor must have an email before social resolution."}
+
+    profile = (await db.execute(
+        select(EnrichmentProfile).where(
+            EnrichmentProfile.site_id == site_id,
+            EnrichmentProfile.visitor_id == visitor_id,
+        )
+    )).scalar_one_or_none()
+    current = (profile.social_context or {}).get("social_resolution") if profile else None
+
+    if current and current.get("status") == "scanning":
+        return {"status": "scanning", "message": "Resolution already running. Refresh shortly."}
+    if current and current.get("status") == "complete" and not force:
+        return {"status": "complete",
+                "message": "Already resolved. Use re-scan to refresh."}
+
+    budget = await check_osint_budget(db, site_id, user.id)
+    if not budget["allowed"]:
+        return {
+            "status": "limit_reached",
+            "message": (
+                f"Daily resolution limit reached ({budget['used']}/{budget['limit']}). "
+                "Add your own API keys in Settings to unlock unlimited."
+            ),
+            "used": budget["used"], "limit": budget["limit"],
+        }
+
+    if profile is None:
+        profile = EnrichmentProfile(
+            visitor_id=visitor_id, site_id=site_id, enrichment_completeness=0.0
+        )
+        db.add(profile)
+    sc = dict(profile.social_context or {})
+    sc["social_resolution"] = {"status": "scanning", "profiles": [], "stages_run": [],
+                               "message": "Resolving social profiles…"}
+    profile.social_context = sc
+    await db.commit()
+
+    await increment_osint_usage(site_id)
+    background_tasks.add_task(_run_social_resolution_job, site_id, visitor_id)
+
+    return {
+        "status": "started",
+        "message": "Resolving social profiles in the background. Refresh in ~30–90s.",
     }
 
 

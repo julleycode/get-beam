@@ -78,6 +78,14 @@ class VisitorListResponse(BaseModel):
     page_size: int
 
 
+class VisitorCountryOut(BaseModel):
+    """One row of the country filter dropdown: a country and how many of this
+    site's visitors came from it (GeoIP-derived country_code on Visitor)."""
+
+    country_code: str
+    count: int
+
+
 class ManualIdentifyRequest(BaseModel):
     email: str
     full_name: str | None = None

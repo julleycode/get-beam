@@ -33,24 +33,75 @@ function intentColor(score: number): string {
   return "text-muted-foreground";
 }
 
+// "YYYY-MM-DD" → next calendar day, computed in UTC so a +07 browser tz can't
+// shift the date. Used to make the date range's upper bound inclusive of the
+// chosen end day (backend filters first/last_seen < this value).
+function nextDay(d: string): string {
+  const [y, m, day] = d.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, day));
+  dt.setUTCDate(dt.getUTCDate() + 1);
+  return dt.toISOString().slice(0, 10);
+}
+
 export default function VisitorsPage() {
   const searchParams = useSearchParams();
   const [siteId, setSiteId] = useState(searchParams.get("site") || "");
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState("all");
   const [sortBy, setSortBy] = useState("intent_score");
+  // Filter panel (Phase 01): date ranges by first/last seen + country.
+  const [firstFrom, setFirstFrom] = useState("");
+  const [firstTo, setFirstTo] = useState("");
+  const [lastFrom, setLastFrom] = useState("");
+  const [lastTo, setLastTo] = useState("");
+  const [country, setCountry] = useState("all");
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["visitors", siteId, page, filter, sortBy],
+    queryKey: [
+      "visitors", siteId, page, filter, sortBy,
+      firstFrom, firstTo, lastFrom, lastTo, country,
+    ],
     queryFn: () =>
       api.listVisitors(siteId, {
         page,
         page_size: 50,
-        identity_status: filter === "all" ? undefined : filter,
+        // "enriched" is an enrichment_status, not an identity_status — route it
+        // to the right param (the old code sent identity_status=enriched, which
+        // matched nothing).
+        identity_status:
+          filter === "all" || filter === "enriched" ? undefined : filter,
+        enrichment_status: filter === "enriched" ? "enriched" : undefined,
+        country: country === "all" ? undefined : country,
+        first_seen_from: firstFrom || undefined,
+        first_seen_to: firstTo ? nextDay(firstTo) : undefined,
+        last_seen_from: lastFrom || undefined,
+        last_seen_to: lastTo ? nextDay(lastTo) : undefined,
         sort_by: sortBy,
       }),
     enabled: !!siteId,
   });
+
+  // Country options (with per-country counts) for the filter dropdown.
+  const { data: countries } = useQuery({
+    queryKey: ["visitor-countries", siteId],
+    queryFn: () => api.getVisitorCountries(siteId),
+    enabled: !!siteId,
+  });
+
+  const hasFilters =
+    filter !== "all" ||
+    country !== "all" ||
+    !!(firstFrom || firstTo || lastFrom || lastTo);
+
+  function clearFilters() {
+    setFilter("all");
+    setCountry("all");
+    setFirstFrom("");
+    setFirstTo("");
+    setLastFrom("");
+    setLastTo("");
+    setPage(1);
+  }
 
   const { data: site } = useQuery({
     queryKey: ["site", siteId],
@@ -180,7 +231,7 @@ export default function VisitorsPage() {
               Auto-identify: {site.auto_identify_enabled ? "On" : "Off"}
             </Button>
           )}
-          <Select value={filter} onValueChange={setFilter}>
+          <Select value={filter} onValueChange={(v) => { setFilter(v); setPage(1); }}>
             <SelectTrigger className="w-[140px]">
               <SelectValue />
             </SelectTrigger>
@@ -191,7 +242,7 @@ export default function VisitorsPage() {
               <SelectItem value="enriched">Enriched</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={sortBy} onValueChange={setSortBy}>
+          <Select value={sortBy} onValueChange={(v) => { setSortBy(v); setPage(1); }}>
             <SelectTrigger className="w-[140px]">
               <SelectValue />
             </SelectTrigger>
@@ -203,6 +254,72 @@ export default function VisitorsPage() {
           </Select>
         </div>
       </div>
+
+      {siteId && (
+        <div className="mb-4 flex flex-wrap items-end gap-4 rounded-lg border bg-muted/30 p-3">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-muted-foreground">First seen</label>
+            <div className="flex items-center gap-1">
+              <input
+                type="date"
+                value={firstFrom}
+                max={firstTo || undefined}
+                onChange={(e) => { setFirstFrom(e.target.value); setPage(1); }}
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+              />
+              <span className="text-xs text-muted-foreground">→</span>
+              <input
+                type="date"
+                value={firstTo}
+                min={firstFrom || undefined}
+                onChange={(e) => { setFirstTo(e.target.value); setPage(1); }}
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-muted-foreground">Last seen</label>
+            <div className="flex items-center gap-1">
+              <input
+                type="date"
+                value={lastFrom}
+                max={lastTo || undefined}
+                onChange={(e) => { setLastFrom(e.target.value); setPage(1); }}
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+              />
+              <span className="text-xs text-muted-foreground">→</span>
+              <input
+                type="date"
+                value={lastTo}
+                min={lastFrom || undefined}
+                onChange={(e) => { setLastTo(e.target.value); setPage(1); }}
+                className="h-9 rounded-md border bg-background px-2 text-sm"
+              />
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-muted-foreground">Country</label>
+            <Select value={country} onValueChange={(v) => { setCountry(v); setPage(1); }}>
+              <SelectTrigger className="h-9 w-[170px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All countries</SelectItem>
+                {(countries ?? []).map((c) => (
+                  <SelectItem key={c.country_code} value={c.country_code}>
+                    {c.country_code} ({c.count})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {hasFilters && (
+            <Button variant="ghost" size="sm" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          )}
+        </div>
+      )}
 
       <BrowserCaptureCard siteId={siteId} />
 

@@ -194,6 +194,14 @@ class ApiClient {
       page?: number;
       page_size?: number;
       identity_status?: string;
+      enrichment_status?: string;
+      country?: string;
+      // Date bounds as "YYYY-MM-DD". *_to is exclusive — pass the day AFTER the
+      // chosen end date (see nextDay() on the Visitors page) to include it.
+      first_seen_from?: string;
+      first_seen_to?: string;
+      last_seen_from?: string;
+      last_seen_to?: string;
       min_intent?: number;
       sort_by?: string;
     } = {}
@@ -202,11 +210,24 @@ class ApiClient {
     if (params.page) query.set("page", String(params.page));
     if (params.page_size) query.set("page_size", String(params.page_size));
     if (params.identity_status) query.set("identity_status", params.identity_status);
+    if (params.enrichment_status) query.set("enrichment_status", params.enrichment_status);
+    if (params.country) query.set("country", params.country);
+    if (params.first_seen_from) query.set("first_seen_from", params.first_seen_from);
+    if (params.first_seen_to) query.set("first_seen_to", params.first_seen_to);
+    if (params.last_seen_from) query.set("last_seen_from", params.last_seen_from);
+    if (params.last_seen_to) query.set("last_seen_to", params.last_seen_to);
     if (params.min_intent !== undefined) query.set("min_intent", String(params.min_intent));
     if (params.sort_by) query.set("sort_by", params.sort_by);
 
     return this.request<VisitorListResponse>(
       `/api/v1/visitors/${siteId}?${query.toString()}`
+    );
+  }
+
+  // Countries (with counts) for this site's visitors — populates the filter dropdown.
+  async getVisitorCountries(siteId: string) {
+    return this.request<VisitorCountry[]>(
+      `/api/v1/visitors/${siteId}/countries`
     );
   }
 
@@ -419,6 +440,24 @@ class ApiClient {
     }>(`/api/v1/visitors/${siteId}/${visitorId}/enrich`, {
       method: "POST",
     });
+  }
+
+  // OSINT account scan (free stacked engines: user-scanner + holehe)
+  async osintScan(siteId: string, visitorId: string, force = false) {
+    const qs = force ? "?force=true" : "";
+    return this.request<{ status: string; message?: string }>(
+      `/api/v1/visitors/${siteId}/${visitorId}/osint-scan${qs}`,
+      { method: "POST" },
+    );
+  }
+
+  // Full social-resolution pipeline (free OSINT + Maigret + rules → paid → Gemini)
+  async resolveSocial(siteId: string, visitorId: string, force = false) {
+    const qs = force ? "?force=true" : "";
+    return this.request<{ status: string; message?: string }>(
+      `/api/v1/visitors/${siteId}/${visitorId}/resolve-social${qs}`,
+      { method: "POST" },
+    );
   }
 
   // ── EasyEngage: Social Accounts ────────────────────
@@ -867,7 +906,62 @@ export interface VisitorDetail extends Visitor {
     deep_research?: string;
     researched_at?: string;
     model?: string;
+    osint_scan?: OsintScan;
+    social_resolution?: SocialResolution;
   } | null;
+}
+
+export interface SocialResolution {
+  status: "scanning" | "complete" | "error" | "not_identified";
+  resolved_at?: string;
+  stages_run?: string[];
+  profiles?: OsintAccount[];
+  paid?: {
+    used: boolean;
+    provider: string;
+    found: number;
+    cached?: boolean;
+    error?: string | null;
+  };
+  summary?: {
+    profile_count?: number;
+    free_profile_count?: number;
+    candidates_used?: string[];
+  };
+  message?: string;
+}
+
+export interface OsintAccount {
+  site_name: string;
+  category?: string | null;
+  url?: string | null;
+  kind: "profile" | "registered";
+  confidence: "confirmed" | "likely" | "guess";
+  source_engine: string;
+  extra?: Record<string, unknown>;
+}
+
+export interface OsintScan {
+  status:
+    | "scanning"
+    | "complete"
+    | "cached"
+    | "error"
+    | "disabled"
+    | "not_identified"
+    | "skipped_no_email";
+  scanned_at?: string;
+  engines?: string[];
+  accounts?: OsintAccount[];
+  summary?: {
+    registered_count?: number;
+    profile_count?: number;
+    checked?: number;
+    total?: number;
+    partial?: boolean;
+    skipped_categories?: string[];
+  };
+  message?: string;
 }
 
 export interface VisitorListResponse {
@@ -875,6 +969,11 @@ export interface VisitorListResponse {
   total: number;
   page: number;
   page_size: number;
+}
+
+export interface VisitorCountry {
+  country_code: string;
+  count: number;
 }
 
 export interface Segment {
