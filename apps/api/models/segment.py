@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, Integer, Text, ForeignKey, func
+from sqlalchemy import String, DateTime, Integer, Text, ForeignKey, Index, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -10,6 +10,9 @@ from apps.api.models.database import Base
 
 class Segment(Base):
     __tablename__ = "segments"
+    __table_args__ = (
+        Index("idx_segments_site", "site_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     site_id: Mapped[str] = mapped_column(String(50), nullable=False)

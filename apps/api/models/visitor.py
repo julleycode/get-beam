@@ -13,6 +13,7 @@ class Visitor(Base):
     __table_args__ = (
         Index("idx_visitors_site_intent", "site_id", "intent_score"),
         Index("idx_visitors_identity_status", "site_id", "identity_status"),
+        Index("idx_visitors_site_enrichment", "site_id", "enrichment_status"),
         Index("uq_visitors_site_visitor", "site_id", "visitor_id", unique=True),
     )
 
@@ -68,6 +69,9 @@ class IdentifiedVisitor(Base):
 
 class ResolutionLog(Base):
     __tablename__ = "resolution_logs"
+    __table_args__ = (
+        Index("idx_resolution_logs_site_created", "site_id", "created_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     site_id: Mapped[str] = mapped_column(String(50), nullable=False)

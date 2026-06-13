@@ -192,3 +192,90 @@ class TestResolutionSkipReason:
             headers=_auth(stats_setup["token"]),
         )
         assert resp.json()["resolution_skip_reason"] is None
+
+
+@pytest_asyncio.fixture
+async def bare_site(test_db):
+    """User + site with no visitors — for direct helper-level tests."""
+    from apps.api.models.site import Site
+    from apps.api.models.user import User
+
+    user = User(email=f"statsh-{uuidlib.uuid4().hex[:8]}@test.com", full_name="Stats Helper")
+    test_db.add(user)
+    await test_db.flush()
+    site = Site(
+        site_id=f"statsh_site_{uuidlib.uuid4().hex[:8]}",
+        user_id=user.id,
+        name="Stats Helper Site",
+        url="https://stats-helper.example.com",
+    )
+    test_db.add(site)
+    await test_db.commit()
+    return site
+
+
+class TestVisitorStatCountsHelper:
+    """Direct tests of the collapsed conditional-aggregate query
+    (``_compute_visitor_stat_counts``), covering cases the endpoint test above
+    does not: the intent==40 boundary, could_enrich_more (enrichment_profiles),
+    an empty site, and cross-site isolation. Pins the collapse to the old
+    per-COUNT semantics."""
+
+    @pytest.mark.asyncio
+    async def test_counts_match_known_fixture(self, test_db, bare_site):
+        from apps.api.models.enrichment import EnrichmentProfile
+        from apps.api.routers.visitors import _compute_visitor_stat_counts
+
+        sid = bare_site.site_id
+        test_db.add_all([
+            # identified + enriched, already segmented
+            _visitor(sid, "v1", identity_status="identified", enrichment_status="enriched", segmented=True, intent_score=90),
+            # identified + enriched, NOT segmented -> enriched_unsegmented
+            _visitor(sid, "v2", identity_status="identified", enrichment_status="enriched", segmented=False, intent_score=80),
+            # anonymous, intent >= 40 -> eligible
+            _visitor(sid, "v3", identity_status="anonymous", enrichment_status="pending", intent_score=55),
+            # anonymous, intent < 40 -> NOT eligible
+            _visitor(sid, "v4", identity_status="anonymous", enrichment_status="pending", intent_score=10),
+            # anonymous, intent exactly 40 -> eligible (>= boundary)
+            _visitor(sid, "v5", identity_status="anonymous", enrichment_status="pending", intent_score=40),
+            # anonymous + enriched, not segmented -> enriched + enriched_unsegmented, NOT eligible (intent<40)
+            _visitor(sid, "v6", identity_status="anonymous", enrichment_status="enriched", segmented=False, intent_score=12),
+        ])
+        test_db.add(EnrichmentProfile(site_id=sid, visitor_id="v1", enrichment_completeness=0.4))
+        test_db.add(EnrichmentProfile(site_id=sid, visitor_id="v2", enrichment_completeness=0.9))
+        await test_db.commit()
+
+        counts = await _compute_visitor_stat_counts(test_db, sid)
+        assert counts["total"] == 6
+        assert counts["identified"] == 2               # v1, v2
+        assert counts["enriched"] == 3                 # v1, v2, v6
+        assert counts["enriched_unsegmented"] == 2     # v2, v6 (v1 segmented)
+        assert counts["eligible_for_resolution"] == 2  # v3, v5 (40 is >= 40)
+        assert counts["could_enrich_more"] == 1        # only the 0.4 profile
+
+    @pytest.mark.asyncio
+    async def test_empty_site_returns_zeros(self, test_db, bare_site):
+        from apps.api.routers.visitors import _compute_visitor_stat_counts
+
+        counts = await _compute_visitor_stat_counts(test_db, bare_site.site_id)
+        assert counts == {
+            "total": 0,
+            "identified": 0,
+            "enriched": 0,
+            "could_enrich_more": 0,
+            "enriched_unsegmented": 0,
+            "eligible_for_resolution": 0,
+        }
+
+    @pytest.mark.asyncio
+    async def test_site_isolation(self, test_db, bare_site):
+        from apps.api.routers.visitors import _compute_visitor_stat_counts
+
+        sid = bare_site.site_id
+        test_db.add(_visitor(sid, "v1", identity_status="identified", enrichment_status="enriched", intent_score=90))
+        test_db.add(_visitor("other_site_999", "x1", identity_status="identified", enrichment_status="enriched", intent_score=90))
+        await test_db.commit()
+
+        counts = await _compute_visitor_stat_counts(test_db, sid)
+        assert counts["total"] == 1
+        assert counts["identified"] == 1

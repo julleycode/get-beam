@@ -114,6 +114,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "ALTER TABLE waitlist_signups ADD COLUMN IF NOT EXISTS used_by_clerk_user_id VARCHAR(255)",
             # Blog: scheduled publishing
             "ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMP WITH TIME ZONE",
+            # Perf (2026-06-13): indexes for dashboard hot-path queries.
+            # Plain CREATE INDEX (not CONCURRENTLY) because this block runs inside
+            # engine.begin()'s transaction; each builds once, then IF NOT EXISTS is
+            # a no-op. One-time brief write-lock per table on the next deploy only.
+            "CREATE INDEX IF NOT EXISTS idx_resolution_logs_site_created ON resolution_logs (site_id, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_visitors_site_enrichment ON visitors (site_id, enrichment_status)",
+            "CREATE INDEX IF NOT EXISTS idx_campaigns_site ON campaigns (site_id)",
+            "CREATE INDEX IF NOT EXISTS idx_segments_site ON segments (site_id)",
+            "CREATE INDEX IF NOT EXISTS idx_campaign_touchpoints_campaign ON campaign_touchpoints (campaign_id)",
+            "CREATE INDEX IF NOT EXISTS idx_posts_account_posted ON posts (social_account_id, posted_at)",
         ]:
             try:
                 await conn.execute(__import__("sqlalchemy").text(stmt))

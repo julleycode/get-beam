@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, Integer, Enum, ForeignKey, func
+from sqlalchemy import String, DateTime, Integer, Enum, ForeignKey, Index, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +18,9 @@ class CampaignType(str, enum.Enum):
 
 class Campaign(Base):
     __tablename__ = "campaigns"
+    __table_args__ = (
+        Index("idx_campaigns_site", "site_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     site_id: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -34,6 +37,9 @@ class Campaign(Base):
 
 class CampaignTouchpoint(Base):
     __tablename__ = "campaign_touchpoints"
+    __table_args__ = (
+        Index("idx_campaign_touchpoints_campaign", "campaign_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     campaign_id: Mapped[uuid.UUID] = mapped_column(

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.database import async_session, get_db
@@ -83,6 +83,69 @@ async def list_visitors(
     return VisitorListResponse(visitors=visitors, total=total, page=page, page_size=page_size)
 
 
+async def _compute_visitor_stat_counts(db: AsyncSession, site_id: str) -> dict[str, int]:
+    """Count-based site stats in 2 queries instead of 6.
+
+    The five visitor-table counts are collapsed into a single table scan using
+    conditional aggregates (``COUNT(*) FILTER (WHERE ...)``). The enrichment-
+    profile count stays its own query because it targets a different table.
+    Results are identical to issuing each ``COUNT`` separately — the per-site
+    ``WHERE`` is applied once and every filtered aggregate is scoped under it.
+    """
+    row = (
+        await db.execute(
+            select(
+                func.count().label("total"),
+                func.count()
+                .filter(Visitor.identity_status == "identified")
+                .label("identified"),
+                func.count()
+                .filter(Visitor.enrichment_status == "enriched")
+                .label("enriched"),
+                func.count()
+                .filter(
+                    and_(
+                        Visitor.enrichment_status == "enriched",
+                        Visitor.segmented == False,  # noqa: E712
+                    )
+                )
+                .label("enriched_unsegmented"),
+                func.count()
+                .filter(
+                    and_(
+                        Visitor.identity_status == "anonymous",
+                        Visitor.intent_score >= 40,
+                    )
+                )
+                .label("eligible_for_resolution"),
+            )
+            .select_from(Visitor)
+            .where(Visitor.site_id == site_id)
+        )
+    ).one()
+
+    # Could be enriched further (low completeness) — separate table.
+    could_enrich_more = (
+        await db.execute(
+            select(func.count())
+            .select_from(EnrichmentProfile)
+            .where(
+                EnrichmentProfile.site_id == site_id,
+                EnrichmentProfile.enrichment_completeness < 0.6,
+            )
+        )
+    ).scalar() or 0
+
+    return {
+        "total": row.total or 0,
+        "identified": row.identified or 0,
+        "enriched": row.enriched or 0,
+        "could_enrich_more": could_enrich_more,
+        "enriched_unsegmented": row.enriched_unsegmented or 0,
+        "eligible_for_resolution": row.eligible_for_resolution or 0,
+    }
+
+
 @router.get("/{site_id}/stats", response_model=VisitorStatsResponse)
 async def get_visitor_stats(
     site_id: str,
@@ -93,69 +156,16 @@ async def get_visitor_stats(
     segmentation-trigger progress count and the daily identification quota."""
     await _verify_site_access(db, site_id, user)
 
-    # Total visitors
-    total_r = await db.execute(
-        select(func.count()).select_from(Visitor).where(Visitor.site_id == site_id)
-    )
-    total = total_r.scalar() or 0
-
-    # Identified visitors
-    identified_r = await db.execute(
-        select(func.count()).select_from(Visitor).where(
-            Visitor.site_id == site_id,
-            Visitor.identity_status == "identified",
-        )
-    )
-    identified = identified_r.scalar() or 0
-
-    # Enriched visitors (Tier 1+)
-    enriched_r = await db.execute(
-        select(func.count()).select_from(Visitor).where(
-            Visitor.site_id == site_id,
-            Visitor.enrichment_status == "enriched",
-        )
-    )
-    enriched = enriched_r.scalar() or 0
-
-    # Could be enriched further (identified but low completeness)
-    partial_r = await db.execute(
-        select(func.count()).select_from(EnrichmentProfile).where(
-            EnrichmentProfile.site_id == site_id,
-            EnrichmentProfile.enrichment_completeness < 0.6,
-        )
-    )
-    could_enrich_more = partial_r.scalar() or 0
-
-    # The count auto-segmentation actually checks: enriched AND not yet
-    # segmented (segmentation_trigger.SEGMENTATION_THRESHOLD = 10).
-    unsegmented_r = await db.execute(
-        select(func.count()).select_from(Visitor).where(
-            Visitor.site_id == site_id,
-            Visitor.enrichment_status == "enriched",
-            Visitor.segmented == False,  # noqa: E712
-        )
-    )
-    enriched_unsegmented = unsegmented_r.scalar() or 0
-
-    # Anonymous visitors eligible for the next resolution run
-    eligible_r = await db.execute(
-        select(func.count()).select_from(Visitor).where(
-            Visitor.site_id == site_id,
-            Visitor.identity_status == "anonymous",
-            Visitor.intent_score >= 40,
-        )
-    )
-    eligible_for_resolution = eligible_r.scalar() or 0
-
+    counts = await _compute_visitor_stat_counts(db, site_id)
     budget = await check_identify_budget(db, site_id, user.id)
 
     return VisitorStatsResponse(
-        total_visitors=total,
-        identified=identified,
-        enriched=enriched,
-        could_enrich_more=could_enrich_more,
-        enriched_unsegmented=enriched_unsegmented,
-        eligible_for_resolution=eligible_for_resolution,
+        total_visitors=counts["total"],
+        identified=counts["identified"],
+        enriched=counts["enriched"],
+        could_enrich_more=counts["could_enrich_more"],
+        enriched_unsegmented=counts["enriched_unsegmented"],
+        eligible_for_resolution=counts["eligible_for_resolution"],
         identify_used_today=budget["used"],
         identify_daily_limit=budget["limit"],
         identify_is_byok=budget["is_byok"],

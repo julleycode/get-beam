@@ -7,6 +7,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     String,
     Text,
     func,
@@ -20,6 +21,9 @@ from apps.api.models.social_account import Platform
 
 class Post(Base):
     __tablename__ = "posts"
+    __table_args__ = (
+        Index("idx_posts_account_posted", "social_account_id", "posted_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     social_account_id: Mapped[uuid.UUID] = mapped_column(
