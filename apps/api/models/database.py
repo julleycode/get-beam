@@ -15,7 +15,11 @@ engine = create_async_engine(
     max_overflow=20,
     pool_recycle=300,
     pool_pre_ping=True,
-    # Supabase pooler (transaction mode) doesn't support prepared statements
+    # Supabase pooler doesn't support prepared statements, so disable asyncpg's
+    # statement cache. NOTE: DATABASE_URL currently points at the SESSION-mode
+    # pooler (port 5432) -- NOT transaction mode (6543), despite what this
+    # comment used to claim. These args are required for the pooler either way;
+    # changing the pooler mode/pool size is deferred (plan P11, outage risk).
     connect_args={"prepared_statement_cache_size": 0, "statement_cache_size": 0}
     if "supabase" in settings.database_url
     else {},

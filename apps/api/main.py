@@ -39,111 +39,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("starting_up", env=settings.app_env)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # Add missing columns to existing tables (safe to re-run)
-        for stmt in [
-            "ALTER TABLE resolution_logs ADD COLUMN IF NOT EXISTS cost_usd FLOAT NOT NULL DEFAULT 0",
-            "ALTER TABLE resolution_logs ADD COLUMN IF NOT EXISTS response_time_ms INTEGER",
-            "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS segmented BOOLEAN DEFAULT FALSE",
-            "ALTER TABLE segment_members ADD COLUMN IF NOT EXISTS assigned_at TIMESTAMP DEFAULT NOW()",
-            "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS campaign_type VARCHAR(20) DEFAULT 'email'",
-            "ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS platform VARCHAR(20)",
-            # EasyEngage: User model new columns
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS clerk_user_id VARCHAR(255) UNIQUE",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS tone_preference VARCHAR(50) DEFAULT 'casual'",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS full_name VARCHAR(200)",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE",
-            "ALTER TABLE users ALTER COLUMN hashed_password DROP NOT NULL",
-            # Pre-merge tables: add updated_at inherited from Base
-            "ALTER TABLE events ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
-            "ALTER TABLE events ADD COLUMN IF NOT EXISTS event_id VARCHAR(64)",
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_events_event_id ON events (event_id)",
-            "ALTER TABLE sites ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
-            "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
-            "ALTER TABLE identified_visitors ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
-            "ALTER TABLE segments ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
-            "ALTER TABLE enrichment_profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
-            "ALTER TABLE user_api_keys ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
-            "ALTER TABLE campaign_touchpoints ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
-            "ALTER TABLE resolution_logs ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()",
-            # Phase 1A: IP address on visitors for identity resolution
-            "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45)",
-            "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS company_domain VARCHAR(253)",
-            # Phase 2A: New event columns for bot filtering and tracking accuracy
-            "ALTER TABLE events ADD COLUMN IF NOT EXISTS user_agent VARCHAR(500) DEFAULT ''",
-            "ALTER TABLE events ADD COLUMN IF NOT EXISTS page_title VARCHAR(500) DEFAULT ''",
-            "ALTER TABLE events ADD COLUMN IF NOT EXISTS page_path VARCHAR(2000) DEFAULT ''",
-            # Enrichment: add facebook_url column
-            "ALTER TABLE enrichment_profiles ADD COLUMN IF NOT EXISTS facebook_url VARCHAR(500)",
-            # Feed: track post source (visitors / following / my_posts)
-            "ALTER TABLE posts ADD COLUMN IF NOT EXISTS source VARCHAR(20) DEFAULT 'following'",
-            # Fix source: user's own tweets should be 'my_posts', not default 'following'
-            """UPDATE posts SET source = 'my_posts'
-               WHERE source = 'following'
-                 AND author_username = (
-                     SELECT sa.username FROM social_accounts sa
-                     WHERE sa.id = posts.social_account_id
-                 )""",
-            # Phase: browser fingerprint for cross-session identification
-            "ALTER TABLE visitors ADD COLUMN IF NOT EXISTS fingerprint VARCHAR(50)",
-            # Phase 2: expand fingerprint column for 128-bit v2 fingerprints
-            "ALTER TABLE visitors ALTER COLUMN fingerprint TYPE VARCHAR(64)",
-            # Phase: visitor_emails table (created by create_all, but ensure index exists)
-            # The table itself is created by Base.metadata.create_all above;
-            # these are safety-net additions for pre-existing deployments.
-            # Billing: new columns on users
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(255)",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS plan VARCHAR(20) NOT NULL DEFAULT 'free'",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(255)",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(50)",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_ends_at TIMESTAMP WITH TIME ZONE",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_period_end TIMESTAMP WITH TIME ZONE",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS monthly_identified_count INTEGER NOT NULL DEFAULT 0",
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS billing_cycle_reset_at TIMESTAMP WITH TIME ZONE",
-            # Social Intelligence: new columns on enrichment_profiles
-            "ALTER TABLE enrichment_profiles ADD COLUMN IF NOT EXISTS social_context JSONB",
-            "ALTER TABLE enrichment_profiles ADD COLUMN IF NOT EXISTS social_context_updated_at TIMESTAMP WITH TIME ZONE",
-            # Auto-draft: new columns on drafts
-            "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS auto_generated BOOLEAN NOT NULL DEFAULT FALSE",
-            "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS visitor_id VARCHAR(100)",
-            "ALTER TABLE drafts ADD COLUMN IF NOT EXISTS context_summary VARCHAR(500)",
-            # Feature requests: admin note for status management
-            "ALTER TABLE feature_requests ADD COLUMN IF NOT EXISTS admin_note TEXT",
-            # Waitlist: one-use invite tokens (consumed at signup)
-            "ALTER TABLE waitlist_signups ADD COLUMN IF NOT EXISTS used_at TIMESTAMP WITH TIME ZONE",
-            "ALTER TABLE waitlist_signups ADD COLUMN IF NOT EXISTS used_by_clerk_user_id VARCHAR(255)",
-            # Blog: scheduled publishing
-            "ALTER TABLE blog_posts ADD COLUMN IF NOT EXISTS scheduled_for TIMESTAMP WITH TIME ZONE",
-            # Perf (2026-06-13): indexes for dashboard hot-path queries.
-            # Plain CREATE INDEX (not CONCURRENTLY) because this block runs inside
-            # engine.begin()'s transaction; each builds once, then IF NOT EXISTS is
-            # a no-op. One-time brief write-lock per table on the next deploy only.
-            "CREATE INDEX IF NOT EXISTS idx_resolution_logs_site_created ON resolution_logs (site_id, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_visitors_site_enrichment ON visitors (site_id, enrichment_status)",
-            "CREATE INDEX IF NOT EXISTS idx_campaigns_site ON campaigns (site_id)",
-            "CREATE INDEX IF NOT EXISTS idx_segments_site ON segments (site_id)",
-            "CREATE INDEX IF NOT EXISTS idx_campaign_touchpoints_campaign ON campaign_touchpoints (campaign_id)",
-            "CREATE INDEX IF NOT EXISTS idx_posts_account_posted ON posts (social_account_id, posted_at)",
-        ]:
-            try:
-                await conn.execute(__import__("sqlalchemy").text(stmt))
-            except Exception as e:
-                logger.debug("migration_skipped", stmt=stmt[:60], reason=str(e))
-        # Backfill IP addresses on existing visitors from their latest event
-        try:
-            await conn.execute(__import__("sqlalchemy").text("""
-                UPDATE visitors v SET ip_address = sub.ip
-                FROM (
-                    SELECT DISTINCT ON (visitor_id, site_id) visitor_id, site_id, ip_address AS ip
-                    FROM events
-                    WHERE ip_address != '' AND ip_address IS NOT NULL
-                    ORDER BY visitor_id, site_id, created_at DESC
-                ) sub
-                WHERE v.visitor_id = sub.visitor_id AND v.site_id = sub.site_id
-                  AND v.ip_address IS NULL
-            """))
-        except Exception as e:
-            logger.debug("ip_backfill_skipped", reason=str(e))
+        # Schema is managed by Alembic now (P3): `alembic upgrade head` runs in
+        # the Dockerfile CMD before the app boots. The old per-boot ALTER block
+        # (~55 statements) and the events->visitors IP backfill were removed —
+        # both redundant: the Alembic baseline already has every column, and the
+        # write paths set the data at creation (visitor_aggregator sets
+        # ip_address from the latest event; sync.py saves the correct post
+        # `source`). create_all stays only as a harmless safety net for
+        # fresh/local DBs; it no-ops once tables exist.
 
     # Start background feed-sync scheduler
     start_scheduler()
