@@ -8,12 +8,13 @@ import structlog
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.models.database import get_db
 from apps.api.models.user import User
+from apps.api.models.waitlist import WaitlistSignup
 from apps.api.services.pii import mask_email
 
 logger = structlog.get_logger()
@@ -123,6 +124,22 @@ async def _fetch_clerk_email(clerk_user_id: str) -> Optional[str]:
         return None
 
 
+async def _is_email_allowlisted(db: AsyncSession, email: str) -> bool:
+    """True if the email has an approved/granted waitlist signup.
+
+    Gates *new* account creation to invited users only. Existing users (matched
+    earlier by clerk_user_id or by email) bypass this entirely — they are
+    grandfathered in regardless of waitlist state.
+    """
+    result = await db.execute(
+        select(WaitlistSignup.id).where(
+            func.lower(WaitlistSignup.email) == email.lower(),
+            WaitlistSignup.status.in_(["approved", "granted"]),
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def get_current_user(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
     db: AsyncSession = Depends(get_db),
@@ -183,6 +200,19 @@ async def get_current_user(
                         email=mask_email(email),
                     )
                 else:
+                    # Genuinely new account — enforce invite-only access.
+                    # (Existing users were matched above and never reach here,
+                    # so all current users are grandfathered in.)
+                    if not await _is_email_allowlisted(db, email):
+                        logger.warning(
+                            "clerk_signup_blocked_not_allowlisted",
+                            clerk_id=clerk_user_id,
+                            email=mask_email(email),
+                        )
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Access is invite-only. Join the waitlist to request access.",
+                        )
                     user = User(
                         id=uuid.uuid4(),
                         email=email,
