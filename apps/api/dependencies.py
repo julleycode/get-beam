@@ -87,6 +87,42 @@ async def _verify_clerk_token(token: str) -> dict:
         raise
 
 
+async def _fetch_clerk_email(clerk_user_id: str) -> Optional[str]:
+    """Fetch a user's primary email from the Clerk Backend API.
+
+    Clerk's default session JWT does NOT carry an email claim, so without this
+    every Clerk login falls back to a fabricated ``{id}@clerk.user`` address.
+    That breaks the link-existing-user-by-email path below and orphans data
+    when an instance changes (e.g. dev -> prod) and re-issues user ids.
+
+    Returns the primary email address, or None if it can't be resolved.
+    """
+    if not settings.clerk_secret_key:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                f"https://api.clerk.com/v1/users/{clerk_user_id}",
+                headers={"Authorization": f"Bearer {settings.clerk_secret_key}"},
+            )
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        primary_id = data.get("primary_email_address_id")
+        emails = data.get("email_addresses", []) or []
+        for entry in emails:
+            if entry.get("id") == primary_id and entry.get("email_address"):
+                return entry["email_address"]
+        # No primary flagged — fall back to the first verified address.
+        for entry in emails:
+            if entry.get("email_address"):
+                return entry["email_address"]
+        return None
+    except Exception:
+        logger.exception("clerk_email_fetch_failed", clerk_id=clerk_user_id)
+        return None
+
+
 async def get_current_user(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
     db: AsyncSession = Depends(get_db),
@@ -122,18 +158,30 @@ async def get_current_user(
             user = result.scalar_one_or_none()
 
             if user is None:
-                # Auto-create user on first Clerk API call
-                email = payload.get(
-                    "email",
-                    payload.get("email_address", f"{clerk_user_id}@clerk.user"),
-                )
-                # Check if email already exists (user registered before Clerk)
+                # Resolve the real email: prefer a JWT claim, then the Clerk
+                # Backend API, and only fabricate as a last resort. Having the
+                # real email is what lets us link to a pre-existing row instead
+                # of spawning a duplicate when the user's id changes.
+                email = payload.get("email") or payload.get("email_address")
+                if not email:
+                    email = await _fetch_clerk_email(clerk_user_id)
+                if not email:
+                    email = f"{clerk_user_id}@clerk.user"
+
+                # Check if email already exists (registered before Clerk, or
+                # under a previous Clerk instance with a different user id).
                 result = await db.execute(select(User).where(User.email == email))
                 user = result.scalar_one_or_none()
                 if user:
-                    # Link existing user to Clerk
+                    # Link existing user to Clerk (re-points the row at the
+                    # current id, restoring access to all of their data).
                     user.clerk_user_id = clerk_user_id
                     await db.commit()
+                    logger.info(
+                        "clerk_user_relinked",
+                        clerk_id=clerk_user_id,
+                        email=mask_email(email),
+                    )
                 else:
                     user = User(
                         id=uuid.uuid4(),
@@ -148,6 +196,26 @@ async def get_current_user(
                         clerk_id=clerk_user_id,
                         email=mask_email(email),
                     )
+            elif user.email.endswith("@clerk.user"):
+                # Self-heal: an existing row created before this fix still has a
+                # fabricated email. Backfill the real one so future logins (and
+                # email-based features) work. Tolerate a unique-constraint clash.
+                real_email = await _fetch_clerk_email(clerk_user_id)
+                if real_email and real_email != user.email:
+                    user.email = real_email
+                    try:
+                        await db.commit()
+                        logger.info(
+                            "clerk_user_email_backfilled",
+                            clerk_id=clerk_user_id,
+                            email=mask_email(real_email),
+                        )
+                    except Exception:
+                        await db.rollback()
+                        logger.warning(
+                            "clerk_user_email_backfill_conflict",
+                            clerk_id=clerk_user_id,
+                        )
 
             return user
 
