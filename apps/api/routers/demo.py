@@ -7,6 +7,7 @@ ANY IP (residential, public WiFi, mobile) — not just business IPs.
 """
 
 import asyncio
+import re
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -510,9 +511,32 @@ async def demo_generate_draft(request: Request, body: DraftRequest) -> dict:
     }
 
 
+_X_HANDLE_INVALID = re.compile(r"[^A-Za-z0-9_]")
+
+
+def _normalize_x_handle(raw: str | None) -> str | None:
+    """Normalize a user-entered X handle to a bare username (no '@', no URL).
+
+    Accepts '@foo', 'foo', 'x.com/foo', 'https://twitter.com/foo?ref=1', etc.
+    Returns the lowercase-preserving username with only [A-Za-z0-9_], capped at
+    39 chars to fit the column, or None when nothing usable remains. Entering a
+    handle is the opt-in to the public Founders Wall.
+    """
+    if not raw:
+        return None
+    h = raw.strip()
+    h = re.sub(r"^https?://", "", h, flags=re.IGNORECASE)
+    h = re.sub(r"^(www\.)?(x\.com|twitter\.com)/", "", h, flags=re.IGNORECASE)
+    h = h.split("/")[0].split("?")[0]
+    h = h.lstrip("@").strip()
+    h = _X_HANDLE_INVALID.sub("", h)
+    return h[:39] or None
+
+
 class WaitlistRequest(BaseModel):
     email: str
     site_url: str | None = None
+    x_handle: str | None = None
 
 
 @router.post("/waitlist")
@@ -522,6 +546,8 @@ async def join_waitlist(request: Request, body: WaitlistRequest) -> dict:
     email = body.email.strip().lower()
     if not email or "@" not in email:
         return {"status": "invalid"}
+
+    x_handle = _normalize_x_handle(body.x_handle)
 
     logger.info("waitlist_signup", email=mask_email(email))
 
@@ -538,15 +564,22 @@ async def join_waitlist(request: Request, body: WaitlistRequest) -> dict:
             )
             existing = result.scalar_one_or_none()
             if existing:
-                # Update site_url if provided and not already set
+                # Backfill site_url / x_handle if newly provided and not already set
+                changed = False
                 if body.site_url and not existing.site_url:
                     existing.site_url = body.site_url
+                    changed = True
+                if x_handle and not existing.x_handle:
+                    existing.x_handle = x_handle
+                    changed = True
+                if changed:
                     await db.commit()
                 break
 
             entry = WaitlistSignup(
                 email=email,
                 site_url=body.site_url or None,
+                x_handle=x_handle,
             )
             db.add(entry)
             await db.commit()
@@ -637,3 +670,42 @@ async def beta_slots() -> dict:
 
     remaining = max(0, BETA_TOTAL_SLOTS - taken)
     return {"total": BETA_TOTAL_SLOTS, "taken": taken, "remaining": remaining}
+
+
+FOUNDER_WALL_SIZE = 100
+
+
+@router.get("/founders")
+async def founders_wall() -> dict:
+    """Public endpoint: the Founders Wall roster.
+
+    Returns up to the first FOUNDER_WALL_SIZE signups that opted in by providing
+    an X handle, ordered by signup time, so the earliest climbers fill the wall
+    first. Exposes ONLY the public X handle (never email). The frontend resolves
+    each avatar via unavatar.io and links to x.com/<handle>.
+
+    Fails soft: any DB error yields an empty roster so the landing page renders
+    a clean all-empty wall instead of breaking.
+    """
+    founders: list[dict] = []
+    claimed = 0
+    try:
+        from apps.api.models.waitlist import WaitlistSignup
+        async with async_session() as db:
+            # Total signups (capped) drives the "N / 100 claimed" counter.
+            count_result = await db.execute(select(WaitlistSignup.id))
+            claimed = min(len(count_result.scalars().all()), FOUNDER_WALL_SIZE)
+
+            result = await db.execute(
+                select(WaitlistSignup.x_handle)
+                .where(WaitlistSignup.x_handle.isnot(None))
+                .order_by(WaitlistSignup.created_at.asc())
+                .limit(FOUNDER_WALL_SIZE)
+            )
+            for position, (handle,) in enumerate(result.all()):
+                founders.append({"position": position, "handle": handle})
+    except Exception as exc:
+        logger.warning("founders_wall_query_failed", error=str(exc))
+        return {"spots": FOUNDER_WALL_SIZE, "claimed": 0, "founders": []}
+
+    return {"spots": FOUNDER_WALL_SIZE, "claimed": claimed, "founders": founders}

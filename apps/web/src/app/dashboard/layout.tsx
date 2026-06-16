@@ -18,6 +18,7 @@ const EASYTRACK_ITEMS = [
   { href: "/dashboard/segments", label: "Segments" },
   { href: "/dashboard/campaigns", label: "Campaigns" },
   { href: "/dashboard/exports", label: "Exports" },
+  { href: "/dashboard/costs", label: "API Costs" },
 ];
 
 const EASYENGAGE_ITEMS = [

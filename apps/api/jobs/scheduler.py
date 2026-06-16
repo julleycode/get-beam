@@ -11,6 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apps.api.config import settings
 from apps.api.models.database import async_session
 from apps.api.services.resolution_runner import run_resolution_sweep
+from apps.api.services.retention import purge_events_older_than
 from apps.api.services.sync import sync_all_accounts
 from apps.api.services import blog_service
 
@@ -48,6 +49,20 @@ async def _resolution_sweep_job() -> None:
         logger.exception("resolution_sweep_crashed")
 
 
+async def _retention_purge_job() -> None:
+    """Periodic job: delete raw events past the retention window.
+
+    purge_events_older_than handles its own sessions and a Postgres advisory
+    lock (single-flight across replicas). Only raw events are removed.
+    """
+    try:
+        result = await purge_events_older_than()
+        if result.get("deleted"):
+            logger.info("retention_purge_job_complete", **result)
+    except Exception:
+        logger.exception("retention_purge_crashed")
+
+
 async def _publish_scheduled_blog_job() -> None:
     """Periodic job: publish blog posts whose scheduled time has passed."""
     try:
@@ -80,6 +95,13 @@ def start_scheduler() -> None:
         "interval",
         minutes=1,
         id="publish_scheduled_blog",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _retention_purge_job,
+        "interval",
+        hours=settings.retention_purge_interval_hours,
+        id="retention_purge",
         replace_existing=True,
     )
     scheduler.start()

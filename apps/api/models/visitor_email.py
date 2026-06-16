@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, UniqueConstraint, Index, func
+from sqlalchemy import DateTime, String, Text, UniqueConstraint, Index, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -29,4 +29,9 @@ class VisitorEmail(Base):
     visitor_id: Mapped[str] = mapped_column(String(100), nullable=False)
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     source: Mapped[str] = mapped_column(String(20), default="form")
+    # Phase 05 (encrypt PII at rest) — added nullable, not yet read/written.
+    # email_ciphertext holds the Fernet-encrypted address; email_bidx is the
+    # HMAC blind index used for equality/uniqueness lookups once we cut over.
+    email_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    email_bidx: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

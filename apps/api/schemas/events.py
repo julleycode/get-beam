@@ -43,6 +43,9 @@ class Event(BaseModel):
     bid: str | None = None
     # Browser fingerprint (sent on every event by the pixel as _fp field)
     fp: str | None = Field(None, alias="_fp")
+    # Privacy opt-out: pixel sets true when navigator.globalPrivacyControl (GPC)
+    # or doNotTrack (DNT) is on. Defaults False for older pixel builds.
+    optout: bool = False
 
 
 class EventBatch(BaseModel):

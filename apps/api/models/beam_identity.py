@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Float, String, DateTime, Index, func
+from sqlalchemy import Float, String, Text, DateTime, Index, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -34,6 +34,10 @@ class BeamIdentityNode(Base):
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     email: Mapped[str | None] = mapped_column(String(320))
     full_name: Mapped[str | None] = mapped_column(String(200))
+    # Phase 05 (encrypt PII at rest) — added nullable, not yet read/written.
+    email_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    email_bidx: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    full_name_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     confidence_score: Mapped[float] = mapped_column(Float, default=0.0)
     source_site_id: Mapped[str] = mapped_column(String(50), nullable=False)
     source_provider: Mapped[str] = mapped_column(String(50), nullable=False)

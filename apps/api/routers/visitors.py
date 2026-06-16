@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.config import settings
 from apps.api.models.database import async_session, get_db
 from apps.api.models.enrichment import EnrichmentProfile
+from apps.api.models.known_contact import KnownContact
 from apps.api.models.site import Site
 from apps.api.models.user import User
 from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog, Visitor
@@ -26,6 +27,7 @@ from apps.api.services.enricher import Enricher
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.resolution_runner import run_resolution_for_site
 from apps.api.services.osint_scanner import run_osint_scan
+from apps.api.services.known_hash import email_hash
 from apps.api.services.social_resolver import resolve_social
 from apps.api.services.usage_limits import (
     check_enrich_budget,
@@ -50,6 +52,39 @@ async def _verify_site_access(db: AsyncSession, site_id: str, user: User) -> Sit
     return site
 
 
+def _row_to_dict(obj) -> dict:
+    """Serialize an ORM row to a plain dict of its columns (DSAR export)."""
+    return {c.key: getattr(obj, c.key) for c in obj.__table__.columns}
+
+
+async def _known_visitor_ids(db: AsyncSession, site_id: str) -> set[str]:
+    """Visitor ids whose identified email matches the site's known-contacts list.
+
+    Matching is hash-vs-hash — the owner's list is stored only as HMAC hashes
+    (see models/known_contact.py). We hash the identified emails in Python here
+    because the HMAC key lives in the app, not the DB. Loads this site's
+    identified emails + known hashes; fine at current scale. If identified rows
+    grow large, add an email_hash column to identified_visitors and switch this
+    to a SQL join.
+    """
+    known_hashes = set(
+        (
+            await db.execute(
+                select(KnownContact.email_hash).where(KnownContact.site_id == site_id)
+            )
+        ).scalars().all()
+    )
+    if not known_hashes:
+        return set()
+    id_rows = await db.execute(
+        select(IdentifiedVisitor.visitor_id, IdentifiedVisitor.email).where(
+            IdentifiedVisitor.site_id == site_id,
+            IdentifiedVisitor.email.isnot(None),
+        )
+    )
+    return {vid for vid, em in id_rows if em and email_hash(em) in known_hashes}
+
+
 @router.get("/{site_id}", response_model=VisitorListResponse)
 async def list_visitors(
     site_id: str,
@@ -58,6 +93,8 @@ async def list_visitors(
     identity_status: str | None = None,
     enrichment_status: str | None = None,
     country: str | None = Query(None, max_length=5),
+    visitor_type: str | None = None,  # "new" | "returning" — by session count
+    known: bool | None = None,  # match against the owner's known-contacts list
     first_seen_from: datetime | None = None,
     first_seen_to: datetime | None = None,
     last_seen_from: datetime | None = None,
@@ -84,6 +121,23 @@ async def list_visitors(
         filters.append(Visitor.enrichment_status == enrichment_status)
     if country:
         filters.append(Visitor.country_code == country)
+    # "new" = seen in a single session; "returning" = came back (2+ sessions).
+    # total_sessions is the lifetime session count (gap > 30 min) and is always
+    # >= 1, so "new" is effectively == 1. This is Beam's own visit signal, NOT a
+    # known-customer/CRM signal (that's a later phase).
+    if visitor_type == "new":
+        filters.append(Visitor.total_sessions <= 1)
+    elif visitor_type == "returning":
+        filters.append(Visitor.total_sessions > 1)
+    if known is not None:
+        # "known" = email matches the owner's uploaded contacts. Resolve the
+        # matching visitor ids once (hash-based) and filter on them. Empty set →
+        # in_() matches nobody / notin_() matches everybody, both correct.
+        known_ids = list(await _known_visitor_ids(db, site_id))
+        if known:
+            filters.append(Visitor.visitor_id.in_(known_ids))
+        else:
+            filters.append(Visitor.visitor_id.notin_(known_ids))
     if first_seen_from is not None:
         filters.append(Visitor.first_seen >= first_seen_from)
     if first_seen_to is not None:
@@ -133,6 +187,23 @@ async def list_visitors(
         for v in visitors:
             if v.visitor_id in id_map:
                 v.email, v.full_name = id_map[v.visitor_id]
+
+        # Flag rows whose email is in the owner's known-contacts list (badge).
+        # One query for the page: hash this page's emails, look them up by hash.
+        page_hashes = {vid: email_hash(em) for vid, (em, _fn) in id_map.items() if em}
+        if page_hashes:
+            known_rows = await db.execute(
+                select(KnownContact.email_hash, KnownContact.source).where(
+                    KnownContact.site_id == site_id,
+                    KnownContact.email_hash.in_(list(set(page_hashes.values()))),
+                )
+            )
+            known_src = {h: src for h, src in known_rows}
+            for v in visitors:
+                h = page_hashes.get(v.visitor_id)
+                if h and h in known_src:
+                    v.is_known = True
+                    v.known_source = known_src[h]
 
     return VisitorListResponse(visitors=visitors, total=total, page=page, page_size=page_size)
 
@@ -283,6 +354,94 @@ async def delete_visitor_data(
 
     logger.info("visitor_data_deleted", site_id=site_id, visitor_id=visitor_id[:8], deleted=deleted)
     return {"status": "deleted", "visitor_id": visitor_id, "deleted": deleted}
+
+
+# Cap on per-visitor events in an export payload. A single visitor almost never
+# has this many; the cap just bounds a pathological payload. Truncation is
+# surfaced in the response so it's never a silent omission.
+_EXPORT_EVENT_CAP = 5000
+
+
+@router.get("/{site_id}/{visitor_id}/data/export")
+async def export_visitor_data(
+    site_id: str,
+    visitor_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Export ALL data held for one visitor as JSON (GDPR/CCPA access request).
+
+    The symmetric counterpart to DELETE /{site_id}/{visitor_id}/data: gathers
+    the visitor row, identity, enrichment, captured emails, events, resolution
+    logs, segment memberships, and any crawled social posts matching their
+    handle. Site-ownership is enforced so one tenant can't read another's data.
+    """
+    from fastapi.encoders import jsonable_encoder
+    from fastapi.responses import JSONResponse
+
+    from apps.api.models.event import Event as EventRow
+    from apps.api.models.post import Post
+    from apps.api.models.segment import SegmentMember
+    from apps.api.models.visitor_email import VisitorEmail
+
+    await _verify_site_access(db, site_id, user)
+
+    def _scope(model):
+        return select(model).where(model.site_id == site_id, model.visitor_id == visitor_id)
+
+    visitor = (await db.execute(_scope(Visitor))).scalar_one_or_none()
+    identified = (await db.execute(_scope(IdentifiedVisitor))).scalar_one_or_none()
+    enrichment = (await db.execute(_scope(EnrichmentProfile))).scalar_one_or_none()
+    emails = (await db.execute(_scope(VisitorEmail))).scalars().all()
+    resolution_logs = (await db.execute(_scope(ResolutionLog))).scalars().all()
+    segments = (await db.execute(_scope(SegmentMember))).scalars().all()
+
+    events_rows = (
+        await db.execute(
+            _scope(EventRow).order_by(EventRow.created_at.desc()).limit(_EXPORT_EVENT_CAP + 1)
+        )
+    ).scalars().all()
+    events_truncated = len(events_rows) > _EXPORT_EVENT_CAP
+    events_rows = events_rows[:_EXPORT_EVENT_CAP]
+
+    # Crawled social posts tied to this person's Twitter handle (best-effort).
+    posts: list = []
+    handle = (enrichment.twitter_handle or "").lstrip("@").strip() if enrichment else ""
+    if handle:
+        posts = (
+            await db.execute(
+                select(Post).where(func.lower(Post.author_username) == handle.lower())
+            )
+        ).scalars().all()
+
+    payload = {
+        "site_id": site_id,
+        "visitor_id": visitor_id,
+        "exported_at": datetime.now(timezone.utc),
+        "visitor": _row_to_dict(visitor) if visitor else None,
+        "identified": _row_to_dict(identified) if identified else None,
+        "enrichment": _row_to_dict(enrichment) if enrichment else None,
+        "emails": [_row_to_dict(e) for e in emails],
+        "events": [_row_to_dict(e) for e in events_rows],
+        "events_truncated": events_truncated,
+        "resolution_logs": [_row_to_dict(r) for r in resolution_logs],
+        "segments": [_row_to_dict(s) for s in segments],
+        "social_posts": [_row_to_dict(p) for p in posts],
+    }
+
+    logger.info(
+        "visitor_data_exported",
+        site_id=site_id,
+        visitor_id=visitor_id[:8],
+        events=len(events_rows),
+        truncated=events_truncated,
+    )
+    return JSONResponse(
+        content=jsonable_encoder(payload),
+        headers={
+            "Content-Disposition": f'attachment; filename="visitor-{visitor_id}-export.json"'
+        },
+    )
 
 
 @router.delete("/{site_id}/cleanup-test")

@@ -136,6 +136,13 @@ class Settings(BaseSettings):
     # ─── Encryption ───
     encryption_key: str = ""  # Fernet key for BYOK API keys (strict)
     token_encryption_key: str = ""  # Fernet key for OAuth tokens (graceful)
+    # HMAC key for the PII blind index (suppression list now; encrypted PII
+    # lookups in Phase 05). Falls back to encryption_key when empty so no new
+    # mandatory env is required to ship the suppression list.
+    pii_hmac_key: str = ""
+    # Fernet key for encrypting PII at rest (Phase 05). Falls back to
+    # encryption_key (itself a valid Fernet key) when empty.
+    pii_encryption_key: str = ""
 
     # ─── Stripe Billing ───
     stripe_secret_key: str = ""

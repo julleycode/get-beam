@@ -27,6 +27,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from apps.api.config import settings
 from apps.api.models.beam_identity import BeamIdentityNode
 from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog, Visitor
+from apps.api.services.usage_logger import log_api_call
 
 logger = structlog.get_logger()
 
@@ -113,6 +114,28 @@ class IdentityResolver:
             )
         )
         return result.scalar() or 0
+
+    # ──────────────────── Helper: Suppression check ────────────────────
+
+    async def _is_email_opted_out(self, visitor: Visitor) -> bool:
+        """True if any email captured for this visitor is on the suppression
+        list for do_not_process. Used to refuse resolution before spending."""
+        from apps.api.models.visitor_email import VisitorEmail
+        from apps.api.services.suppression import is_email_suppressed
+
+        try:
+            rows = await self.db.execute(
+                select(VisitorEmail.email).where(
+                    VisitorEmail.site_id == visitor.site_id,
+                    VisitorEmail.visitor_id == visitor.visitor_id,
+                )
+            )
+            for (email,) in rows.all():
+                if await is_email_suppressed(self.db, email, "do_not_process"):
+                    return True
+        except Exception as exc:
+            logger.warning("suppression_check_failed", error=str(exc))
+        return False
 
     # ──────────────────── Pre-waterfall: Prior Signal Check ────────────────────
 
@@ -267,6 +290,23 @@ class IdentityResolver:
         3.  Hunter (domain → employee emails)
         4.  Apollo (domain → contact)
         """
+        # ── Privacy guard: visitor opted out (GPC/DNT or suppression) ──
+        # A visitor who signaled Global Privacy Control / Do Not Track must NEVER
+        # be resolved to a real identity, regardless of caller (sweep, manual
+        # Identify button, or per-row endpoint). Single choke point for that policy.
+        if getattr(visitor, "do_not_resolve", False):
+            logger.info("resolution_skipped_opted_out", visitor_id=visitor.visitor_id[:8])
+            return None
+
+        # ── Suppression list: a known email on the do-not-process list ──
+        # Catches the window where a Do Not Process/Sell request was filed by
+        # email before this visitor's do_not_resolve flag was cascaded (e.g. the
+        # email was captured after the request). Cheap: one indexed lookup, and
+        # most anonymous visitors have no captured email so it short-circuits.
+        if await self._is_email_opted_out(visitor):
+            logger.info("resolution_skipped_suppressed", visitor_id=visitor.visitor_id[:8])
+            return None
+
         # ── Pre-waterfall: check prior signals (form capture, fingerprint) ──
         # These are free, high-confidence, and work on residential IPs, so they
         # run BEFORE the 30-day recency gate and the daily budget — a visitor who
@@ -1494,10 +1534,17 @@ class IdentityResolver:
         try:
             from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+            # Phase 05 (5b): dual-write encrypted columns. CORE insert → mapper
+            # hooks don't fire; set ciphertext + blind index explicitly.
+            from apps.api.services.pii_crypto import email_hash, encrypt_pii
+
             stmt = pg_insert(BeamIdentityNode).values(
                 fingerprint=fp,
                 email=email,
                 full_name=data.get("full_name"),
+                email_ciphertext=encrypt_pii(email),
+                email_bidx=email_hash(email),
+                full_name_ciphertext=encrypt_pii(data.get("full_name")),
                 confidence_score=data.get("confidence_score", 0.0),
                 source_site_id=visitor.site_id,
                 source_provider=provider,
@@ -1506,6 +1553,7 @@ class IdentityResolver:
                 index_elements=["fingerprint", "email"],
                 set_={
                     "full_name": stmt.excluded.full_name,
+                    "full_name_ciphertext": stmt.excluded.full_name_ciphertext,
                     "confidence_score": stmt.excluded.confidence_score,
                     "source_provider": stmt.excluded.source_provider,
                     "updated_at": func.now(),
@@ -1577,5 +1625,18 @@ class IdentityResolver:
             response_time_ms=ms,
         )
         self.db.add(log)
+        # Mirror into the unified cost ledger (api_usage_logs) so the costs
+        # dashboard reads one source. resolution_logs stays the budget meter.
+        # Best-effort — never breaks resolve; commits with the row below.
+        await log_api_call(
+            db=self.db,
+            site_id=visitor.site_id,
+            visitor_id=visitor.visitor_id,
+            provider=provider,
+            category="identity",
+            success=success,
+            cost_usd=cost,
+            response_time_ms=ms,
+        )
         await self.db.commit()
 

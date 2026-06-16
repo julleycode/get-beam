@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.segment import SegmentMember
 from apps.api.models.visitor import IdentifiedVisitor
+from apps.api.services.suppression import is_email_suppressed
 
 logger = structlog.get_logger()
 
@@ -40,6 +41,11 @@ async def _get_segment_visitors(
         )
         identified = id_result.scalar_one_or_none()
         if not identified or not identified.email:
+            continue
+
+        # Compliance: never export contacts on the privacy suppression list
+        # (CCPA "Do Not Sell"). This is on top of the do_not_email filter above.
+        if await is_email_suppressed(db, identified.email, "do_not_sell"):
             continue
 
         enrich_result = await db.execute(

@@ -56,6 +56,7 @@ async def run_resolution_for_site(
             Visitor.site_id == site.site_id,
             Visitor.identity_status == "anonymous",
             Visitor.intent_score >= 40,
+            Visitor.do_not_resolve.is_(False),
         ).order_by(Visitor.intent_score.desc()).limit(max_resolve)
     )
     visitors = list(result.scalars().all())

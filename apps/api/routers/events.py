@@ -109,6 +109,7 @@ async def ingest_events(
             user_agent=event.user_agent or request_ua[:500],
             page_title=event.page_title or "",
             page_path=event.page_path or "",
+            optout=bool(event.optout),
             created_at=event.ts.replace(tzinfo=None) if event.ts.tzinfo else event.ts,
         )
         for event in batch.events
@@ -268,8 +269,14 @@ async def _process_signal_events(db: AsyncSession, batch: EventBatch) -> None:
                 await db.rollback()
         return
 
+    # Phase 05 (5b): dual-write encrypted columns. This is a CORE insert, so the
+    # ORM mapper-event hooks don't fire — populate ciphertext + blind index here.
+    from apps.api.services.pii_crypto import email_hash, encrypt_pii
+
     for row in emails_to_upsert:
         try:
+            row["email_ciphertext"] = encrypt_pii(row["email"])
+            row["email_bidx"] = email_hash(row["email"])
             stmt = (
                 pg_insert(VisitorEmail)
                 .values(**row)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, Site, ApiKeyInfo } from "@/lib/api";
 import { FormCardSkeleton } from "@/components/skeletons";
@@ -65,6 +65,12 @@ export default function SettingsPage() {
   const [keyError, setKeyError] = useState("");
   const [keysLoadError, setKeysLoadError] = useState<string | null>(null);
 
+  // Known contacts (the owner's existing-customer list)
+  const [knownCount, setKnownCount] = useState<number | null>(null);
+  const [knownBusy, setKnownBusy] = useState(false);
+  const [knownMsg, setKnownMsg] = useState<string | null>(null);
+  const knownFileRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     if (!siteId) return;
     setSiteError(null);
@@ -77,6 +83,12 @@ export default function SettingsPage() {
       .then((r) => setSnippet(r.snippet))
       .catch(() => {});
     setVerifyResult(null);
+    setKnownMsg(null);
+    setKnownCount(null);
+    api
+      .getKnownCount(siteId)
+      .then((r) => setKnownCount(r.count))
+      .catch(() => {});
   }, [siteId, siteRetryKey]);
 
   // Load API keys (not site-specific)
@@ -144,12 +156,108 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleKnownUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // let the same file be re-selected
+    if (!file || !siteId) return;
+    setKnownBusy(true);
+    setKnownMsg(null);
+    try {
+      const r = await api.uploadKnownContacts(siteId, file);
+      setKnownMsg(
+        `Added ${r.inserted} new, skipped ${r.skipped} already on file` +
+          (r.truncated ? " (file truncated at 50,000)" : "") +
+          "."
+      );
+      const c = await api.getKnownCount(siteId);
+      setKnownCount(c.count);
+    } catch (err) {
+      setKnownMsg(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setKnownBusy(false);
+    }
+  }
+
+  async function handleKnownClear() {
+    if (!siteId) return;
+    if (!window.confirm("Remove your entire known-contacts list for this site?")) return;
+    setKnownBusy(true);
+    setKnownMsg(null);
+    try {
+      const r = await api.clearKnownContacts(siteId);
+      setKnownMsg(`Removed ${r.deleted} contacts.`);
+      setKnownCount(0);
+    } catch (err) {
+      setKnownMsg(err instanceof Error ? err.message : "Failed to clear");
+    } finally {
+      setKnownBusy(false);
+    }
+  }
+
   return (
     <div className="max-w-2xl space-y-6">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-serif font-semibold tracking-tight">Settings</h2>
         <SiteSelector value={siteId} onChange={setSiteId} />
       </div>
+
+      {/* ── Known contacts (existing-customer list) ── */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Known contacts</CardTitle>
+          <CardDescription>
+            Upload a CSV of people you already know — existing customers, prior
+            leads, or a CRM export. Beam flags matching visitors as “Known” so
+            you can filter them out of net-new targeting. Emails are stored
+            hashed; we never keep your plaintext list.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {!siteId ? (
+            <p className="text-sm text-muted-foreground">Select a site first.</p>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">
+                {knownCount === null
+                  ? "Loading…"
+                  : `${knownCount} contact${knownCount === 1 ? "" : "s"} on file`}
+              </p>
+              <input
+                ref={knownFileRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={handleKnownUpload}
+              />
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={knownBusy}
+                  onClick={() => knownFileRef.current?.click()}
+                >
+                  {knownBusy ? "Working…" : "Upload CSV"}
+                </Button>
+                {!!knownCount && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={knownBusy}
+                    onClick={handleKnownClear}
+                  >
+                    Remove all
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                CSV with an email column (or one email per line). Matching is
+                case-insensitive.
+              </p>
+              {knownMsg && <p className="text-sm text-foreground">{knownMsg}</p>}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       {/* ── API Keys (BYOK) ── */}
       <Card>

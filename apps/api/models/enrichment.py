@@ -33,6 +33,14 @@ class EnrichmentProfile(Base):
     github_url: Mapped[str | None] = mapped_column(String(500))
     personal_website: Mapped[str | None] = mapped_column(String(500))
 
+    # Phase 05 (encrypt PII at rest) — added nullable, not yet read/written.
+    # These social handles/URLs identify a person; ciphertext only (no blind
+    # index — they're decrypted after fetch, never used as a lookup key).
+    linkedin_url_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    twitter_handle_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    facebook_url_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    github_url_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # LinkedIn details
     linkedin_headline: Mapped[str | None] = mapped_column(String(500))
     linkedin_summary: Mapped[str | None] = mapped_column(Text)

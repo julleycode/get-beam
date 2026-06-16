@@ -27,6 +27,7 @@ from apps.api.config import settings
 from apps.api.services import maigret_engine, paid_osint
 from apps.api.services.enricher import Enricher
 from apps.api.services.osint_scanner import OsintAccount, _dedupe, run_osint_scan
+from apps.api.services.usage_logger import log_api_call
 from apps.api.services.social_rules import (
     derive_username_candidates,
     name_matches,
@@ -235,6 +236,17 @@ async def resolve_social(db, *, visitor, identified, profile, run_gemini: bool =
             pr = await paid_osint.lookup(email)
             if pr.get("used"):
                 await increment_osint_paid_usage(visitor.site_id)
+                # Billable OSINT Industries credit ($1) → cost ledger. Own
+                # session, best-effort; never breaks resolution.
+                await log_api_call(
+                    site_id=visitor.site_id,
+                    visitor_id=visitor.visitor_id,
+                    provider="osint-industries",
+                    category="osint",
+                    operation="email_lookup",
+                    success=not pr.get("error"),
+                    units=1,
+                )
             paid_accounts = [a for a in (_acc(d) for d in pr.get("accounts", [])) if a]
             for a in paid_accounts:
                 a.site_name = _canon_site(a.site_name)

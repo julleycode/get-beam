@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, String, DateTime, Float, Integer, Index, func
+from sqlalchemy import Boolean, String, Text, DateTime, Float, Integer, Index, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -40,6 +40,12 @@ class Visitor(Base):
     identity_status: Mapped[str] = mapped_column(String(30), default="anonymous")
     enrichment_status: Mapped[str] = mapped_column(String(20), default="pending")
     segmented: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Privacy: visitor signaled GPC/DNT (or was added to a suppression list).
+    # When true, identity resolution must NEVER run for this visitor. Sticky:
+    # once set by any event, the aggregator keeps it true on recompute.
+    do_not_resolve: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -64,6 +70,10 @@ class IdentifiedVisitor(Base):
     resolution_provider: Mapped[str | None] = mapped_column(String(50))
     confidence_score: Mapped[float | None] = mapped_column(Float)
     do_not_email: Mapped[bool] = mapped_column(default=False)
+    # Phase 05 (encrypt PII at rest) — added nullable, not yet read/written.
+    email_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    email_bidx: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    full_name_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolved_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 

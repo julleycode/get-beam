@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text
 from sqlalchemy.sql import func
 
 from apps.api.models.database import Base
@@ -37,6 +37,9 @@ class Event(Base):
     user_agent: str = Column(String(500), default="")
     page_title: str = Column(String(500), default="")
     page_path: str = Column(String(2000), default="")
+    # Privacy opt-out signal from the browser (GPC or DNT) on this event.
+    # Aggregated per visitor (BOOL_OR) into visitors.do_not_resolve.
+    optout: bool = Column(Boolean, default=False, server_default="false", nullable=False)
     created_at: datetime = Column(DateTime, default=func.now(), nullable=False)
 
     __table_args__ = (

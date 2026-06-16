@@ -164,6 +164,7 @@ async def _upsert_visitor(
     country_code: str | None,
     device_type: str | None,
     ip_address: str | None,
+    do_not_resolve: bool = False,
 ) -> None:
     """Upsert a single visitor row into the visitors table."""
     if avg_time_on_page is None or (isinstance(avg_time_on_page, float) and math.isnan(avg_time_on_page)):
@@ -201,6 +202,7 @@ async def _upsert_visitor(
         device_type=device_type or None,
         ip_address=ip_address or None,
         intent_score=intent,
+        do_not_resolve=do_not_resolve,
     ).on_conflict_do_update(
         index_elements=["site_id", "visitor_id"],
         set_={
@@ -213,6 +215,9 @@ async def _upsert_visitor(
             "pages_visited": pages_visited or [],
             "ip_address": ip_address or Visitor.ip_address,
             "intent_score": intent,
+            # Sticky opt-out: once true it stays true, even if a later recompute
+            # sees events without the flag (e.g. a different browser/session).
+            "do_not_resolve": text("visitors.do_not_resolve OR EXCLUDED.do_not_resolve"),
             "updated_at": datetime.utcnow(),
         },
     )
@@ -245,7 +250,7 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
             SELECT
                 visitor_id, created_at, event_type, url, referrer,
                 utm_source, utm_medium, country_code, device_type,
-                scroll_depth, time_on_page, ip_address,
+                scroll_depth, time_on_page, ip_address, optout,
                 CASE
                     WHEN created_at - LAG(created_at) OVER (
                         PARTITION BY visitor_id ORDER BY created_at
@@ -276,7 +281,8 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
             MAX(utm_medium) FILTER (WHERE utm_medium != '') AS utm_medium,
             MAX(country_code) FILTER (WHERE country_code != '') AS country_code,
             MAX(device_type) FILTER (WHERE device_type != '') AS device_type,
-            (ARRAY_AGG(ip_address ORDER BY created_at DESC) FILTER (WHERE ip_address != ''))[1] AS latest_ip
+            (ARRAY_AGG(ip_address ORDER BY created_at DESC) FILTER (WHERE ip_address != ''))[1] AS latest_ip,
+            BOOL_OR(optout) AS do_not_resolve
         FROM session_numbered
         GROUP BY visitor_id
     """), {"site_id": site_id})
@@ -287,7 +293,7 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
             visitor_id, first_seen, last_seen, total_pageviews,
             total_sessions, max_scroll_depth, avg_time_on_page, pages_visited,
             top_referrer, utm_source, utm_medium, country_code, device_type,
-            latest_ip,
+            latest_ip, do_not_resolve,
         ) = row
 
         await _upsert_visitor(
@@ -301,6 +307,7 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
             pages_visited or [],
             top_referrer, utm_source, utm_medium, country_code, device_type,
             latest_ip,
+            do_not_resolve=bool(do_not_resolve),
         )
         count += 1
 

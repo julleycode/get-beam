@@ -154,6 +154,7 @@ class TestCsvExportSuppression:
         db = _make_db([
             _scalars_all_result([member]),
             _scalar_result(identified),
+            _scalar_result(None),  # suppression list: not on do_not_sell
             _scalar_result(None),  # no enrichment profile
         ])
 

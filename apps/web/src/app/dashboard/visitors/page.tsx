@@ -55,16 +55,22 @@ export default function VisitorsPage() {
   const [lastFrom, setLastFrom] = useState("");
   const [lastTo, setLastTo] = useState("");
   const [country, setCountry] = useState("all");
+  // "all" | "new" | "returning" — Beam's own visit signal (session count).
+  const [visitorType, setVisitorType] = useState("all");
+  // "all" | "known" | "unknown" — match against the owner's known-contacts list.
+  const [knownFilter, setKnownFilter] = useState("all");
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [
       "visitors", siteId, page, filter, sortBy,
-      firstFrom, firstTo, lastFrom, lastTo, country,
+      firstFrom, firstTo, lastFrom, lastTo, country, visitorType, knownFilter,
     ],
     queryFn: () =>
       api.listVisitors(siteId, {
         page,
         page_size: 50,
+        visitor_type: visitorType === "all" ? undefined : visitorType,
+        known: knownFilter === "all" ? undefined : knownFilter === "known",
         // "enriched" is an enrichment_status, not an identity_status — route it
         // to the right param (the old code sent identity_status=enriched, which
         // matched nothing).
@@ -91,11 +97,15 @@ export default function VisitorsPage() {
   const hasFilters =
     filter !== "all" ||
     country !== "all" ||
+    visitorType !== "all" ||
+    knownFilter !== "all" ||
     !!(firstFrom || firstTo || lastFrom || lastTo);
 
   function clearFilters() {
     setFilter("all");
     setCountry("all");
+    setVisitorType("all");
+    setKnownFilter("all");
     setFirstFrom("");
     setFirstTo("");
     setLastFrom("");
@@ -313,6 +323,42 @@ export default function VisitorsPage() {
               </SelectContent>
             </Select>
           </div>
+          <div className="flex flex-col gap-1">
+            <label
+              className="text-xs font-medium text-muted-foreground"
+              title="By number of visits Beam has seen — not whether they're in your CRM."
+            >
+              Visitor type
+            </label>
+            <Select value={visitorType} onValueChange={(v) => { setVisitorType(v); setPage(1); }}>
+              <SelectTrigger className="h-9 w-[150px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All visitors</SelectItem>
+                <SelectItem value="new">New (1 visit)</SelectItem>
+                <SelectItem value="returning">Returning (2+ visits)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label
+              className="text-xs font-medium text-muted-foreground"
+              title="Whether this person's email is in the customer list you uploaded under Settings → Known contacts."
+            >
+              Known
+            </label>
+            <Select value={knownFilter} onValueChange={(v) => { setKnownFilter(v); setPage(1); }}>
+              <SelectTrigger className="h-9 w-[150px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Everyone</SelectItem>
+                <SelectItem value="known">In my list</SelectItem>
+                <SelectItem value="unknown">Not in my list</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           {hasFilters && (
             <Button variant="ghost" size="sm" onClick={clearFilters}>
               Clear filters
@@ -356,25 +402,43 @@ export default function VisitorsPage() {
               {visitors.map((v) => (
                 <TableRow key={v.id}>
                   <TableCell>
-                    <Link
-                      href={`/dashboard/visitors/${v.visitor_id}?site=${siteId}`}
-                      className="hover:underline"
-                    >
-                      {v.email || v.full_name ? (
-                        <div className="flex flex-col">
-                          <span className="text-sm font-medium">
-                            {v.email ?? v.full_name}
-                          </span>
-                          <span className="font-mono text-xs text-muted-foreground">
+                    <div className="flex items-center gap-2">
+                      <Link
+                        href={`/dashboard/visitors/${v.visitor_id}?site=${siteId}`}
+                        className="hover:underline"
+                      >
+                        {v.email || v.full_name ? (
+                          <div className="flex flex-col">
+                            <span className="text-sm font-medium">
+                              {v.email ?? v.full_name}
+                            </span>
+                            <span className="font-mono text-xs text-muted-foreground">
+                              {v.visitor_id.slice(0, 12)}…
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="font-mono text-xs">
                             {v.visitor_id.slice(0, 12)}…
                           </span>
-                        </div>
-                      ) : (
-                        <span className="font-mono text-xs">
-                          {v.visitor_id.slice(0, 12)}…
+                        )}
+                      </Link>
+                      {v.total_sessions > 1 && (
+                        <span
+                          className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
+                          title={`Returning — ${v.total_sessions} visits Beam has seen (not your CRM)`}
+                        >
+                          Returning
                         </span>
                       )}
-                    </Link>
+                      {v.is_known && (
+                        <span
+                          className="shrink-0 rounded bg-purple-50 px-1.5 py-0.5 text-[10px] font-medium text-purple-700"
+                          title="In your uploaded known-contacts list"
+                        >
+                          Known
+                        </span>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell className="text-sm">
                     {new Date(v.first_seen).toLocaleDateString()}

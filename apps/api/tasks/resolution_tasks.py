@@ -57,6 +57,7 @@ async def _process_site(db, site_id: str) -> tuple[int, int]:
             Visitor.site_id == site_id,
             Visitor.identity_status == "anonymous",
             Visitor.intent_score >= 40,
+            Visitor.do_not_resolve.is_(False),
         ).order_by(Visitor.intent_score.desc()).limit(50)
     )
     visitors = list(result.scalars().all())

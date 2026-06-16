@@ -28,6 +28,7 @@ from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.services.gemini_client import GeminiError, gemini_generate
 from apps.api.services.key_vault import decrypt_key
 from apps.api.services.redis_client import get_redis
+from apps.api.services.usage_logger import log_api_call
 
 logger = structlog.get_logger()
 
@@ -142,7 +143,7 @@ class Enricher:
         # A transient PDL failure (timeout/5xx after retries) raises out of
         # here and the caller leaves the status retryable; only a definitive
         # no-match marks "failed".
-        pdl_data = await self._enrich_pdl(identified.email)
+        pdl_data = await self._enrich_pdl(identified.email, visitor=visitor)
         if not pdl_data:
             visitor.enrichment_status = "failed"
             await self.db.commit()
@@ -156,7 +157,7 @@ class Enricher:
         if linkedin_url:
             proxycurl_key = self._get_system_proxycurl_key()
             if proxycurl_key:
-                proxycurl_data = await self._enrich_proxycurl(linkedin_url, api_key=proxycurl_key)
+                proxycurl_data = await self._enrich_proxycurl(linkedin_url, api_key=proxycurl_key, visitor=visitor)
                 if proxycurl_data:
                     profile.linkedin_headline = proxycurl_data.get("linkedin_headline")
                     profile.linkedin_summary = proxycurl_data.get("linkedin_summary")
@@ -168,7 +169,7 @@ class Enricher:
         if twitter_handle:
             twitter_key = self._get_system_twitter_key()
             if twitter_key:
-                twitter_data = await self._enrich_twitter(twitter_handle, api_key=twitter_key)
+                twitter_data = await self._enrich_twitter(twitter_handle, api_key=twitter_key, visitor=visitor)
                 if twitter_data:
                     profile.twitter_bio = twitter_data.get("twitter_bio")
                     profile.twitter_follower_count = twitter_data.get("twitter_follower_count")
@@ -218,7 +219,7 @@ class Enricher:
         # Proxycurl (fill if cascade didn't run or returned nothing)
         if "proxycurl" in keys and profile.linkedin_url and not profile.linkedin_headline:
             proxycurl_data = await self._enrich_proxycurl(
-                profile.linkedin_url, api_key=keys["proxycurl"]
+                profile.linkedin_url, api_key=keys["proxycurl"], visitor=visitor
             )
             if proxycurl_data:
                 profile.linkedin_headline = proxycurl_data.get("linkedin_headline")
@@ -229,7 +230,7 @@ class Enricher:
         # Twitter (fill if cascade didn't run or returned nothing)
         if "twitter" in keys and profile.twitter_handle and not profile.twitter_bio:
             twitter_data = await self._enrich_twitter(
-                profile.twitter_handle, api_key=keys["twitter"]
+                profile.twitter_handle, api_key=keys["twitter"], visitor=visitor
             )
             if twitter_data:
                 profile.twitter_bio = twitter_data.get("twitter_bio")
@@ -323,8 +324,29 @@ class Enricher:
 
     # ──────────────────────── API Calls ──────────────────────────────────
 
+    async def _log_enrich(
+        self, visitor: Visitor | None, provider: str, operation: str, success: bool
+    ) -> None:
+        """Record one billable enrichment API call into the cost ledger.
+
+        Only called on a cache MISS (a real HTTP request → real cost). Uses its
+        own session (no db passed) so it commits independently of the cascade's
+        commit timing — tier2, for one, only commits when something changed.
+        Best-effort; never raises.
+        """
+        if visitor is None:
+            return
+        await log_api_call(
+            site_id=visitor.site_id,
+            visitor_id=visitor.visitor_id,
+            provider=provider,
+            category="enrichment",
+            operation=operation,
+            success=success,
+        )
+
     @_http_retry
-    async def _enrich_pdl(self, email: str) -> dict | None:
+    async def _enrich_pdl(self, email: str, *, visitor: Visitor | None = None) -> dict | None:
         """Enrich a person record from PDL by email.
 
         Cached in Redis for 7 days (positive and negative results) — the
@@ -361,17 +383,21 @@ class Enricher:
                     "country": p.get("location_country"),
                 }
                 await self._cache_set(cache_key, data)
+                await self._log_enrich(visitor, "pdl", "person_enrich", True)
                 return data
             elif resp.status_code == 404:
                 logger.debug("pdl_enrich_no_match", email_prefix=email[:5])
                 await self._cache_set(cache_key, None)
+                await self._log_enrich(visitor, "pdl", "person_enrich", False)
             else:
                 logger.warning("pdl_enrich_error", status=resp.status_code)
                 if resp.status_code in _TRANSIENT_HTTP_STATUSES:
                     resp.raise_for_status()
         return None
 
-    async def _enrich_proxycurl(self, linkedin_url: str, *, api_key: str) -> dict:
+    async def _enrich_proxycurl(
+        self, linkedin_url: str, *, api_key: str, visitor: Visitor | None = None
+    ) -> dict:
         cache_key = f"enrich:proxycurl:{hashlib.sha256(linkedin_url.strip().lower().encode()).hexdigest()}"
         hit, cached = await self._cache_get(cache_key)
         if hit:
@@ -391,14 +417,18 @@ class Enricher:
                         "linkedin_follower_count": p.get("follower_count"),
                     }
                     await self._cache_set(cache_key, data)
+                    await self._log_enrich(visitor, "proxycurl", "linkedin", True)
                     return data
                 if resp.status_code == 404:
                     await self._cache_set(cache_key, None)
+                await self._log_enrich(visitor, "proxycurl", "linkedin", resp.status_code == 200)
             except httpx.HTTPError as e:
                 logger.error("proxycurl_error", error=str(e))
         return {}
 
-    async def _enrich_twitter(self, handle: str, *, api_key: str) -> dict:
+    async def _enrich_twitter(
+        self, handle: str, *, api_key: str, visitor: Visitor | None = None
+    ) -> dict:
         cache_key = f"enrich:twitter:{handle.strip().lower().lstrip('@')}"
         hit, cached = await self._cache_get(cache_key)
         if hit:
@@ -417,9 +447,11 @@ class Enricher:
                         "twitter_follower_count": u.get("public_metrics", {}).get("followers_count"),
                     }
                     await self._cache_set(cache_key, data)
+                    await self._log_enrich(visitor, "twitter", "user_lookup", True)
                     return data
                 if resp.status_code == 404:
                     await self._cache_set(cache_key, None)
+                await self._log_enrich(visitor, "twitter", "user_lookup", resp.status_code == 200)
             except httpx.HTTPError as e:
                 logger.error("twitter_error", error=str(e))
         return {}

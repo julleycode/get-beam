@@ -151,6 +151,9 @@
   var QUEUE_KEY = "_rta_q";
   var queue = [];
 
+  // Honor GPC (CCPA opt-out) + DNT → server marks visitor do_not_resolve.
+  var OPTOUT = (function(){try{if(navigator.globalPrivacyControl===true)return true;var d=navigator.doNotTrack||window.doNotTrack||navigator.msDoNotTrack;return d==="1"||d==="yes"||d===true;}catch(e){return false;}})();
+
   // Recover unflushed events from previous page load
   try {
     var saved = lsGet(QUEUE_KEY);
@@ -161,6 +164,7 @@
 
   function pushEvent(evt) {
     evt._fp = fingerprint;
+    evt.optout = OPTOUT;
     // Idempotency key: the server drops duplicate event_ids, so a re-sent
     // batch (flush retry, beacon replay) can't double-count events.
     evt.event_id = uuid();

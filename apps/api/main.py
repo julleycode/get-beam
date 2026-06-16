@@ -23,14 +23,20 @@ from apps.api.models.beam_identity import BeamIdentityNode  # noqa: F401 — reg
 from apps.api.models.waitlist import WaitlistSignup  # noqa: F401 — register for create_all
 from apps.api.models.stripe_event import StripeEvent  # noqa: F401 — register for create_all
 from apps.api.models.blog_post import BlogPost  # noqa: F401 — register for create_all
+from apps.api.models.api_usage import ApiUsageLog  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
-from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog
+from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
+from apps.api.routers import known_contacts, costs
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
+from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 logger = structlog.get_logger()
+
+# Phase 05 (5b): dual-write encrypted PII columns on every ORM insert/update.
+register_pii_encryption_hooks()
 
 
 @asynccontextmanager
@@ -141,11 +147,14 @@ app.add_middleware(PixelCORSMiddleware)
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(events.router, prefix="/api/v1/events", tags=["events"])
 app.include_router(sites.router, prefix="/api/v1/sites", tags=["sites"])
+app.include_router(known_contacts.router, prefix="/api/v1/sites", tags=["known-contacts"])
 app.include_router(visitors.router, prefix="/api/v1/visitors", tags=["visitors"])
+app.include_router(costs.router, prefix="/api/v1/costs", tags=["costs"])
 app.include_router(segments.router, prefix="/api/v1/segments", tags=["segments"])
 app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaigns"])
 app.include_router(exports.router, prefix="/api/v1/exports", tags=["exports"])
 app.include_router(api_keys.router, prefix="/api/v1/api-keys", tags=["api-keys"])
+app.include_router(privacy.router, prefix="/api/v1/privacy", tags=["privacy"])
 
 # ── EasyEngage routers ──────────────────────────────────
 app.include_router(social_auth.router, prefix="/api/v1/social", tags=["social-auth"])

@@ -104,6 +104,7 @@
                 <button type="submit" class="btn btn-primary">join the waitlist <span aria-hidden="true">→</span></button>
               </div>
               <input type="url" class="waitlist-input waitlist-site" name="site_url" placeholder="your site url (optional)" />
+              <input type="text" class="waitlist-input waitlist-site" name="x_handle" placeholder="@yourhandle — claim your founders wall spot" autocapitalize="off" autocorrect="off" spellcheck="false" />
             </form>
           </div>
         </div>
@@ -152,6 +153,18 @@
   </div>
 </section>
 
+<!-- ────────────────────────────────────────────────────────────
+     THE FOUNDERS WALL — first 100 climbers, linked to their X
+     ──────────────────────────────────────────────────────────── -->
+<section class="founders-wall" id="founders">
+  <div class="wrap">
+    <h2 class="h-serif fw-title">the founders wall</h2>
+    <p class="fw-lede">the first 100 climbers get a spot on the wall.<br>linked to your X — proof you got here first.</p>
+    <p class="fw-count"><strong id="fw-claimed">0</strong> / 100 claimed</p>
+    <div class="fw-grid" id="fw-grid" aria-label="Founders wall — the first 100 beam climbers"></div>
+  </div>
+</section>
+
 <!-- ── ENDCARD — sky theme (original) ── -->
 <div class="sky-stage sky-stage--footer" style="padding-top: 1px;">
   <div class="cloud-layer"></div>
@@ -163,6 +176,7 @@
           <input type="email" class="waitlist-input" placeholder="you@company.com" required style="max-width:280px" />
           <button type="submit" class="btn btn-primary">join the waitlist <span aria-hidden="true">→</span></button>
         </div>
+        <input type="text" class="waitlist-input waitlist-site" name="x_handle" placeholder="@yourhandle — claim your founders wall spot" autocapitalize="off" autocorrect="off" spellcheck="false" style="max-width:360px;margin-left:auto;margin-right:auto" />
       </form>
       <p class="fine" data-tw="footer-fine">limited spots · we'll reach out personally</p>
     </div>
@@ -1242,12 +1256,66 @@ document.addEventListener('keydown', function(e) {
     });
 })();
 
+(function loadFoundersWall() {
+  var grid = document.getElementById('fw-grid');
+  if (!grid) return;
+  var SIZE = 100;
+  var API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:8000' : 'https://api.getbeam.fyi';
+
+  function focusJoin() {
+    var input = document.querySelector('#hero-waitlist input[type="email"]');
+    if (input) {
+      input.scrollIntoView({behavior: 'smooth', block: 'center'});
+      setTimeout(function() { input.focus(); }, 400);
+    }
+  }
+
+  function render(founders, claimed) {
+    var byPos = {};
+    (founders || []).forEach(function(f) {
+      if (f && typeof f.position === 'number' && f.handle) byPos[f.position] = f.handle;
+    });
+    var html = '';
+    for (var i = 0; i < SIZE; i++) {
+      var handle = byPos[i];
+      if (handle) {
+        var safe = String(handle).replace(/[^A-Za-z0-9_]/g, '');
+        if (!safe) { html += '<button type="button" class="fw-slot fw-empty" aria-label="claim a spot" data-fw-join>+</button>'; continue; }
+        var initials = safe.slice(0, 2).toUpperCase();
+        html += '<a class="fw-slot fw-filled" href="https://x.com/' + safe + '"'
+              + ' target="_blank" rel="noopener noreferrer" title="@' + safe + '" data-initials="' + initials + '">'
+              + '<img class="fw-avatar" src="https://unavatar.io/x/' + safe + '" alt="@' + safe + '"'
+              + ' loading="lazy" onerror="this.remove()" /></a>';
+      } else {
+        html += '<button type="button" class="fw-slot fw-empty" aria-label="claim a spot" data-fw-join>+</button>';
+      }
+    }
+    grid.innerHTML = html;
+    var cl = document.getElementById('fw-claimed');
+    if (cl) cl.textContent = claimed || 0;
+    Array.prototype.forEach.call(grid.querySelectorAll('[data-fw-join]'), function(b) {
+      b.addEventListener('click', focusJoin);
+    });
+  }
+
+  // Render an empty wall immediately so the layout is stable before the fetch.
+  render([], 0);
+
+  fetch(API + '/api/v1/demo/founders')
+    .then(function(r) { return r.json(); })
+    .then(function(d) { render(d.founders, d.claimed); })
+    .catch(function() { /* keep the empty wall */ });
+})();
+
 function handleWaitlist(e, form) {
   e.preventDefault();
   var email = form.querySelector('input[type="email"]').value.trim();
   if (!email) return false;
   var siteInput = form.querySelector('input[name="site_url"]');
   var siteUrl = siteInput ? siteInput.value.trim() : '';
+  var xInput = form.querySelector('input[name="x_handle"]');
+  var xHandle = xInput ? xInput.value.trim() : '';
   var btn = form.querySelector('button');
   var orig = btn.innerHTML;
   btn.innerHTML = 'joining…';
@@ -1256,6 +1324,7 @@ function handleWaitlist(e, form) {
     ? 'http://localhost:8000' : 'https://api.getbeam.fyi';
   var payload = {email: email};
   if (siteUrl) payload.site_url = siteUrl;
+  if (xHandle) payload.x_handle = xHandle;
   fetch(API + '/api/v1/demo/waitlist', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},

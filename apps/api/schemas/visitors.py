@@ -27,6 +27,10 @@ class VisitorOut(BaseModel):
     # Lets the list show a real email/name instead of the opaque visitor_id.
     email: str | None = None
     full_name: str | None = None
+    # True when this visitor's email matches the site owner's uploaded
+    # known-contacts list (existing customer / prior lead). Matched by hash.
+    is_known: bool = False
+    known_source: str | None = None  # "csv" | "crm" | ...
 
     model_config = {"from_attributes": True}
 
