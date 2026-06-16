@@ -56,12 +56,18 @@ class ApiClient {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
+    const method = (options.method ?? "GET").toUpperCase();
+    // Only auto-retry idempotent reads. Mutations fail fast so a request the
+    // server may have already received is never re-applied.
+    const idempotent = method === "GET" || method === "HEAD";
+
     let res: Response;
     try {
-      res = await fetch(`${API_BASE}${path}`, {
-        ...options,
-        headers,
-      });
+      res = await this.fetchWithRetry(
+        `${API_BASE}${path}`,
+        { ...options, headers },
+        idempotent
+      );
     } catch (err) {
       throw new Error(
         `Network error: unable to reach API (${(err as Error).message})`
@@ -99,6 +105,65 @@ class ApiClient {
 
     if (res.status === 204) return undefined as T;
     return res.json();
+  }
+
+  /**
+   * fetch() with cold-start resilience for idempotent reads.
+   *
+   * Railway hobby services sleep when idle; the first request after a cold
+   * period can hang or return a 502/503/504 while the container wakes. Without
+   * this, that surfaces to the user as "Network error: unable to reach API
+   * (Failed to fetch)". We give the backend a few seconds to come up:
+   *   - a per-attempt timeout turns a hang into a retry (unless the caller
+   *     supplied its own AbortSignal);
+   *   - network errors and gateway 5xx are retried with exponential backoff.
+   * Non-idempotent requests pass straight through (no retry, no timeout) so a
+   * mutation is never re-applied.
+   */
+  private async fetchWithRetry(
+    url: string,
+    init: RequestInit,
+    idempotent: boolean,
+    maxAttempts = 3
+  ): Promise<Response> {
+    if (!idempotent) return fetch(url, init);
+
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const isLast = attempt === maxAttempts - 1;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let attemptInit = init;
+      // Add a timeout only when the caller didn't bring its own signal.
+      if (!init.signal && typeof AbortController !== "undefined") {
+        const ctrl = new AbortController();
+        timer = setTimeout(() => ctrl.abort(), 10_000);
+        attemptInit = { ...init, signal: ctrl.signal };
+      }
+      try {
+        const res = await fetch(url, attemptInit);
+        if (
+          !isLast &&
+          (res.status === 502 || res.status === 503 || res.status === 504)
+        ) {
+          await this.backoff(attempt);
+          continue;
+        }
+        return res;
+      } catch (err) {
+        lastErr = err;
+        if (isLast) throw err;
+        await this.backoff(attempt);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+    // Unreachable — the loop always returns or throws — but satisfies the type.
+    throw lastErr;
+  }
+
+  // Exponential backoff between retries: ~0.5s, then 1s.
+  private backoff(attempt: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt));
   }
 
   // Auth
@@ -196,6 +261,8 @@ class ApiClient {
       identity_status?: string;
       enrichment_status?: string;
       country?: string;
+      visitor_type?: string; // "new" | "returning" (by session count)
+      known?: boolean; // true = in the owner's known-contacts list
       // Date bounds as "YYYY-MM-DD". *_to is exclusive — pass the day AFTER the
       // chosen end date (see nextDay() on the Visitors page) to include it.
       first_seen_from?: string;
@@ -212,6 +279,8 @@ class ApiClient {
     if (params.identity_status) query.set("identity_status", params.identity_status);
     if (params.enrichment_status) query.set("enrichment_status", params.enrichment_status);
     if (params.country) query.set("country", params.country);
+    if (params.visitor_type) query.set("visitor_type", params.visitor_type);
+    if (params.known !== undefined) query.set("known", String(params.known));
     if (params.first_seen_from) query.set("first_seen_from", params.first_seen_from);
     if (params.first_seen_to) query.set("first_seen_to", params.first_seen_to);
     if (params.last_seen_from) query.set("last_seen_from", params.last_seen_from);
@@ -244,6 +313,12 @@ class ApiClient {
   async getBrowserBreakdown(siteId: string, windowDays = 30) {
     return this.request<BrowserBreakdown>(
       `/api/v1/sites/${siteId}/browser-breakdown?window_days=${windowDays}`
+    );
+  }
+
+  async getCostSummary(siteId: string, days = 30) {
+    return this.request<CostSummary>(
+      `/api/v1/costs/${siteId}/summary?days=${days}`
     );
   }
 
@@ -1115,6 +1190,37 @@ export interface SiteStats {
   identified: number;
   enriched: number;
   could_enrich_more: number;
+}
+
+export interface CostProviderRow {
+  provider: string;
+  calls: number;
+  cost_usd: number;
+  success_rate: number; // 0..1
+}
+
+export interface CostCategoryRow {
+  category: string;
+  calls: number;
+  cost_usd: number;
+}
+
+export interface CostDayRow {
+  date: string; // YYYY-MM-DD
+  calls: number;
+  cost_usd: number;
+}
+
+export interface CostSummary {
+  site_id: string;
+  days: number;
+  total_usd: number;
+  total_calls: number;
+  success_calls: number;
+  failed_calls: number;
+  by_provider: CostProviderRow[];
+  by_category: CostCategoryRow[];
+  by_day: CostDayRow[];
 }
 
 export interface ApiKeyInfo {
