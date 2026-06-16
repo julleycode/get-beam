@@ -242,6 +242,14 @@ async def get_current_user(
                         )
                     except Exception:
                         await db.rollback()
+                        # A rollback EXPIRES every attribute on `user`. Returning
+                        # it as-is makes the downstream `user.id` / `user.is_admin`
+                        # access trigger a *synchronous* lazy reload inside the
+                        # async session -> sqlalchemy MissingGreenlet -> HTTP 500
+                        # (which, being unhandled, also loses its CORS header and
+                        # surfaces in the browser as "Failed to fetch"). Refresh
+                        # repopulates the object via the async path.
+                        await db.refresh(user)
                         logger.warning(
                             "clerk_user_email_backfill_conflict",
                             clerk_id=clerk_user_id,
