@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -59,7 +59,10 @@ async def get_cost_summary(
     """
     await _verify_site_access(db, site_id, user)
 
-    since = datetime.now(timezone.utc) - timedelta(days=days)
+    # created_at is stored as naive UTC (see ApiUsageLog / events.py) — use a
+    # naive cutoff so asyncpg binds it against the timestamp column. An aware
+    # datetime here triggers "can't subtract offset-naive and offset-aware".
+    since = datetime.utcnow() - timedelta(days=days)
     scope = [ApiUsageLog.site_id == site_id, ApiUsageLog.created_at >= since]
     if category:
         scope.append(ApiUsageLog.category == category)
