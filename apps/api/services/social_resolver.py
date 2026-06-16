@@ -18,6 +18,7 @@ adds `social_resolution`, and deep_research adds its own key — none clobber.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from datetime import datetime, timezone
 
@@ -74,9 +75,22 @@ def _canon_site(name: str | None) -> str:
     return _SITE_ALIASES.get(name.strip().lower(), name)
 
 
-# Sources that are keyed by the EMAIL (so the handle belongs to THIS person):
-# PDL enrich, OSINT Industries, and user-scanner's email-scan (extra.username).
-_EMAIL_KEYED = {"user-scanner", "pdl", "osint-industries"}
+# Sites we never attach to a named real person (legal/defamation + privacy risk).
+_ADULT_SITES = {
+    "onlyfans", "fansly", "xvideos", "xnxx", "pornhub", "xhamster", "redtube",
+    "youporn", "manyvids", "chaturbate", "stripchat", "brazzers", "fancentro",
+    "clips4sale", "myfreecams", "cam4", "bongacams", "adultwork", "fapello",
+}
+
+
+def _is_adult(site_name: str | None) -> bool:
+    return _canon_site(site_name).lower() in _ADULT_SITES
+
+
+# Identity-grade sources — confirm on their own (email-keyed, low false-positive).
+_GOLD_SOURCES = {"pdl", "osint-industries"}
+# Free email-probe — strong but noisy; counts as ONE corroborating signal, not auto-confirm.
+_EMAIL_PROBE_SOURCES = {"user-scanner", "holehe"}
 
 
 def _registered_sites(osint_blob: dict) -> set[str]:
@@ -88,24 +102,49 @@ def _registered_sites(osint_blob: dict) -> set[str]:
     return sites
 
 
-def _classify(acc: OsintAccount, full_name: str | None, registered_sites: set[str]) -> str:
-    """Identity-based confidence — does this profile belong to the TARGET person?
+def _is_echoed_handle(pname: str | None, username: str | None) -> bool:
+    """True when a profile's 'name' is just the username we searched (sinh ra từ
+    chính tên/email của target) — circular, NOT independent evidence."""
+    if not pname or not username:
+        return False
+    a = re.sub(r"[^a-z0-9]", "", pname.lower())
+    b = re.sub(r"[^a-z0-9]", "", username.lower())
+    if not a or not b:
+        return False
+    return a == b or a in b or b in a
 
-    confirmed = email-keyed source OR the profile's real name matches full_name.
-    likely    = username from a known handle, OR the site is one the email is
-                registered on (they use it) — but the handle isn't identity-verified.
-    guess     = a guessed username, unverified, on a site we can't tie to them.
+
+def _classify(acc: OsintAccount, full_name: str | None, registered_sites: set[str]) -> str:
+    """Identity confidence via independent corroborating signals.
+
+    Gold sources (PDL enrichment, paid OSINT Industries) confirm alone.
+    Otherwise ≥2 independent signals → confirmed, exactly 1 → likely, 0 → guess.
+    Signals: (a) site's real display name matches full_name and is NOT just the
+    handle we searched; (b) the handle came from a verified real account
+    (twitter/github); (c) the target's email is registered on this same site;
+    (d) a free email-probe surfaced this handle directly.
     """
     engines = {e.strip() for e in (acc.source_engine or "").split(",") if e.strip()}
-    if engines & _EMAIL_KEYED:
+    if engines & _GOLD_SOURCES:
         return "confirmed"
+
     extra = acc.extra or {}
     pname = extra.get("name") or extra.get("fullname") or extra.get("full_name")
-    if pname and name_matches(pname, full_name):
-        return "confirmed"
+    uname = extra.get("username")
+
+    signals = 0
+    if pname and not _is_echoed_handle(pname, uname) and name_matches(pname, full_name):
+        signals += 1
     if extra.get("cand_source") == "known":
-        return "likely"
+        signals += 1
     if _canon_site(acc.site_name).lower() in registered_sites:
+        signals += 1
+    if engines & _EMAIL_PROBE_SOURCES:
+        signals += 1
+
+    if signals >= 2:
+        return "confirmed"
+    if signals == 1:
         return "likely"
     return "guess"
 
@@ -262,6 +301,15 @@ async def resolve_social(db, *, visitor, identified, profile, run_gemini: bool =
         else:
             paid_info["error"] = "daily paid budget reached"
 
+    # ── Drop adult/NSFW sites entirely (legal/defamation + privacy risk) ──
+    # Single serialization point: filter the unified set BEFORE the partition so
+    # adult accounts never reach `profiles` or `guesses`, and recompute counts so
+    # the summary stays internally consistent.
+    hidden_adult = sum(1 for a in unified if _is_adult(a.site_name))
+    if hidden_adult:
+        unified = [a for a in unified if not _is_adult(a.site_name)]
+        confirmed_count = sum(1 for a in unified if a.confidence == "confirmed")
+
     # ── Narrow: keep verified (confirmed + likely); collapse pure guesses ──
     verified = [a for a in unified if a.confidence in ("confirmed", "likely")]
     verified.sort(key=lambda a: 0 if a.confidence == "confirmed" else 1)
@@ -281,6 +329,7 @@ async def resolve_social(db, *, visitor, identified, profile, run_gemini: bool =
             "confirmed_count": confirmed_count,
             "likely_count": likely_count,
             "guess_count": len(guesses),
+            "hidden_adult": hidden_adult,
             "candidates_used": [c["username"] for c in candidates],
         },
         "message": (

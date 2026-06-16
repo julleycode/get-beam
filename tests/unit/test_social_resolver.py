@@ -113,14 +113,21 @@ def _run(profile_social=None, linkedin_url=None, twitter_handle=None, github_url
 
 @pytest.mark.asyncio
 async def test_free_profiles_skip_paid(wired):
-    wired.maigret = [_profile_acc("GitHub"), _profile_acc("Instagram")]
+    # Two STRONG (confirmed) free profiles → paid fallback skipped. Each carries 2
+    # signals: independent name match + known handle → confirmed under the ≥2-signal
+    # rule (a single name match alone would only be "likely" and would trip paid).
+    wired.maigret = [
+        _profile_acc("GitHub", cand_source="known"),
+        _profile_acc("Instagram", cand_source="known"),
+    ]
     wired.paid_configured = True
     db, v, i, p = _run()
     out = await res.resolve_social(db, visitor=v, identified=i, profile=p)
     assert out["status"] == "complete"
     assert out["profiles"] == 2
+    assert out["confirmed"] == 2  # ≥2 signals each → confirmed → enough → no paid
     assert out["paid_used"] is False
-    assert wired.paid_called is False  # >= min profiles → no paid
+    assert wired.paid_called is False  # >= min CONFIRMED profiles → no paid
     # persisted social_resolution + osint_scan
     sc = p.social_context
     assert sc["social_resolution"]["summary"]["profile_count"] == 2
@@ -180,9 +187,11 @@ async def test_preserves_deep_research_and_seeds_gemini(wired):
 
 @pytest.mark.asyncio
 async def test_alias_merge_and_name_confirms(wired):
-    # Maigret "Twitter" (parsed name matches) + rule-base "X" → same platform after
-    # aliasing → merge into ONE profile, confirmed via NAME match (not engine count).
-    wired.maigret = [_profile_acc("Twitter", engine="maigret", username="jdoe")]
+    # Maigret "Twitter" + rule-base "X" → same platform after aliasing → merge into
+    # ONE profile. Confirmed via TWO signals (independent name match + known handle),
+    # per the ≥2-signal rule — not via engine count.
+    wired.maigret = [_profile_acc("Twitter", engine="maigret", username="jdoe",
+                                  cand_source="known")]
     wired.rules = [OsintAccount("X", "social", "https://x.com/jdoe", "profile",
                                 "likely", "rule-base", {"username": "jdoe"})]
     db, v, i, p = _run()
@@ -222,10 +231,14 @@ async def test_pdl_handle_is_confirmed(wired):
 
 
 @pytest.mark.asyncio
-async def test_name_match_confirms(wired):
-    # Maigret parsed a real name that matches the target → confirmed even though it
-    # came from a guessed (name-derived) username.
-    wired.maigret = [_profile_acc("GitHub", username="johndoe", name="John Doe")]
+async def test_name_match_plus_probe_confirms(wired):
+    # TWO independent signals → confirmed: (a) maigret parsed a real name matching the
+    # target, INDEPENDENT of the handle "jd_codes" (not echoed/circular), AND (b) the
+    # free email-probe "user-scanner" surfaced this same handle. Either alone is only
+    # "likely"; together they reach confirmed under the ≥2-signal rule.
+    wired.maigret = [_profile_acc("GitHub", engine="user-scanner",
+                                  username="jd_codes", name="John Doe",
+                                  cand_source="name")]
     db, v, i, p = _run()
     await res.resolve_social(db, visitor=v, identified=i, profile=p)
     prof = p.social_context["social_resolution"]["profiles"][0]
@@ -282,3 +295,148 @@ async def test_no_email_returns_not_identified(wired):
     p = _Obj(social_context=None, twitter_handle=None, github_url=None)
     out = await res.resolve_social(db, visitor=v, identified=i, profile=p)
     assert out["status"] == "not_identified"
+
+
+# ── Regression: echoed-handle circular confirmation (the wrong-person bug) ──
+# A maigret hit whose parsed "name" is just the handle we searched (and the handle
+# was derived from the target's own name/email) is circular — NOT independent
+# identity evidence. It must never reach "confirmed". Real case: visitor "Ahmad
+# Syamil" / ahmads@starhub.com → guessed handles "ahmads" / "syamilahmad" found on
+# random sites whose channel name echoes the handle.
+
+def _maigret_echo(username: str):
+    """A maigret profile whose parsed display name == the searched username."""
+    return OsintAccount(
+        "YouTube", "social", f"https://youtube.com/@{username}", "profile",
+        "likely", "maigret",
+        {"name": username, "username": username, "parsed": True},
+    )
+
+
+def test_echoed_handle_ahmads_not_confirmed():
+    # Echoed name → no name signal; maigret-only, not registered, not known → 0
+    # signals → "guess" (and definitely NOT confirmed).
+    acc = _maigret_echo("ahmads")
+    assert res._classify(acc, "Ahmad Syamil", set()) == "guess"
+
+
+def test_echoed_handle_syamilahmad_not_confirmed():
+    acc = _maigret_echo("syamilahmad")
+    assert res._classify(acc, "Ahmad Syamil", set()) == "guess"
+
+
+def test_is_echoed_handle_helper():
+    # exact / containment both count as echoed (circular)
+    assert res._is_echoed_handle("ahmads", "ahmads") is True
+    assert res._is_echoed_handle("Ahmad S", "ahmads") is True   # strips to "ahmads" == "ahmads"
+    assert res._is_echoed_handle("syamilahmad", "syamilahmad") is True
+    # an INDEPENDENT real name is not an echo
+    assert res._is_echoed_handle("Nathan Adams", "nadams123") is False
+    # empty / missing → not an echo (can't decide → don't suppress)
+    assert res._is_echoed_handle(None, "ahmads") is False
+    assert res._is_echoed_handle("ahmads", None) is False
+
+
+# ── Regression: adult/NSFW sites never surface (legal/defamation risk) ──
+
+def test_is_adult_helper():
+    assert res._is_adult("OnlyFans") is True
+    assert res._is_adult("onlyfans") is True
+    assert res._is_adult("Pornhub") is True
+    assert res._is_adult("GitHub") is False
+    assert res._is_adult(None) is False
+
+
+@pytest.mark.asyncio
+async def test_adult_site_dropped_from_output(wired):
+    # An OnlyFans username collision (even if it would otherwise be surfaced) is
+    # excluded from BOTH profiles and guesses, and counted in summary.hidden_adult.
+    wired.maigret = [
+        OsintAccount("OnlyFans", "social", "https://onlyfans.com/syamilahmad",
+                     "profile", "likely", "maigret",
+                     {"name": "Syamil Ahmad", "username": "syamilahmad"}),
+        _profile_acc("GitHub", username="jd_codes", name="John Doe"),  # legit, kept
+    ]
+    db, v, i, p = _run()
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    sr = p.social_context["social_resolution"]
+    sites_shown = {a["site_name"] for a in sr["profiles"]} | {
+        a["site_name"] for a in sr["guesses"]
+    }
+    assert "OnlyFans" not in sites_shown          # dropped everywhere
+    assert "GitHub" in sites_shown                # legit profile survives
+    assert sr["summary"]["hidden_adult"] == 1
+
+
+# ── Phase 2: signal-counting _classify (≥2 independent signals → confirmed) ──
+# Gold sources confirm alone; everything else needs ≥2 corroborating signals. This
+# stops two real people who share a NAME from cross-confirming, and stops one noisy
+# free email-probe hit from auto-confirming.
+
+
+def test_gold_pdl_source_confirmed_alone():
+    # PDL enrichment is identity-grade (email-keyed, low false-positive) → confirmed
+    # on its own, no second signal required.
+    acc = OsintAccount("LinkedIn", "professional",
+                       "https://linkedin.com/in/nathan", "profile",
+                       "likely", "pdl", {"username": "nathan"})
+    assert res._classify(acc, "Nathan Adams", set()) == "confirmed"
+
+
+def test_gold_osint_industries_source_confirmed_alone():
+    # Paid OSINT Industries is identity-grade → confirmed on its own.
+    acc = OsintAccount("Telegram", "social", "https://t.me/nathan", "profile",
+                       "likely", "osint-industries", {"username": "nathan"})
+    assert res._classify(acc, "Nathan Adams", set()) == "confirmed"
+
+
+def test_email_probe_alone_is_likely_not_confirmed():
+    # A SINGLE free email-probe hit (user-scanner) is strong but noisy → ONE signal
+    # → "likely", NOT auto-confirmed. (Was "confirmed" in Phase 1; downgraded here.)
+    acc = OsintAccount("Spotify", "music", "https://spotify.com/u/ahmads", "profile",
+                       "likely", "user-scanner", {"username": "ahmads"})
+    assert res._classify(acc, "Ahmad Syamil", set()) == "likely"
+
+
+def test_email_probe_plus_second_signal_confirms():
+    # user-scanner (probe signal) + the email IS registered on this same site (2nd
+    # signal) → 2 signals → confirmed.
+    acc = OsintAccount("GitHub", "dev", "https://github.com/ahmads", "profile",
+                       "likely", "user-scanner", {"username": "ahmads"})
+    assert res._classify(acc, "Ahmad Syamil", {"github"}) == "confirmed"
+
+
+def test_same_real_name_collision_is_likely_not_confirmed():
+    # PHASE-2 WIN: two real people share the real name "Nathan Adams". An independent
+    # name match is the ONLY signal (maigret, NOT a registered site, NOT a known
+    # handle, NOT a probe) → exactly 1 signal → "likely", NOT confirmed. This is what
+    # stops a same-named stranger's profile from cross-confirming as the target.
+    acc = OsintAccount("GitHub", "dev", "https://github.com/nadams123", "profile",
+                       "likely", "maigret",
+                       {"name": "Nathan Adams", "username": "nadams123", "parsed": True})
+    assert res._classify(acc, "Nathan Adams", set()) == "likely"
+
+
+def test_two_signals_name_plus_registered_confirms():
+    # Independent name match + email registered on this site → 2 signals → confirmed.
+    acc = OsintAccount("GitHub", "dev", "https://github.com/nadams123", "profile",
+                       "likely", "maigret",
+                       {"name": "Nathan Adams", "username": "nadams123"})
+    assert res._classify(acc, "Nathan Adams", {"github"}) == "confirmed"
+
+
+def test_two_signals_known_plus_registered_confirms():
+    # Known/verified handle + email registered on this site → 2 signals → confirmed
+    # (no name needed).
+    acc = OsintAccount("GitHub", "dev", "https://github.com/nadams123", "profile",
+                       "likely", "maigret",
+                       {"username": "nadams123", "cand_source": "known"})
+    assert res._classify(acc, "Nathan Adams", {"github"}) == "confirmed"
+
+
+def test_zero_signals_is_guess():
+    # No name match, not known, not registered, not a probe → 0 signals → guess.
+    acc = OsintAccount("GitHub", "dev", "https://github.com/randomhandle", "profile",
+                       "likely", "maigret",
+                       {"name": "Someone Else", "username": "randomhandle"})
+    assert res._classify(acc, "Nathan Adams", set()) == "guess"

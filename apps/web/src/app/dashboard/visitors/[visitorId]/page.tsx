@@ -155,7 +155,7 @@ export default function VisitorDetailPage() {
                   : "text-muted-foreground"
             }`}
           >
-            {p.confidence}
+            {p.confidence === "confirmed" ? "strong match" : p.confidence}
           </Badge>
         </span>
       </div>
@@ -479,7 +479,10 @@ export default function VisitorDetailPage() {
             {confirmedProfiles.length > 0 && (
               <div className="space-y-2">
                 <p className="text-xs font-semibold text-green-700">
-                  Verified profiles ({confirmedProfiles.length}) — same person
+                  Strong matches ({confirmedProfiles.length})
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  High confidence — verify before contacting
                 </p>
                 {confirmedProfiles.map(renderProfileRow)}
               </div>
