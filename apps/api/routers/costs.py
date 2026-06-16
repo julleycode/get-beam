@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.dependencies import get_current_user
+from apps.api.dependencies import require_admin
 from apps.api.models.api_usage import ApiUsageLog
 from apps.api.models.database import get_db
 from apps.api.models.site import Site
@@ -48,7 +48,7 @@ async def get_cost_summary(
     days: int = Query(30, ge=1, le=365),
     category: str | None = Query(None),
     provider: str | None = Query(None),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> CostSummaryResponse:
     """Total estimated API spend for a site over the last `days` days, read from

@@ -58,6 +58,7 @@ async def cost_setup(test_client, test_db):
     email = f"cost-{uuidlib.uuid4().hex[:8]}@test.com"
     token = await _signup(test_client, email)
     user = (await test_db.execute(select(User).where(User.email == email))).scalar_one()
+    user.is_admin = True  # /costs is admin-only (require_admin)
 
     site_id = f"cost_site_{uuidlib.uuid4().hex[:8]}"
     test_db.add(
@@ -140,10 +141,12 @@ class TestCostSummary:
         assert body["total_usd"] == pytest.approx(1.13, abs=1e-6)
 
     @pytest.mark.asyncio
-    async def test_other_users_site_is_404(self, test_client, cost_setup):
+    async def test_non_admin_blocked(self, test_client, cost_setup):
+        # /costs is admin-only — a normal (non-admin) user is rejected by
+        # require_admin before any site logic runs.
         other = await _signup(test_client, f"other-{uuidlib.uuid4().hex[:8]}@test.com")
         resp = await test_client.get(
             f"/api/v1/costs/{cost_setup['site_id']}/summary",
             headers=_auth(other),
         )
-        assert resp.status_code == 404, resp.text
+        assert resp.status_code == 403, resp.text

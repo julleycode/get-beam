@@ -12,13 +12,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
-const EASYTRACK_ITEMS = [
+const EASYTRACK_ITEMS: { href: string; label: string; adminOnly?: boolean }[] = [
   { href: "/dashboard", label: "Overview" },
   { href: "/dashboard/visitors", label: "Visitors" },
   { href: "/dashboard/segments", label: "Segments" },
   { href: "/dashboard/campaigns", label: "Campaigns" },
   { href: "/dashboard/exports", label: "Exports" },
-  { href: "/dashboard/costs", label: "API Costs" },
+  { href: "/dashboard/costs", label: "API Costs", adminOnly: true },
 ];
 
 const EASYENGAGE_ITEMS = [
@@ -274,9 +274,16 @@ export default function DashboardLayout({
           <p className="px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             EasyTrack
           </p>
-          {EASYTRACK_ITEMS.map((item) => (
-            <NavLink key={item.href} {...item} pathname={pathname} />
-          ))}
+          {EASYTRACK_ITEMS.filter((item) => !item.adminOnly || isAdmin).map(
+            (item) => (
+              <NavLink
+                key={item.href}
+                href={item.href}
+                label={item.label}
+                pathname={pathname}
+              />
+            )
+          )}
 
           <Separator className="my-2" />
 
