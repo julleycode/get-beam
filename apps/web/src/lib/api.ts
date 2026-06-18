@@ -911,6 +911,8 @@ export interface BlogPostAdmin extends BlogPost {
   site_id: string | null;
   updated_at: string | null;
   scheduled_for: string | null;
+  // Author-only SEO input (not exposed on public posts).
+  focus_keyword: string | null;
 }
 
 export interface BlogPostListResponse {
@@ -931,6 +933,7 @@ export interface BlogPostInput {
   cover_image_url?: string | null;
   tags?: string[] | null;
   slug?: string | null;
+  focus_keyword?: string | null;
   meta_title?: string | null;
   meta_description?: string | null;
   canonical_url?: string | null;

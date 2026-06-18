@@ -75,7 +75,7 @@ export default async function BlogPostPage({ params }: Params) {
   };
 
   return (
-    <article>
+    <article className="rounded-2xl border border-[rgba(43,37,48,0.06)] bg-white p-6 sm:p-10">
       {/* JSON-LD structured data (our own data, not user raw HTML) */}
       <script
         type="application/ld+json"

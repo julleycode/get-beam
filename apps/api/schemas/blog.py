@@ -15,6 +15,7 @@ class BlogPostCreate(BaseModel):
     tags: list[str] | None = Field(default=None)
     slug: str | None = Field(default=None, max_length=255)
     # SEO overrides — fall back to title/excerpt/cover when omitted.
+    focus_keyword: str | None = Field(default=None, max_length=255)
     meta_title: str | None = Field(default=None, max_length=255)
     meta_description: str | None = Field(default=None, max_length=320)
     canonical_url: str | None = Field(default=None, max_length=2000)
@@ -31,6 +32,7 @@ class BlogPostUpdate(BaseModel):
     cover_image_url: str | None = Field(default=None, max_length=2000)
     tags: list[str] | None = Field(default=None)
     slug: str | None = Field(default=None, max_length=255)
+    focus_keyword: str | None = Field(default=None, max_length=255)
     meta_title: str | None = Field(default=None, max_length=255)
     meta_description: str | None = Field(default=None, max_length=320)
     canonical_url: str | None = Field(default=None, max_length=2000)
@@ -60,12 +62,14 @@ class BlogPostOut(BaseModel):
 
 
 class BlogPostAdminOut(BlogPostOut):
-    """Admin view — adds lifecycle + tenant fields."""
+    """Admin view — adds lifecycle + tenant fields + author-only SEO inputs."""
 
     status: str
     site_id: uuid.UUID | None
     updated_at: datetime | None
     scheduled_for: datetime | None
+    # Author-only — kept out of the public BlogPostOut, surfaced to the editor.
+    focus_keyword: str | None
 
 
 class BlogPostSchedule(BaseModel):

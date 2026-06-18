@@ -40,6 +40,8 @@ class BlogPost(Base):
     tags: Mapped[list[str] | None] = mapped_column(ARRAY(String), nullable=True)
 
     # SEO fields — the on-page auditor (P3) grades pages against these.
+    # The phrase the post should rank for; also drives the editor's SEO checklist.
+    focus_keyword: Mapped[str | None] = mapped_column(String(255), nullable=True)
     meta_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     meta_description: Mapped[str | None] = mapped_column(String(320), nullable=True)
     canonical_url: Mapped[str | None] = mapped_column(Text, nullable=True)

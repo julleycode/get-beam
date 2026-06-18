@@ -30,6 +30,12 @@ export function Markdown({ children }: { children: string }) {
           a: (props) => (
             <a className="text-[hsl(345,100%,45%)] underline underline-offset-2 hover:opacity-80" {...props} />
           ),
+          // Inline body images (markdown `![](url)`). Block-level + spaced so an
+          // image-then-paragraph rhythm reads cleanly through the article.
+          img: (props) => (
+            // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text
+            <img className="my-6 w-full rounded-xl border border-[rgba(43,37,48,0.08)]" {...props} />
+          ),
           blockquote: (props) => (
             <blockquote className="my-4 border-l-2 border-[hsl(345,100%,60%)] pl-4 italic text-muted-foreground" {...props} />
           ),

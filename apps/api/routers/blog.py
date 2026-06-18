@@ -139,6 +139,7 @@ async def create_post(
         author_name=payload.author_name or "Beam",
         cover_image_url=payload.cover_image_url,
         tags=payload.tags,
+        focus_keyword=payload.focus_keyword,
         meta_title=payload.meta_title,
         meta_description=payload.meta_description,
         canonical_url=payload.canonical_url,

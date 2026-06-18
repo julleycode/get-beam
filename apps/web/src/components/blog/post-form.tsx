@@ -55,8 +55,8 @@ export function PostForm({
   const [metaDescription, setMetaDescription] = useState(initial?.meta_description ?? "");
   const [canonicalUrl, setCanonicalUrl] = useState(initial?.canonical_url ?? "");
   const [ogImageUrl, setOgImageUrl] = useState(initial?.og_image_url ?? "");
-  // Author-time only — drives the live SEO checklist; not persisted yet.
-  const [focusKeyword, setFocusKeyword] = useState("");
+  // Persisted SEO input — drives the live SEO checklist and is saved per post.
+  const [focusKeyword, setFocusKeyword] = useState(initial?.focus_keyword ?? "");
   const [touched, setTouched] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -81,6 +81,26 @@ export function PostForm({
     }
   }
 
+  // Insert an image at the caret in the body textarea (falls back to appending
+  // when the textarea isn't focused), so authors can place images between
+  // paragraphs — image, paragraph, image — not only at the end.
+  function insertImageAtCursor(url: string): void {
+    const snippet = `\n\n![](${url})\n\n`;
+    const ta = bodyRef.current;
+    if (!ta) {
+      setBody((b) => `${b}${snippet}`);
+      return;
+    }
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    setBody((b) => b.slice(0, start) + snippet + b.slice(end));
+    requestAnimationFrame(() => {
+      ta.focus();
+      const caret = start + snippet.length;
+      ta.selectionStart = ta.selectionEnd = caret;
+    });
+  }
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setTouched(true);
@@ -96,6 +116,7 @@ export function PostForm({
       body_markdown: body,
       tags: tagList.length ? tagList : null,
       cover_image_url: coverImageUrl.trim() || null,
+      focus_keyword: focusKeyword.trim() || null,
       meta_title: metaTitle.trim() || null,
       meta_description: metaDescription.trim() || null,
       canonical_url: canonicalUrl.trim() || null,
@@ -168,13 +189,11 @@ export function PostForm({
                 className="hidden"
                 disabled={uploading}
                 onChange={(e) =>
-                  uploadAndApply(e.target.files?.[0], (url) =>
-                    setBody((b) => `${b}\n\n![](${url})\n`)
-                  )
+                  uploadAndApply(e.target.files?.[0], insertImageAtCursor)
                 }
               />
             </label>
-            <span className="text-muted-foreground">Inserts markdown at the end.</span>
+            <span className="text-muted-foreground">Inserts at your cursor.</span>
           </div>
         </Field>
 
