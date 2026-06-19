@@ -1092,6 +1092,18 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
   var grid = document.getElementById('fw-grid');
   if (!grid) return;
   var SIZE = 100;
+  // Featured early supporters — pinned to the front of the wall.
+  // X handles auto-load real photos via unavatar; LinkedIn/Facebook block photo
+  // fetching, so those show initials until a real image file is supplied.
+  var FEATURED = [
+    { url: 'https://x.com/christhenguyen', initials: 'CN', name: 'Chris Nguyen', avatar: 'https://unavatar.io/x/christhenguyen' },
+    { url: 'https://x.com/ChloeLuong_', initials: 'CL', name: 'Chloe Luong', avatar: 'https://unavatar.io/x/ChloeLuong_' },
+    { url: 'https://www.linkedin.com/in/asofronov/', initials: 'AS', name: 'A. Sofronov', avatar: '' },
+    { url: 'https://www.linkedin.com/in/dmytro-strukov-4ab450117/', initials: 'DS', name: 'Dmytro Strukov', avatar: '' },
+    { url: 'https://www.linkedin.com/in/nathan-nguyennhat?originalSubdomain=au', initials: 'NN', name: 'Nathan Nguyen', avatar: '' },
+    { url: 'https://www.facebook.com/toannhu0210', initials: 'TN', name: 'Toan Nhu', avatar: '' },
+    { url: 'https://www.facebook.com/phamthianhthu2026', initials: 'AT', name: 'Anh Thu Pham', avatar: '' }
+  ];
   var API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
     ? 'http://localhost:8000' : 'https://api.getbeam.fyi';
 
@@ -1109,6 +1121,13 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
       if (f && typeof f.position === 'number' && f.handle) byPos[f.position] = f.handle;
     });
     var html = '';
+    FEATURED.forEach(function(f) {
+      var img = f.avatar
+        ? '<img class="fw-avatar" src="' + f.avatar + '" alt="' + f.name + '" loading="lazy" onerror="this.remove()" />'
+        : '';
+      html += '<a class="fw-slot fw-filled" href="' + f.url + '" target="_blank" rel="noopener noreferrer"'
+            + ' title="' + f.name + '" data-initials="' + f.initials + '">' + img + '</a>';
+    });
     for (var i = 0; i < SIZE; i++) {
       var handle = byPos[i];
       if (handle) {
