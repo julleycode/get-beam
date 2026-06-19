@@ -1,17 +1,19 @@
 import { redirect } from "next/navigation";
 
 /**
- * Private beta. An invite link (?invite=<token>) forwards to the Clerk signup
- * route with the token preserved; everything else is bounced to the waitlist.
+ * Public signup. Forwards to the Clerk signup route, preserving any query
+ * params (e.g. ?plan=pro&interval=monthly from the pricing page) so the
+ * post-signup checkout still has them.
  */
 export default function SignupPage({
   searchParams,
 }: {
-  searchParams: { invite?: string };
+  searchParams: Record<string, string | string[] | undefined>;
 }) {
-  const invite = searchParams?.invite;
-  if (invite) {
-    redirect(`/sign-up?invite=${encodeURIComponent(invite)}`);
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(searchParams)) {
+    if (typeof v === "string") qs.set(k, v);
   }
-  redirect("/beam/index.html");
+  const s = qs.toString();
+  redirect(s ? `/sign-up?${s}` : "/sign-up");
 }

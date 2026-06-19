@@ -35,7 +35,7 @@
     "@type": "Offer",
     "price": "0",
     "priceCurrency": "USD",
-    "description": "Free private beta"
+    "description": "Free to start — no credit card required"
   },
   "creator": {
     "@type": "Organization",
@@ -94,18 +94,12 @@
     <section class="hero">
       <div class="hero-grid">
         <div class="hero-copy">
-          <span class="hero-eyebrow" data-tw="hero-eyebrow"><span class="dot"></span> now in private beta — <strong id="beta-remaining" style="color:var(--pink)">…</strong> spots left</span>
+          <span class="hero-eyebrow" data-tw="hero-eyebrow"><span class="dot"></span> now live — free to start, no card needed</span>
           <h1 class="h-serif hero-title" data-tw="hero-title" style="font-size: 61px">see who's into you. <em>say hi back.</em></h1>
           <p class="hero-sub" data-tw="hero-sub">the stupidly easy way to identify high intent visitors. show up where they post. engage with them tastefully.</p>
           <div class="hero-actions">
-            <form class="waitlist-form" id="hero-waitlist" onsubmit="return handleWaitlist(event, this)">
-              <div class="waitlist-row">
-                <input type="email" class="waitlist-input" placeholder="you@company.com" required />
-                <button type="submit" class="btn btn-primary">join the waitlist <span aria-hidden="true">→</span></button>
-              </div>
-              <input type="url" class="waitlist-input waitlist-site" name="site_url" placeholder="your site url (optional)" />
-              <input type="text" class="waitlist-input waitlist-site" name="x_handle" placeholder="@yourhandle — claim your founders wall spot" autocapitalize="off" autocorrect="off" spellcheck="false" />
-            </form>
+            <a class="btn btn-primary" href="/onboarding">get started free <span aria-hidden="true">→</span></a>
+            <a class="btn btn-ghost" href="#pricing">see pricing</a>
           </div>
         </div>
         <div class="hero-stage-wrap">
@@ -273,7 +267,7 @@
           <li>1 website</li>
           <li class="pc-hl">unlimited email &amp; social outreach — that's on us</li>
         </ul>
-        <a class="btn btn-ghost pc-cta" href="#hero-waitlist">get started free</a>
+        <a class="btn btn-ghost pc-cta" href="/onboarding">get started free</a>
       </div>
       <div class="pricing-card pricing-card--featured">
         <div class="pc-badge">most popular</div>
@@ -287,7 +281,7 @@
           <li>priority support</li>
           <li>3 websites</li>
         </ul>
-        <a class="btn btn-primary pc-cta" href="#hero-waitlist">start with pro</a>
+        <a class="btn btn-primary pc-cta" href="/onboarding">start with pro</a>
       </div>
       <div class="pricing-card">
         <div class="pc-name">max</div>
@@ -300,7 +294,7 @@
           <li>api access</li>
           <li>unlimited websites</li>
         </ul>
-        <a class="btn btn-ghost pc-cta" href="#hero-waitlist">go max</a>
+        <a class="btn btn-ghost pc-cta" href="/onboarding">go max</a>
       </div>
     </div>
   </div>
@@ -377,14 +371,10 @@
   <section class="footer-cta">
     <div class="wrap">
       <h2 class="h-serif" data-tw="footer-title">turn pageviews into <em>growth pipeline.</em></h2>
-      <form class="waitlist-form" id="end-waitlist" onsubmit="return handleWaitlist(event, this)" style="justify-content:center;margin-top:16px">
-        <div class="waitlist-row" style="justify-content:center">
-          <input type="email" class="waitlist-input" placeholder="you@company.com" required style="max-width:280px" />
-          <button type="submit" class="btn btn-primary">join the waitlist <span aria-hidden="true">→</span></button>
-        </div>
-        <input type="text" class="waitlist-input waitlist-site" name="x_handle" placeholder="@yourhandle — claim your founders wall spot" autocapitalize="off" autocorrect="off" spellcheck="false" style="max-width:360px;margin-left:auto;margin-right:auto" />
-      </form>
-      <p class="fine" data-tw="footer-fine">limited spots · we'll reach out personally</p>
+      <div style="display:flex;justify-content:center;margin-top:16px">
+        <a class="btn btn-primary" href="/onboarding">get started free <span aria-hidden="true">→</span></a>
+      </div>
+      <p class="fine" data-tw="footer-fine">free to start · no card needed</p>
     </div>
   </section>
 </div>
@@ -1071,22 +1061,6 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
 
 <!-- ── WAITLIST HANDLER ── -->
 <script>
-(function loadBetaSlots() {
-  var API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'http://localhost:8000' : 'https://api.getbeam.fyi';
-  fetch(API + '/api/v1/demo/beta-slots')
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      var el = document.getElementById('beta-remaining');
-      if (el && typeof d.remaining === 'number') {
-        el.textContent = d.remaining;
-      }
-    })
-    .catch(function() {
-      var el = document.getElementById('beta-remaining');
-      if (el) el.textContent = '18';
-    });
-})();
 
 (function loadFoundersWall() {
   var grid = document.getElementById('fw-grid');
@@ -1108,11 +1082,7 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
     ? 'http://localhost:8000' : 'https://api.getbeam.fyi';
 
   function focusJoin() {
-    var input = document.querySelector('#hero-waitlist input[type="email"]');
-    if (input) {
-      input.scrollIntoView({behavior: 'smooth', block: 'center'});
-      setTimeout(function() { input.focus(); }, 400);
-    }
+    window.location.href = '/onboarding';
   }
 
   function render(founders, claimed) {
@@ -1159,36 +1129,6 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
     .catch(function() { /* keep the empty wall */ });
 })();
 
-function handleWaitlist(e, form) {
-  e.preventDefault();
-  var email = form.querySelector('input[type="email"]').value.trim();
-  if (!email) return false;
-  var siteInput = form.querySelector('input[name="site_url"]');
-  var siteUrl = siteInput ? siteInput.value.trim() : '';
-  var xInput = form.querySelector('input[name="x_handle"]');
-  var xHandle = xInput ? xInput.value.trim() : '';
-  var btn = form.querySelector('button');
-  var orig = btn.innerHTML;
-  btn.innerHTML = 'joining…';
-  btn.disabled = true;
-  var API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-    ? 'http://localhost:8000' : 'https://api.getbeam.fyi';
-  var payload = {email: email};
-  if (siteUrl) payload.site_url = siteUrl;
-  if (xHandle) payload.x_handle = xHandle;
-  fetch(API + '/api/v1/demo/waitlist', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(payload)
-  }).then(function() {
-    var el = document.getElementById('beta-remaining');
-    if (el) { var n = parseInt(el.textContent, 10); if (n > 0) el.textContent = n - 1; }
-    window.location.href = '/beam/waitlisted.html';
-  }).catch(function() {
-    window.location.href = '/beam/waitlisted.html';
-  });
-  return false;
-}
 </script>
 
 <script src="https://retarget-agent-production.up.railway.app/pixel/tracker.js" data-site="beam_getbeam_fyi" data-api="https://retarget-agent-production.up.railway.app" defer></script>
