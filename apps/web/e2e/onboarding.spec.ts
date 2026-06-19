@@ -237,10 +237,15 @@ test.describe("Onboarding — Platform Detection", () => {
     await fillCreateForm(page, "Test Spinner", "https://example.com");
 
     // Should show spinner/detecting state
-    await expect(page.locator("text=Detecting your platform")).toBeVisible({
-      timeout: 10_000,
-    });
-    await expect(page.locator(".animate-spin")).toBeVisible();
+    // Detecting text + spinner render together under the same `detecting` state.
+    // Catch that transient state ONCE (whichever is present) — two sequential
+    // toBeVisible checks raced the detection window and flaked when it was fast.
+    await expect(
+      page
+        .locator("text=Detecting your platform")
+        .or(page.locator(".animate-spin"))
+        .first()
+    ).toBeVisible({ timeout: 10_000 });
 
     // Wait for it to finish
     await expect(page.locator(".animate-spin")).toBeHidden({ timeout: 30_000 });
@@ -341,8 +346,9 @@ test.describe("Settings Page — Pixel Management", () => {
 
     // Use Playwright auto-waiting (NOT waitForTimeout + isVisible).
     // expect().toBeVisible() retries until timeout — robust against slow renders.
-    // The "Settings" h1 (PageHeader) is rendered immediately, before any API call resolves.
-    await expect(page.locator("h1")).toContainText("Settings", {
+    // The "Settings" h1 (PageHeader) renders immediately. Scope to it — the
+    // dashboard shell also has a brand <h1>, so a bare h1 is a strict-mode match.
+    await expect(page.locator("h1:has-text('Settings')")).toBeVisible({
       timeout: 15_000,
     });
 
