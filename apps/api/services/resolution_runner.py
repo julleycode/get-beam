@@ -61,27 +61,6 @@ async def run_resolution_for_site(
     )
     visitors = list(result.scalars().all())
     counters = {"processed": 0, "resolved": 0, "enriched": 0, "skipped_plan_limit": 0}
-
-    # TEMP DEBUG (remove after diagnosing processed=0): standalone reads of this
-    # same DB return eligible rows, but the live sweep sees 0. Log what THIS
-    # session sees to find the divergence.
-    try:
-        from sqlalchemy import func as _func
-        _total = (await db.execute(select(_func.count()).select_from(Visitor)
-            .where(Visitor.site_id == site.site_id))).scalar()
-        _anon = (await db.execute(select(_func.count()).select_from(Visitor)
-            .where(Visitor.site_id == site.site_id,
-                   Visitor.identity_status == "anonymous"))).scalar()
-        _anon_intent = (await db.execute(select(_func.count()).select_from(Visitor)
-            .where(Visitor.site_id == site.site_id,
-                   Visitor.identity_status == "anonymous",
-                   Visitor.intent_score >= 40))).scalar()
-        logger.info("sweep_eligibility_debug", site_id=repr(site.site_id),
-                    total=_total, anonymous=_anon, anon_intent=_anon_intent,
-                    eligible=len(visitors))
-    except Exception as _e:
-        logger.warning("sweep_eligibility_debug_failed", error=str(_e))
-
     if not visitors:
         return counters
 
