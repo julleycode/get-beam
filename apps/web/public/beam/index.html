@@ -120,6 +120,8 @@
 <section class="launch-video" style="padding:44px 20px 4px;text-align:center;">
   <div class="wrap" style="max-width:860px;margin:0 auto;">
     <video src="/beam/launch.mp4" autoplay muted playsinline controls preload="metadata"
+           poster="/beam/social-share.png"
+           onerror="var s=this.closest('.launch-video'); if(s){s.style.display='none';}"
            style="width:100%;height:auto;border-radius:18px;box-shadow:0 18px 60px rgba(0,0,0,.18);display:block;"
            aria-label="beam launch video"></video>
   </div>
