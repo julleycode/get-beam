@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -5,6 +6,7 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 
 from apps.api.config import settings
 from apps.api.models.database import engine, Base
@@ -95,6 +97,16 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+# Serve static media (the Beam landing launch video) from the API host. Vercel's
+# static CDN won't serve a file this large, so the 7.5MB launch.mp4 lives here and
+# is referenced as https://api.getbeam.fyi/static/launch.mp4. check_dir=False so a
+# missing dir can never crash API boot — it would just 404 the asset.
+app.mount(
+    "/static",
+    StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static"), check_dir=False),
+    name="static",
 )
 
 
