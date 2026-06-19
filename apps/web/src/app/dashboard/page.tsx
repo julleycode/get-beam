@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { RefreshCw, Sparkles } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { RefreshCw, Sparkles, Users, FileText, Megaphone, AtSign } from "lucide-react";
 import { api, Site, SiteStats, EngagementROI } from "@/lib/api";
 import { SiteCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
@@ -15,8 +16,21 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { PageHeader } from "@/components/page-header";
 import { StatTile } from "@/components/stat-tile";
+import { AskAi } from "@/components/ask-ai";
+import { TodayActions } from "@/components/today-actions";
+
+const QUICK_ACTIONS: {
+  href: string;
+  title: string;
+  subtitle: string;
+  icon: ComponentType<{ className?: string }>;
+}[] = [
+  { href: "/dashboard/visitors", title: "Find leads", subtitle: "See who's visiting", icon: Users },
+  { href: "/dashboard/drafts", title: "Review drafts", subtitle: "Approve AI replies", icon: FileText },
+  { href: "/dashboard/campaigns", title: "Create a campaign", subtitle: "Reach a segment", icon: Megaphone },
+  { href: "/dashboard/social-accounts", title: "Connect socials", subtitle: "Engage on their turf", icon: AtSign },
+];
 
 function OverviewSkeleton() {
   return (
@@ -223,6 +237,13 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
 
+  const { data: me } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api.getMe(),
+    staleTime: 5 * 60_000,
+  });
+  const firstName = me?.full_name?.trim().split(/\s+/)[0] || "there";
+
   const handleSites = useState(() => (s: Site[]) => {
     setSites(s);
     setLoaded(true);
@@ -246,22 +267,59 @@ export default function DashboardPage() {
       ) : !loaded ? (
         <OverviewSkeleton />
       ) : (
-        <div>
-          <PageHeader
-            title="Dashboard"
-            actions={
-              <Link href="/dashboard/onboarding">
-                <Button size="sm">Add site</Button>
+        <div className="space-y-8">
+          {/* Greeting */}
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="font-serif text-2xl font-semibold tracking-tight">
+                Hey {firstName}, ready to get started?
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Here&apos;s what&apos;s happening across your sites.
+              </p>
+            </div>
+            <Link href="/dashboard/onboarding">
+              <Button size="sm">Add site</Button>
+            </Link>
+          </div>
+
+          {/* Ask Beam anything */}
+          <AskAi siteId={sites[0]?.site_id} />
+
+          {/* Quick actions */}
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {QUICK_ACTIONS.map((qa) => (
+              <Link key={qa.href} href={qa.href}>
+                <Card className="h-full transition-colors hover:bg-secondary/50">
+                  <CardContent className="flex items-start gap-3 p-4">
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
+                      <qa.icon className="h-5 w-5" />
+                    </span>
+                    <div>
+                      <p className="text-sm font-medium">{qa.title}</p>
+                      <p className="text-xs text-muted-foreground">{qa.subtitle}</p>
+                    </div>
+                  </CardContent>
+                </Card>
               </Link>
-            }
-          />
+            ))}
+          </div>
+
+          {/* Today's actions (real data) */}
+          <TodayActions sites={sites} />
 
           <BeamLoopWidget />
 
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {sites.map((site) => (
-              <SiteCard key={site.site_id} site={site} />
-            ))}
+          {/* Sites */}
+          <div className="space-y-3">
+            <h2 className="font-serif text-lg font-semibold tracking-tight">
+              Your sites
+            </h2>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {sites.map((site) => (
+                <SiteCard key={site.site_id} site={site} />
+              ))}
+            </div>
           </div>
         </div>
       )}

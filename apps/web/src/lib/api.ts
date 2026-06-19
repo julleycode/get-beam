@@ -876,6 +876,14 @@ class ApiClient {
       { method: "DELETE" }
     );
   }
+
+  // ── AI assistant (Overview "ask Beam anything" box) ────
+  async askAI(question: string, siteId?: string) {
+    return this.request<{ answer: string }>("/api/v1/ai/ask", {
+      method: "POST",
+      body: JSON.stringify({ question, site_id: siteId ?? null }),
+    });
+  }
 }
 
 export const api = new ApiClient();
@@ -1193,6 +1201,12 @@ export interface SiteStats {
   identified: number;
   enriched: number;
   could_enrich_more: number;
+  // Action-panel fields — backend /visitors/{id}/stats returns these; optional
+  // here for back-compat with callers that only read the core counts.
+  eligible_for_resolution?: number;
+  enriched_unsegmented?: number;
+  identify_used_today?: number;
+  identify_daily_limit?: number | null;
 }
 
 export interface CostProviderRow {

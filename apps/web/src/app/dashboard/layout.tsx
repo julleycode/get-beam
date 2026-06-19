@@ -20,7 +20,9 @@ import {
   ListChecks,
   Inbox,
   Settings,
+  Menu,
 } from "lucide-react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { BeamLogo } from "@/components/beam-logo";
@@ -72,11 +74,13 @@ function NavLink({
   label,
   icon: Icon,
   pathname,
+  onNavigate,
 }: {
   href: string;
   label: string;
   icon: ComponentType<{ className?: string }>;
   pathname: string;
+  onNavigate?: () => void;
 }) {
   const isActive =
     pathname === href ||
@@ -84,6 +88,7 @@ function NavLink({
   return (
     <Link
       href={href}
+      onClick={onNavigate}
       className={cn(
         "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
         isActive
@@ -227,6 +232,81 @@ function ClerkTokenGate({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * The sidebar's contents — brand, nav sections, sign-out. Rendered both in the
+ * static desktop aside and inside the mobile slide-in drawer. `onNavigate`
+ * fires on link click so the mobile drawer can close itself.
+ */
+function SidebarBody({
+  userEmail,
+  isAdmin,
+  pathname,
+  onNavigate,
+}: {
+  userEmail: string;
+  isAdmin: boolean;
+  pathname: string;
+  onNavigate?: () => void;
+}) {
+  return (
+    <>
+      <div className="mb-6">
+        <h1 className="flex items-center gap-2 text-xl font-serif font-semibold tracking-tight">
+          <BeamLogo />
+          Beam
+        </h1>
+        <p className="mt-1 truncate text-xs text-muted-foreground">{userEmail}</p>
+      </div>
+      <nav className="flex flex-1 flex-col gap-1">
+        <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          EasyTrack
+        </p>
+        {EASYTRACK_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => (
+          <NavLink
+            key={item.href}
+            href={item.href}
+            label={item.label}
+            icon={item.icon}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+        ))}
+
+        <Separator className="my-2" />
+
+        <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          EasyEngage
+        </p>
+        {EASYENGAGE_ITEMS.map((item) => (
+          <NavLink
+            key={item.href}
+            href={item.href}
+            label={item.label}
+            icon={item.icon}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+        ))}
+
+        <div className="flex-1" />
+
+        {BOTTOM_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => (
+          <NavLink
+            key={item.href}
+            href={item.href}
+            label={item.label}
+            icon={item.icon}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+        ))}
+      </nav>
+      <Separator className="my-2" />
+      {HAS_CLERK ? <ClerkSignOutButton /> : <LegacySignOutButton />}
+    </>
+  );
+}
+
 export default function DashboardLayout({
   children,
 }: {
@@ -236,6 +316,7 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const [userEmail, setUserEmail] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     const token = api.getToken();
@@ -291,59 +372,49 @@ export default function DashboardLayout({
       {/* Clerk auth guard (only when Clerk is active) */}
       {HAS_CLERK && <ClerkAuthGuard />}
 
-      <aside className="w-56 border-r border-border bg-card p-4 flex flex-col">
-        <div className="mb-6">
-          <h1 className="text-xl font-serif font-semibold tracking-tight flex items-center gap-2">
+      {/* Desktop sidebar (md and up) */}
+      <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-card p-4 md:flex">
+        <SidebarBody userEmail={userEmail} isAdmin={isAdmin} pathname={pathname} />
+      </aside>
+
+      {/* Mobile slide-in drawer (below md). Radix gives focus-trap, ESC and
+          outside-click close for free; nav links close it via onNavigate. */}
+      <DialogPrimitive.Root open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-foreground/40 backdrop-blur-sm data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 md:hidden" />
+          <DialogPrimitive.Content className="fixed inset-y-0 left-0 z-50 flex w-64 flex-col overflow-y-auto border-r border-border bg-card p-4 shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left md:hidden">
+            <DialogPrimitive.Title className="sr-only">Navigation</DialogPrimitive.Title>
+            <SidebarBody
+              userEmail={userEmail}
+              isAdmin={isAdmin}
+              pathname={pathname}
+              onNavigate={() => setMobileNavOpen(false)}
+            />
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
+
+      <div className="flex flex-1 flex-col">
+        {/* Mobile top bar (below md) */}
+        <header className="flex items-center gap-3 border-b border-border bg-card px-4 py-3 md:hidden">
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen(true)}
+            aria-label="Open menu"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <span className="flex items-center gap-2 font-serif text-lg font-semibold tracking-tight">
             <BeamLogo />
             Beam
-          </h1>
-          <p className="text-xs text-muted-foreground truncate mt-1">{userEmail}</p>
-        </div>
-        <nav className="flex flex-col gap-1 flex-1">
-          <p className="px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            EasyTrack
-          </p>
-          {EASYTRACK_ITEMS.filter((item) => !item.adminOnly || isAdmin).map(
-            (item) => (
-              <NavLink
-                key={item.href}
-                href={item.href}
-                label={item.label}
-                icon={item.icon}
-                pathname={pathname}
-              />
-            )
-          )}
+          </span>
+        </header>
 
-          <Separator className="my-2" />
-
-          <p className="px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            EasyEngage
-          </p>
-          {EASYENGAGE_ITEMS.map((item) => (
-            <NavLink key={item.href} {...item} pathname={pathname} />
-          ))}
-
-          <div className="flex-1" />
-
-          {BOTTOM_ITEMS.filter((item) => !item.adminOnly || isAdmin).map(
-            (item) => (
-              <NavLink
-                key={item.href}
-                href={item.href}
-                label={item.label}
-                icon={item.icon}
-                pathname={pathname}
-              />
-            )
-          )}
-        </nav>
-        <Separator className="my-2" />
-        {HAS_CLERK ? <ClerkSignOutButton /> : <LegacySignOutButton />}
-      </aside>
-      <main className="flex-1 p-6 overflow-auto">
-        {HAS_CLERK ? <ClerkTokenGate>{children}</ClerkTokenGate> : children}
-      </main>
+        <main className="flex-1 overflow-auto p-6">
+          {HAS_CLERK ? <ClerkTokenGate>{children}</ClerkTokenGate> : children}
+        </main>
+      </div>
     </div>
   );
 }
