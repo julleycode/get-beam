@@ -478,7 +478,13 @@
       }
 
       setTimeout(() => ob.celebrate(), 250);
-      if (ob.state.identified && ob.state.identified.matched) {
+      // Only ask "is this you?" when there's an actual profile to confirm.
+      // A device-level fingerprint match has matched:true but no name/email,
+      // so a failed email lookup must NOT trigger the confirm prompt.
+      const idf = ob.state.identified;
+      const hasProfile = idf && idf.matched && idf.level !== 'device' &&
+        (idf.full_name || idf.company_name || idf.company_domain || idf.email);
+      if (hasProfile) {
         await ob.bot(`is this you?`);
       } else {
         await ob.bot(`no worries. let me show you how beam works when a real visitor lands.`, { delay: 400 });

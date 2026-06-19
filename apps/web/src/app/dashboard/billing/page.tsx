@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import { api, BillingStatus, BillingInterval } from "@/lib/api";
 import { CardGridSkeleton, PageHeaderSkeleton } from "@/components/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -71,6 +72,7 @@ function statusBadgeClass(status: string | null): string {
 
 function BillingContent() {
   const searchParams = useSearchParams();
+  const { isLoaded, isSignedIn, getToken } = useAuth();
   const [billing, setBilling] = useState<BillingStatus | null>(null);
   const [interval, setInterval] = useState<BillingInterval>("monthly");
   const [loading, setLoading] = useState(true);
@@ -82,12 +84,27 @@ function BillingContent() {
   const canceledParam = searchParams.get("canceled");
 
   useEffect(() => {
-    api
-      .getBillingStatus()
-      .then(setBilling)
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
+    // Wait for Clerk + ensure the API client has a token before fetching.
+    // Firing on mount races ClerkTokenSync — the call goes out with no auth
+    // header and 401s as "Unauthorized". Gate on auth, then sync the token.
+    if (!isLoaded || !isSignedIn) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const t = await getToken();
+        if (t) api.setClerkToken(t);
+        const status = await api.getBillingStatus();
+        if (!cancelled) setBilling(status);
+      } catch (e) {
+        if (!cancelled) setError((e as Error).message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, isSignedIn, getToken]);
 
   async function handleUpgrade(planId: string) {
     if (planId === "free") return;
