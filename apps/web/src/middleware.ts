@@ -1,9 +1,21 @@
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import type { NextRequest, NextFetchEvent } from "next/server";
+
+// Non-US visitors can't be identity-resolved yet (Beam only resolves US IPs),
+// so the onboarding "aha" demo falls flat for them — route them straight to
+// /login. US, and unknown country (e.g. localhost / geo miss), keep onboarding.
+// x-vercel-ip-country is set automatically on every Vercel request (no config).
+function geoRedirect(req: NextRequest): NextResponse | null {
+  if (req.nextUrl.pathname !== "/onboarding") return null;
+  const country = req.headers.get("x-vercel-ip-country");
+  return country && country !== "US"
+    ? NextResponse.redirect(new URL("/login", req.url))
+    : null;
+}
 
 // Clerk middleware is only active when NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set.
 // Without it, all routes are publicly accessible (local dev without Clerk).
-let middleware: (req: NextRequest) => NextResponse | Promise<NextResponse>;
+let handler: (req: NextRequest, ev: NextFetchEvent) => NextResponse | Promise<NextResponse>;
 
 if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -18,16 +30,20 @@ if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
     "/pricing(.*)",
     "/blog(.*)",    // public marketing blog (SEO). /dashboard/blog stays protected.
   ]);
-  middleware = clerkMiddleware((auth: () => { protect: () => void }, request: NextRequest) => {
+  handler = clerkMiddleware((auth: () => { protect: () => void }, request: NextRequest) => {
     if (!isPublicRoute(request)) {
       auth().protect();
     }
   });
 } else {
-  middleware = () => NextResponse.next();
+  handler = () => NextResponse.next();
 }
 
-export default middleware;
+// Geo check runs first (covers every onboarding CTA at once); otherwise fall
+// through to Clerk auth.
+export default function middleware(req: NextRequest, ev: NextFetchEvent) {
+  return geoRedirect(req) ?? handler(req, ev);
+}
 
 export const config = {
   matcher: [
