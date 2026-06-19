@@ -1,9 +1,18 @@
-"""Billing router — Stripe Checkout, Portal, status, and webhook endpoints."""
+"""Billing router — Lemon Squeezy Checkout, Portal, status, and webhook.
 
+Lemon Squeezy is the active billing provider (Merchant of Record). Stripe is
+unavailable in Vietnam, so the stripe_* settings are dormant. The existing
+`stripe_customer_id` / `stripe_subscription_id` columns are reused to store the
+Lemon Squeezy customer id / subscription id — no DB migration required.
+"""
+
+import hashlib
+import hmac
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
@@ -14,11 +23,18 @@ from apps.api.config import settings
 from apps.api.dependencies import get_current_user
 from apps.api.models.database import get_db
 from apps.api.models.user import User
-from apps.api.services.billing import PLAN_LIMITS, get_plan_limits
+from apps.api.services.billing import get_plan_limits
 
 logger = structlog.get_logger()
 
 router = APIRouter()
+
+_LS_API = "https://api.lemonsqueezy.com/v1"
+
+# Lemon Squeezy subscription statuses that still grant plan access. "cancelled"
+# stays entitled until the period ends (LS keeps it active until ends_at);
+# "expired"/"unpaid"/"paused" lose access and fall back to free.
+_ENTITLED_STATUSES = {"active", "on_trial", "past_due", "cancelled"}
 
 
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
@@ -47,46 +63,82 @@ class BillingStatusResponse(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _resolve_price_id(plan: str, interval: str) -> str:
-    """Map (plan, interval) to the configured Stripe Price ID."""
+def _resolve_variant_id(plan: str, interval: str) -> str:
+    """Map (plan, interval) to the configured Lemon Squeezy variant id."""
     mapping = {
-        ("pro", "monthly"): settings.stripe_price_pro_monthly,
-        ("pro", "yearly"): settings.stripe_price_pro_yearly,
-        ("max", "monthly"): settings.stripe_price_max_monthly,
-        ("max", "yearly"): settings.stripe_price_max_yearly,
+        ("pro", "monthly"): settings.ls_variant_pro_monthly,
+        ("pro", "yearly"): settings.ls_variant_pro_yearly,
+        ("max", "monthly"): settings.ls_variant_max_monthly,
+        ("max", "yearly"): settings.ls_variant_max_yearly,
     }
-    price_id = mapping.get((plan, interval))
-    if not price_id:
+    variant_id = mapping.get((plan, interval))
+    if not variant_id:
         raise HTTPException(
             status_code=400,
             detail=f"Unknown plan/interval combination: {plan}/{interval}",
         )
-    return price_id
+    return variant_id
 
 
-async def _get_or_create_stripe_customer(user: User, db: AsyncSession) -> str:
-    """Return existing Stripe customer ID or create a new one."""
-    if user.stripe_customer_id:
-        return user.stripe_customer_id
+def _variant_to_plan(variant_id: str) -> str:
+    """Reverse-map a Lemon Squeezy variant id to an internal plan name."""
+    mapping = {
+        str(settings.ls_variant_pro_monthly): "pro",
+        str(settings.ls_variant_pro_yearly): "pro",
+        str(settings.ls_variant_max_monthly): "max",
+        str(settings.ls_variant_max_yearly): "max",
+    }
+    return mapping.get(str(variant_id), "free")
 
-    import stripe  # lazy import — only needed when Stripe key is present
 
-    stripe.api_key = settings.stripe_secret_key
-    customer = stripe.Customer.create(
-        email=user.email,
-        name=user.full_name or "",
-        metadata={"user_id": str(user.id)},
-    )
-    customer_id: str = customer["id"]
+def _parse_dt(value: Optional[str]) -> Optional[datetime]:
+    """Parse a Lemon Squeezy ISO-8601 timestamp (may end in 'Z')."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        return None
 
-    await db.execute(
-        update(User)
-        .where(User.id == user.id)
-        .values(stripe_customer_id=customer_id)
-    )
-    await db.commit()
-    logger.info("stripe_customer_created", user_id=str(user.id), customer_id=customer_id)
-    return customer_id
+
+async def _ls_request(method: str, path: str, json_body: Optional[dict] = None) -> dict:
+    """Call the Lemon Squeezy API with timeout + retry on network/5xx errors."""
+    if not settings.lemonsqueezy_api_key:
+        raise HTTPException(status_code=503, detail="Billing is not configured")
+
+    headers = {
+        "Authorization": f"Bearer {settings.lemonsqueezy_api_key}",
+        "Accept": "application/vnd.api+json",
+        "Content-Type": "application/vnd.api+json",
+    }
+    last_error: Optional[Exception] = None
+    for attempt in range(3):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.request(
+                    method, f"{_LS_API}{path}", headers=headers, json=json_body
+                )
+            if resp.status_code >= 500:
+                last_error = httpx.HTTPStatusError(
+                    "server error", request=resp.request, response=resp
+                )
+                continue  # retry transient server errors
+            resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as exc:
+            # 4xx is a caller/config error — surface, don't retry.
+            logger.error(
+                "lemonsqueezy_api_error",
+                path=path,
+                status=exc.response.status_code,
+                body=exc.response.text[:500],
+            )
+            raise HTTPException(status_code=502, detail="Billing provider error")
+        except httpx.RequestError as exc:
+            last_error = exc  # network error — retry
+
+    logger.error("lemonsqueezy_unreachable", path=path, error=str(last_error))
+    raise HTTPException(status_code=502, detail="Billing provider unreachable")
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -95,63 +147,69 @@ async def _get_or_create_stripe_customer(user: User, db: AsyncSession) -> str:
 async def create_checkout_session(
     body: CheckoutRequest,
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
 ) -> CheckoutResponse:
-    """Create a Stripe Checkout Session and return the redirect URL."""
+    """Create a Lemon Squeezy checkout and return the redirect URL."""
     if body.plan not in ("pro", "max"):
         raise HTTPException(status_code=400, detail="plan must be 'pro' or 'max'")
     if body.interval not in ("monthly", "yearly"):
         raise HTTPException(status_code=400, detail="interval must be 'monthly' or 'yearly'")
 
-    price_id = _resolve_price_id(body.plan, body.interval)
+    variant_id = _resolve_variant_id(body.plan, body.interval)
 
-    import stripe
+    payload = {
+        "data": {
+            "type": "checkouts",
+            "attributes": {
+                "checkout_data": {
+                    "email": user.email,
+                    "name": user.full_name or "",
+                    # Carried back on every webhook as meta.custom_data.user_id.
+                    "custom": {"user_id": str(user.id)},
+                },
+                "product_options": {
+                    "redirect_url": f"{settings.frontend_url}/dashboard/billing?success=1",
+                },
+            },
+            "relationships": {
+                "store": {
+                    "data": {"type": "stores", "id": str(settings.lemonsqueezy_store_id)}
+                },
+                "variant": {
+                    "data": {"type": "variants", "id": str(variant_id)}
+                },
+            },
+        }
+    }
+    resp = await _ls_request("POST", "/checkouts", payload)
+    checkout_url = resp.get("data", {}).get("attributes", {}).get("url")
+    if not checkout_url:
+        logger.error("lemonsqueezy_checkout_no_url", response=str(resp)[:500])
+        raise HTTPException(status_code=502, detail="Checkout creation failed")
 
-    stripe.api_key = settings.stripe_secret_key
-    customer_id = await _get_or_create_stripe_customer(user, db)
-
-    session = stripe.checkout.Session.create(
-        customer=customer_id,
-        mode="subscription",
-        line_items=[{"price": price_id, "quantity": 1}],
-        success_url=f"{settings.frontend_url}/dashboard/billing?success=1",
-        cancel_url=f"{settings.frontend_url}/dashboard/billing?canceled=1",
-        metadata={"user_id": str(user.id)},
-    )
-    logger.info(
-        "stripe_checkout_created",
-        user_id=str(user.id),
-        session_id=session["id"],
-        plan=body.plan,
-    )
-    return CheckoutResponse(checkout_url=session["url"])
+    logger.info("lemonsqueezy_checkout_created", user_id=str(user.id), plan=body.plan)
+    return CheckoutResponse(checkout_url=checkout_url)
 
 
 @router.post("/portal", response_model=PortalResponse)
 async def create_portal_session(
     user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
 ) -> PortalResponse:
-    """Create a Stripe Customer Portal session and return the redirect URL."""
-    if not user.stripe_customer_id:
+    """Return the Lemon Squeezy customer portal URL for the user's subscription."""
+    if not user.stripe_subscription_id:
         raise HTTPException(
             status_code=400,
             detail="No billing account found. Subscribe to a plan first.",
         )
 
-    import stripe
+    resp = await _ls_request("GET", f"/subscriptions/{user.stripe_subscription_id}")
+    urls = resp.get("data", {}).get("attributes", {}).get("urls", {}) or {}
+    portal_url = urls.get("customer_portal")
+    if not portal_url:
+        logger.error("lemonsqueezy_portal_no_url", user_id=str(user.id))
+        raise HTTPException(status_code=502, detail="Portal URL unavailable")
 
-    stripe.api_key = settings.stripe_secret_key
-    kwargs: dict = {
-        "customer": user.stripe_customer_id,
-        "return_url": f"{settings.frontend_url}/dashboard/billing",
-    }
-    if settings.stripe_portal_config_id:
-        kwargs["configuration"] = settings.stripe_portal_config_id
-
-    portal = stripe.billing_portal.Session.create(**kwargs)
-    logger.info("stripe_portal_created", user_id=str(user.id))
-    return PortalResponse(portal_url=portal["url"])
+    logger.info("lemonsqueezy_portal_created", user_id=str(user.id))
+    return PortalResponse(portal_url=portal_url)
 
 
 @router.get("/status", response_model=BillingStatusResponse)
@@ -170,212 +228,135 @@ async def get_billing_status(
 
 
 @router.post("/webhook")
-async def stripe_webhook(
+async def lemonsqueezy_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db),
-    stripe_signature: Optional[str] = Header(None, alias="stripe-signature"),
+    x_signature: Optional[str] = Header(None, alias="X-Signature"),
+    x_event_name: Optional[str] = Header(None, alias="X-Event-Name"),
 ) -> dict:
-    """Stripe webhook — NO auth required. Verified via Stripe signature."""
+    """Lemon Squeezy webhook — NO auth. Verified via X-Signature HMAC-SHA256.
+
+    Handlers set absolute state from the payload, so at-least-once redelivery is
+    naturally idempotent (no event-id table needed).
+    """
     payload = await request.body()
 
-    if not stripe_signature:
-        raise HTTPException(status_code=400, detail="Missing Stripe-Signature header")
+    if not settings.lemonsqueezy_webhook_secret:
+        raise HTTPException(status_code=503, detail="Webhook not configured")
+    if not x_signature:
+        raise HTTPException(status_code=400, detail="Missing X-Signature header")
 
-    import stripe
+    expected = hmac.new(
+        settings.lemonsqueezy_webhook_secret.encode(), payload, hashlib.sha256
+    ).hexdigest()
+    if not hmac.compare_digest(expected, x_signature):
+        logger.warning("lemonsqueezy_webhook_invalid_signature")
+        raise HTTPException(status_code=400, detail="Invalid signature")
 
-    stripe.api_key = settings.stripe_secret_key
     try:
-        event = stripe.Webhook.construct_event(
-            payload=payload,
-            sig_header=stripe_signature,
-            secret=settings.stripe_webhook_secret,
-        )
-    except stripe.error.SignatureVerificationError:
-        logger.warning("stripe_webhook_invalid_signature")
-        raise HTTPException(status_code=400, detail="Invalid Stripe signature")
-    except Exception as exc:
-        logger.error("stripe_webhook_parse_error", error=str(exc))
+        event = await request.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.error("lemonsqueezy_webhook_parse_error", error=str(exc))
         raise HTTPException(status_code=400, detail="Webhook parse error")
 
-    logger.info("stripe_webhook_received", event_type=event["type"], event_id=event["id"])
+    meta: dict = event.get("meta", {}) or {}
+    data: dict = event.get("data", {}) or {}
+    event_name: str = x_event_name or meta.get("event_name", "")
+    logger.info("lemonsqueezy_webhook_received", event_name=event_name)
 
-    # Idempotency: Stripe delivers at-least-once and out of order. Record the
-    # event id (PK) in the same transaction as the handler's writes — a
-    # redelivery hits the PK and is skipped; a handler failure rolls the id
-    # back too, so Stripe's retry gets a clean attempt.
-    from sqlalchemy.exc import IntegrityError
+    if event_name in (
+        "subscription_created",
+        "subscription_updated",
+        "subscription_cancelled",
+        "subscription_expired",
+    ):
+        await _apply_subscription(data, meta, db)
+    elif event_name == "subscription_payment_failed":
+        await _handle_payment_failed(data, meta, db)
+    else:
+        logger.debug("lemonsqueezy_webhook_unhandled", event_name=event_name)
 
-    from apps.api.models.stripe_event import StripeEvent
-
-    db.add(StripeEvent(id=event["id"]))
-    try:
-        await db.flush()
-    except IntegrityError:
-        await db.rollback()
-        logger.info("stripe_webhook_duplicate_skipped", event_id=event["id"])
-        return {"received": True, "duplicate": True}
-
-    await _handle_webhook_event(event, db)
-    # Handlers commit their own changes (committing the event id with them);
-    # commit here as well for event types with no handler so the id persists.
-    await db.commit()
     return {"received": True}
 
 
-async def _handle_webhook_event(event: dict, db: AsyncSession) -> None:
-    """Dispatch Stripe webhook events to the appropriate handler."""
-    event_type: str = event.get("type", "")
-    data_object: dict = event.get("data", {}).get("object", {})
+# ── Webhook handlers ────────────────────────────────────────────────────────────
 
-    if event_type == "checkout.session.completed":
-        await _handle_checkout_completed(data_object, db)
-    elif event_type == "customer.subscription.updated":
-        await _handle_subscription_updated(data_object, db)
-    elif event_type == "customer.subscription.deleted":
-        await _handle_subscription_deleted(data_object, db)
-    elif event_type == "invoice.payment_failed":
-        await _handle_payment_failed(data_object, db)
-    else:
-        logger.debug("stripe_webhook_unhandled", event_type=event_type)
-
-
-async def _user_by_customer_id(customer_id: str, db: AsyncSession) -> Optional[User]:
-    result = await db.execute(
-        select(User).where(User.stripe_customer_id == customer_id)
-    )
-    return result.scalar_one_or_none()
-
-
-async def _handle_checkout_completed(obj: dict, db: AsyncSession) -> None:
-    """Mark the user's subscription as active after successful checkout."""
-    customer_id: str = obj.get("customer", "")
-    subscription_id: str = obj.get("subscription", "")
-
-    # Extract plan from metadata if present
-    metadata: dict = obj.get("metadata", {})
-    user_id_str: str = metadata.get("user_id", "")
-
-    user: Optional[User] = None
+async def _find_user(meta: dict, attrs: dict, db: AsyncSession) -> Optional[User]:
+    """Locate the user from webhook custom_data.user_id, falling back to the
+    stored Lemon Squeezy customer id."""
+    custom: dict = meta.get("custom_data", {}) or {}
+    user_id_str = custom.get("user_id")
     if user_id_str:
         try:
-            uid = uuid.UUID(user_id_str)
-            result = await db.execute(select(User).where(User.id == uid))
+            result = await db.execute(
+                select(User).where(User.id == uuid.UUID(str(user_id_str)))
+            )
             user = result.scalar_one_or_none()
+            if user is not None:
+                return user
         except ValueError:
             pass
 
-    if user is None and customer_id:
-        user = await _user_by_customer_id(customer_id, db)
-
-    if user is None:
-        logger.warning("stripe_checkout_completed_user_not_found", customer_id=customer_id)
-        return
-
-    # Update subscription_id — plan will be set by subscription.updated event
-    await db.execute(
-        update(User)
-        .where(User.id == user.id)
-        .values(
-            stripe_customer_id=customer_id,
-            stripe_subscription_id=subscription_id,
-            subscription_status="active",
+    customer_id = str(attrs.get("customer_id") or "")
+    if customer_id:
+        result = await db.execute(
+            select(User).where(User.stripe_customer_id == customer_id)
         )
-    )
-    await db.commit()
-    logger.info(
-        "stripe_checkout_completed",
-        user_id=str(user.id),
-        subscription_id=subscription_id,
-    )
+        return result.scalar_one_or_none()
+    return None
 
 
-async def _handle_subscription_updated(obj: dict, db: AsyncSession) -> None:
-    """Sync plan, status, and billing period from Stripe subscription."""
-    customer_id: str = obj.get("customer", "")
-    subscription_id: str = obj.get("id", "")
-    status: str = obj.get("status", "")
-    current_period_end_ts: Optional[int] = obj.get("current_period_end")
-    trial_end_ts: Optional[int] = obj.get("trial_end")
+async def _apply_subscription(data: dict, meta: dict, db: AsyncSession) -> None:
+    """Sync plan, status, customer/subscription ids, and renewal date from a
+    Lemon Squeezy subscription object."""
+    attrs: dict = data.get("attributes", {}) or {}
+    subscription_id = str(data.get("id") or "")
 
-    # Derive plan from the first line item price
-    plan = "free"
-    items = obj.get("items", {}).get("data", [])
-    if items:
-        price_id: str = items[0].get("price", {}).get("id", "")
-        plan = _price_id_to_plan(price_id)
-
-    user = await _user_by_customer_id(customer_id, db)
+    user = await _find_user(meta, attrs, db)
     if user is None:
-        logger.warning("stripe_subscription_updated_user_not_found", customer_id=customer_id)
+        logger.warning(
+            "lemonsqueezy_subscription_user_not_found",
+            subscription_id=subscription_id,
+            customer_id=attrs.get("customer_id"),
+        )
         return
+
+    status: str = attrs.get("status", "")
+    variant_id = str(attrs.get("variant_id") or "")
+    plan = _variant_to_plan(variant_id) if status in _ENTITLED_STATUSES else "free"
 
     values: dict = {
-        "stripe_subscription_id": subscription_id,
+        "stripe_subscription_id": subscription_id or user.stripe_subscription_id,
         "subscription_status": status,
         "plan": plan,
+        "current_period_end": _parse_dt(attrs.get("renews_at")),
+        "trial_ends_at": _parse_dt(attrs.get("trial_ends_at")),
     }
-    if current_period_end_ts:
-        values["current_period_end"] = datetime.fromtimestamp(
-            current_period_end_ts, tz=timezone.utc
-        )
-    if trial_end_ts:
-        values["trial_ends_at"] = datetime.fromtimestamp(trial_end_ts, tz=timezone.utc)
+    customer_id = str(attrs.get("customer_id") or "")
+    if customer_id:
+        values["stripe_customer_id"] = customer_id
 
     await db.execute(update(User).where(User.id == user.id).values(**values))
     await db.commit()
     logger.info(
-        "stripe_subscription_updated",
+        "lemonsqueezy_subscription_synced",
         user_id=str(user.id),
         plan=plan,
         status=status,
     )
 
 
-async def _handle_subscription_deleted(obj: dict, db: AsyncSession) -> None:
-    """Downgrade user to free plan when subscription is cancelled."""
-    customer_id: str = obj.get("customer", "")
-    user = await _user_by_customer_id(customer_id, db)
+async def _handle_payment_failed(data: dict, meta: dict, db: AsyncSession) -> None:
+    """Mark subscription past_due on a failed renewal payment (keeps plan during
+    the dunning grace period)."""
+    attrs: dict = data.get("attributes", {}) or {}
+    user = await _find_user(meta, attrs, db)
     if user is None:
-        logger.warning("stripe_subscription_deleted_user_not_found", customer_id=customer_id)
+        logger.warning("lemonsqueezy_payment_failed_user_not_found")
         return
 
     await db.execute(
-        update(User)
-        .where(User.id == user.id)
-        .values(
-            plan="free",
-            subscription_status="canceled",
-            stripe_subscription_id=None,
-            current_period_end=None,
-        )
+        update(User).where(User.id == user.id).values(subscription_status="past_due")
     )
     await db.commit()
-    logger.info("stripe_subscription_deleted", user_id=str(user.id))
-
-
-async def _handle_payment_failed(obj: dict, db: AsyncSession) -> None:
-    """Mark subscription as past_due on payment failure."""
-    customer_id: str = obj.get("customer", "")
-    user = await _user_by_customer_id(customer_id, db)
-    if user is None:
-        logger.warning("stripe_payment_failed_user_not_found", customer_id=customer_id)
-        return
-
-    await db.execute(
-        update(User)
-        .where(User.id == user.id)
-        .values(subscription_status="past_due")
-    )
-    await db.commit()
-    logger.warning("stripe_payment_failed", user_id=str(user.id))
-
-
-def _price_id_to_plan(price_id: str) -> str:
-    """Reverse-map a Stripe Price ID to an internal plan name."""
-    mapping = {
-        settings.stripe_price_pro_monthly: "pro",
-        settings.stripe_price_pro_yearly: "pro",
-        settings.stripe_price_max_monthly: "max",
-        settings.stripe_price_max_yearly: "max",
-    }
-    return mapping.get(price_id, "free")
+    logger.warning("lemonsqueezy_payment_failed", user_id=str(user.id))

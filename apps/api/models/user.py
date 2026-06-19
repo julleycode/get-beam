@@ -28,6 +28,9 @@ class User(Base):
     )
 
     # ─── Billing fields ───
+    # Billing provider is Lemon Squeezy (Stripe is unavailable in VN). The
+    # stripe_* columns below are reused to store the LS customer id /
+    # subscription id — kept as-is to avoid a migration. See routers/billing.py.
     stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     plan: Mapped[str] = mapped_column(String(20), default="free", nullable=False, server_default="free")
     stripe_subscription_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)

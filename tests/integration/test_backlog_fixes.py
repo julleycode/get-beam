@@ -1,7 +1,7 @@
 """Integration tests for previously-untested critical paths.
 
 Covers the test-gap items from the 2026-06-10 review backlog:
-- Stripe webhook idempotency (duplicate event ids are skipped)
+- Lemon Squeezy webhook (HMAC signature, plan sync, idempotent redelivery)
 - Unsubscribe flow (signed token → do_not_email, case-insensitive)
 - Campaign email send guardrails (suppression skip + per-recipient idempotency)
 - Feature-requests admin gating (plain users get 403)
@@ -57,40 +57,71 @@ async def admin_token(test_client, test_db):
     return token
 
 
-class TestStripeWebhookIdempotency:
+class TestLemonSqueezyWebhook:
     @pytest.mark.asyncio
-    async def test_duplicate_event_skipped(self, test_client, test_db, monkeypatch):
-        from apps.api.models.stripe_event import StripeEvent
+    async def test_subscription_created_sets_plan_and_is_idempotent(
+        self, test_client, test_db, monkeypatch
+    ):
+        import hashlib
+        import hmac
+        import json
 
-        event_id = f"evt_test_{uuidlib.uuid4().hex[:12]}"
+        from apps.api.config import settings
+        from apps.api.models.user import User
 
-        def fake_construct_event(payload, sig_header, secret):
-            return {"id": event_id, "type": "noop.event", "data": {"object": {}}}
+        await _signup(test_client, "ls-billing@test.com")
+        result = await test_db.execute(
+            select(User).where(User.email == "ls-billing@test.com")
+        )
+        user = result.scalar_one()
 
-        import stripe
+        secret = "ls_test_secret"
+        monkeypatch.setattr(settings, "lemonsqueezy_webhook_secret", secret)
+        monkeypatch.setattr(settings, "ls_variant_pro_monthly", "12345")
 
-        monkeypatch.setattr(stripe.Webhook, "construct_event", fake_construct_event)
+        body = json.dumps(
+            {
+                "meta": {
+                    "event_name": "subscription_created",
+                    "custom_data": {"user_id": str(user.id)},
+                },
+                "data": {
+                    "id": "sub_999",
+                    "attributes": {
+                        "status": "active",
+                        "variant_id": 12345,
+                        "customer_id": 555,
+                        "renews_at": "2099-01-01T00:00:00.000000Z",
+                    },
+                },
+            }
+        ).encode()
+        sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+        headers = {"X-Event-Name": "subscription_created"}
 
-        first = await test_client.post(
+        # Wrong signature is rejected.
+        bad = await test_client.post(
             "/api/v1/billing/webhook",
-            content=b"{}",
-            headers={"stripe-signature": "t=1,v1=test"},
+            content=body,
+            headers={**headers, "X-Signature": "deadbeef"},
         )
-        assert first.status_code == 200
-        assert first.json() == {"received": True}
+        assert bad.status_code == 400
 
-        second = await test_client.post(
-            "/api/v1/billing/webhook",
-            content=b"{}",
-            headers={"stripe-signature": "t=1,v1=test"},
-        )
-        assert second.status_code == 200
-        assert second.json() == {"received": True, "duplicate": True}
+        # Valid signature succeeds; redelivery is idempotent (same end state).
+        for _ in range(2):
+            ok = await test_client.post(
+                "/api/v1/billing/webhook",
+                content=body,
+                headers={**headers, "X-Signature": sig},
+            )
+            assert ok.status_code == 200
+            assert ok.json() == {"received": True}
 
-        rows = await test_db.execute(
-            select(StripeEvent).where(StripeEvent.id == event_id)
-        )
-        assert len(rows.scalars().all()) == 1
+        await test_db.refresh(user)
+        assert user.plan == "pro"
+        assert user.subscription_status == "active"
+        assert user.stripe_subscription_id == "sub_999"
+        assert user.stripe_customer_id == "555"
 
 
 class TestUnsubscribeFlow:

@@ -153,6 +153,17 @@ class Settings(BaseSettings):
     stripe_price_max_yearly: str = ""        # Stripe Price ID — Max yearly
     stripe_portal_config_id: str = ""        # Optional Stripe Portal Configuration ID
 
+    # ─── Lemon Squeezy Billing (Merchant of Record — active billing provider) ───
+    # Stripe is unavailable in Vietnam; Lemon Squeezy is a MoR that handles
+    # global tax and pays out via Wise. The stripe_* vars above are dormant.
+    lemonsqueezy_api_key: str = ""           # Settings → API
+    lemonsqueezy_store_id: str = ""          # numeric store id
+    lemonsqueezy_webhook_secret: str = ""    # webhook signing secret
+    ls_variant_pro_monthly: str = ""         # LS variant id — Pro monthly
+    ls_variant_pro_yearly: str = ""          # LS variant id — Pro yearly
+    ls_variant_max_monthly: str = ""         # LS variant id — Max monthly
+    ls_variant_max_yearly: str = ""          # LS variant id — Max yearly
+
     # ─── Feature flags ───
     sync_interval_minutes: int = 60
     resolution_sweep_interval_minutes: int = 30  # APScheduler identity-resolution sweep cadence
