@@ -18,7 +18,7 @@ test.describe("Visitors Page", () => {
     // mode violation when "Visitor" matches both nav link + page heading.
     await expect(
       page
-        .locator("h2:has-text('Visitor')")
+        .locator("h1:has-text('Visitor')")
         .or(page.locator("text=No visitors"))
         .or(page.locator("text=anonymous"))
         .first()

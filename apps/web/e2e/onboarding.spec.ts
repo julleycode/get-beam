@@ -341,8 +341,8 @@ test.describe("Settings Page — Pixel Management", () => {
 
     // Use Playwright auto-waiting (NOT waitForTimeout + isVisible).
     // expect().toBeVisible() retries until timeout — robust against slow renders.
-    // The "Settings" h2 is rendered immediately, before any API call resolves.
-    await expect(page.locator("h2")).toContainText("Settings", {
+    // The "Settings" h1 (PageHeader) is rendered immediately, before any API call resolves.
+    await expect(page.locator("h1")).toContainText("Settings", {
       timeout: 15_000,
     });
 

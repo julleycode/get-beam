@@ -11,7 +11,7 @@ test.describe("EasyEngage — Social Accounts", () => {
       page
         .locator("text=Social Accounts")
         .or(page.locator("text=Connect a"))
-        .or(page.locator("h2"))
+        .or(page.locator("h1"))
         .first()
     ).toBeVisible({ timeout: 15_000 });
   });
@@ -27,7 +27,7 @@ test.describe("EasyEngage — Drafts", () => {
       page
         .locator("text=Drafts")
         .or(page.locator("text=No drafts"))
-        .or(page.locator("h2"))
+        .or(page.locator("h1"))
         .first()
     ).toBeVisible({ timeout: 15_000 });
   });
