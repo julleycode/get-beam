@@ -2,9 +2,12 @@
 
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { FileText } from "lucide-react";
 import { api, type DraftStatus } from "@/lib/api";
 import { ListCardSkeleton } from "@/components/skeletons";
 import { DraftCard } from "@/components/draft-card";
+import { EmptyState } from "@/components/empty-state";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 const TABS: { label: string; value: DraftStatus | undefined }[] = [
   { label: "Pending", value: "pending" },
@@ -53,31 +56,27 @@ export default function DraftsPage() {
     <div className="max-w-3xl space-y-4">
       <h1 className="text-2xl font-serif font-semibold tracking-tight">Drafts</h1>
 
-      <div className="flex gap-2 border-b border-gray-200 pb-2">
-        {TABS.map((t) => (
-          <button
-            key={t.label}
-            onClick={() => setTab(t.value)}
-            className={`text-sm px-3 py-1.5 rounded-t-md ${
-              tab === t.value
-                ? "bg-[#FF3366] text-white"
-                : "text-gray-500 hover:text-gray-700"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        value={tab ?? "all"}
+        onValueChange={(v) => setTab(v === "all" ? undefined : (v as DraftStatus))}
+      >
+        <TabsList>
+          {TABS.map((t) => (
+            <TabsTrigger key={t.label} value={t.value ?? "all"}>
+              {t.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {isLoading ? (
         <ListCardSkeleton rows={4} />
       ) : data?.drafts.length === 0 ? (
-        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-          <p className="text-gray-500">No drafts here.</p>
-          <p className="text-sm text-gray-400 mt-1">
-            Generate replies from the Feed page.
-          </p>
-        </div>
+        <EmptyState
+          icon={FileText}
+          title="No drafts here"
+          description="Generate replies from the Feed page to start the conversation."
+        />
       ) : (
         <div className="space-y-3">
           {data?.drafts.map((draft) => (

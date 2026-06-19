@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
+import { Check } from "lucide-react";
 import { api, BillingStatus, BillingInterval } from "@/lib/api";
 import { CardGridSkeleton, PageHeaderSkeleton } from "@/components/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,6 +15,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { Separator } from "@/components/ui/separator";
 
 // ── Plan metadata ──────────────────────────────────────────────────────────
@@ -57,15 +59,6 @@ const PLANS = [
 
 function planLabel(plan: string): string {
   return PLANS.find((p) => p.id === plan)?.name ?? plan;
-}
-
-function statusBadgeClass(status: string | null): string {
-  if (!status) return "bg-gray-100 text-gray-600";
-  if (status === "active" || status === "trialing")
-    return "bg-green-100 text-green-700";
-  if (status === "past_due") return "bg-yellow-100 text-yellow-700";
-  if (status === "canceled") return "bg-red-100 text-red-600";
-  return "bg-gray-100 text-gray-600";
 }
 
 // ── Main component ─────────────────────────────────────────────────────────
@@ -157,17 +150,17 @@ function BillingContent() {
 
       {/* Success / canceled banners */}
       {successParam && (
-        <div className="rounded-md bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-700">
+        <div className="rounded-md border border-success/30 bg-success-muted px-4 py-3 text-sm text-success">
           Subscription activated. Your plan has been updated.
         </div>
       )}
       {canceledParam && (
-        <div className="rounded-md bg-yellow-50 border border-yellow-200 px-4 py-3 text-sm text-yellow-700">
+        <div className="rounded-md border border-warning/30 bg-warning-muted px-4 py-3 text-sm text-warning">
           Checkout canceled. No changes were made.
         </div>
       )}
       {error && (
-        <div className="rounded-md bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+        <div className="rounded-md border border-destructive/30 bg-destructive-muted px-4 py-3 text-sm text-destructive">
           {error}
         </div>
       )}
@@ -192,13 +185,7 @@ function BillingContent() {
                   {planLabel(billing.plan)}
                 </span>
                 {billing.subscription_status && (
-                  <span
-                    className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${statusBadgeClass(
-                      billing.subscription_status
-                    )}`}
-                  >
-                    {billing.subscription_status}
-                  </span>
+                  <StatusBadge status={billing.subscription_status} />
                 )}
               </div>
 
@@ -219,7 +206,7 @@ function BillingContent() {
                   <div className="h-2 w-full rounded-full bg-secondary overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all ${
-                        usagePct >= 90 ? "bg-red-500" : "bg-primary"
+                        usagePct >= 90 ? "bg-destructive" : "bg-primary"
                       }`}
                       style={{ width: `${usagePct}%` }}
                     />
@@ -238,7 +225,7 @@ function BillingContent() {
               )}
 
               {billing.trial_ends_at && (
-                <p className="text-xs text-yellow-600">
+                <p className="text-xs text-warning">
                   Trial ends{" "}
                   {new Date(billing.trial_ends_at).toLocaleDateString("en-US", {
                     year: "numeric",
@@ -286,7 +273,7 @@ function BillingContent() {
               >
                 {iv === "monthly" ? "Monthly" : "Yearly"}
                 {iv === "yearly" && (
-                  <span className="ml-1 text-xs text-green-600 font-semibold">
+                  <span className="ml-1 text-xs font-semibold text-success">
                     -20%
                   </span>
                 )}
@@ -333,9 +320,9 @@ function BillingContent() {
                     {plan.features.map((f) => (
                       <li
                         key={f}
-                        className="text-xs text-muted-foreground flex gap-2"
+                        className="flex gap-2 text-xs text-muted-foreground"
                       >
-                        <span className="text-green-500 font-bold">+</span>
+                        <Check className="h-3.5 w-3.5 shrink-0 text-success" />
                         {f}
                       </li>
                     ))}

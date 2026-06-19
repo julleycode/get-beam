@@ -1,7 +1,10 @@
 "use client";
 
+import { Check } from "lucide-react";
 import type { SocialPost as Post } from "@/lib/api";
 import { PlatformBadge } from "./platform-badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 interface PostCardProps {
   post: Post;
@@ -13,51 +16,58 @@ export function PostCard({ post, onGenerateDraft, loading }: PostCardProps) {
   const timeAgo = getTimeAgo(post.posted_at);
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-bold">
-            {post.author_name.charAt(0).toUpperCase()}
+    <Card>
+      <CardContent className="space-y-3 p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-secondary text-xs font-bold text-secondary-foreground">
+              {post.author_name.charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <p className="text-sm font-medium">{post.author_name}</p>
+              <p className="text-xs text-muted-foreground">@{post.author_username}</p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-medium">{post.author_name}</p>
-            <p className="text-xs text-gray-400">@{post.author_username}</p>
+          <div className="flex items-center gap-2">
+            <PlatformBadge platform={post.platform} />
+            <span className="text-xs text-muted-foreground">{timeAgo}</span>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <PlatformBadge platform={post.platform} />
-          <span className="text-xs text-gray-400">{timeAgo}</span>
-        </div>
-      </div>
 
-      {post.content && (
-        <p className="text-sm text-gray-700 leading-relaxed">{post.content}</p>
-      )}
-
-      <div className="flex items-center justify-between pt-1">
-        {post.post_url && (
-          <a
-            href={post.post_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-[#FF5C82] hover:underline"
-          >
-            View original
-          </a>
+        {post.content && (
+          <p className="text-sm leading-relaxed text-foreground">{post.content}</p>
         )}
-        <button
-          onClick={() => onGenerateDraft(post.id)}
-          disabled={post.commented || loading}
-          className={
-            post.commented
-              ? "text-xs px-3 py-1.5 rounded-md bg-green-50 text-green-600 cursor-default"
-              : "text-xs px-3 py-1.5 rounded-md bg-[#FF3366] text-white hover:bg-[#E51F50] disabled:opacity-50"
-          }
-        >
-          {post.commented ? "Commented" : loading ? "Generating..." : "Generate Reply"}
-        </button>
-      </div>
-    </div>
+
+        <div className="flex items-center justify-between pt-1">
+          {post.post_url ? (
+            <a
+              href={post.post_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-primary hover:underline"
+            >
+              View original
+            </a>
+          ) : (
+            <span />
+          )}
+          {post.commented ? (
+            <Button size="sm" variant="ghost" disabled className="text-success">
+              <Check className="mr-1 h-3.5 w-3.5" />
+              Commented
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              onClick={() => onGenerateDraft(post.id)}
+              disabled={loading}
+            >
+              {loading ? "Generating..." : "Generate Reply"}
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

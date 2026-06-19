@@ -5,8 +5,11 @@ import { useSearchParams } from "next/navigation";
 import { api, Site, ApiKeyInfo } from "@/lib/api";
 import { FormCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
+import { CheckCircle2 } from "lucide-react";
 import { SiteSelector } from "@/components/site-selector";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import {
   Card,
   CardContent,
@@ -22,21 +25,21 @@ const PROVIDERS = [
     name: "OpenRouter",
     description: "AI replies — 100+ models (Grok, Llama, GPT-4o-mini, etc.)",
     docsUrl: "https://openrouter.ai/keys",
-    color: "text-[#FF3366]",
+    color: "text-primary",
   },
   {
     id: "proxycurl",
     name: "Proxycurl",
     description: "LinkedIn profile enrichment",
     docsUrl: "https://nubela.co/proxycurl",
-    color: "text-blue-600",
+    color: "text-info",
   },
   {
     id: "twitter",
     name: "Twitter / X",
     description: "Twitter bio & followers",
     docsUrl: "https://developer.twitter.com",
-    color: "text-sky-600",
+    color: "text-info",
   },
 ];
 
@@ -196,10 +199,10 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-2xl space-y-6">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-serif font-semibold tracking-tight">Settings</h2>
-        <SiteSelector value={siteId} onChange={setSiteId} />
-      </div>
+      <PageHeader
+        title="Settings"
+        actions={<SiteSelector value={siteId} onChange={setSiteId} />}
+      />
 
       {/* ── Known contacts (existing-customer list) ── */}
       <Card>
@@ -293,15 +296,7 @@ export default function SettingsPage() {
                       <code className="text-xs text-muted-foreground">
                         {key.key_hint}
                       </code>
-                      {key.is_valid ? (
-                        <span className="text-xs text-green-500 font-medium">
-                          Valid
-                        </span>
-                      ) : (
-                        <span className="text-xs text-red-500 font-medium">
-                          Invalid
-                        </span>
-                      )}
+                      <StatusBadge status={key.is_valid ? "valid" : "invalid"} />
                     </div>
                     <Button
                       variant="ghost"
@@ -422,25 +417,13 @@ export default function SettingsPage() {
                 <span className="text-muted-foreground">Pixel verified</span>
                 <div className="flex items-center gap-2">
                   {site.pixel_verified ? (
-                    <span className="inline-flex items-center gap-1 text-green-500 font-medium">
-                      <svg
-                        className="w-4 h-4"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        strokeWidth={2}
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          d="M5 13l4 4L19 7"
-                        />
-                      </svg>
+                    <span className="inline-flex items-center gap-1 font-medium text-success">
+                      <CheckCircle2 className="h-4 w-4" />
                       Verified
                     </span>
                   ) : (
                     <>
-                      <span className="text-yellow-500">Not yet</span>
+                      <span className="text-warning">Not yet</span>
                       <Button
                         variant="outline"
                         size="sm"
@@ -455,10 +438,10 @@ export default function SettingsPage() {
               </div>
               {verifyResult && (
                 <p
-                  className={`text-xs text-right ${
+                  className={`text-right text-xs ${
                     verifyResult.status === "verified"
-                      ? "text-green-500"
-                      : "text-yellow-500"
+                      ? "text-success"
+                      : "text-warning"
                   }`}
                 >
                   {verifyResult.message}

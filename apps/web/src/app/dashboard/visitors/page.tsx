@@ -5,12 +5,14 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { SlidersHorizontal } from "lucide-react";
 import { TableSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { SiteSelector } from "@/components/site-selector";
 import { BrowserCaptureCard } from "@/components/browser-capture-card";
-import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
 import {
   Table,
   TableBody,
@@ -28,8 +30,8 @@ import {
 } from "@/components/ui/select";
 
 function intentColor(score: number): string {
-  if (score >= 70) return "text-green-600";
-  if (score >= 40) return "text-yellow-600";
+  if (score >= 70) return "text-intent-high";
+  if (score >= 40) return "text-warning";
   return "text-muted-foreground";
 }
 
@@ -171,17 +173,11 @@ export default function VisitorsPage() {
   function renderIdentity(v: (typeof visitors)[number]) {
     const s = v.identity_status;
     if (s === "identified" || s === "merged") {
-      return (
-        <Badge className="border-transparent bg-green-600 text-white hover:bg-green-600">
-          Identified
-        </Badge>
-      );
+      return <StatusBadge status="identified" label="Identified" />;
     }
     if (s === "unresolvable" || s === "vpn_filtered") {
       return (
-        <Badge variant="outline" className="capitalize opacity-50">
-          {s.replace("_", " ")}
-        </Badge>
+        <StatusBadge status={s} label={s.replace("_", " ")} className="opacity-60" />
       );
     }
     const busy = resolveMut.isPending && actioningId === v.visitor_id;
@@ -204,11 +200,7 @@ export default function VisitorsPage() {
       return <span className="text-xs text-muted-foreground opacity-50">—</span>;
     }
     if (v.enrichment_status === "enriched") {
-      return (
-        <Badge className="border-transparent bg-green-600 text-white hover:bg-green-600">
-          Enriched
-        </Badge>
-      );
+      return <StatusBadge status="enriched" label="Enriched" />;
     }
     const busy = enrichMut.isPending && actioningId === v.visitor_id;
     const label = v.enrichment_status === "failed" ? "Retry enrich" : "Enrich";
@@ -226,9 +218,10 @@ export default function VisitorsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-serif font-semibold tracking-tight">Visitors</h2>
-        <div className="flex items-center gap-3">
+      <PageHeader
+        title="Visitors"
+        actions={
+          <div className="flex flex-wrap items-center gap-3">
           <SiteSelector value={siteId} onChange={setSiteId} />
           {siteId && site && (
             <Button
@@ -262,11 +255,16 @@ export default function VisitorsPage() {
               <SelectItem value="pageviews">Pageviews</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-      </div>
+          </div>
+        }
+      />
 
       {siteId && (
         <div className="mb-4 flex flex-wrap items-end gap-4 rounded-lg border bg-muted/30 p-3">
+          <div className="flex w-full items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            Filters
+          </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-muted-foreground">First seen</label>
             <div className="flex items-center gap-1">
@@ -384,7 +382,7 @@ export default function VisitorsPage() {
             {total} visitor{total !== 1 ? "s" : ""}
           </p>
           {notice && (
-            <p className="mb-3 text-sm text-yellow-600">{notice}</p>
+            <p className="mb-3 text-sm text-warning">{notice}</p>
           )}
           <Table>
             <TableHeader>
@@ -424,7 +422,7 @@ export default function VisitorsPage() {
                       </Link>
                       {v.total_sessions > 1 && (
                         <span
-                          className="shrink-0 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-medium text-blue-700"
+                          className="shrink-0 rounded bg-info-muted px-1.5 py-0.5 text-[10px] font-medium text-info"
                           title={`Returning — ${v.total_sessions} visits Beam has seen (not your CRM)`}
                         >
                           Returning
@@ -432,7 +430,7 @@ export default function VisitorsPage() {
                       )}
                       {v.is_known && (
                         <span
-                          className="shrink-0 rounded bg-purple-50 px-1.5 py-0.5 text-[10px] font-medium text-purple-700"
+                          className="shrink-0 rounded bg-success-muted px-1.5 py-0.5 text-[10px] font-medium text-success"
                           title="In your uploaded known-contacts list"
                         >
                           Known
@@ -447,7 +445,7 @@ export default function VisitorsPage() {
                     {new Date(v.last_seen).toLocaleDateString()}
                   </TableCell>
                   <TableCell className="text-right">{v.total_pageviews}</TableCell>
-                  <TableCell className={`text-right font-medium ${intentColor(v.intent_score)}`}>
+                  <TableCell className={`text-right font-mono font-medium tabular-nums ${intentColor(v.intent_score)}`}>
                     {Math.round(v.intent_score)}
                   </TableCell>
                   <TableCell>{renderIdentity(v)}</TableCell>

@@ -24,6 +24,25 @@
     --input: 36 15% 88%;
     --ring: 345 100% 60%;
     --radius: 0.75rem;
+
+    /* Semantic status tokens — warm-tuned to sit on the cream background
+       instead of clinical SaaS green/blue. Each has DEFAULT / -foreground
+       (readable text) / -muted (chip background). */
+    --success: 152 45% 38%;
+    --success-foreground: 152 45% 24%;
+    --success-muted: 152 40% 92%;
+    --warning: 32 80% 45%;
+    --warning-foreground: 30 70% 28%;
+    --warning-muted: 40 75% 90%;
+    --info: 222 47% 50%;
+    --info-foreground: 222 45% 32%;
+    --info-muted: 220 45% 93%;
+    --destructive-muted: 0 70% 94%;
+
+    /* Intent-score ramp (Visitors). High reuses the brand pink. */
+    --intent-high: 345 100% 60%;
+    --intent-medium: 32 80% 45%;
+    --intent-low: 269 13% 35%;
   }
 }
 

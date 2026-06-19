@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Sparkles } from "lucide-react";
 import { api, Site, SiteStats, EngagementROI } from "@/lib/api";
 import { SiteCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
@@ -15,6 +15,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/page-header";
+import { StatTile } from "@/components/stat-tile";
 
 function OverviewSkeleton() {
   return (
@@ -63,32 +65,22 @@ function SiteCard({ site }: { site: Site }) {
       <CardContent className="space-y-4">
         {/* Stats row */}
         {stats && stats.total_visitors > 0 && (
-          <div className="grid grid-cols-3 gap-2 text-center">
-            <div>
-              <p className="text-2xl font-bold">{stats.total_visitors}</p>
-              <p className="text-xs text-muted-foreground">Visitors</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-blue-600">
-                {stats.identified}
-              </p>
-              <p className="text-xs text-muted-foreground">Identified</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-green-500">
-                {stats.enriched}
-              </p>
-              <p className="text-xs text-muted-foreground">Enriched</p>
-            </div>
+          <div className="grid grid-cols-3 gap-2">
+            <StatTile label="Visitors" value={stats.total_visitors} />
+            <StatTile label="Identified" value={stats.identified} tone="info" />
+            <StatTile label="Enriched" value={stats.enriched} tone="success" />
           </div>
         )}
 
         {/* Enrichment nudge */}
         {stats && stats.could_enrich_more > 0 && (
-          <p className="text-xs text-yellow-500">
-            {stats.could_enrich_more} visitor
-            {stats.could_enrich_more > 1 ? "s" : ""} could be enriched further
-            with BYOK keys
+          <p className="flex items-center gap-1.5 text-xs text-warning">
+            <Sparkles className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              {stats.could_enrich_more} visitor
+              {stats.could_enrich_more > 1 ? "s" : ""} could be enriched further
+              with BYOK keys
+            </span>
           </p>
         )}
 
@@ -97,25 +89,27 @@ function SiteCard({ site }: { site: Site }) {
           <div className="flex items-center gap-1.5 text-xs">
             {pixelVerified ? (
               <>
-                <span className="h-2 w-2 rounded-full bg-green-500" />
+                <span className="h-2 w-2 rounded-full bg-success" />
                 <span className="text-muted-foreground">Pixel active</span>
               </>
             ) : (
               <>
-                <span className="h-2 w-2 rounded-full bg-yellow-500" />
-                <span className="font-medium text-yellow-700">Pixel not verified</span>
-                <button
+                <span className="h-2 w-2 rounded-full bg-warning" />
+                <span className="font-medium text-warning">Pixel not verified</span>
+                <Button
+                  variant="outline"
+                  size="icon"
                   onClick={handleVerify}
                   disabled={verifying}
                   title={verifying ? "Checking…" : "Re-verify pixel"}
                   aria-label={verifying ? "Checking pixel" : "Re-verify pixel"}
-                  className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded-full border border-yellow-400 bg-yellow-50 text-yellow-800 transition-colors hover:bg-yellow-100 disabled:opacity-60"
+                  className="ml-1 h-6 w-6"
                 >
                   <RefreshCw className={`h-3.5 w-3.5 ${verifying ? "animate-spin" : ""}`} />
-                </button>
+                </Button>
                 <Link
                   href={`/dashboard/onboarding?site=${site.site_id}&step=install`}
-                  className="ml-1 text-[11px] font-medium text-yellow-800 underline-offset-2 hover:underline"
+                  className="ml-1 text-[11px] font-medium text-warning underline-offset-2 hover:underline"
                 >
                   Finish setup →
                 </Link>
@@ -162,9 +156,9 @@ function BeamLoopWidget() {
   const hasActivity = roi.total_engagements > 0 || roi.new_visitors_attributed > 0;
 
   return (
-    <Card className="mb-6 border-blue-200 bg-blue-50/60">
+    <Card className="mb-6 border-info/30 bg-info-muted">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium text-blue-700">
+        <CardTitle className="text-sm font-medium text-info">
           Your Beam Loop this week
         </CardTitle>
         <CardDescription className="text-xs">
@@ -174,19 +168,19 @@ function BeamLoopWidget() {
       <CardContent>
         {hasActivity ? (
           <p className="text-sm font-medium">
-            <span className="text-blue-600 font-bold">{roi.total_engagements}</span>
+            <span className="font-mono font-bold tabular-nums text-info">{roi.total_engagements}</span>
             {" engagements"}
-            <span className="text-muted-foreground mx-2">→</span>
-            <span className="text-green-600 font-bold">{roi.new_visitors_attributed}</span>
+            <span className="mx-2 text-muted-foreground">→</span>
+            <span className="font-mono font-bold tabular-nums text-success">{roi.new_visitors_attributed}</span>
             {" new visitors"}
-            <span className="text-muted-foreground mx-2">→</span>
-            <span className="text-[#FF3366] font-bold">{roi.identified_from_engagement}</span>
+            <span className="mx-2 text-muted-foreground">→</span>
+            <span className="font-mono font-bold tabular-nums text-primary">{roi.identified_from_engagement}</span>
             {" identified"}
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">
             No engagement activity yet.{" "}
-            <Link href="/dashboard/drafts" className="underline text-blue-600">
+            <Link href="/dashboard/drafts" className="text-info underline">
               Approve a draft
             </Link>{" "}
             to start the flywheel.
@@ -253,12 +247,14 @@ export default function DashboardPage() {
         <OverviewSkeleton />
       ) : (
         <div>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-serif font-semibold tracking-tight">Dashboard</h2>
-            <Link href="/dashboard/onboarding">
-              <Button size="sm">Add site</Button>
-            </Link>
-          </div>
+          <PageHeader
+            title="Dashboard"
+            actions={
+              <Link href="/dashboard/onboarding">
+                <Button size="sm">Add site</Button>
+              </Link>
+            }
+          />
 
           <BeamLoopWidget />
 

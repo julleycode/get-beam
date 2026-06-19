@@ -3,10 +3,13 @@
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Layers } from "lucide-react";
 import { api } from "@/lib/api";
 import { CardGridSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { SiteSelector } from "@/components/site-selector";
+import { PageHeader } from "@/components/page-header";
+import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,17 +52,19 @@ export default function SegmentsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-serif font-semibold tracking-tight">Segments</h2>
-        <div className="flex items-center gap-3">
-          <SiteSelector value={siteId} onChange={setSiteId} />
-          {siteId && (
-            <Button size="sm" onClick={handleTrigger} disabled={triggering}>
-              {triggering ? "Running..." : "Re-run segmentation"}
-            </Button>
-          )}
-        </div>
-      </div>
+      <PageHeader
+        title="Segments"
+        actions={
+          <>
+            <SiteSelector value={siteId} onChange={setSiteId} />
+            {siteId && (
+              <Button size="sm" onClick={handleTrigger} disabled={triggering}>
+                {triggering ? "Running..." : "Re-run segmentation"}
+              </Button>
+            )}
+          </>
+        }
+      />
 
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view segments.</p>
@@ -71,9 +76,16 @@ export default function SegmentsPage() {
           onRetry={() => refetch()}
         />
       ) : segments.length === 0 ? (
-        <p className="text-muted-foreground">
-          No segments yet. Segments are auto-generated when 10+ new visitors are enriched, or click &quot;Re-run segmentation&quot; to trigger manually.
-        </p>
+        <EmptyState
+          icon={Layers}
+          title="No segments yet"
+          description="Segments are auto-generated when 10+ new visitors are enriched. You can also trigger one manually."
+          action={
+            <Button size="sm" onClick={handleTrigger} disabled={triggering}>
+              {triggering ? "Running..." : "Re-run segmentation"}
+            </Button>
+          }
+        />
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
           {segments.map((seg) => (

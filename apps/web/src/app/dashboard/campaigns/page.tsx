@@ -7,8 +7,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { TableSkeleton } from "@/components/skeletons";
 import { SiteSelector } from "@/components/site-selector";
-import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -18,22 +27,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 
-function statusVariant(status: string) {
-  switch (status) {
-    case "active": return "default" as const;
-    case "approved": return "default" as const;
-    case "completed": return "secondary" as const;
-    case "paused": return "outline" as const;
-    default: return "secondary" as const;
-  }
-}
-
 export default function CampaignsPage() {
   const searchParams = useSearchParams();
   const [siteId, setSiteId] = useState(searchParams.get("site") || "");
   const [actionError, setActionError] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [sendResult, setSendResult] = useState<string | null>(null);
+  const [confirmCampaign, setConfirmCampaign] = useState<{ id: string; name: string } | null>(null);
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -58,15 +58,6 @@ export default function CampaignsPage() {
   }
 
   async function handleSend(campaignId: string, campaignName: string) {
-    // Real emails go out — make the user confirm explicitly.
-    if (
-      !window.confirm(
-        `Send "${campaignName}" emails to this campaign's audience now? ` +
-          "Unsubscribed and bounced contacts are skipped automatically."
-      )
-    ) {
-      return;
-    }
     setActionError(null);
     setSendResult(null);
     setSendingId(campaignId);
@@ -84,15 +75,16 @@ export default function CampaignsPage() {
       setActionError(err instanceof Error ? err.message : "Send failed");
     } finally {
       setSendingId(null);
+      setConfirmCampaign(null);
     }
   }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-serif font-semibold tracking-tight">Campaigns</h2>
-        <SiteSelector value={siteId} onChange={setSiteId} />
-      </div>
+      <PageHeader
+        title="Campaigns"
+        actions={<SiteSelector value={siteId} onChange={setSiteId} />}
+      />
 
       {actionError && (
         <p className="mb-3 text-sm text-destructive">{actionError}</p>
@@ -131,7 +123,7 @@ export default function CampaignsPage() {
                   </Link>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={statusVariant(c.status)}>{c.status}</Badge>
+                  <StatusBadge status={c.status} />
                 </TableCell>
                 <TableCell className="text-sm">
                   {new Date(c.created_at).toLocaleDateString()}
@@ -160,7 +152,7 @@ export default function CampaignsPage() {
                         <Button
                           size="sm"
                           disabled={sendingId !== null}
-                          onClick={() => handleSend(c.id, c.name)}
+                          onClick={() => setConfirmCampaign({ id: c.id, name: c.name })}
                         >
                           {sendingId === c.id ? "Sending..." : "Send emails"}
                         </Button>
@@ -189,6 +181,42 @@ export default function CampaignsPage() {
           </TableBody>
         </Table>
       )}
+
+      <Dialog
+        open={!!confirmCampaign}
+        onOpenChange={(o) => {
+          if (!o && sendingId === null) setConfirmCampaign(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send &ldquo;{confirmCampaign?.name}&rdquo; now?</DialogTitle>
+            <DialogDescription>
+              Real emails go out to this campaign&apos;s audience. Unsubscribed
+              and bounced contacts are skipped automatically.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmCampaign(null)}
+              disabled={sendingId !== null}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() =>
+                confirmCampaign &&
+                handleSend(confirmCampaign.id, confirmCampaign.name)
+              }
+              disabled={sendingId !== null}
+            >
+              {sendingId !== null ? "Sending..." : "Send emails"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

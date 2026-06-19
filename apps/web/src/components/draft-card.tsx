@@ -3,6 +3,11 @@
 import { useState } from "react";
 import type { SocialDraft as Draft } from "@/lib/api";
 import { PlatformBadge } from "./platform-badge";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import { StatusBadge } from "@/components/ui/status-badge";
 
 interface DraftCardProps {
   draft: Draft;
@@ -11,14 +16,6 @@ interface DraftCardProps {
   onEdit: (id: string, content: string) => void;
   loading?: boolean;
 }
-
-const STATUS_STYLES: Record<string, string> = {
-  pending: "bg-yellow-50 text-yellow-700",
-  approved: "bg-blue-50 text-blue-700",
-  sent: "bg-green-50 text-green-700",
-  rejected: "bg-gray-50 text-gray-500",
-  failed: "bg-red-50 text-red-700",
-};
 
 export function DraftCard({
   draft,
@@ -33,102 +30,81 @@ export function DraftCard({
   );
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
-      {/* Original context */}
-      {draft.original_content && (
-        <div className="bg-gray-50 rounded-md p-3 space-y-1">
-          <p className="text-xs text-gray-400">
-            Replying to @{draft.original_author}
-          </p>
-          <p className="text-sm text-gray-600">{draft.original_content}</p>
-        </div>
-      )}
-
-      {/* Draft content */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <PlatformBadge platform={draft.platform} />
-          <span
-            className={`text-xs px-2 py-0.5 rounded font-medium ${STATUS_STYLES[draft.status]}`}
-          >
-            {draft.status}
-          </span>
-          {draft.strategy_label && (
-            <span
-              className={`text-xs px-2 py-0.5 rounded font-medium ${
-                draft.strategy === "direct"
-                  ? "bg-blue-50 text-blue-600"
-                  : draft.strategy === "conversational"
-                    ? "bg-green-50 text-green-600"
-                    : "bg-[#FFF1F5] text-[#FF3366]"
-              }`}
-            >
-              {draft.strategy_label}
-            </span>
-          )}
-        </div>
-
-        {editing ? (
-          <textarea
-            value={editText}
-            onChange={(e) => setEditText(e.target.value)}
-            className="w-full border border-gray-300 rounded-md p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#FF5C82]"
-            rows={3}
-          />
-        ) : (
-          <p className="text-sm text-gray-800 leading-relaxed">
-            {draft.edited_content || draft.ai_content}
-          </p>
+    <Card>
+      <CardContent className="space-y-3 p-4">
+        {/* Original context */}
+        {draft.original_content && (
+          <div className="space-y-1 rounded-md bg-muted p-3">
+            <p className="text-xs text-muted-foreground">
+              Replying to @{draft.original_author}
+            </p>
+            <p className="text-sm text-muted-foreground">{draft.original_content}</p>
+          </div>
         )}
-      </div>
 
-      {/* Actions */}
-      {draft.status === "pending" && (
-        <div className="flex items-center gap-2 pt-1">
+        {/* Draft content */}
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <PlatformBadge platform={draft.platform} />
+            <StatusBadge status={draft.status} />
+            {draft.strategy_label && (
+              <Badge variant="secondary">{draft.strategy_label}</Badge>
+            )}
+          </div>
+
           {editing ? (
-            <>
-              <button
-                onClick={() => {
-                  onEdit(draft.id, editText);
-                  setEditing(false);
-                }}
-                className="text-xs px-3 py-1.5 rounded-md bg-[#FF3366] text-white hover:bg-[#E51F50]"
-              >
-                Save
-              </button>
-              <button
-                onClick={() => setEditing(false)}
-                className="text-xs px-3 py-1.5 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-            </>
+            <Textarea
+              value={editText}
+              onChange={(e) => setEditText(e.target.value)}
+              rows={3}
+            />
           ) : (
-            <>
-              <button
-                onClick={() => onApprove(draft.id)}
-                disabled={loading}
-                className="text-xs px-3 py-1.5 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-              >
-                {loading ? "Sending..." : "Approve & Send"}
-              </button>
-              <button
-                onClick={() => setEditing(true)}
-                className="text-xs px-3 py-1.5 rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50"
-              >
-                Edit
-              </button>
-              <button
-                onClick={() => onReject(draft.id)}
-                disabled={loading}
-                className="text-xs px-3 py-1.5 rounded-md border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
-              >
-                Reject
-              </button>
-            </>
+            <p className="text-sm leading-relaxed text-foreground">
+              {draft.edited_content || draft.ai_content}
+            </p>
           )}
         </div>
-      )}
-    </div>
+
+        {/* Actions */}
+        {draft.status === "pending" && (
+          <div className="flex items-center gap-2 pt-1">
+            {editing ? (
+              <>
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    onEdit(draft.id, editText);
+                    setEditing(false);
+                  }}
+                >
+                  Save
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button size="sm" onClick={() => onApprove(draft.id)} disabled={loading}>
+                  {loading ? "Sending..." : "Approve & Send"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                  Edit
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-destructive hover:text-destructive"
+                  onClick={() => onReject(draft.id)}
+                  disabled={loading}
+                >
+                  Reject
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

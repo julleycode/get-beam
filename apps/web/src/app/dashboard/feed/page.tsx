@@ -2,10 +2,16 @@
 
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Rss } from "lucide-react";
 import { api, type Platform, type GenerateMultiDraftResponse } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { ListCardSkeleton } from "@/components/skeletons";
 import { PostCard } from "@/components/post-card";
 import { DraftPicker } from "@/components/draft-picker";
+import { EmptyState } from "@/components/empty-state";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 const PLATFORMS: (Platform | "all")[] = [
   "all",
@@ -207,15 +213,16 @@ export default function FeedPage() {
     <div className="max-w-3xl space-y-4 relative">
       {toast && (
         <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium ${
+          className={cn(
+            "fixed right-4 top-4 z-50 rounded-lg px-4 py-3 text-sm font-medium shadow-lg",
             toast.type === "success"
-              ? "bg-green-600 text-white"
-              : "bg-red-600 text-white"
-          }`}
+              ? "bg-success text-primary-foreground"
+              : "bg-destructive text-destructive-foreground"
+          )}
         >
           <div className="flex items-center gap-2">
             <span>{toast.message}</span>
-            <button onClick={() => setToast(null)} className="ml-2 text-white/80 hover:text-white">
+            <button onClick={() => setToast(null)} className="ml-2 opacity-80 hover:opacity-100">
               x
             </button>
           </div>
@@ -225,68 +232,56 @@ export default function FeedPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-serif font-semibold tracking-tight">Feed</h1>
         <div className="flex gap-2">
-          <button
-            onClick={() => setShowImport(!showImport)}
-            className="text-sm px-4 py-2 rounded-md border border-[#FFA8BD] text-[#FF3366] hover:bg-[#FFF1F5]"
-          >
+          <Button variant="outline" size="sm" onClick={() => setShowImport(!showImport)}>
             + Import Post
-          </button>
-          <button
+          </Button>
+          <Button
+            size="sm"
             onClick={() => syncMutation.mutate()}
             disabled={syncMutation.isPending}
-            className="text-sm px-4 py-2 rounded-md bg-[#FF3366] text-white hover:bg-[#E51F50] disabled:opacity-50"
           >
             {syncMutation.isPending ? "Syncing..." : "Sync Now"}
-          </button>
+          </Button>
         </div>
       </div>
 
       {showImport && (
-        <div className="bg-[#FFF1F5] border border-[#FFCCD8] rounded-lg p-4 space-y-3">
-          <p className="text-sm font-medium text-[#8F0F30]">
+        <div className="space-y-3 rounded-lg border bg-secondary/60 p-4">
+          <p className="text-sm font-medium">
             Paste a tweet/post URL to add it to your feed and generate a reply
           </p>
-          <input
+          <Input
             type="text"
             placeholder="https://x.com/user/status/123456..."
             value={importUrl}
             onChange={(e) => setImportUrl(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-[#FFCCD8] rounded-md bg-white"
           />
-          <input
+          <Input
             type="text"
             placeholder="Author name (e.g. Elon Musk @elonmusk)"
             value={importAuthor}
             onChange={(e) => setImportAuthor(e.target.value)}
-            className="w-full px-3 py-2 text-sm border border-[#FFCCD8] rounded-md bg-white"
           />
-          <textarea
+          <Textarea
             placeholder="Paste the post content here..."
             value={importContent}
             onChange={(e) => setImportContent(e.target.value)}
             rows={3}
-            className="w-full px-3 py-2 text-sm border border-[#FFCCD8] rounded-md bg-white resize-none"
+            className="resize-none"
           />
           <div className="flex items-center justify-between">
             {importUrl && (
-              <span className="text-xs text-[#FF3366] bg-[#FFE3EA] px-2 py-1 rounded">
+              <span className="rounded bg-primary/10 px-2 py-1 text-xs text-primary">
                 Detected: {detectPlatform(importUrl)}
               </span>
             )}
-            <div className="flex gap-2 ml-auto">
-              <button
-                onClick={() => setShowImport(false)}
-                className="text-sm px-3 py-1.5 rounded-md text-gray-600 hover:bg-gray-100"
-              >
+            <div className="ml-auto flex gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setShowImport(false)}>
                 Cancel
-              </button>
-              <button
-                onClick={handleImport}
-                disabled={!importUrl.trim()}
-                className="text-sm px-4 py-1.5 rounded-md bg-[#FF3366] text-white hover:bg-[#E51F50] disabled:opacity-50"
-              >
+              </Button>
+              <Button size="sm" onClick={handleImport} disabled={!importUrl.trim()}>
                 Import & Add to Feed
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -294,16 +289,17 @@ export default function FeedPage() {
 
       <div className="space-y-3">
         {/* Source tabs */}
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {SOURCES.map((s) => (
             <button
               key={s.value}
               onClick={() => { setSource(s.value); setPage(1); }}
-              className={`text-sm px-4 py-2 rounded-lg font-medium transition-colors ${
+              className={cn(
+                "rounded-lg px-4 py-2 text-sm font-medium transition-colors",
                 source === s.value
-                  ? "bg-[#FF3366] text-white shadow-sm"
-                  : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
-              }`}
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "border border-border bg-card text-muted-foreground hover:bg-secondary"
+              )}
             >
               {s.label}
             </button>
@@ -311,34 +307,34 @@ export default function FeedPage() {
         </div>
 
         {/* Platform filter */}
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {PLATFORMS.map((p) => (
             <button
               key={p}
               onClick={() => { setPlatform(p); setPage(1); }}
-              className={`text-xs px-3 py-1.5 rounded-full border ${
+              className={cn(
+                "rounded-full border px-3 py-1.5 text-xs transition-colors",
                 platform === p
-                  ? "bg-[#FF3366] text-white border-[#FF3366]"
-                  : "bg-white text-gray-600 border-gray-300 hover:bg-gray-50"
-              }`}
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card text-muted-foreground hover:bg-secondary"
+              )}
             >
               {p === "all" ? "All" : p.charAt(0).toUpperCase() + p.slice(1)}
             </button>
           ))}
         </div>
 
-        <div className="flex items-center gap-3 flex-wrap">
-          <label className="text-xs font-medium text-gray-500">Date:</label>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-xs font-medium text-muted-foreground">Date:</label>
           <input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1); }}
-            className="text-xs px-2 py-1.5 border border-gray-300 rounded-md bg-white text-gray-700" />
-          <span className="text-xs text-gray-400">to</span>
+            className="rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground" />
+          <span className="text-xs text-muted-foreground">to</span>
           <input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1); }}
-            className="text-xs px-2 py-1.5 border border-gray-300 rounded-md bg-white text-gray-700" />
+            className="rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground" />
           {(dateFrom || dateTo) && (
-            <button onClick={() => { setDateFrom(""); setDateTo(""); setPage(1); }}
-              className="text-xs px-2 py-1.5 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100">
+            <Button variant="ghost" size="sm" onClick={() => { setDateFrom(""); setDateTo(""); setPage(1); }}>
               Clear dates
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -346,12 +342,11 @@ export default function FeedPage() {
       {isLoading ? (
         <ListCardSkeleton rows={5} leading />
       ) : data?.posts.length === 0 ? (
-        <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-          <p className="text-gray-500">No posts yet.</p>
-          <p className="text-sm text-gray-400 mt-1">
-            Connect an account and sync to see posts, or import a post by URL.
-          </p>
-        </div>
+        <EmptyState
+          icon={Rss}
+          title="No posts yet"
+          description="Connect an account and sync to see posts, or import a post by URL."
+        />
       ) : (
         <div className="space-y-3">
           {data?.posts.map((post) => (
@@ -374,11 +369,13 @@ export default function FeedPage() {
 
       {data && data.total > data.per_page && (
         <div className="flex items-center justify-center gap-4 pt-4">
-          <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}
-            className="text-sm px-3 py-1 rounded border disabled:opacity-30">Previous</button>
-          <span className="text-sm text-gray-500">Page {page} of {Math.ceil(data.total / data.per_page)}</span>
-          <button onClick={() => setPage((p) => p + 1)} disabled={page * data.per_page >= data.total}
-            className="text-sm px-3 py-1 rounded border disabled:opacity-30">Next</button>
+          <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page === 1}>
+            Previous
+          </Button>
+          <span className="text-sm text-muted-foreground">Page {page} of {Math.ceil(data.total / data.per_page)}</span>
+          <Button variant="outline" size="sm" onClick={() => setPage((p) => p + 1)} disabled={page * data.per_page >= data.total}>
+            Next
+          </Button>
         </div>
       )}
     </div>

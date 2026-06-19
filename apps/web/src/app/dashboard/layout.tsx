@@ -1,10 +1,28 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
+import {
+  LayoutDashboard,
+  Users,
+  Layers,
+  Megaphone,
+  Download,
+  Receipt,
+  Rss,
+  FileText,
+  AtSign,
+  BookOpen,
+  Lightbulb,
+  CreditCard,
+  ListChecks,
+  Inbox,
+  Settings,
+} from "lucide-react";
 import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import { BeamLogo } from "@/components/beam-logo";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -12,30 +30,37 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
-const EASYTRACK_ITEMS: { href: string; label: string; adminOnly?: boolean }[] = [
-  { href: "/dashboard", label: "Overview" },
-  { href: "/dashboard/visitors", label: "Visitors" },
-  { href: "/dashboard/segments", label: "Segments" },
-  { href: "/dashboard/campaigns", label: "Campaigns" },
-  { href: "/dashboard/exports", label: "Exports" },
-  { href: "/dashboard/costs", label: "API Costs", adminOnly: true },
+type NavItem = {
+  href: string;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  adminOnly?: boolean;
+};
+
+const EASYTRACK_ITEMS: NavItem[] = [
+  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
+  { href: "/dashboard/visitors", label: "Visitors", icon: Users },
+  { href: "/dashboard/segments", label: "Segments", icon: Layers },
+  { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone },
+  { href: "/dashboard/exports", label: "Exports", icon: Download },
+  { href: "/dashboard/costs", label: "API Costs", icon: Receipt, adminOnly: true },
 ];
 
-const EASYENGAGE_ITEMS = [
-  { href: "/dashboard/feed", label: "Feed" },
-  { href: "/dashboard/drafts", label: "Drafts" },
-  { href: "/dashboard/social-accounts", label: "Social Accounts" },
+const EASYENGAGE_ITEMS: NavItem[] = [
+  { href: "/dashboard/feed", label: "Feed", icon: Rss },
+  { href: "/dashboard/drafts", label: "Drafts", icon: FileText },
+  { href: "/dashboard/social-accounts", label: "Social Accounts", icon: AtSign },
 ];
 
 // adminOnly items are hidden until /auth/me confirms is_admin (no flash for
 // non-admins while loading — the backend rejects non-admins on those pages).
-const BOTTOM_ITEMS: { href: string; label: string; adminOnly?: boolean }[] = [
-  { href: "/dashboard/blog", label: "Blog", adminOnly: true },
-  { href: "/dashboard/feature-board", label: "Feature Board" },
-  { href: "/dashboard/billing", label: "Billing" },
-  { href: "/dashboard/waitlist", label: "Waitlist", adminOnly: true },
-  { href: "/dashboard/feature-requests", label: "Feature Requests", adminOnly: true },
-  { href: "/dashboard/settings", label: "Settings" },
+const BOTTOM_ITEMS: NavItem[] = [
+  { href: "/dashboard/blog", label: "Blog", icon: BookOpen, adminOnly: true },
+  { href: "/dashboard/feature-board", label: "Feature Board", icon: Lightbulb },
+  { href: "/dashboard/billing", label: "Billing", icon: CreditCard },
+  { href: "/dashboard/waitlist", label: "Waitlist", icon: ListChecks, adminOnly: true },
+  { href: "/dashboard/feature-requests", label: "Feature Requests", icon: Inbox, adminOnly: true },
+  { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
 
 // Set by the sign-up page so the invite token survives Clerk's multi-step
@@ -45,10 +70,12 @@ const INVITE_TOKEN_KEY = "beam_invite";
 function NavLink({
   href,
   label,
+  icon: Icon,
   pathname,
 }: {
   href: string;
   label: string;
+  icon: ComponentType<{ className?: string }>;
   pathname: string;
 }) {
   const isActive =
@@ -57,12 +84,14 @@ function NavLink({
   return (
     <Link
       href={href}
-      className={`rounded-full px-4 py-2 text-sm transition-all ${
+      className={cn(
+        "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
         isActive
-          ? "bg-[hsl(345,100%,60%)] text-[#FAF6F0] font-medium shadow-[0_1px_0_rgba(43,37,48,0.1),0_4px_12px_-4px_rgba(255,51,102,0.35)]"
-          : "text-muted-foreground hover:text-foreground hover:bg-secondary"
-      }`}
+          ? "bg-primary font-medium text-primary-foreground shadow-sm"
+          : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+      )}
     >
+      <Icon className="h-4 w-4 shrink-0" />
       {label}
     </Link>
   );
@@ -238,7 +267,7 @@ export default function DashboardLayout({
     return (
       <div className="flex min-h-screen flex-col">
         {HAS_CLERK && <ClerkAuthGuard />}
-        <header className="flex items-center justify-between border-b border-[rgba(43,37,48,0.08)] bg-card px-6 py-3">
+        <header className="flex items-center justify-between border-b border-border bg-card px-6 py-3">
           <h1 className="text-xl font-serif font-semibold tracking-tight flex items-center gap-2">
             <BeamLogo />
             Beam
@@ -262,7 +291,7 @@ export default function DashboardLayout({
       {/* Clerk auth guard (only when Clerk is active) */}
       {HAS_CLERK && <ClerkAuthGuard />}
 
-      <aside className="w-56 border-r border-[rgba(43,37,48,0.08)] bg-card p-4 flex flex-col">
+      <aside className="w-56 border-r border-border bg-card p-4 flex flex-col">
         <div className="mb-6">
           <h1 className="text-xl font-serif font-semibold tracking-tight flex items-center gap-2">
             <BeamLogo />
@@ -280,6 +309,7 @@ export default function DashboardLayout({
                 key={item.href}
                 href={item.href}
                 label={item.label}
+                icon={item.icon}
                 pathname={pathname}
               />
             )
@@ -302,6 +332,7 @@ export default function DashboardLayout({
                 key={item.href}
                 href={item.href}
                 label={item.label}
+                icon={item.icon}
                 pathname={pathname}
               />
             )
