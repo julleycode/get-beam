@@ -89,7 +89,7 @@
   async function renderJourney(ob) {
     const pages = (ob.state && ob.state.journey) || [];
     if (!pages.length) return;
-    await ob.bot(`and here's <b>exactly</b> what you just did on getbeam.fyi — recorded live by the pixel:`, { delay: 300 });
+    await ob.bot(`and here's <b>exactly</b> what you just did on getbeam.fyi:`, { delay: 300 });
     const rows = pages.map((p, i) => {
       const secs = _fmtSecs(p.seconds);
       return `<div class="ob-row"><span class="k">${i + 1}. ${_esc(p.path || '/')}</span>` +
@@ -390,8 +390,8 @@
         }), { cls: 'rich card', typing: false });
       } else if (id && id.matched && id.level === 'device') {
         await ob.bot(`caught you! your browser fingerprint matched the pixel visit. 🔒`, { delay: 300 });
-        await ob.bot(`that's device-level identification — in production, we layer identity providers on top to get your name, email, and social profiles.`);
-        await ob.bot(`drop your work email and i'll show you the full profile experience.`);
+        await ob.bot(`i matched your device, but i don't have a name on file for it yet — happens with some traffic.`);
+        await ob.bot(`drop your work email and i'll pull your full profile — name, company, and socials.`);
       } else {
         await ob.bot(`couldn't identify you this time — happens with ~30% of traffic. in production, our 7-layer waterfall catches most of your real visitors.`, { delay: 300 });
         await ob.bot(`drop your work email and i'll pull your real profile.`);

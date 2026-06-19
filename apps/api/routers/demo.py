@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from apps.api.config import settings
 from apps.api.models.database import async_session
+from apps.api.models.beam_identity import BeamIdentityNode
 from apps.api.models.event import Event
 from apps.api.models.visitor import Visitor
 from apps.api.services.rate_limiter import limiter
@@ -136,6 +137,7 @@ async def demo_identify(request: Request, body: IdentifyBody = IdentifyBody()) -
 
     # ── Pre-check: fingerprint match against recent pixel events ──
     fp_matched = False
+    id_node = None
     if body.fingerprint and body.fingerprint.startswith("fp2_"):
         try:
             async with async_session() as db:
@@ -153,8 +155,50 @@ async def demo_identify(request: Request, body: IdentifyBody = IdentifyBody()) -
                     base["fingerprint_matched"] = True
                     base["providers_tried"].append("fingerprint")
                     logger.info("demo_fingerprint_match", fp=body.fingerprint[:12])
+
+                # Cross-customer identity graph: if this exact device was ever
+                # identified on ANY Beam site, we already KNOW who they are.
+                # Reuse it (free, no provider call) instead of punting to email.
+                id_node = (
+                    await db.execute(
+                        select(BeamIdentityNode)
+                        .where(
+                            BeamIdentityNode.fingerprint == body.fingerprint,
+                            BeamIdentityNode.email.isnot(None),
+                        )
+                        .order_by(BeamIdentityNode.confidence_score.desc())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
         except Exception as e:
             logger.debug("demo_fingerprint_check_failed", error=str(e))
+
+    # Known device → return the real person now (the "detect for real" path).
+    if id_node is not None and id_node.email:
+        base["providers_tried"].append("beam_identity_graph")
+        base.update({
+            "matched": True,
+            "level": "person",
+            "full_name": id_node.full_name,
+            "email": id_node.email,
+            "resolution_provider": "beam_identity_graph",
+        })
+        try:
+            from apps.api.services.enricher import Enricher
+            prof = await Enricher(None)._enrich_pdl(id_node.email)
+            if prof:
+                base.update({
+                    "job_title": prof.get("job_title"),
+                    "company_name": prof.get("company_name"),
+                    "company_domain": prof.get("company_domain"),
+                    "country": prof.get("country") or base.get("country"),
+                    "linkedin_url": prof.get("linkedin_url"),
+                    "twitter_handle": prof.get("twitter_handle"),
+                })
+        except Exception as e:
+            logger.warning("demo_identify_enrich_error", error=str(e))
+        logger.info("demo_identify", ip=ip[:8], level="person", matched=True, provider="beam_identity_graph")
+        return base
 
     # ── Step 0: Identity Graphs in parallel (works on ANY IP) ──
 
