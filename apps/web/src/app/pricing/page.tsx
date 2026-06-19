@@ -119,12 +119,12 @@ export default function PricingPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background font-mono">
       {/* Nav */}
       <nav className="border-b border-border/40">
         <div className="max-w-5xl mx-auto flex items-center justify-between px-6 py-4">
-          <Link href="/" className="text-xl font-bold tracking-tight">
-            Beam
+          <Link href="/" className="font-serif text-2xl font-semibold lowercase tracking-tight">
+            beam
           </Link>
           <div className="flex items-center gap-3">
             <Link href="/sign-in">
@@ -141,7 +141,7 @@ export default function PricingPage() {
 
       {/* Hero */}
       <section className="max-w-3xl mx-auto text-center pt-16 pb-10 px-6">
-        <h1 className="text-4xl font-bold tracking-tight sm:text-5xl">
+        <h1 className="font-serif text-4xl font-semibold tracking-tight sm:text-5xl">
           Simple, transparent pricing
         </h1>
         <p className="mt-4 text-lg text-muted-foreground max-w-xl mx-auto">
@@ -164,7 +164,7 @@ export default function PricingPage() {
             >
               {iv === "monthly" ? "Monthly" : "Yearly"}
               {iv === "yearly" && (
-                <span className="ml-1.5 text-xs text-green-500 font-semibold">
+                <span className="ml-1.5 text-xs text-emerald-600 font-semibold">
                   Save 20%
                 </span>
               )}
@@ -195,9 +195,9 @@ export default function PricingPage() {
                   </div>
                 )}
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-lg">{plan.name}</CardTitle>
+                  <CardTitle className="font-serif text-xl font-semibold">{plan.name}</CardTitle>
                   <div className="flex items-baseline gap-1 mt-2">
-                    <span className="text-4xl font-bold">${price}</span>
+                    <span className="font-serif text-4xl font-semibold">${price}</span>
                     {price > 0 && (
                       <span className="text-muted-foreground">/mo</span>
                     )}
@@ -222,7 +222,7 @@ export default function PricingPage() {
                         className="text-sm text-muted-foreground flex items-start gap-2"
                       >
                         <svg
-                          className="w-4 h-4 text-green-500 mt-0.5 shrink-0"
+                          className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0"
                           fill="none"
                           viewBox="0 0 24 24"
                           stroke="currentColor"
@@ -257,13 +257,13 @@ export default function PricingPage() {
       {/* FAQ */}
       <section className="border-t border-border">
         <div className="max-w-3xl mx-auto px-6 py-16">
-          <h2 className="text-2xl font-bold text-center mb-10">
+          <h2 className="font-serif text-2xl font-semibold text-center mb-10">
             Frequently asked questions
           </h2>
           <div className="space-y-8">
             {FAQ.map((item) => (
               <div key={item.q}>
-                <h3 className="font-semibold text-foreground mb-2">{item.q}</h3>
+                <h3 className="font-serif text-lg font-semibold text-foreground mb-2">{item.q}</h3>
                 <p className="text-sm text-muted-foreground leading-relaxed">{item.a}</p>
               </div>
             ))}
@@ -274,7 +274,7 @@ export default function PricingPage() {
       {/* Footer CTA */}
       <section className="border-t border-border">
         <div className="max-w-3xl mx-auto text-center px-6 py-16">
-          <h2 className="text-2xl font-bold mb-3">Ready to see who&apos;s visiting?</h2>
+          <h2 className="font-serif text-2xl font-semibold mb-3">Ready to see who&apos;s visiting?</h2>
           <p className="text-muted-foreground mb-6">
             Start free. No credit card required. Upgrade anytime.
           </p>
