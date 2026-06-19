@@ -5,6 +5,8 @@ trigger-agnostic services (e.g. resolution_runner) so jobs stay thin and
 can move to a Railway cron service or Celery worker without rewrites.
 """
 
+from datetime import datetime, timedelta, timezone
+
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -89,6 +91,14 @@ def start_scheduler() -> None:
         minutes=settings.resolution_sweep_interval_minutes,
         id="resolution_sweep",
         replace_existing=True,
+        # APScheduler's first interval fire is at +interval. The API process
+        # restarts on every deploy, resetting that 30-min timer before it ever
+        # elapses — so the sweep effectively never ran and backlogs piled up.
+        # Fire ~shortly after boot so each deploy drains the backlog, then keep
+        # the interval. The sweep is advisory-locked + budget-gated, so running
+        # on every boot is safe. (Railway cron is the durable fix — see
+        # apps/api/jobs/run_sweep_once.py.)
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=20),
     )
     scheduler.add_job(
         _publish_scheduled_blog_job,
