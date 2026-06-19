@@ -39,3 +39,6 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+
+# beam landing: keep the 53MB source video out of git (compressed launch.mp4 is committed)
+apps/web/public/beam/launch.src.mp4

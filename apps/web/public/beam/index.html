@@ -84,8 +84,8 @@
         beam
       </div>
       <div class="nav-pills">
-        <a href="#how" onclick="openModal('modal-how'); return false;">how it works</a>
-        <a href="#faq" onclick="openModal('modal-faq'); return false;">faq</a>
+        <a href="#how">how it works</a>
+        <a href="#faq">faq</a>
         <a href="/sign-in" class="login-link">log in</a>
       </div>
     </nav>
@@ -116,10 +116,20 @@
   </div>
 </div>
 
+<!-- ── LAUNCH VIDEO (autoplay, below hero) ── -->
+<section class="launch-video" style="padding:44px 20px 4px;text-align:center;">
+  <div class="wrap" style="max-width:860px;margin:0 auto;">
+    <video src="/beam/launch.mp4" autoplay muted playsinline controls preload="metadata"
+           style="width:100%;height:auto;border-radius:18px;box-shadow:0 18px 60px rgba(0,0,0,.18);display:block;"
+           aria-label="beam launch video"></video>
+  </div>
+</section>
+
 <!-- ────────────────────────────────────────────────────────────
      SECTION 2: SCROLL STORYTELLING (indie hacker hook)
+     hidden per request — narrative removed from the landing page
      ──────────────────────────────────────────────────────────── -->
-<section class="story-section">
+<section class="story-section" style="display:none">
   <div class="story-wrap">
     <div class="story-line sl-1" data-sr>so you launched your vibe-coded product?</div>
     <div class="story-line sl-2" data-sr>congrats. you rock! 🎉</div>
@@ -159,37 +169,17 @@
 <section class="founders-wall" id="founders">
   <div class="wrap">
     <h2 class="h-serif fw-title">the founders wall</h2>
-    <p class="fw-lede">the first 100 climbers get a spot on the wall.<br>linked to your X — proof you got here first.</p>
+    <p class="fw-lede">the first 100 early supporters get a spot on the wall.</p>
     <p class="fw-count"><strong id="fw-claimed">0</strong> / 100 claimed</p>
     <div class="fw-grid" id="fw-grid" aria-label="Founders wall — the first 100 beam climbers"></div>
   </div>
 </section>
 
-<!-- ── ENDCARD — sky theme (original) ── -->
-<div class="sky-stage sky-stage--footer" style="padding-top: 1px;">
-  <div class="cloud-layer"></div>
-  <section class="footer-cta">
-    <div class="wrap">
-      <h2 class="h-serif" data-tw="footer-title">turn pageviews into <em>growth pipeline.</em></h2>
-      <form class="waitlist-form" id="end-waitlist" onsubmit="return handleWaitlist(event, this)" style="justify-content:center;margin-top:16px">
-        <div class="waitlist-row" style="justify-content:center">
-          <input type="email" class="waitlist-input" placeholder="you@company.com" required style="max-width:280px" />
-          <button type="submit" class="btn btn-primary">join the waitlist <span aria-hidden="true">→</span></button>
-        </div>
-        <input type="text" class="waitlist-input waitlist-site" name="x_handle" placeholder="@yourhandle — claim your founders wall spot" autocapitalize="off" autocorrect="off" spellcheck="false" style="max-width:360px;margin-left:auto;margin-right:auto" />
-      </form>
-      <p class="fine" data-tw="footer-fine">limited spots · we'll reach out personally</p>
-    </div>
-  </section>
-</div>
-
-
-
 <!-- ────────────────────────────────────────────────────────────
      SECTION 3: WHAT YOU GET (3-column grid)
-     HIDDEN via display:none — remove the style to re-enable
+     now shown inline on the landing page
      ──────────────────────────────────────────────────────────── -->
-<section id="how" class="what-section" style="display:none !important">
+<section id="how" class="what-section">
   <div class="wrap">
     <h2 class="eyebrow-label" data-tw="what-eyebrow" style="color: rgb(255, 51, 102)">how beam works</h2>
     <h2 class="h-serif section-title" data-tw="what-title">three steps. <em>no setup.</em></h2>
@@ -212,7 +202,7 @@
               <span class="mockwin-light" style="background:#7AD08F"></span>
               <span class="mockwin-title">beam · live visitors</span>
             </div>
-            <div class="mockwin-body"></div>
+            <div class="mockwin-body" id="mock-visitors"></div>
           </div>
         </div>
       </article>
@@ -232,7 +222,7 @@
               <span class="mockwin-light" style="background:#7AD08F"></span>
               <span class="mockwin-title">beam · profile match</span>
             </div>
-            <div class="mockwin-body"></div>
+            <div class="mockwin-body" id="mock-match"></div>
           </div>
         </div>
       </article>
@@ -252,7 +242,7 @@
               <span class="mockwin-light" style="background:#7AD08F"></span>
               <span class="mockwin-title">beam · outreach draft</span>
             </div>
-            <div class="mockwin-body"></div>
+            <div class="mockwin-body" id="mock-draft"></div>
           </div>
         </div>
       </article>
@@ -263,16 +253,87 @@
 
 
 <!-- ────────────────────────────────────────────────────────────
-     SECTION 4: FAQ
-     HIDDEN via display:none — remove the style to re-enable
+     PRICING — moved onto the landing page per request
      ──────────────────────────────────────────────────────────── -->
-<section id="faq" class="faq-section" style="display:none !important">
+<section id="pricing" class="pricing-section">
+  <div class="wrap">
+    <h2 class="eyebrow-label" style="color:#FF3366;text-align:center;">pricing</h2>
+    <h2 class="h-serif section-title" style="text-align:center;margin:0 auto 8px;">simple pricing. <em>start free.</em></h2>
+    <p class="section-lede" style="text-align:center;max-width:520px;margin:0 auto 38px;">no card to start. cancel in two clicks. you only pay when beam identifies real people.</p>
+    <div class="pricing-grid">
+      <div class="pricing-card">
+        <div class="pc-name">free</div>
+        <div class="pc-price">$0<span>/mo</span></div>
+        <div class="pc-limit">10 identified visitors/mo</div>
+        <ul class="pc-feats">
+          <li>core enrichment</li>
+          <li>basic visitor analytics</li>
+          <li>1 website</li>
+          <li class="pc-hl">unlimited email &amp; social outreach — that's on us</li>
+        </ul>
+        <a class="btn btn-ghost pc-cta" href="#hero-waitlist">get started free</a>
+      </div>
+      <div class="pricing-card pricing-card--featured">
+        <div class="pc-badge">most popular</div>
+        <div class="pc-name">pro</div>
+        <div class="pc-price">$19<span>/mo</span></div>
+        <div class="pc-limit">50 identified visitors/mo</div>
+        <ul class="pc-feats">
+          <li>everything in free</li>
+          <li>social enrichment</li>
+          <li>ai reply drafts</li>
+          <li>priority support</li>
+          <li>3 websites</li>
+        </ul>
+        <a class="btn btn-primary pc-cta" href="#hero-waitlist">start with pro</a>
+      </div>
+      <div class="pricing-card">
+        <div class="pc-name">max</div>
+        <div class="pc-price">$49<span>/mo</span></div>
+        <div class="pc-limit">unlimited identified visitors</div>
+        <ul class="pc-feats">
+          <li>everything in pro</li>
+          <li>priority identification</li>
+          <li>team seats</li>
+          <li>api access</li>
+          <li>unlimited websites</li>
+        </ul>
+        <a class="btn btn-ghost pc-cta" href="#hero-waitlist">go max</a>
+      </div>
+    </div>
+  </div>
+  <style>
+    .pricing-section{padding:56px 20px 8px}
+    .pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:20px;max-width:960px;margin:0 auto;align-items:stretch}
+    .pricing-card{display:flex;flex-direction:column;background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:18px;padding:28px 22px;box-shadow:0 10px 30px rgba(0,0,0,.05);position:relative}
+    .pricing-card--featured{border-color:var(--pink,#FF3366);box-shadow:0 16px 44px rgba(255,51,102,.16)}
+    .pc-badge{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--pink,#FF3366);color:#fff;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:4px 12px;border-radius:999px;white-space:nowrap}
+    .pc-name{font-weight:700;font-size:15px;letter-spacing:.02em;color:#FF3366;text-transform:lowercase}
+    .pc-price{font-size:38px;font-weight:800;margin:6px 0 2px;line-height:1}
+    .pc-price span{font-size:15px;font-weight:600;color:#888}
+    .pc-limit{font-size:13px;color:#666;margin-bottom:16px}
+    .pc-feats{list-style:none;padding:0;margin:0 0 22px;flex:1}
+    .pc-feats li{font-size:14px;color:#444;padding:6px 0 6px 22px;position:relative}
+    .pc-feats li::before{content:"✓";position:absolute;left:0;color:#FF3366;font-weight:700}
+    .pc-feats li.pc-hl{color:#FF3366;font-weight:700}
+    .pc-cta{width:100%;text-align:center;justify-content:center}
+    .btn-ghost{background:transparent;border:1.5px solid rgba(0,0,0,.14);color:#222}
+    .btn-ghost:hover{border-color:var(--pink,#FF3366);color:var(--pink,#FF3366)}
+    @media(max-width:760px){.pricing-grid{grid-template-columns:1fr;max-width:380px}}
+  </style>
+</section>
+
+<!-- ────────────────────────────────────────────────────────────
+     SECTION 4: FAQ
+     now shown inline on the landing page
+     ──────────────────────────────────────────────────────────── -->
+<section id="faq" class="faq-section">
   <div class="wrap">
     <h2 class="eyebrow-label" data-tw="faq-eyebrow" style="text-align:center;">faq</h2>
     <h2 class="h-serif section-title" data-tw="faq-title" style="text-align: center; margin-left: auto; margin-right: auto; font-size: 44px">questions you're probably <em>about to ask.</em></h2>
 
     <div class="faq-list">
-      <details class="faq-item">
+      <details class="faq-item" open>
         <summary>when will i see my first identified visitor? <span class="chev" aria-hidden="true">+</span></summary>
         <p class="faq-answer">within 30 minutes of installing the snippet. you'll get an email the moment beam catches one.</p>
       </details>
@@ -308,7 +369,23 @@
   </div>
 </section>
 
-<!-- SECTION 5: FOOTER CTA — hidden, CTA already in story section above -->
+<!-- ── ENDCARD — sky theme (original), moved below pricing ── -->
+<div class="sky-stage sky-stage--footer" style="padding-top: 1px;">
+  <div class="cloud-layer"></div>
+  <section class="footer-cta">
+    <div class="wrap">
+      <h2 class="h-serif" data-tw="footer-title">turn pageviews into <em>growth pipeline.</em></h2>
+      <form class="waitlist-form" id="end-waitlist" onsubmit="return handleWaitlist(event, this)" style="justify-content:center;margin-top:16px">
+        <div class="waitlist-row" style="justify-content:center">
+          <input type="email" class="waitlist-input" placeholder="you@company.com" required style="max-width:280px" />
+          <button type="submit" class="btn btn-primary">join the waitlist <span aria-hidden="true">→</span></button>
+        </div>
+        <input type="text" class="waitlist-input waitlist-site" name="x_handle" placeholder="@yourhandle — claim your founders wall spot" autocapitalize="off" autocorrect="off" spellcheck="false" style="max-width:360px;margin-left:auto;margin-right:auto" />
+      </form>
+      <p class="fine" data-tw="footer-fine">limited spots · we'll reach out personally</p>
+    </div>
+  </section>
+</div>
 
 <div class="wrap">
   <footer class="legal">
@@ -318,132 +395,6 @@
       <a href="/beam/terms.html">terms</a>
     </div>
   </footer>
-</div>
-
-<!-- ────────────────────────────────────────────────────────────
-     HOW IT WORKS MODAL
-     ──────────────────────────────────────────────────────────── -->
-<div class="modal-overlay" id="modal-how" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-how-title">
-  <div class="modal-backdrop" onclick="closeModal('modal-how')"></div>
-  <div class="modal-content modal-content--carousel">
-    <button class="modal-close" onclick="closeModal('modal-how')" aria-label="close">&times;</button>
-    <h2 class="eyebrow-label" style="color:#FF3366">how beam works</h2>
-    <h2 class="h-serif modal-title" id="modal-how-title">three steps. <em>no setup.</em></h2>
-    <p class="modal-lede">paste your site url. install one snippet. take a nap.<br>we'll beam the rest.</p>
-
-    <div class="carousel" id="how-carousel">
-      <div class="carousel-track">
-        <!-- slide 1 -->
-        <div class="carousel-slide" data-slide="0">
-          <div class="slide-text">
-            <span class="step-num">01</span>
-            <h3 class="h-serif" style="font-size:22px;margin:0 0 6px">see them</h3>
-            <p>a live list of who's on your site — names, companies, what page they're reading right now.</p>
-          </div>
-          <div class="slide-mock">
-            <div class="mockwin">
-              <div class="mockwin-bar">
-                <span class="mockwin-light" style="background:#FF6B7A"></span>
-                <span class="mockwin-light" style="background:#FFD86B"></span>
-                <span class="mockwin-light" style="background:#7AD08F"></span>
-                <span class="mockwin-title">beam · live visitors</span>
-              </div>
-              <div class="mockwin-body" id="mock-visitors"></div>
-            </div>
-          </div>
-        </div>
-        <!-- slide 2 -->
-        <div class="carousel-slide" data-slide="1">
-          <div class="slide-text">
-            <span class="step-num">02</span>
-            <h3 class="h-serif" style="font-size:22px;margin:0 0 6px">find them</h3>
-            <p>social handles auto-matched. linkedin, twitter, facebook. know where they're most active.</p>
-          </div>
-          <div class="slide-mock">
-            <div class="mockwin">
-              <div class="mockwin-bar">
-                <span class="mockwin-light" style="background:#FF6B7A"></span>
-                <span class="mockwin-light" style="background:#FFD86B"></span>
-                <span class="mockwin-light" style="background:#7AD08F"></span>
-                <span class="mockwin-title">beam · profile match</span>
-              </div>
-              <div class="mockwin-body" id="mock-match"></div>
-            </div>
-          </div>
-        </div>
-        <!-- slide 3 -->
-        <div class="carousel-slide" data-slide="2">
-          <div class="slide-text">
-            <span class="step-num">03</span>
-            <h3 class="h-serif" style="font-size:22px;margin:0 0 6px">charm them</h3>
-            <p>outreach that sounds like you wrote it. watch the heart float up.</p>
-          </div>
-          <div class="slide-mock">
-            <div class="mockwin">
-              <div class="mockwin-bar">
-                <span class="mockwin-light" style="background:#FF6B7A"></span>
-                <span class="mockwin-light" style="background:#FFD86B"></span>
-                <span class="mockwin-light" style="background:#7AD08F"></span>
-                <span class="mockwin-title">beam · outreach draft</span>
-              </div>
-              <div class="mockwin-body" id="mock-draft"></div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="carousel-dots">
-        <button class="carousel-dot active" data-dot="0" aria-label="step 1"></button>
-        <button class="carousel-dot" data-dot="1" aria-label="step 2"></button>
-        <button class="carousel-dot" data-dot="2" aria-label="step 3"></button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ────────────────────────────────────────────────────────────
-     FAQ MODAL
-     ──────────────────────────────────────────────────────────── -->
-<div class="modal-overlay" id="modal-faq" style="display:none" role="dialog" aria-modal="true" aria-labelledby="modal-faq-title">
-  <div class="modal-backdrop" onclick="closeModal('modal-faq')"></div>
-  <div class="modal-content modal-content--wide">
-    <button class="modal-close" onclick="closeModal('modal-faq')" aria-label="close">&times;</button>
-    <h2 class="eyebrow-label" style="color:#FF3366;text-align:center">faq</h2>
-    <h2 class="h-serif modal-title" id="modal-faq-title" style="text-align:center">questions you're probably <em>about to ask.</em></h2>
-    <div class="faq-list" style="margin-top:24px">
-      <details class="faq-item">
-        <summary>when will i see my first identified visitor? <span class="chev" aria-hidden="true">+</span></summary>
-        <p class="faq-answer">within 30 minutes of installing the snippet. you'll get an email the moment beam catches one.</p>
-      </details>
-      <details class="faq-item">
-        <summary>how accurate is identification? <span class="chev" aria-hidden="true">+</span></summary>
-        <p class="faq-answer">60 to 80 percent of visitors on average. we run multiple identification layers with llm fallback enrichment, which pushes match rate higher than typical reverse-ip tools. b2b traffic skews to the top of that range.</p>
-      </details>
-      <details class="faq-item">
-        <summary>which platforms does beam cover? <span class="chev" aria-hidden="true">+</span></summary>
-        <p class="faq-answer">linkedin, x, instagram, slack, facebook, and 10+ more. real-time across all of them. you pick which platforms matter most for your icp.</p>
-      </details>
-      <details class="faq-item">
-        <summary>do i have to write the engagement copy myself? <span class="chev" aria-hidden="true">+</span></summary>
-        <p class="faq-answer">no. beam drafts it based on their recent posts and your product context. you edit if you want, then send from your own account in one click.</p>
-      </details>
-      <details class="faq-item">
-        <summary>how is this different from clay or rb2b? <span class="chev" aria-hidden="true">+</span></summary>
-        <p class="faq-answer">clay needs setup and ops know-how. rb2b just identifies — you do the rest. beam does the whole loop. paste url, done.</p>
-      </details>
-      <details class="faq-item">
-        <summary>will this get my linkedin banned? <span class="chev" aria-hidden="true">+</span></summary>
-        <p class="faq-answer">no. beam never logs into your account. you click send manually from native linkedin every time. zero automation on your side.</p>
-      </details>
-      <details class="faq-item">
-        <summary>how compliant is the data? <span class="chev" aria-hidden="true">+</span></summary>
-        <p class="faq-answer">we only automate through your own account, never fake profiles. we don't scrape data you couldn't see yourself. your data stays yours — we don't sell or share it. gdpr and ccpa compliant.</p>
-      </details>
-      <details class="faq-item">
-        <summary>can i cancel anytime? <span class="chev" aria-hidden="true">+</span></summary>
-        <p class="faq-answer">yes. 2 clicks from the dashboard. no contracts, no "talk to sales" gate.</p>
-      </details>
-    </div>
-  </div>
 </div>
 
 <!-- ────────────────────────────────────────────────────────────
@@ -1114,128 +1065,7 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
 
 <!-- envelope JS removed — letter moved to /beam/letter.html -->
 
-<script>
-/* ── how-carousel controller ── */
-(function() {
-  var track = document.getElementById('how-carousel') && document.getElementById('how-carousel').querySelector('.carousel-track');
-  var dots  = document.querySelectorAll('#how-carousel .carousel-dot');
-  var current = 0;
-  var timer = null;
-  var INTERVAL = 5000;
-  var animFired = new Set();
-
-  function goTo(idx) {
-    current = idx;
-    if (track) track.style.transform = 'translateX(-' + (idx * 100) + '%)';
-    dots.forEach(function(d) { d.classList.toggle('active', +d.dataset.dot === idx); });
-    triggerSlideAnim(idx);
-  }
-
-  function triggerSlideAnim(idx) {
-    if (animFired.has(idx)) return;
-    animFired.add(idx);
-    var slide = document.querySelector('.carousel-slide[data-slide="' + idx + '"]');
-    if (!slide) return;
-
-    if (idx === 0) {
-      var rows = slide.querySelectorAll('.vlist-row');
-      rows.forEach(function(r, i) {
-        setTimeout(function() {
-          r.classList.add('in');
-          if (i === rows.length - 1) r.classList.add('fresh');
-        }, 140 + i * 220);
-      });
-      setTimeout(function() {
-        var last = rows[rows.length - 1];
-        if (last) { last.classList.remove('fresh'); void last.offsetWidth; last.classList.add('fresh'); }
-      }, 140 + rows.length * 220 + 1200);
-    }
-
-    if (idx === 1) {
-      var mrows = slide.querySelectorAll('.match-row');
-      mrows.forEach(function(r, i) {
-        setTimeout(function() { r.classList.add('in'); }, 160 + i * 260);
-        setTimeout(function() {
-          r.classList.add('matched');
-          var label = r.querySelector('.verify-label');
-          if (label) label.textContent = 'matched';
-        }, 160 + i * 260 + 520);
-      });
-    }
-
-    if (idx === 2) {
-      if (window.__beamTypeStart) setTimeout(window.__beamTypeStart, 240);
-    }
-  }
-
-  function startAuto() {
-    stopAuto();
-    timer = setInterval(function() { goTo((current + 1) % 3); }, INTERVAL);
-  }
-  function stopAuto() { if (timer) { clearInterval(timer); timer = null; } }
-
-  function resetCarousel() {
-    stopAuto();
-    animFired.clear();
-    current = 0;
-    if (track) track.style.transform = 'translateX(0)';
-    dots.forEach(function(d) { d.classList.toggle('active', +d.dataset.dot === 0); });
-    // reset mock states
-    document.querySelectorAll('#how-carousel .vlist-row, #how-carousel .match-row').forEach(function(r) {
-      r.classList.remove('in', 'fresh', 'matched');
-      var label = r.querySelector('.verify-label');
-      if (label) label.textContent = 'matching';
-    });
-    document.querySelectorAll('#how-carousel .draft-btn').forEach(function(b) { b.classList.remove('in'); });
-    var heart = document.getElementById('draft-heart');
-    if (heart) heart.classList.remove('go');
-    var cursor = document.getElementById('draft-cursor');
-    if (cursor) cursor.classList.remove('done');
-    var txt = document.getElementById('draft-text');
-    if (txt) txt.innerHTML = '';
-    if (window.__beamTypeReset) window.__beamTypeReset();
-  }
-
-  dots.forEach(function(d) {
-    d.addEventListener('click', function() {
-      goTo(+d.dataset.dot);
-      startAuto();
-    });
-  });
-
-  window.__carouselStart = function() {
-    resetCarousel();
-    setTimeout(function() { triggerSlideAnim(0); startAuto(); }, 350);
-  };
-  window.__carouselStop = function() { stopAuto(); };
-})();
-
-/* how/faq modal open + close */
-function openModal(id) {
-  var el = document.getElementById(id);
-  if (!el) return;
-  el.style.display = 'flex';
-  requestAnimationFrame(function() { el.classList.add('modal-open'); });
-  document.body.style.overflow = 'hidden';
-  if (id === 'modal-how' && window.__carouselStart) window.__carouselStart();
-}
-function closeModal(id) {
-  var el = document.getElementById(id);
-  if (!el) return;
-  el.classList.remove('modal-open');
-  document.body.style.overflow = '';
-  if (id === 'modal-how' && window.__carouselStop) window.__carouselStop();
-  setTimeout(function() { el.style.display = 'none'; }, 240);
-}
-document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') {
-    ['modal-how', 'modal-faq'].forEach(function(id) {
-      var el = document.getElementById(id);
-      if (el && el.style.display !== 'none') closeModal(id);
-    });
-  }
-});
-</script>
+<!-- modal + carousel JS removed: how-it-works & faq now render inline on the page -->
 
 <!-- ── WAITLIST HANDLER ── -->
 <script>

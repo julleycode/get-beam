@@ -14,6 +14,12 @@
       "port": 3000,
       "autoPort": true,
       "cwd": "apps/web"
+    },
+    {
+      "name": "beam-static",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["serve", "apps/web/public", "-l", "4599", "--no-clipboard"],
+      "port": 4599
     }
   ]
 }
