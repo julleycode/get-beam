@@ -202,16 +202,23 @@
     /* ── 3 · VERIFY + DETECT PLATFORM ────────────────────────── */
     async verify(ob) {
       const isSample = ob.state.url === 'demo.beam.fyi';
-      const hostName = isSample ? 'getbeam.fyi' : cleanHost(ob.state.url);
+      if (isSample) {
+        // Sample-data users have no site of their own — skip the snippet/install
+        // pretense entirely and demo on our own site instead.
+        await ob.bot(`no site of your own yet? no problem — i'll show you exactly how beam works on our <b>own</b> site, <b>getbeam.fyi</b>.`, { delay: 700 });
+        await ob.bot(`i'll catch you there as a real, anonymous visitor — identify you and replay what you did. same thing i'd do for every visitor on your site.`);
+        const sc = ob.controls(`<button class="ob-btn ob-btn-primary" data-go>show me how it works <span aria-hidden="true">→</span></button>`);
+        sc.querySelector('[data-go]').addEventListener('click', () => ob.answer('show me how it works', 'detect'));
+        return;
+      }
+      const hostName = cleanHost(ob.state.url);
       await ob.bot(`checking ${hostName}…`, { delay: 1100 });
       // REAL platform detection — fetches the site's HTML (same engine as the dashboard).
-      if (ob.state.url && ob.state.url !== 'demo.beam.fyi') {
-        try {
-          const det = await apiPost('/api/v1/demo/detect-platform', { url: ob.state.url });
-          if (det && det.platform && det.platform !== 'unknown') ob.state.platform = det.platform;
-          else ob.state.platform = ob.state.platform || '';
-        } catch (e) { /* keep whatever we have */ }
-      }
+      try {
+        const det = await apiPost('/api/v1/demo/detect-platform', { url: ob.state.url });
+        if (det && det.platform && det.platform !== 'unknown') ob.state.platform = det.platform;
+        else ob.state.platform = ob.state.platform || '';
+      } catch (e) { /* keep whatever we have */ }
       const plat = ob.state.platform || 'webflow';
       await ob.bot(`found you, and i can tell what you're built on:`, { cls: 'rich', delay: 400 });
       await ob.bot(`
@@ -276,21 +283,24 @@
     /* ── 5 · AUTO-DETECT SNIPPET ACTIVE ──────────────────────── */
     async detect(ob) {
       const isSample = ob.state.url === 'demo.beam.fyi';
-      const hostName = isSample ? 'getbeam.fyi' : cleanHost(ob.state.url);
-      await ob.bot(`scanning for the snippet…`, { delay: 1200 });
-      await ob.bot(`<span class="ob-pill green" style="padding:3px 9px"><span class="pdot"></span> live</span> i can see you now. 🎉`, { delay: 500 });
       if (isSample) {
-        await ob.bot(`no site of your own yet? no problem — let's catch <b>you</b> on <b>getbeam.fyi</b> instead. i'll open it in a new tab. click around a page or two, then come back here and watch.`);
+        // Nothing was installed — no "scanning for the snippet". Go straight to
+        // catching them on our own site.
+        await ob.bot(`alright — i'll open <b>getbeam.fyi</b> in a new tab. click around a page or two over there, then come back here and watch.`, { delay: 600 });
+        await ob.bot(`our pixel records every move — exactly what it'll do on your site once you drop in the snippet.`);
         const c = ob.controls(`<button class="ob-btn ob-btn-primary" data-go>open getbeam.fyi &amp; catch me</button>`);
         c.querySelector('[data-go]').addEventListener('click', () => {
           try { window.open('https://getbeam.fyi/?beam=demo', '_blank', 'noopener'); } catch (e) {}
           ob.answer('opening getbeam.fyi now', 'wait');
         });
-      } else {
-        await ob.bot(`let's test it on you first. open <b>${hostName}</b> in another tab or an incognito window — i'll catch you and show you exactly what i do for every visitor.`);
-        const c = ob.controls(`<button class="ob-btn ob-btn-primary" data-go>i'm opening it now</button>`);
-        c.querySelector('[data-go]').addEventListener('click', () => ob.answer('opening it now', 'wait'));
+        return;
       }
+      const hostName = cleanHost(ob.state.url);
+      await ob.bot(`scanning for the snippet…`, { delay: 1200 });
+      await ob.bot(`<span class="ob-pill green" style="padding:3px 9px"><span class="pdot"></span> live</span> i can see you now. 🎉`, { delay: 500 });
+      await ob.bot(`let's test it on you first. open <b>${hostName}</b> in another tab or an incognito window — i'll catch you and show you exactly what i do for every visitor.`);
+      const c = ob.controls(`<button class="ob-btn ob-btn-primary" data-go>i'm opening it now</button>`);
+      c.querySelector('[data-go]').addEventListener('click', () => ob.answer('opening it now', 'wait'));
     },
 
     /* ── 6 · WAITING FOR VISIT ───────────────────────────────── */
