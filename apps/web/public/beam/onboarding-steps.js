@@ -203,12 +203,16 @@
     async verify(ob) {
       const isSample = ob.state.url === 'demo.beam.fyi';
       if (isSample) {
-        // Sample-data users have no site of their own — skip the snippet/install
-        // pretense entirely and demo on our own site instead.
+        // Sample-data users have no site — skip the snippet/install pretense and
+        // demo on our own site. ONE button: it opens getbeam.fyi and starts
+        // watching (no redundant second "i'll open it" step).
         await ob.bot(`no site of your own yet? no problem — i'll show you exactly how beam works on our <b>own</b> site, <b>getbeam.fyi</b>.`, { delay: 700 });
-        await ob.bot(`i'll catch you there as a real, anonymous visitor — identify you and replay what you did. same thing i'd do for every visitor on your site.`);
-        const sc = ob.controls(`<button class="ob-btn ob-btn-primary" data-go>show me how it works <span aria-hidden="true">→</span></button>`);
-        sc.querySelector('[data-go]').addEventListener('click', () => ob.answer('show me how it works', 'detect'));
+        await ob.bot(`i'll open it in a new tab — click around a page or two, then come back here and watch. our pixel records every move, exactly what it'll do on your site once you add the snippet.`);
+        const sc = ob.controls(`<button class="ob-btn ob-btn-primary" data-go>open getbeam.fyi &amp; catch me <span aria-hidden="true">→</span></button>`);
+        sc.querySelector('[data-go]').addEventListener('click', () => {
+          try { window.open('https://getbeam.fyi/?beam=demo', '_blank', 'noopener'); } catch (e) {}
+          ob.answer('opening getbeam.fyi now', 'wait');
+        });
         return;
       }
       const hostName = cleanHost(ob.state.url);
@@ -282,19 +286,8 @@
 
     /* ── 5 · AUTO-DETECT SNIPPET ACTIVE ──────────────────────── */
     async detect(ob) {
-      const isSample = ob.state.url === 'demo.beam.fyi';
-      if (isSample) {
-        // Nothing was installed — no "scanning for the snippet". Go straight to
-        // catching them on our own site.
-        await ob.bot(`alright — i'll open <b>getbeam.fyi</b> in a new tab. click around a page or two over there, then come back here and watch.`, { delay: 600 });
-        await ob.bot(`our pixel records every move — exactly what it'll do on your site once you drop in the snippet.`);
-        const c = ob.controls(`<button class="ob-btn ob-btn-primary" data-go>open getbeam.fyi &amp; catch me</button>`);
-        c.querySelector('[data-go]').addEventListener('click', () => {
-          try { window.open('https://getbeam.fyi/?beam=demo', '_blank', 'noopener'); } catch (e) {}
-          ob.answer('opening getbeam.fyi now', 'wait');
-        });
-        return;
-      }
+      // Sample mode never reaches here — verify() opens getbeam.fyi and jumps
+      // straight to 'wait'. This step is the real-site (installed-snippet) path.
       const hostName = cleanHost(ob.state.url);
       await ob.bot(`scanning for the snippet…`, { delay: 1200 });
       await ob.bot(`<span class="ob-pill green" style="padding:3px 9px"><span class="pdot"></span> live</span> i can see you now. 🎉`, { delay: 500 });
