@@ -74,6 +74,30 @@
     return 'fp2_' + _h128(c.join('|'));
   }
 
+  // ── Journey replay (sample-data mode) ───────────────────────────────
+  // When a user has no site, onboarding sends them to getbeam.fyi (which
+  // runs the pixel). renderJourney shows the real pages they just browsed,
+  // pulled from ob.state.journey (populated by the wait-step poll).
+  function _esc(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function _fmtSecs(s) {
+    s = Math.max(0, Math.round(s || 0));
+    if (!s) return '';
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60), r = s % 60;
+    return r ? m + 'm ' + r + 's' : m + 'm';
+  }
+  async function renderJourney(ob) {
+    const pages = (ob.state && ob.state.journey) || [];
+    if (!pages.length) return;
+    await ob.bot(`and here's <b>exactly</b> what you just did on getbeam.fyi — recorded live by the pixel:`, { delay: 300 });
+    const rows = pages.map((p, i) => {
+      const secs = _fmtSecs(p.seconds);
+      return `<div class="ob-row"><span class="k">${i + 1}. ${_esc(p.path || '/')}</span>` +
+        `<span class="v">${secs ? '<span class="ob-pill">' + secs + '</span>' : '<span class="ob-hint">just now</span>'}</span></div>`;
+    }).join('');
+    await ob.bot(`<div class="ob-rows">${rows}</div>`, { cls: 'rich card', typing: false });
+  }
+
   const PLATFORM_INSTALL = {
     webflow:     'project settings → custom code → head',
     shopify:     'theme.liquid, before &lt;/head&gt;',
@@ -177,7 +201,8 @@
 
     /* ── 3 · VERIFY + DETECT PLATFORM ────────────────────────── */
     async verify(ob) {
-      const hostName = cleanHost(ob.state.url);
+      const isSample = ob.state.url === 'demo.beam.fyi';
+      const hostName = isSample ? 'getbeam.fyi' : cleanHost(ob.state.url);
       await ob.bot(`checking ${hostName}…`, { delay: 1100 });
       // REAL platform detection — fetches the site's HTML (same engine as the dashboard).
       if (ob.state.url && ob.state.url !== 'demo.beam.fyi') {
@@ -250,16 +275,27 @@
 
     /* ── 5 · AUTO-DETECT SNIPPET ACTIVE ──────────────────────── */
     async detect(ob) {
-      const hostName = cleanHost(ob.state.url);
+      const isSample = ob.state.url === 'demo.beam.fyi';
+      const hostName = isSample ? 'getbeam.fyi' : cleanHost(ob.state.url);
       await ob.bot(`scanning for the snippet…`, { delay: 1200 });
       await ob.bot(`<span class="ob-pill green" style="padding:3px 9px"><span class="pdot"></span> live</span> i can see you now. 🎉`, { delay: 500 });
-      await ob.bot(`let's test it on you first. open <b>${hostName}</b> in another tab or an incognito window — i'll catch you and show you exactly what i do for every visitor.`);
-      const c = ob.controls(`<button class="ob-btn ob-btn-primary" data-go>i'm opening it now</button>`);
-      c.querySelector('[data-go]').addEventListener('click', () => ob.answer('opening it now', 'wait'));
+      if (isSample) {
+        await ob.bot(`no site of your own yet? no problem — let's catch <b>you</b> on <b>getbeam.fyi</b> instead. i'll open it in a new tab. click around a page or two, then come back here and watch.`);
+        const c = ob.controls(`<button class="ob-btn ob-btn-primary" data-go>open getbeam.fyi &amp; catch me</button>`);
+        c.querySelector('[data-go]').addEventListener('click', () => {
+          try { window.open('https://getbeam.fyi/?beam=demo', '_blank', 'noopener'); } catch (e) {}
+          ob.answer('opening getbeam.fyi now', 'wait');
+        });
+      } else {
+        await ob.bot(`let's test it on you first. open <b>${hostName}</b> in another tab or an incognito window — i'll catch you and show you exactly what i do for every visitor.`);
+        const c = ob.controls(`<button class="ob-btn ob-btn-primary" data-go>i'm opening it now</button>`);
+        c.querySelector('[data-go]').addEventListener('click', () => ob.answer('opening it now', 'wait'));
+      }
     },
 
     /* ── 6 · WAITING FOR VISIT ───────────────────────────────── */
     async wait(ob) {
+      const isSample = ob.state.url === 'demo.beam.fyi';
       await ob.bot(`i'm watching… 👀`, { delay: 400 });
       const card = await ob.bot(`
         <div class="ob-listen">
@@ -267,10 +303,30 @@
           <div class="ob-hint" id="ob-wait-note">listening for your visit…</div>
         </div>`, { cls: 'rich card', typing: false });
       const c = ob.controls(`<button class="ob-skip" data-skip>skip the wait →</button>`);
-      c.querySelector('[data-skip]').addEventListener('click', () => ob.answer('', 'identify'));
       const note = card.querySelector('#ob-wait-note');
-      setTimeout(() => { if (note && document.body.contains(note)) note.textContent = 'still listening — did you open the site?'; }, 4200);
-      setTimeout(() => { if (document.getElementById('ob-controls')) ob.answer('', 'identify'); }, 3600);
+      let done = false;
+      const advance = () => { if (!done) { done = true; ob.answer('', 'identify'); } };
+      c.querySelector('[data-skip]').addEventListener('click', advance);
+
+      if (isSample) {
+        // Poll the real pixel events until we see the getbeam.fyi visit land.
+        if (note) note.textContent = 'open getbeam.fyi and click around a page or two…';
+        const fp = obFingerprint();
+        const deadline = Date.now() + 15000;
+        while (!done && Date.now() < deadline) {
+          await ob.wait(2000);
+          if (done) return;
+          try {
+            const j = await apiPost('/api/v1/demo/journey', { fingerprint: fp });
+            if (j && j.pages && j.pages.length) { ob.state.journey = j.pages; break; }
+          } catch (e) { /* keep listening */ }
+          if (note && document.body.contains(note)) note.textContent = 'still listening — browse a page on getbeam.fyi…';
+        }
+        advance();
+      } else {
+        setTimeout(() => { if (note && document.body.contains(note)) note.textContent = 'still listening — did you open the site?'; }, 4200);
+        setTimeout(advance, 3600);
+      }
     },
 
     /* ── 7 · CAPTURED + IDENTIFYING ───────────────── */
@@ -290,6 +346,8 @@
 
     /* ── 8 · WHAT I KNOW ABOUT YOU (the WOW) ──────────────────── */
     async wow(ob) {
+      // Sample-data mode: replay the real pages they just browsed on getbeam.fyi.
+      await renderJourney(ob);
       const id = ob.state.identified;
       function initials(n) { return (n || 'JT').split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase(); }
       function profileCard(p) {

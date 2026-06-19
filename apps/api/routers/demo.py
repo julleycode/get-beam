@@ -8,7 +8,7 @@ ANY IP (residential, public WiFi, mobile) — not just business IPs.
 
 import asyncio
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import structlog
@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from apps.api.config import settings
 from apps.api.models.database import async_session
+from apps.api.models.event import Event
 from apps.api.models.visitor import Visitor
 from apps.api.services.rate_limiter import limiter
 from apps.api.services.identity_resolver import IdentityResolver
@@ -278,6 +279,90 @@ async def demo_identify(request: Request, body: IdentifyBody = IdentifyBody()) -
 
     logger.info("demo_identify", ip=ip[:8], level=base.get("level"), matched=base["matched"])
     return base
+
+
+class JourneyBody(BaseModel):
+    fingerprint: str | None = None
+
+
+@router.post("/journey")
+@limiter.limit("12/minute")
+async def demo_journey(request: Request, body: JourneyBody = JourneyBody()) -> dict:
+    """Replay the caller's real visit on getbeam.fyi inside onboarding.
+
+    Sample-data users have no site of their own, so the onboarding sends them
+    to getbeam.fyi (which runs the Beam pixel). This matches their browser
+    fingerprint — the same ``fp2_`` value the pixel emits — to the visitor
+    row(s) the pixel just recorded, then returns the pages they browsed in
+    order with how long they spent on each.
+
+    Durations live in separate ``time_on_page`` event rows keyed by url (the
+    pixel fires them on page leave), so we merge those seconds onto each
+    ``pageview``. Read-only, scoped to the last hour, capped at 8 pages.
+    """
+    fp = (body.fingerprint or "").strip()
+    if not fp.startswith("fp2_"):
+        return {"matched": False, "pages": []}
+
+    # Naive UTC to match Event.created_at (TIMESTAMP WITHOUT TIME ZONE — the
+    # ingest path strips tzinfo). Comparing an aware datetime would error in asyncpg.
+    since = datetime.utcnow() - timedelta(hours=1)
+    try:
+        async with async_session() as db:
+            vids = (
+                await db.execute(
+                    select(Visitor.visitor_id).where(Visitor.fingerprint == fp)
+                )
+            ).scalars().all()
+            if not vids:
+                return {"matched": False, "pages": []}
+
+            rows = (
+                await db.execute(
+                    select(
+                        Event.event_type,
+                        Event.page_path,
+                        Event.page_title,
+                        Event.url,
+                        Event.time_on_page,
+                        Event.created_at,
+                    )
+                    .where(
+                        Event.visitor_id.in_(vids),
+                        Event.event_type.in_(("pageview", "time_on_page")),
+                        Event.created_at >= since,
+                    )
+                    .order_by(Event.created_at.asc())
+                    .limit(60)
+                )
+            ).all()
+    except Exception as e:  # noqa: BLE001 — demo never 500s the onboarding
+        logger.debug("demo_journey_failed", error=str(e))
+        return {"matched": False, "pages": []}
+
+    # seconds spent per url, from the dedicated time_on_page rows
+    secs_by_url: dict[str, int] = {}
+    for r in rows:
+        if r.event_type == "time_on_page" and r.url:
+            secs_by_url[r.url] = max(secs_by_url.get(r.url, 0), int(r.time_on_page or 0))
+
+    pages: list[dict] = []
+    for r in rows:
+        if r.event_type != "pageview":
+            continue
+        pages.append(
+            {
+                "path": (r.page_path or r.url or "/"),
+                "title": (r.page_title or "").strip(),
+                "seconds": int(r.time_on_page or 0) or secs_by_url.get(r.url or "", 0),
+                "at": r.created_at.isoformat() if r.created_at else None,
+            }
+        )
+        if len(pages) >= 8:
+            break
+
+    logger.info("demo_journey", fp=fp[:12], pages=len(pages))
+    return {"matched": bool(pages), "pages": pages}
 
 
 class EmailIdentifyRequest(BaseModel):
