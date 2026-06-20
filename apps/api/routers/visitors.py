@@ -546,6 +546,11 @@ async def _resolution_skip_reason(
     checked in the order the pipeline applies them. "awaiting_next_run" means
     fully eligible — just waiting on the next sweep or a manual resolve.
     """
+    # Privacy opt-out (GPC/DNT or a cascaded suppression match) is the FIRST
+    # gate resolve() applies — it blocks identification by policy, not by any
+    # usage limit, so it must be reported as such, never as "budget used up".
+    if getattr(visitor, "do_not_resolve", False):
+        return "privacy_opt_out"
     if visitor.intent_score < 40:
         return "below_intent_threshold"
     if not visitor.ip_address:
@@ -559,6 +564,21 @@ async def _resolution_skip_reason(
     if not await check_usage_allowed(db, site.user_id):
         return "monthly_plan_limit_reached"
     return "awaiting_next_run"
+
+
+# Human-facing copy for each skip reason. Keeps the per-row Identify endpoint
+# from collapsing every "still anonymous" outcome into a misleading "daily
+# budget used up" line (a max-plan site with no caps was seeing exactly that
+# for privacy-opted-out visitors).
+_SKIP_REASON_MESSAGES: dict[str, str] = {
+    "privacy_opt_out": "This visitor opted out of identification (privacy signal / suppression list). Policy block — not a usage limit.",
+    "below_intent_threshold": "Intent score is below 40 — not eligible for identification yet.",
+    "no_ip_address": "No IP address captured for this visitor — can't run identity lookup.",
+    "recently_attempted": "Already attempted in the last 30 days. Will retry automatically after the cooldown.",
+    "daily_budget_exhausted": "Daily identification budget used up for this site. Resets tomorrow (UTC).",
+    "monthly_plan_limit_reached": "Monthly identification limit reached for your plan. Add your own API keys in Settings to unlock unlimited.",
+    "awaiting_next_run": "Eligible — couldn't identify from available providers this time.",
+}
 
 
 @router.get("/{site_id}/{visitor_id}", response_model=VisitorDetailOut)
@@ -732,6 +752,17 @@ async def resolve_one_visitor(
     if visitor.identity_status != "anonymous":
         return {"status": visitor.identity_status, "message": "Already processed."}
 
+    # Privacy opt-out / intent gates BEFORE the paid waterfall: resolve() would
+    # bail on these anyway, but bailing here lets us return the real reason (not
+    # a canned "budget used up" line) and avoids burning provider calls on the
+    # intent<40 visitors the auto sweep never touches.
+    if visitor.do_not_resolve:
+        return {"status": "anonymous", "skip_reason": "privacy_opt_out",
+                "message": _SKIP_REASON_MESSAGES["privacy_opt_out"]}
+    if visitor.intent_score < 40:
+        return {"status": "anonymous", "skip_reason": "below_intent_threshold",
+                "message": _SKIP_REASON_MESSAGES["below_intent_threshold"]}
+
     # Monthly plan limit (free=10/mo) — the same gate the auto sweep applies.
     if not await check_usage_allowed(db, site.user_id):
         return {
@@ -767,10 +798,27 @@ async def resolve_one_visitor(
             )
         )
     ).scalar_one()
+    if status == "anonymous":
+        # Left anonymous by a gate (recent attempt / daily budget / etc.). Report
+        # the REAL reason instead of guessing — reuses the same logic the visitor
+        # detail page shows. Needs the latest attempt for the 30-day cooldown check.
+        last_attempt = (
+            await db.execute(
+                select(func.max(ResolutionLog.created_at)).where(
+                    ResolutionLog.site_id == site_id,
+                    ResolutionLog.visitor_id == visitor_id,
+                )
+            )
+        ).scalar_one_or_none()
+        reason = await _resolution_skip_reason(db, site, visitor, last_attempt)
+        return {
+            "status": "anonymous",
+            "skip_reason": reason,
+            "message": _SKIP_REASON_MESSAGES.get(reason, "Not resolved. Try again later."),
+        }
     messages = {
         "unresolvable": "Couldn't identify this visitor from available providers.",
         "vpn_filtered": "Skipped — visitor is behind a VPN/proxy.",
-        "anonymous": "Not resolved — daily budget used up or attempted in the last 30 days. Try later.",
     }
     return {"status": status, "message": messages.get(status, "Not resolved.")}
 
