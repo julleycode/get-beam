@@ -184,6 +184,34 @@ async def list_visitors(
             )
         )
         id_map = {r.visitor_id: (r.email, r.full_name) for r in id_rows}
+
+        # Merged visitors carry their identity on the canonical row, not their
+        # own — resolve email/name from canonical_visitor_id so deduped
+        # duplicates aren't shown blank. Fold into id_map so the display loop
+        # and the known-contacts hash below both pick them up.
+        canon_of = {
+            v.visitor_id: v.canonical_visitor_id
+            for v in rows
+            if v.identity_status == "merged"
+            and v.canonical_visitor_id
+            and v.visitor_id not in id_map
+        }
+        if canon_of:
+            canon_rows = await db.execute(
+                select(
+                    IdentifiedVisitor.visitor_id,
+                    IdentifiedVisitor.email,
+                    IdentifiedVisitor.full_name,
+                ).where(
+                    IdentifiedVisitor.site_id == site_id,
+                    IdentifiedVisitor.visitor_id.in_(set(canon_of.values())),
+                )
+            )
+            canon_id_map = {r.visitor_id: (r.email, r.full_name) for r in canon_rows}
+            for vid, cvid in canon_of.items():
+                if cvid in canon_id_map:
+                    id_map[vid] = canon_id_map[cvid]
+
         for v in visitors:
             if v.visitor_id in id_map:
                 v.email, v.full_name = id_map[v.visitor_id]

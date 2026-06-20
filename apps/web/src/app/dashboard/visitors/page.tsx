@@ -172,8 +172,13 @@ export default function VisitorsPage() {
 
   function renderIdentity(v: (typeof visitors)[number]) {
     const s = v.identity_status;
-    if (s === "identified" || s === "merged") {
+    if (s === "identified") {
       return <StatusBadge status="identified" label="Identified" />;
+    }
+    if (s === "merged") {
+      // Deduped duplicate of another visitor — same person. The identity lives
+      // on the canonical profile; the API surfaces its email here too.
+      return <StatusBadge status="identified" label="Merged" className="opacity-80" />;
     }
     if (s === "unresolvable" || s === "vpn_filtered") {
       return (
