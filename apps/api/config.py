@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     clerk_publishable_key: str = ""
     jwt_secret: str = "change-me-in-production"  # Legacy HS256 fallback
     jwt_algorithm: str = "HS256"
+    # Gate new-account creation to waitlist-approved emails. Default open now
+    # that the private beta is over; set INVITE_ONLY=true to re-gate.
+    invite_only: bool = False
 
     # ─── External APIs (EasyTrack) ───
     people_data_labs_api_key: str = ""

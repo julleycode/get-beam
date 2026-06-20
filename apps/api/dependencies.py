@@ -140,6 +140,58 @@ async def _is_email_allowlisted(db: AsyncSession, email: str) -> bool:
     return result.scalar_one_or_none() is not None
 
 
+async def _send_welcome_email(email: str) -> None:
+    """Greet a brand-new user the moment their Beam account is created.
+
+    Fired once, from the genuinely-new-account branch of get_current_user, so
+    each user gets exactly one welcome. Best-effort: any failure is logged and
+    swallowed so a flaky SendGrid never blocks first login.
+    """
+    # ponytail: inline send blocks this one request until SendGrid replies
+    # (~0.5s typical, 10s ceiling). Runs once per user lifetime, so the cost is
+    # negligible. Move to BackgroundTasks if first-load latency ever matters.
+    try:
+        from apps.api.services.email_sender import EmailSender
+
+        await EmailSender().send(
+            to_email=email,
+            subject="welcome to beam — here's step one",
+            body_html="""
+<div style="font-family: 'Inter', -apple-system, sans-serif; max-width: 520px; margin: 0 auto; color: #2b2530;">
+  <p style="font-size: 16px; line-height: 1.7; color: #4a3f50;">hey,</p>
+  <p style="font-size: 16px; line-height: 1.7; color: #4a3f50;">
+    you're all set — your beam account is live. welcome aboard.
+  </p>
+  <p style="font-size: 16px; line-height: 1.7; color: #4a3f50;">
+    one thing to do first: drop the beam pixel on your site. that's what lets us
+    show you who's actually visiting — real people, real profiles, not just numbers.
+  </p>
+  <p style="margin: 28px 0;">
+    <a href="https://getbeam.fyi/dashboard"
+       style="display: inline-block; padding: 14px 28px; background: #FF3366; color: white;
+              text-decoration: none; border-radius: 10px; font-weight: 500; font-size: 15px;">
+      install the pixel &rarr;
+    </a>
+  </p>
+  <p style="font-size: 16px; line-height: 1.7; color: #4a3f50;">
+    once it's live, your visitors start showing up on the dashboard within minutes.
+  </p>
+  <p style="font-size: 16px; line-height: 1.7; color: #4a3f50;">
+    stuck on anything? just reply to this email — i read every one.
+  </p>
+  <p style="font-size: 15px; line-height: 1.7; color: #FF3366; font-style: italic; margin-top: 24px;">
+    &mdash; julley, beam
+  </p>
+</div>
+""",
+            from_name="Beam",
+            from_email="hello@getbeam.fyi",
+        )
+        logger.info("welcome_email_sent", email=mask_email(email))
+    except Exception as e:
+        logger.warning("welcome_email_failed", email=mask_email(email), error=str(e))
+
+
 async def get_current_user(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
     db: AsyncSession = Depends(get_db),
@@ -200,10 +252,12 @@ async def get_current_user(
                         email=mask_email(email),
                     )
                 else:
-                    # Genuinely new account — enforce invite-only access.
-                    # (Existing users were matched above and never reach here,
-                    # so all current users are grandfathered in.)
-                    if not await _is_email_allowlisted(db, email):
+                    # Genuinely new account — enforce invite-only access when
+                    # enabled. (Existing users were matched above and never
+                    # reach here, so all current users are grandfathered in.)
+                    if settings.invite_only and not await _is_email_allowlisted(
+                        db, email
+                    ):
                         logger.warning(
                             "clerk_signup_blocked_not_allowlisted",
                             clerk_id=clerk_user_id,
@@ -226,6 +280,7 @@ async def get_current_user(
                         clerk_id=clerk_user_id,
                         email=mask_email(email),
                     )
+                    await _send_welcome_email(email)
             elif user.email.endswith("@clerk.user"):
                 # Self-heal: an existing row created before this fix still has a
                 # fabricated email. Backfill the real one so future logins (and
