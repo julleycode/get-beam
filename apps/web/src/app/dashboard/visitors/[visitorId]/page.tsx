@@ -249,6 +249,12 @@ export default function VisitorDetailPage() {
         </CardContent>
       </Card>
 
+      {visitor.identity_status === "unresolvable" && visitor.coverage_note && (
+        <div className="rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+          {visitor.coverage_note}
+        </div>
+      )}
+
       {visitor.identity_status !== "anonymous" && (
         <Card>
           <CardHeader>

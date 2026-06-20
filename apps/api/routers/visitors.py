@@ -581,6 +581,24 @@ _SKIP_REASON_MESSAGES: dict[str, str] = {
 }
 
 
+def _coverage_note(visitor: Visitor) -> str | None:
+    """Honest reason an `unresolvable` visitor was a *structural* miss, not a
+    fluke. The person-level providers (RB2B, Leadpipe) are US-only graphs, and
+    IP→company only resolves corporate IPs — so a non-US visitor on a
+    residential network (no company_domain) can NEVER match. Say that plainly
+    instead of a bare "unresolvable", which reads as a bug to the site owner.
+    Returns None when the miss isn't region-structural (e.g. US traffic, or a
+    corporate IP that simply had no contact data)."""
+    cc = (visitor.country_code or "").upper()
+    if cc and cc != "US" and not visitor.company_domain:
+        return (
+            "Identity providers currently cover US traffic only. This visitor is "
+            "outside the US on a residential network, so they can't be matched — "
+            "this is a coverage limit of the data providers, not an error or a usage cap."
+        )
+    return None
+
+
 @router.get("/{site_id}/{visitor_id}", response_model=VisitorDetailOut)
 async def get_visitor_detail(
     site_id: str,
@@ -614,6 +632,9 @@ async def get_visitor_detail(
         data["resolution_skip_reason"] = await _resolution_skip_reason(
             db, site, visitor, logs[0].created_at if logs else None
         )
+    elif visitor.identity_status == "unresolvable":
+        # Explain a structural miss (non-US residential) instead of a bare badge.
+        data["coverage_note"] = _coverage_note(visitor)
 
     id_result = await db.execute(
         select(IdentifiedVisitor).where(
@@ -748,9 +769,12 @@ async def resolve_one_visitor(
     if not visitor:
         raise HTTPException(status_code=404, detail="Visitor not found")
 
-    # Already processed → don't re-run (no extra paid lookup).
+    # Already processed → don't re-run (no extra paid lookup). For an
+    # unresolvable visitor, surface WHY (region coverage) rather than a terse
+    # "Already processed" the owner can't act on.
     if visitor.identity_status != "anonymous":
-        return {"status": visitor.identity_status, "message": "Already processed."}
+        note = _coverage_note(visitor) if visitor.identity_status == "unresolvable" else None
+        return {"status": visitor.identity_status, "message": note or "Already processed."}
 
     # Privacy opt-out / intent gates BEFORE the paid waterfall: resolve() would
     # bail on these anyway, but bailing here lets us return the real reason (not
@@ -817,7 +841,8 @@ async def resolve_one_visitor(
             "message": _SKIP_REASON_MESSAGES.get(reason, "Not resolved. Try again later."),
         }
     messages = {
-        "unresolvable": "Couldn't identify this visitor from available providers.",
+        "unresolvable": _coverage_note(visitor)
+        or "Couldn't identify this visitor from available providers.",
         "vpn_filtered": "Skipped — visitor is behind a VPN/proxy.",
     }
     return {"status": status, "message": messages.get(status, "Not resolved.")}

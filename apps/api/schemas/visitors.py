@@ -57,7 +57,8 @@ class VisitorDetailOut(VisitorOut):
     # Resolution observability — why is this visitor still anonymous?
     last_resolution_attempt: datetime | None = None
     resolution_providers_tried: list[str] | None = None
-    resolution_skip_reason: str | None = None  # below_intent_threshold | no_ip_address | recently_attempted | daily_budget_exhausted | monthly_plan_limit_reached | awaiting_next_run
+    resolution_skip_reason: str | None = None  # below_intent_threshold | no_ip_address | recently_attempted | daily_budget_exhausted | monthly_plan_limit_reached | privacy_opt_out | awaiting_next_run
+    coverage_note: str | None = None  # set for 'unresolvable' visitors the US-only provider stack structurally can't match (e.g. non-US residential)
 
 
 class VisitorStatsResponse(BaseModel):

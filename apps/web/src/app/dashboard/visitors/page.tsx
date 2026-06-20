@@ -142,9 +142,10 @@ export default function VisitorsPage() {
       setNotice(null);
     },
     onSuccess: (res) => {
-      // identified/unresolvable show up visually; only surface the rest.
-      if (res.status === "limit_reached" || res.status === "anonymous") {
-        setNotice(res.message ?? null);
+      // Surface any explanatory message (limit, privacy opt-out, region
+      // coverage). A successful identify shows up visually, so skip only that.
+      if (res.status !== "identified" && res.message) {
+        setNotice(res.message);
       }
     },
     onError: (e) => setNotice(e instanceof Error ? e.message : "Identify failed"),
@@ -264,6 +265,8 @@ export default function VisitorsPage() {
         }
       />
 
+      <BrowserCaptureCard siteId={siteId} />
+
       {siteId && (
         <div className="mb-4 flex flex-wrap items-end gap-4 rounded-lg border bg-muted/30 p-3">
           <div className="flex w-full items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
@@ -369,8 +372,6 @@ export default function VisitorsPage() {
           )}
         </div>
       )}
-
-      <BrowserCaptureCard siteId={siteId} />
 
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view visitors.</p>

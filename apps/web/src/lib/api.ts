@@ -1034,6 +1034,7 @@ export interface VisitorDetail extends Visitor {
   city?: string | null;
   region?: string | null;
   country?: string | null;
+  coverage_note?: string | null;
   job_title?: string | null;
   company_name?: string | null;
   industry?: string | null;
