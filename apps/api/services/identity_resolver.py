@@ -16,6 +16,7 @@ import socket
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 import httpx
 import structlog
@@ -26,6 +27,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 
 from apps.api.config import settings
 from apps.api.models.beam_identity import BeamIdentityNode
+from apps.api.models.site import Site
 from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog, Visitor
 from apps.api.services.usage_logger import log_api_call
 
@@ -60,6 +62,19 @@ _http_retry = retry(
 )
 
 
+def _url_to_host(url: str | None) -> str | None:
+    """Bare hostname from a site URL ('https://www.grade.coach/x' -> 'grade.coach').
+
+    Used to scope provider queries to one site's pixel domain.
+    """
+    if not url:
+        return None
+    host = urlparse(url if "//" in url else f"//{url}").hostname
+    if host and host.startswith("www."):
+        host = host[4:]
+    return host
+
+
 class IdentityResolver:
     def __init__(self, db: AsyncSession, redis_client: object | None = None) -> None:
         self.db = db
@@ -71,6 +86,21 @@ class IdentityResolver:
                 self.redis = None
         else:
             self.redis = redis_client
+        # site_id -> bare hostname, for scoping provider queries to one site.
+        self._site_domain_cache: dict[str, str | None] = {}
+
+    async def _site_domain(self, site_id: str) -> str | None:
+        """Bare hostname for a site's URL (e.g. 'grade.coach'), used to scope a
+        provider query to this site instead of the whole account. Cached per
+        instance — a sweep reuses one resolver across one site's visitors."""
+        if site_id in self._site_domain_cache:
+            return self._site_domain_cache[site_id]
+        url = (
+            await self.db.execute(select(Site.url).where(Site.site_id == site_id))
+        ).scalar_one_or_none()
+        host = _url_to_host(url)
+        self._site_domain_cache[site_id] = host
+        return host
 
     async def check_daily_budget(self, site_id: str) -> bool:
         """Daily attempt budget: distinct visitors tried today vs the
@@ -703,14 +733,21 @@ class IdentityResolver:
         Retries up to 3× on transient errors (5xx, 429, timeouts).
         """
         async with httpx.AsyncClient(timeout=15.0) as client:
-            # Query recent identifications, filter by page URL or IP
+            # Scope to THIS site's pixel domain. /v1/data is account-wide and
+            # paginates at 50/page; without scoping, a low-traffic site's record
+            # is buried under other sites' identifications and never seen. The
+            # API has NO per-IP or per-pixel filter (only email/page/timeframe/
+            # domain), so `domain` is the only documented way to narrow it.
+            # (limit/sort sent previously were not real params — ignored.)
+            # Falls back to the account-wide feed when the site URL is unknown.
+            params: dict[str, str] = {}
+            site_domain = await self._site_domain(visitor.site_id)
+            if site_domain:
+                params["domain"] = site_domain
             resp = await client.get(
                 f"{self.LEADPIPE_API_BASE}/v1/data",
                 headers={"X-API-Key": settings.leadpipe_api_key},
-                params={
-                    "limit": 10,
-                    "sort": "desc",
-                },
+                params=params,
             )
 
             if resp.status_code == 404:
@@ -729,11 +766,10 @@ class IdentityResolver:
                 logger.debug("leadpipe_no_matches")
                 return None
 
-            # The feed is account-wide (latest N identifications across ALL
-            # traffic), so a record may only attach to this visitor on IP
-            # equality AND recency (_record_matches_visitor). The old
-            # "page URL contains site domain" fallback attached arbitrary
-            # humans and is intentionally gone.
+            # Even scoped to this site's domain the feed holds many visitors, so
+            # a record only attaches to THIS visitor on IP equality AND recency
+            # (_record_matches_visitor). The old "page URL contains site domain"
+            # fallback attached arbitrary humans and is intentionally gone.
             for lp_visitor in visitors_data:
                 lp_email = lp_visitor.get("email")
                 if not lp_email and isinstance(lp_visitor.get("emails"), list) and lp_visitor.get("emails"):
