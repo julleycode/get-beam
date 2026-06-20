@@ -760,7 +760,32 @@ class IdentityResolver:
                 return None
 
             body = resp.json()
-            visitors_data = body.get("data", [])
+
+            # TEMP shape probe — REMOVE once a real prod response confirms the
+            # schema. /v1/data's response is undocumented; the parser below
+            # assumes data[].{ip,email,...}. Log STRUCTURE ONLY (key names, never
+            # values → no PII) so we can verify the parser reads the right fields
+            # the next time Leadpipe runs on US traffic.
+            try:
+                if isinstance(body, dict):
+                    top_keys = sorted(body.keys())
+                    sample = body.get("data") or body.get("visitors") or body.get("results")
+                elif isinstance(body, list):
+                    top_keys, sample = "<list>", body
+                else:
+                    top_keys, sample = f"<{type(body).__name__}>", None
+                record_keys = (
+                    sorted(sample[0].keys())
+                    if isinstance(sample, list) and sample and isinstance(sample[0], dict)
+                    else None
+                )
+                logger.info(
+                    "leadpipe_response_shape", top_level=top_keys, record_keys=record_keys
+                )
+            except Exception:
+                pass
+
+            visitors_data = body.get("data", []) if isinstance(body, dict) else []
 
             if not visitors_data:
                 logger.debug("leadpipe_no_matches")
