@@ -136,7 +136,13 @@ class ApiClient {
       // Add a timeout only when the caller didn't bring its own signal.
       if (!init.signal && typeof AbortController !== "undefined") {
         const ctrl = new AbortController();
-        timer = setTimeout(() => ctrl.abort(), 10_000);
+        // Escalate per attempt (12s, 24s, 36s). A Railway hobby container
+        // sleeps when idle and can take 15-30s to wake; a flat 10s aborted
+        // mid-boot on every attempt, surfacing as
+        // "Network error: unable to reach API (signal is aborted without reason)".
+        // Attempt 0 stays snappy for the warm case; later attempts give a
+        // cold-starting backend room to finish booting.
+        timer = setTimeout(() => ctrl.abort(), 12_000 * (attempt + 1));
         attemptInit = { ...init, signal: ctrl.signal };
       }
       try {

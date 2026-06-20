@@ -1,0 +1,34 @@
+name: keep-warm
+
+# Pings the Railway backend so it never sits idle long enough to cold-start.
+# Railway hobby sleeps when idle; a cold wake takes 15-30s and surfaced in the
+# dashboard as "Network error: unable to reach API (signal is aborted without
+# reason)". See the cold-start note in apps/web/src/lib/api.ts (fetchWithRetry).
+#
+# Caveat: GitHub may delay scheduled runs by 5-15+ min under load, and disables
+# the schedule after 60 days of zero repo activity. For rock-solid keep-warm use
+# an external monitor (UptimeRobot / cron-job.org, free, 5-min interval).
+
+on:
+  schedule:
+    - cron: "*/5 * * * *" # every 5 minutes
+  workflow_dispatch: {} # manual "Run workflow" button
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: |
+          URL="https://retarget-agent-production.up.railway.app/health"
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 40 "$URL")
+            if [ "$code" = "200" ]; then
+              echo "warm (HTTP $code)"
+              exit 0
+            fi
+            echo "attempt $i: HTTP '$code' — retrying in 15s"
+            sleep 15
+          done
+          echo "backend did not return 200 after 3 tries — possible outage"
+          exit 1
