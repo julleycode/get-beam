@@ -3,7 +3,7 @@
 import { useEffect, useState, type ComponentType } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Sparkles, Users, FileText, Megaphone, AtSign } from "lucide-react";
 import { api, Site } from "@/lib/api";
 import { SiteCardSkeleton } from "@/components/skeletons";
@@ -216,18 +216,29 @@ function DashboardContent({
   retryKey: number;
 }) {
   const router = useRouter();
+  const qc = useQueryClient();
 
   useEffect(() => {
+    const settle = (sites: Site[]) => {
+      onSitesLoaded(sites);
+      if (sites.length === 0) router.push("/dashboard/onboarding");
+    };
+    // One round-trip: sites + per-site stats. Seed the ["visitor-stats", id]
+    // cache so SiteCard and TodayActions read it instead of refetching.
     api
-      .listSites()
-      .then((s) => {
-        onSitesLoaded(s);
-        if (s.length === 0) {
-          router.push("/dashboard/onboarding");
+      .getDashboardOverview()
+      .then((o) => {
+        for (const [siteId, stats] of Object.entries(o.stats)) {
+          qc.setQueryData(["visitor-stats", siteId], stats);
         }
+        settle(o.sites);
       })
-      .catch((e: Error) => onError(e.message));
-  }, [router, onSitesLoaded, onError, retryKey]);
+      .catch(() => {
+        // Aggregate endpoint not available (e.g. backend not yet deployed) —
+        // fall back to the original per-call path.
+        api.listSites().then(settle).catch((e: Error) => onError(e.message));
+      });
+  }, [router, onSitesLoaded, onError, retryKey, qc]);
 
   return null;
 }

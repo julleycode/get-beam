@@ -240,6 +240,18 @@ class ApiClient {
     return this.request<Site[]>("/api/v1/sites/");
   }
 
+  /**
+   * Overview in one round-trip: sites + per-site stats (keyed by site_id).
+   * Collapses the old listSites + N×getVisitorStats fan-out — matters most for
+   * clients far from the US origin. Falls back to listSites at the call site if
+   * this endpoint isn't deployed yet.
+   */
+  async getDashboardOverview() {
+    return this.request<{ sites: Site[]; stats: Record<string, SiteStats> }>(
+      "/api/v1/dashboard/overview"
+    );
+  }
+
   async getSite(siteId: string) {
     return this.request<Site>(`/api/v1/sites/${siteId}`);
   }
