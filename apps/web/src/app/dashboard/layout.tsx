@@ -29,7 +29,6 @@ import { cn } from "@/lib/utils";
 import { BeamLogo } from "@/components/beam-logo";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
 
 const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
@@ -192,44 +191,24 @@ function ClerkAuthGuard() {
 }
 
 /**
- * Resolves the Clerk session token onto the API client BEFORE rendering the
- * gated page content, so a page's first data fetch on cold load carries auth
- * instead of racing ClerkTokenSync (previously only the Overview page did this;
- * inner pages could fire a token-less first request). Only rendered when Clerk
- * is configured, so useAuth() is always inside <ClerkProvider>. Never acts on
- * isSignedIn before isLoaded — acting early bounces signed-in users to
- * /sign-in (the dashboard↔sign-in loop guarded against in ClerkAuthGuard).
+ * Resolves the Clerk session token onto the API client. It NO LONGER blocks
+ * rendering: server-prefetched pages (the Overview ships its data in the SSR
+ * HTML) must paint immediately instead of waiting for the client token. A
+ * client fetch that races ahead of the token is retried once by the api client
+ * (setClerkTokenGetter, wired by ClerkTokenSync), so dropping the gate's wait is
+ * safe. Only rendered when Clerk is configured, so useAuth() is always inside
+ * <ClerkProvider>. Never acts on isSignedIn before isLoaded.
  */
 function ClerkTokenGate({ children }: { children: React.ReactNode }) {
   const { getToken, isSignedIn, isLoaded } = useAuth();
-  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    if (!isLoaded) return;
-    if (!isSignedIn) {
-      // Not signed in: let ClerkAuthGuard handle the redirect; don't block here.
-      setReady(true);
-      return;
-    }
-    getToken()
-      .then((token: string | null) => {
-        if (token) api.setClerkToken(token);
-      })
-      .finally(() => setReady(true));
+    if (!isLoaded || !isSignedIn) return;
+    getToken().then((token: string | null) => {
+      if (token) api.setClerkToken(token);
+    });
   }, [isLoaded, isSignedIn, getToken]);
 
-  if (!ready) {
-    return (
-      <div className="space-y-4">
-        <Skeleton className="h-8 w-48" />
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <Skeleton className="h-32 rounded-lg" />
-          <Skeleton className="h-32 rounded-lg" />
-          <Skeleton className="h-32 rounded-lg" />
-        </div>
-      </div>
-    );
-  }
   return <>{children}</>;
 }
 
