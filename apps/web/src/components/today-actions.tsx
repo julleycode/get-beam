@@ -2,7 +2,7 @@
 
 import type { ComponentType } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Users, Layers, FileText, Megaphone, Send, Radio, CheckCircle2 } from "lucide-react";
 import { api, type Site } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,7 +21,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 // Compose the day's to-do list from real data across the user's sites. Drafts
 // are per-user (one global count); everything else is summed per site.
-async function computeActions(sites: Site[]): Promise<ActionItem[]> {
+async function computeActions(sites: Site[], qc: QueryClient): Promise<ActionItem[]> {
   const pendingDraftsP = api
     .getDrafts("pending")
     .then((r) => r.total)
@@ -30,7 +30,12 @@ async function computeActions(sites: Site[]): Promise<ActionItem[]> {
   const perSite = await Promise.all(
     sites.map(async (s) => {
       const [stats, campaigns] = await Promise.all([
-        api.getVisitorStats(s.site_id).catch(() => null),
+        qc
+          .fetchQuery({
+            queryKey: ["visitor-stats", s.site_id],
+            queryFn: () => api.getVisitorStats(s.site_id),
+          })
+          .catch(() => null),
         api.listCampaigns(s.site_id).then((r) => r.campaigns).catch(() => []),
       ]);
       return { site: s, stats, campaigns };
@@ -68,9 +73,10 @@ async function computeActions(sites: Site[]): Promise<ActionItem[]> {
 }
 
 export function TodayActions({ sites }: { sites: Site[] }) {
+  const qc = useQueryClient();
   const { data: actions, isLoading } = useQuery({
     queryKey: ["today-actions", sites.map((s) => s.site_id).sort().join(",")],
-    queryFn: () => computeActions(sites),
+    queryFn: () => computeActions(sites, qc),
     enabled: sites.length > 0,
   });
 

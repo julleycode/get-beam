@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ComponentType } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
+import { useQuery } from "@tanstack/react-query";
 import {
   LayoutDashboard,
   Users,
@@ -314,30 +315,26 @@ export default function DashboardLayout({
 }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [userEmail, setUserEmail] = useState("");
-  const [isAdmin, setIsAdmin] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
+  // Shared ["me"] cache with the Overview page — one /auth/me request, not two.
+  const { data: me, isError: meError } = useQuery({
+    queryKey: ["me"],
+    queryFn: () => api.getMe(),
+    staleTime: 5 * 60_000,
+  });
+  const userEmail = me?.email ?? "";
+  const isAdmin = me?.is_admin === true;
+
   useEffect(() => {
-    const token = api.getToken();
-    // Without Clerk, require a legacy token
-    if (!HAS_CLERK && !token) {
+    // Legacy auth (no Clerk): a missing token or a failed /me means re-login.
+    // With Clerk, ClerkAuthGuard owns redirects.
+    if (HAS_CLERK) return;
+    if (!api.getToken() || meError) {
+      api.clearToken();
       router.replace("/login");
-      return;
     }
-    api
-      .getMe()
-      .then((u) => {
-        setUserEmail(u.email);
-        setIsAdmin(u.is_admin === true);
-      })
-      .catch(() => {
-        if (!HAS_CLERK) {
-          api.clearToken();
-          router.replace("/login");
-        }
-      });
-  }, [router]);
+  }, [router, meError]);
 
   // During onboarding we strip the full nav: a half-finished setup that gets
   // interrupted by an accidental "Overview" click strands the user with no way

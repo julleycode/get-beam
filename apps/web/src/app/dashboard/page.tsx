@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Sparkles, Users, FileText, Megaphone, AtSign } from "lucide-react";
-import { api, Site, SiteStats, EngagementROI } from "@/lib/api";
+import { api, Site } from "@/lib/api";
 import { SiteCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import {
@@ -43,16 +43,18 @@ function OverviewSkeleton() {
 }
 
 function SiteCard({ site }: { site: Site }) {
-  const [stats, setStats] = useState<SiteStats | null>(null);
   // Local pixel status so a successful re-verify flips the card immediately
   // without refetching the whole site list.
   const [pixelVerified, setPixelVerified] = useState(site.pixel_verified);
   const [verifying, setVerifying] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.getVisitorStats(site.site_id).then(setStats).catch(() => {});
-  }, [site.site_id]);
+  // Shared cache key with TodayActions (queryClient.fetchQuery) — one stats
+  // request per site, and cached across navigation back to Overview.
+  const { data: stats } = useQuery({
+    queryKey: ["visitor-stats", site.site_id],
+    queryFn: () => api.getVisitorStats(site.site_id),
+  });
 
   async function handleVerify() {
     setVerifying(true);
@@ -158,11 +160,10 @@ function SiteCard({ site }: { site: Site }) {
 }
 
 function BeamLoopWidget() {
-  const [roi, setRoi] = useState<EngagementROI | null>(null);
-
-  useEffect(() => {
-    api.getEngagementRoi(7).then(setRoi).catch(() => {});
-  }, []);
+  const { data: roi } = useQuery({
+    queryKey: ["engagement-roi", 7],
+    queryFn: () => api.getEngagementRoi(7),
+  });
 
   if (!roi) return null;
 
