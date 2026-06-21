@@ -18,6 +18,26 @@ export const metadata: Metadata = {
   description: "See who visits your site. Reach out on their turf.",
 };
 
+// Warm DNS/TLS to the external Clerk + API origins during HTML parse, so the
+// 320KB Clerk script and the first /auth/me + /sites fetches don't each pay a
+// fresh handshake on cold dashboard loads. Hosts come from env (correct in dev
+// and prod): Clerk's frontend-API host is base64-encoded in the publishable key.
+const CLERK_HOST = (() => {
+  const pk = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
+  try {
+    return Buffer.from(pk.split("_")[2] || "", "base64").toString("utf8").replace(/\$$/, "") || null;
+  } catch {
+    return null;
+  }
+})();
+const API_ORIGIN = (() => {
+  try {
+    return new URL(process.env.NEXT_PUBLIC_API_URL || "").origin;
+  } catch {
+    return null;
+  }
+})();
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -25,6 +45,10 @@ export default function RootLayout({
 }>) {
   const inner = (
     <html lang="en">
+      <head>
+        {CLERK_HOST && <link rel="preconnect" href={`https://${CLERK_HOST}`} crossOrigin="anonymous" />}
+        {API_ORIGIN && <link rel="preconnect" href={API_ORIGIN} crossOrigin="anonymous" />}
+      </head>
       <body className={cn(inter.variable, fraunces.variable, dmMono.variable, "font-sans antialiased")}>
         {HAS_CLERK && <ClerkTokenSync />}
         <Providers>{children}</Providers>
