@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentType } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@clerk/nextjs";
@@ -22,6 +22,7 @@ import {
   Inbox,
   Settings,
   Menu,
+  HelpCircle,
 } from "lucide-react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { api } from "@/lib/api";
@@ -30,6 +31,8 @@ import { BeamLogo } from "@/components/beam-logo";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { OnboardingTour } from "@/components/onboarding-tour";
+import { TOUR_STEPS } from "@/lib/tour-steps";
 
 const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
@@ -38,19 +41,22 @@ type NavItem = {
   label: string;
   icon: ComponentType<{ className?: string }>;
   adminOnly?: boolean;
+  // Marks this link as an onboarding-tour target. The OnboardingTour spotlights
+  // it via `aside [data-tour="<tour>"]`.
+  tour?: string;
 };
 
 const EASYTRACK_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { href: "/dashboard/visitors", label: "Visitors", icon: Users },
-  { href: "/dashboard/segments", label: "Segments", icon: Layers },
-  { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone },
-  { href: "/dashboard/exports", label: "Exports", icon: Download },
+  { href: "/dashboard", label: "Overview", icon: LayoutDashboard, tour: "overview" },
+  { href: "/dashboard/visitors", label: "Visitors", icon: Users, tour: "visitors" },
+  { href: "/dashboard/segments", label: "Segments", icon: Layers, tour: "segments" },
+  { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone, tour: "campaigns" },
+  { href: "/dashboard/exports", label: "Exports", icon: Download, tour: "exports" },
   { href: "/dashboard/costs", label: "API Costs", icon: Receipt, adminOnly: true },
 ];
 
 const EASYENGAGE_ITEMS: NavItem[] = [
-  { href: "/dashboard/feed", label: "Feed", icon: Rss },
+  { href: "/dashboard/feed", label: "Feed", icon: Rss, tour: "feed" },
   { href: "/dashboard/drafts", label: "Drafts", icon: FileText },
   { href: "/dashboard/social-accounts", label: "Social Accounts", icon: AtSign },
 ];
@@ -63,12 +69,15 @@ const BOTTOM_ITEMS: NavItem[] = [
   { href: "/dashboard/billing", label: "Billing", icon: CreditCard },
   { href: "/dashboard/waitlist", label: "Waitlist", icon: ListChecks, adminOnly: true },
   { href: "/dashboard/feature-requests", label: "Feature Requests", icon: Inbox, adminOnly: true },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings },
+  { href: "/dashboard/settings", label: "Settings", icon: Settings, tour: "settings" },
 ];
 
 // Set by the sign-up page so the invite token survives Clerk's multi-step
 // signup flow (see sign-up/[[...sign-up]]/page.tsx).
 const INVITE_TOKEN_KEY = "beam_invite";
+
+// Versioned so a future tour revision can re-trigger for everyone by bumping it.
+const TOUR_DONE_KEY = "beam_tour_done_v1";
 
 function NavLink({
   href,
@@ -76,12 +85,14 @@ function NavLink({
   icon: Icon,
   pathname,
   onNavigate,
+  tour,
 }: {
   href: string;
   label: string;
   icon: ComponentType<{ className?: string }>;
   pathname: string;
   onNavigate?: () => void;
+  tour?: string;
 }) {
   const isActive =
     pathname === href ||
@@ -90,6 +101,7 @@ function NavLink({
     <Link
       href={href}
       onClick={onNavigate}
+      data-tour={tour}
       className={cn(
         "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
         isActive
@@ -243,11 +255,13 @@ function SidebarBody({
   isAdmin,
   pathname,
   onNavigate,
+  onReplayTour,
 }: {
   userEmail: string;
   isAdmin: boolean;
   pathname: string;
   onNavigate?: () => void;
+  onReplayTour?: () => void;
 }) {
   return (
     <>
@@ -270,6 +284,7 @@ function SidebarBody({
             icon={item.icon}
             pathname={pathname}
             onNavigate={onNavigate}
+            tour={item.tour}
           />
         ))}
 
@@ -286,6 +301,7 @@ function SidebarBody({
             icon={item.icon}
             pathname={pathname}
             onNavigate={onNavigate}
+            tour={item.tour}
           />
         ))}
 
@@ -299,10 +315,25 @@ function SidebarBody({
             icon={item.icon}
             pathname={pathname}
             onNavigate={onNavigate}
+            tour={item.tour}
           />
         ))}
       </nav>
       <Separator className="my-2" />
+      {onReplayTour && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="justify-start gap-2 text-muted-foreground"
+          onClick={() => {
+            onNavigate?.();
+            onReplayTour();
+          }}
+        >
+          <HelpCircle className="h-4 w-4 shrink-0" />
+          Help / Replay tour
+        </Button>
+      )}
       {HAS_CLERK ? <ClerkSignOutButton /> : <LegacySignOutButton />}
     </>
   );
@@ -316,6 +347,8 @@ export default function DashboardLayout({
   const router = useRouter();
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
+  const autoLaunchTried = useRef(false);
 
   // Shared ["me"] cache with the Overview page — one /auth/me request, not two.
   const { data: me, isError: meError } = useQuery({
@@ -340,6 +373,29 @@ export default function DashboardLayout({
   // interrupted by an accidental "Overview" click strands the user with no way
   // back to verification. Show only the brand + one deliberate exit instead.
   const isOnboarding = pathname === "/dashboard/onboarding";
+
+  const completeTour = useCallback(() => {
+    try {
+      localStorage.setItem(TOUR_DONE_KEY, "1");
+    } catch {
+      /* storage blocked — tour will simply re-offer next session */
+    }
+  }, []);
+
+  // Auto-launch the tour once on a user's first dashboard visit. Waits for
+  // /auth/me so admin-only steps resolve and we know the session is authed
+  // (getMe carries the token). Never runs on the onboarding setup flow.
+  useEffect(() => {
+    if (isOnboarding || !me || autoLaunchTried.current) return;
+    autoLaunchTried.current = true;
+    let done = false;
+    try {
+      done = localStorage.getItem(TOUR_DONE_KEY) === "1";
+    } catch {
+      return; // storage blocked — don't auto-launch
+    }
+    if (!done) setTourOpen(true);
+  }, [me, isOnboarding]);
 
   if (isOnboarding) {
     return (
@@ -371,7 +427,12 @@ export default function DashboardLayout({
 
       {/* Desktop sidebar (md and up) */}
       <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-card p-4 md:flex">
-        <SidebarBody userEmail={userEmail} isAdmin={isAdmin} pathname={pathname} />
+        <SidebarBody
+          userEmail={userEmail}
+          isAdmin={isAdmin}
+          pathname={pathname}
+          onReplayTour={() => setTourOpen(true)}
+        />
       </aside>
 
       {/* Mobile slide-in drawer (below md). Radix gives focus-trap, ESC and
@@ -386,6 +447,7 @@ export default function DashboardLayout({
               isAdmin={isAdmin}
               pathname={pathname}
               onNavigate={() => setMobileNavOpen(false)}
+              onReplayTour={() => setTourOpen(true)}
             />
           </DialogPrimitive.Content>
         </DialogPrimitive.Portal>
@@ -412,6 +474,14 @@ export default function DashboardLayout({
           {HAS_CLERK ? <ClerkTokenGate>{children}</ClerkTokenGate> : children}
         </main>
       </div>
+
+      <OnboardingTour
+        steps={TOUR_STEPS}
+        open={tourOpen}
+        onOpenChange={setTourOpen}
+        onComplete={completeTour}
+        isAdmin={isAdmin}
+      />
     </div>
   );
 }

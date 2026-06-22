@@ -13,6 +13,8 @@ import { BrowserCaptureCard } from "@/components/browser-capture-card";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { IntentScoreInfo } from "@/components/intent-score-info";
 import {
   Table,
   TableBody,
@@ -397,7 +399,18 @@ export default function VisitorsPage() {
                 <TableHead>First seen</TableHead>
                 <TableHead>Last seen</TableHead>
                 <TableHead className="text-right">Pageviews</TableHead>
-                <TableHead className="text-right">Intent</TableHead>
+                <TableHead className="text-right">
+                  <span className="inline-flex items-center justify-end gap-1">
+                    Intent
+                    <InfoTooltip
+                      label="How intent score is calculated"
+                      side="bottom"
+                      align="end"
+                    >
+                      <IntentScoreInfo />
+                    </InfoTooltip>
+                  </span>
+                </TableHead>
                 <TableHead>Identity</TableHead>
                 <TableHead>Enrichment</TableHead>
               </TableRow>
