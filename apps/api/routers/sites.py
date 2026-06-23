@@ -320,6 +320,27 @@ async def traffic_fit(
     )
 
 
+@router.get("/{site_id}/kpis")
+async def site_kpis(
+    site_id: str,
+    days: int = 30,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Per-site KPI funnel — visitors → identified → high-intent → acted-on,
+    plus identify/action rates. The numbers a growth marketer reads to judge ROI."""
+    result = await db.execute(
+        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
+    )
+    site = result.scalar_one_or_none()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    from apps.api.services.kpi import compute_kpis
+
+    return await compute_kpis(db, site_id, days=max(1, min(days, 365)))
+
+
 # ──────────────────────── WordPress Plugin ─────────────────────────────
 
 

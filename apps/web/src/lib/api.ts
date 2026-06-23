@@ -375,6 +375,10 @@ class ApiClient {
     );
   }
 
+  async getSiteKpis(siteId: string, days = 30) {
+    return this.request<SiteKpis>(`/api/v1/sites/${siteId}/kpis?days=${days}`);
+  }
+
   async getCostSummary(siteId: string, days = 30) {
     return this.request<CostSummary>(
       `/api/v1/costs/${siteId}/summary?days=${days}`
@@ -1288,6 +1292,21 @@ export interface TrafficFit {
   top_countries: CountryShare[];
   status: "good_fit" | "partial_fit" | "poor_fit" | "insufficient_data";
   message: string;
+}
+
+export interface SiteKpis {
+  site_id: string;
+  window_days: number;
+  visitors: number;
+  identified: number;
+  enriched: number;
+  high_intent: number;
+  acted: number;
+  acted_high_intent: number;
+  sent: number;
+  identify_rate: number; // 0..1
+  action_rate: number; // 0..1
+  reply_tracking_available: boolean;
 }
 
 export interface SiteStats {

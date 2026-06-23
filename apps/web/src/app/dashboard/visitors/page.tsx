@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/empty-state";
 import { SiteSelector } from "@/components/site-selector";
 import { BrowserCaptureCard } from "@/components/browser-capture-card";
 import { TrafficFitCard } from "@/components/traffic-fit-card";
+import { KpiStrip } from "@/components/kpi-strip";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -334,6 +335,7 @@ export default function VisitorsPage() {
         }
       />
 
+      <KpiStrip siteId={siteId} />
       <TrafficFitCard siteId={siteId} />
       <BrowserCaptureCard siteId={siteId} />
 
