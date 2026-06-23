@@ -85,36 +85,31 @@ async def _known_visitor_ids(db: AsyncSession, site_id: str) -> set[str]:
     return {vid for vid, em in id_rows if em and email_hash(em) in known_hashes}
 
 
-@router.get("/{site_id}", response_model=VisitorListResponse)
-async def list_visitors(
+async def _build_visitor_filters(
+    db: AsyncSession,
     site_id: str,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    *,
     identity_status: str | None = None,
     enrichment_status: str | None = None,
-    country: str | None = Query(None, max_length=5),
-    visitor_type: str | None = None,  # "new" | "returning" — by session count
-    known: bool | None = None,  # match against the owner's known-contacts list
+    country: str | None = None,
+    visitor_type: str | None = None,
+    known: bool | None = None,
     first_seen_from: datetime | None = None,
     first_seen_to: datetime | None = None,
     last_seen_from: datetime | None = None,
     last_seen_to: datetime | None = None,
     min_intent: float | None = None,
-    sort_by: str = "intent_score",
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> VisitorListResponse:
-    await _verify_site_access(db, site_id, user)
+) -> list:
+    """Translate the Visitors-filter query params into SQLAlchemy predicates.
 
-    query = select(Visitor).where(Visitor.site_id == site_id)
-    count_query = select(func.count()).select_from(Visitor).where(Visitor.site_id == site_id)
-
-    # Build the filter predicates once and apply the same list to both the row
-    # query and the count query, so the paginated total always matches the rows.
-    # Date bounds: *_to is EXCLUSIVE (< ) — the frontend sends the start of the
-    # day AFTER the chosen end date so the whole end day is included. first_seen
-    # / last_seen are naive (UTC) timestamps, so bounds are cut on UTC days.
-    filters = []
+    Shared by the list endpoint and the country-facet endpoint so the dropdown
+    counts always reflect the same predicates as the rows. The country facet
+    passes country=None on purpose (faceted search: a facet must not constrain
+    its own counts, or picking a country would collapse the dropdown to that one
+    country). Date bounds: *_to is EXCLUSIVE — the frontend sends the start of
+    the day AFTER the chosen end date so the whole end day is included.
+    """
+    filters: list = []
     if identity_status:
         filters.append(Visitor.identity_status == identity_status)
     if enrichment_status:
@@ -148,6 +143,50 @@ async def list_visitors(
         filters.append(Visitor.last_seen < last_seen_to)
     if min_intent is not None:
         filters.append(Visitor.intent_score >= min_intent)
+    return filters
+
+
+@router.get("/{site_id}", response_model=VisitorListResponse)
+async def list_visitors(
+    site_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    identity_status: str | None = None,
+    enrichment_status: str | None = None,
+    country: str | None = Query(None, max_length=5),
+    visitor_type: str | None = None,  # "new" | "returning" — by session count
+    known: bool | None = None,  # match against the owner's known-contacts list
+    first_seen_from: datetime | None = None,
+    first_seen_to: datetime | None = None,
+    last_seen_from: datetime | None = None,
+    last_seen_to: datetime | None = None,
+    min_intent: float | None = None,
+    sort_by: str = "intent_score",
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> VisitorListResponse:
+    await _verify_site_access(db, site_id, user)
+
+    query = select(Visitor).where(Visitor.site_id == site_id)
+    count_query = select(func.count()).select_from(Visitor).where(Visitor.site_id == site_id)
+
+    # Build the filter predicates once and apply the same list to both the row
+    # query and the count query, so the paginated total always matches the rows.
+    # first_seen / last_seen are naive (UTC) timestamps, so bounds cut on UTC days.
+    filters = await _build_visitor_filters(
+        db,
+        site_id,
+        identity_status=identity_status,
+        enrichment_status=enrichment_status,
+        country=country,
+        visitor_type=visitor_type,
+        known=known,
+        first_seen_from=first_seen_from,
+        first_seen_to=first_seen_to,
+        last_seen_from=last_seen_from,
+        last_seen_to=last_seen_to,
+        min_intent=min_intent,
+    )
 
     for predicate in filters:
         query = query.where(predicate)
@@ -239,20 +278,51 @@ async def list_visitors(
 @router.get("/{site_id}/countries", response_model=list[VisitorCountryOut])
 async def list_visitor_countries(
     site_id: str,
+    identity_status: str | None = None,
+    enrichment_status: str | None = None,
+    visitor_type: str | None = None,
+    known: bool | None = None,
+    first_seen_from: datetime | None = None,
+    first_seen_to: datetime | None = None,
+    last_seen_from: datetime | None = None,
+    last_seen_to: datetime | None = None,
+    min_intent: float | None = None,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[VisitorCountryOut]:
     """Distinct GeoIP countries for this site's visitors, with counts, ordered
     by count desc. Feeds the country filter dropdown on the Visitors page.
-    One cheap GROUP BY — not paginated. Defined before the /{visitor_id} route
-    so "countries" isn't swallowed as a visitor id."""
+
+    Counts are FACETED: they honour every other active filter (date ranges,
+    visitor type, known, status) so the dropdown reflects what the list will
+    actually show. The ``country`` predicate itself is intentionally NOT applied
+    here — a facet must not constrain its own counts, otherwise picking one
+    country would collapse the dropdown to that single option.
+    One GROUP BY — not paginated. Defined before the /{visitor_id} route so
+    "countries" isn't swallowed as a visitor id."""
     await _verify_site_access(db, site_id, user)
-    rows = await db.execute(
+    filters = await _build_visitor_filters(
+        db,
+        site_id,
+        identity_status=identity_status,
+        enrichment_status=enrichment_status,
+        country=None,  # faceted: don't constrain the facet by itself
+        visitor_type=visitor_type,
+        known=known,
+        first_seen_from=first_seen_from,
+        first_seen_to=first_seen_to,
+        last_seen_from=last_seen_from,
+        last_seen_to=last_seen_to,
+        min_intent=min_intent,
+    )
+    stmt = (
         select(Visitor.country_code, func.count().label("count"))
         .where(Visitor.site_id == site_id, Visitor.country_code.isnot(None))
-        .group_by(Visitor.country_code)
-        .order_by(func.count().desc())
     )
+    for predicate in filters:
+        stmt = stmt.where(predicate)
+    stmt = stmt.group_by(Visitor.country_code).order_by(func.count().desc())
+    rows = await db.execute(stmt)
     return [VisitorCountryOut(country_code=r.country_code, count=r.count) for r in rows]
 
 

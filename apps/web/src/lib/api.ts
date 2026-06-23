@@ -311,10 +311,37 @@ class ApiClient {
     );
   }
 
-  // Countries (with counts) for this site's visitors — populates the filter dropdown.
-  async getVisitorCountries(siteId: string) {
+  // Countries (with counts) for this site's visitors — populates the filter
+  // dropdown. Counts are faceted: pass the other active filters so each count
+  // reflects what the list would actually show (the country filter itself is
+  // deliberately excluded server-side).
+  async getVisitorCountries(
+    siteId: string,
+    params: {
+      identity_status?: string;
+      enrichment_status?: string;
+      visitor_type?: string;
+      known?: boolean;
+      first_seen_from?: string;
+      first_seen_to?: string;
+      last_seen_from?: string;
+      last_seen_to?: string;
+      min_intent?: number;
+    } = {}
+  ) {
+    const query = new URLSearchParams();
+    if (params.identity_status) query.set("identity_status", params.identity_status);
+    if (params.enrichment_status) query.set("enrichment_status", params.enrichment_status);
+    if (params.visitor_type) query.set("visitor_type", params.visitor_type);
+    if (params.known !== undefined) query.set("known", String(params.known));
+    if (params.first_seen_from) query.set("first_seen_from", params.first_seen_from);
+    if (params.first_seen_to) query.set("first_seen_to", params.first_seen_to);
+    if (params.last_seen_from) query.set("last_seen_from", params.last_seen_from);
+    if (params.last_seen_to) query.set("last_seen_to", params.last_seen_to);
+    if (params.min_intent !== undefined) query.set("min_intent", String(params.min_intent));
+    const qs = query.toString();
     return this.request<VisitorCountry[]>(
-      `/api/v1/visitors/${siteId}/countries`
+      `/api/v1/visitors/${siteId}/countries${qs ? `?${qs}` : ""}`
     );
   }
 
@@ -331,6 +358,12 @@ class ApiClient {
   async getBrowserBreakdown(siteId: string, windowDays = 30) {
     return this.request<BrowserBreakdown>(
       `/api/v1/sites/${siteId}/browser-breakdown?window_days=${windowDays}`
+    );
+  }
+
+  async getTrafficFit(siteId: string, windowDays = 30) {
+    return this.request<TrafficFit>(
+      `/api/v1/sites/${siteId}/traffic-fit?window_days=${windowDays}`
     );
   }
 
@@ -1207,12 +1240,44 @@ export interface SafariCoverage {
   message: string;
 }
 
+export interface BrowserMetrics {
+  total_pageviews: number;
+  avg_time_on_page: number; // seconds
+  bounce_rate: number; // 0..1
+  identified: number;
+  enriched: number;
+}
+
 export interface BrowserBreakdown {
   site_id: string;
   window_days: number;
   total_visitors: number;
   browsers: BrowserRow[];
+  // Optional so the card degrades gracefully against a backend not yet deployed.
+  metrics?: BrowserMetrics;
   safari_coverage: SafariCoverage;
+}
+
+export interface CountryShare {
+  country: string;
+  count: number;
+  share: number; // 0..1
+}
+
+export interface TrafficFit {
+  site_id: string;
+  window_days: number;
+  total_visitors: number;
+  located_visitors: number; // visitors with a known country
+  us_share: number; // 0..1, of located
+  unknown_share: number; // 0..1, of total
+  servable_count: number;
+  identified_servable: number;
+  us_match_rate: number | null; // measured, null until enough US visitors
+  identifiable_estimate: number; // 0..1 — "~X% of visitors are identifiable"
+  top_countries: CountryShare[];
+  status: "good_fit" | "partial_fit" | "poor_fit" | "insufficient_data";
+  message: string;
 }
 
 export interface SiteStats {

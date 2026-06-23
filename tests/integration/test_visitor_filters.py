@@ -180,6 +180,44 @@ class TestVisitorFilters:
         assert counts == {"US": 2, "VN": 1}  # NULL country excluded
         assert rows[0]["country_code"] == "US"  # ordered by count desc
 
+    @pytest.mark.asyncio
+    async def test_countries_faceted_by_visitor_type(self, test_client, filter_setup):
+        # Faceted counts honour the other active filters. Returning (2+ sessions):
+        # v-vn-mid (VN, 3) + v-us-late (US, 2). v-us-enriched & v-nocountry are new.
+        resp = await test_client.get(
+            f"/api/v1/visitors/{filter_setup['site_id']}/countries"
+            "?visitor_type=returning",
+            headers=_auth(filter_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        counts = {r["country_code"]: r["count"] for r in resp.json()}
+        assert counts == {"US": 1, "VN": 1}
+
+    @pytest.mark.asyncio
+    async def test_countries_faceted_by_date(self, test_client, filter_setup):
+        # first_seen >= 06-15 → v-nocountry(NULL, excluded) + v-us-late(US). VN &
+        # the early US visitor drop out, so the dropdown should show only US (1).
+        resp = await test_client.get(
+            f"/api/v1/visitors/{filter_setup['site_id']}/countries"
+            "?first_seen_from=2026-06-15",
+            headers=_auth(filter_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        counts = {r["country_code"]: r["count"] for r in resp.json()}
+        assert counts == {"US": 1}
+
+    @pytest.mark.asyncio
+    async def test_countries_facet_ignores_its_own_country(self, test_client, filter_setup):
+        # A facet must not constrain its own counts — passing country=US must NOT
+        # collapse the dropdown to {US}; every country still shows.
+        resp = await test_client.get(
+            f"/api/v1/visitors/{filter_setup['site_id']}/countries?country=US",
+            headers=_auth(filter_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        counts = {r["country_code"]: r["count"] for r in resp.json()}
+        assert counts == {"US": 2, "VN": 1}
+
 
 @pytest_asyncio.fixture
 async def known_uploaded(test_client, filter_setup):

@@ -5,11 +5,13 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal, SearchX } from "lucide-react";
 import { TableSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
+import { EmptyState } from "@/components/empty-state";
 import { SiteSelector } from "@/components/site-selector";
 import { BrowserCaptureCard } from "@/components/browser-capture-card";
+import { TrafficFitCard } from "@/components/traffic-fit-card";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -47,6 +49,15 @@ function nextDay(d: string): string {
   return dt.toISOString().slice(0, 10);
 }
 
+// "YYYY-MM-DD" strings sort chronologically as plain strings, so min/max over a
+// few date bounds is a sort. Empty values are ignored. Used to intertwine the
+// First-seen and Last-seen pickers (a visitor's last_seen is always >= its
+// first_seen, so the two ranges constrain each other).
+const earliest = (...ds: string[]): string | undefined =>
+  ds.filter(Boolean).sort()[0] || undefined;
+const latest = (...ds: string[]): string | undefined =>
+  ds.filter(Boolean).sort().at(-1) || undefined;
+
 export default function VisitorsPage() {
   const searchParams = useSearchParams();
   const [siteId, setSiteId] = useState(searchParams.get("site") || "");
@@ -64,6 +75,36 @@ export default function VisitorsPage() {
   // "all" | "known" | "unknown" — match against the owner's known-contacts list.
   const [knownFilter, setKnownFilter] = useState("all");
 
+  // Filters shared by the list AND the country facet, so the dropdown counts
+  // reflect the same predicates as the rows. The country filter is NOT in here
+  // on purpose — a facet must not constrain its own counts (faceted search).
+  // "enriched" is an enrichment_status, not an identity_status — route it to the
+  // right param (the old code sent identity_status=enriched, which matched
+  // nothing).
+  const facetParams = {
+    visitor_type: visitorType === "all" ? undefined : visitorType,
+    known: knownFilter === "all" ? undefined : knownFilter === "known",
+    identity_status:
+      filter === "all" || filter === "enriched" ? undefined : filter,
+    enrichment_status: filter === "enriched" ? "enriched" : undefined,
+    first_seen_from: firstFrom || undefined,
+    first_seen_to: firstTo ? nextDay(firstTo) : undefined,
+    last_seen_from: lastFrom || undefined,
+    last_seen_to: lastTo ? nextDay(lastTo) : undefined,
+  };
+
+  // Logically-impossible date windows (e.g. last-seen-end before first-seen-start,
+  // or a from after its own to). A visitor's last_seen is always >= first_seen,
+  // so such combinations can only ever return zero rows — warn instead of
+  // silently showing an empty table.
+  const dateWarning =
+    (firstFrom && firstTo && firstFrom > firstTo) ||
+    (lastFrom && lastTo && lastFrom > lastTo)
+      ? "Ngày bắt đầu đang sau ngày kết thúc — không có khách nào khớp."
+      : firstFrom && lastTo && lastTo < firstFrom
+        ? "“Last seen đến” đang trước “First seen từ” — bất khả thi (lần cuối luôn sau lần đầu)."
+        : null;
+
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [
       "visitors", siteId, page, filter, sortBy,
@@ -71,32 +112,33 @@ export default function VisitorsPage() {
     ],
     queryFn: () =>
       api.listVisitors(siteId, {
+        ...facetParams,
         page,
         page_size: 50,
-        visitor_type: visitorType === "all" ? undefined : visitorType,
-        known: knownFilter === "all" ? undefined : knownFilter === "known",
-        // "enriched" is an enrichment_status, not an identity_status — route it
-        // to the right param (the old code sent identity_status=enriched, which
-        // matched nothing).
-        identity_status:
-          filter === "all" || filter === "enriched" ? undefined : filter,
-        enrichment_status: filter === "enriched" ? "enriched" : undefined,
         country: country === "all" ? undefined : country,
-        first_seen_from: firstFrom || undefined,
-        first_seen_to: firstTo ? nextDay(firstTo) : undefined,
-        last_seen_from: lastFrom || undefined,
-        last_seen_to: lastTo ? nextDay(lastTo) : undefined,
         sort_by: sortBy,
       }),
     enabled: !!siteId,
   });
 
-  // Country options (with per-country counts) for the filter dropdown.
+  // Country options (with per-country counts) for the filter dropdown — faceted
+  // by every other active filter (keyed on facetParams so it refetches).
   const { data: countries } = useQuery({
-    queryKey: ["visitor-countries", siteId],
-    queryFn: () => api.getVisitorCountries(siteId),
+    queryKey: ["visitor-countries", siteId, facetParams],
+    queryFn: () => api.getVisitorCountries(siteId, facetParams),
     enabled: !!siteId,
   });
+
+  // Keep the currently-selected country visible even if the faceted counts no
+  // longer include it (e.g. a date filter dropped it to zero) — otherwise the
+  // Select trigger would render blank and feel stuck. Show it with (0).
+  const countryOptions = (() => {
+    const list = countries ?? [];
+    if (country !== "all" && !list.some((c) => c.country_code === country)) {
+      return [...list, { country_code: country, count: 0 }];
+    }
+    return list;
+  })();
 
   const hasFilters =
     filter !== "all" ||
@@ -115,6 +157,14 @@ export default function VisitorsPage() {
     setLastFrom("");
     setLastTo("");
     setPage(1);
+  }
+
+  // Switching sites must drop the previous site's filters AND reset paging —
+  // otherwise e.g. country="US" from the old site (or page 3) carries over and
+  // the new site looks empty for no visible reason.
+  function handleSiteChange(id: string) {
+    setSiteId(id);
+    clearFilters();
   }
 
   const { data: site } = useQuery({
@@ -230,7 +280,7 @@ export default function VisitorsPage() {
         title="Visitors"
         actions={
           <div className="flex flex-wrap items-center gap-3">
-          <SiteSelector value={siteId} onChange={setSiteId} />
+          <SiteSelector value={siteId} onChange={handleSiteChange} />
           {siteId && site && (
             <Button
               variant={site.auto_identify_enabled ? "default" : "outline"}
@@ -267,6 +317,7 @@ export default function VisitorsPage() {
         }
       />
 
+      <TrafficFitCard siteId={siteId} />
       <BrowserCaptureCard siteId={siteId} />
 
       {siteId && (
@@ -281,7 +332,7 @@ export default function VisitorsPage() {
               <input
                 type="date"
                 value={firstFrom}
-                max={firstTo || undefined}
+                max={earliest(firstTo, lastTo)}
                 onChange={(e) => { setFirstFrom(e.target.value); setPage(1); }}
                 className="h-9 rounded-md border bg-background px-2 text-sm"
               />
@@ -290,6 +341,7 @@ export default function VisitorsPage() {
                 type="date"
                 value={firstTo}
                 min={firstFrom || undefined}
+                max={lastTo || undefined}
                 onChange={(e) => { setFirstTo(e.target.value); setPage(1); }}
                 className="h-9 rounded-md border bg-background px-2 text-sm"
               />
@@ -301,6 +353,7 @@ export default function VisitorsPage() {
               <input
                 type="date"
                 value={lastFrom}
+                min={firstFrom || undefined}
                 max={lastTo || undefined}
                 onChange={(e) => { setLastFrom(e.target.value); setPage(1); }}
                 className="h-9 rounded-md border bg-background px-2 text-sm"
@@ -309,7 +362,7 @@ export default function VisitorsPage() {
               <input
                 type="date"
                 value={lastTo}
-                min={lastFrom || undefined}
+                min={latest(lastFrom, firstFrom)}
                 onChange={(e) => { setLastTo(e.target.value); setPage(1); }}
                 className="h-9 rounded-md border bg-background px-2 text-sm"
               />
@@ -323,7 +376,7 @@ export default function VisitorsPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All countries</SelectItem>
-                {(countries ?? []).map((c) => (
+                {countryOptions.map((c) => (
                   <SelectItem key={c.country_code} value={c.country_code}>
                     {c.country_code} ({c.count})
                   </SelectItem>
@@ -372,6 +425,9 @@ export default function VisitorsPage() {
               Clear filters
             </Button>
           )}
+          {dateWarning && (
+            <p className="w-full text-xs font-medium text-warning">{dateWarning}</p>
+          )}
         </div>
       )}
 
@@ -392,6 +448,24 @@ export default function VisitorsPage() {
           {notice && (
             <p className="mb-3 text-sm text-warning">{notice}</p>
           )}
+          {visitors.length === 0 ? (
+            <EmptyState
+              icon={SearchX}
+              title={hasFilters ? "Không có khách nào khớp bộ lọc" : "Chưa có khách nào"}
+              description={
+                hasFilters
+                  ? "Thử nới rộng khoảng ngày hoặc bỏ bớt điều kiện lọc."
+                  : "Khi pixel ghi nhận lượt truy cập, khách sẽ hiện ở đây."
+              }
+              action={
+                hasFilters ? (
+                  <Button variant="outline" size="sm" onClick={clearFilters}>
+                    Xoá bộ lọc
+                  </Button>
+                ) : undefined
+              }
+            />
+          ) : (
           <Table>
             <TableHeader>
               <TableRow>
@@ -473,6 +547,7 @@ export default function VisitorsPage() {
               ))}
             </TableBody>
           </Table>
+          )}
 
           {total > 50 && (
             <div className="flex justify-center gap-2 mt-4">
