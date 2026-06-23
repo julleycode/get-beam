@@ -1085,6 +1085,7 @@ export interface Visitor {
   full_name?: string | null;
   is_known?: boolean;
   known_source?: string | null;
+  conviction?: string | null;
 }
 
 export interface VisitorDetail extends Visitor {

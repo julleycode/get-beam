@@ -23,6 +23,7 @@ from apps.api.schemas.visitors import (
     VisitorStatsResponse,
 )
 from apps.api.services.billing import check_usage_allowed, increment_usage
+from apps.api.services.conviction import build_conviction
 from apps.api.services.enricher import Enricher
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.resolution_runner import run_resolution_for_site
@@ -271,6 +272,9 @@ async def list_visitors(
                 if h and h in known_src:
                     v.is_known = True
                     v.known_source = known_src[h]
+
+    for v in visitors:
+        v.conviction = build_conviction(v.model_dump())
 
     return VisitorListResponse(visitors=visitors, total=total, page=page, page_size=page_size)
 
@@ -754,6 +758,7 @@ async def get_visitor_detail(
         )
     )
     data["auto_draft_count"] = draft_count_result.scalar() or 0
+    data["conviction"] = build_conviction(data)
 
     return VisitorDetailOut(**data)
 

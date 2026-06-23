@@ -169,6 +169,12 @@ export default function VisitorDetailPage() {
         <p className="text-sm font-mono text-muted-foreground">
           {visitor.visitor_id}
         </p>
+        {visitor.conviction && (
+          <p className="mt-2 text-sm">
+            <span className="text-muted-foreground">Why reach out: </span>
+            <span className="font-medium">{visitor.conviction}</span>
+          </p>
+        )}
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">

@@ -31,6 +31,9 @@ class VisitorOut(BaseModel):
     # known-contacts list (existing customer / prior lead). Matched by hash.
     is_known: bool = False
     known_source: str | None = None  # "csv" | "crm" | ...
+    # One-line "why this person matters" — derived from behaviour (+ enrichment
+    # on the detail view). None when there's no signal worth surfacing.
+    conviction: str | None = None
 
     model_config = {"from_attributes": True}
 

@@ -547,6 +547,14 @@ export default function VisitorsPage() {
                         </span>
                       )}
                     </div>
+                    {v.conviction && (
+                      <div
+                        className="mt-1 text-xs text-muted-foreground"
+                        title="Why this visitor is worth reaching out to"
+                      >
+                        {v.conviction}
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell className="text-sm">
                     {new Date(v.first_seen).toLocaleDateString()}
