@@ -27,5 +27,11 @@ class Site(Base):
     auto_identify_enabled: Mapped[bool] = mapped_column(
         default=False, nullable=False, server_default="false"
     )
+    # When True (default), email the owner the moment a high-intent US visitor is
+    # identified — the "hot visitor" ping. Gated to US + intent >= 40 + once per
+    # visitor; toggle off per site to silence.
+    hot_alert_enabled: Mapped[bool] = mapped_column(
+        default=True, nullable=False, server_default="true"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

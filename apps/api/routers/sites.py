@@ -134,6 +134,8 @@ async def update_site(
 
     if body.auto_identify_enabled is not None:
         site.auto_identify_enabled = body.auto_identify_enabled
+    if body.hot_alert_enabled is not None:
+        site.hot_alert_enabled = body.hot_alert_enabled
 
     await db.commit()
     await db.refresh(site)

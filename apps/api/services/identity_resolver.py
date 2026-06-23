@@ -1582,6 +1582,14 @@ class IdentityResolver:
         # ── Beam Identity Network: contribute to cross-customer graph ──
         await self._upsert_beam_identity(visitor, data, provider)
 
+        # ── Hot-visitor ping: email the owner if US + high-intent (best-effort) ──
+        try:
+            from apps.api.services.hot_alert import maybe_send_hot_alert
+
+            await maybe_send_hot_alert(self.db, visitor, identified)
+        except Exception as e:  # noqa: BLE001 — a failed ping must not break resolve
+            logger.warning("hot_alert_failed", error=str(e))
+
         return identified
 
     async def _upsert_beam_identity(

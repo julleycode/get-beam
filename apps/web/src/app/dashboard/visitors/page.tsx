@@ -223,6 +223,12 @@ export default function VisitorsPage() {
       queryClient.invalidateQueries({ queryKey: ["site", siteId] }),
   });
 
+  const hotMut = useMutation({
+    mutationFn: (enabled: boolean) => api.setHotAlert(siteId, enabled),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["site", siteId] }),
+  });
+
   function renderIdentity(v: (typeof visitors)[number]) {
     const s = v.identity_status;
     if (s === "identified") {
@@ -290,6 +296,17 @@ export default function VisitorsPage() {
               title="On = tự động nhận diện khách intent cao. Off = bấm Identify từng người."
             >
               Auto-identify: {site.auto_identify_enabled ? "On" : "Off"}
+            </Button>
+          )}
+          {siteId && site && (
+            <Button
+              variant={site.hot_alert_enabled ? "default" : "outline"}
+              size="sm"
+              disabled={hotMut.isPending}
+              onClick={() => hotMut.mutate(!site.hot_alert_enabled)}
+              title="On = email báo ngay khi có khách US intent cao được nhận diện."
+            >
+              🔥 Hot alerts: {site.hot_alert_enabled ? "On" : "Off"}
             </Button>
           )}
           <Select value={filter} onValueChange={(v) => { setFilter(v); setPage(1); }}>

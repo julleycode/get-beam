@@ -264,6 +264,14 @@ class ApiClient {
     });
   }
 
+  // Toggle the per-site hot-visitor email ping on/off.
+  async setHotAlert(siteId: string, enabled: boolean) {
+    return this.request<Site>(`/api/v1/sites/${siteId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ hot_alert_enabled: enabled }),
+    });
+  }
+
   async getPixelSnippet(siteId: string) {
     return this.request<{ site_id: string; snippet: string }>(
       `/api/v1/sites/${siteId}/pixel`
@@ -1010,6 +1018,7 @@ export interface Site {
   pixel_verified: boolean;
   daily_resolution_budget: number;
   auto_identify_enabled: boolean;
+  hot_alert_enabled: boolean;
   created_at: string;
 }
 
