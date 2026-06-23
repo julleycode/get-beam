@@ -294,6 +294,30 @@ async def browser_breakdown(
     )
 
 
+@router.get("/{site_id}/traffic-fit")
+async def traffic_fit(
+    site_id: str,
+    window_days: int = 30,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """US-coverage fit estimate — "what share of this site's traffic can beam
+    actually identify?" Person-level identification is US-only, so a mostly
+    non-US site will never resolve; this surfaces that up front."""
+    result = await db.execute(
+        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
+    )
+    site = result.scalar_one_or_none()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    from apps.api.services.traffic_fit import compute_traffic_fit
+
+    return await compute_traffic_fit(
+        db, site_id, window_days=max(1, min(window_days, 90))
+    )
+
+
 # ──────────────────────── WordPress Plugin ─────────────────────────────
 
 

@@ -393,8 +393,8 @@
         await ob.bot(`i matched your device, but i don't have a name on file for it yet — happens with some traffic.`);
         await ob.bot(`drop your work email and i'll pull your full profile — name, company, and socials.`);
       } else {
-        await ob.bot(`couldn't identify you this time — happens with ~30% of traffic. in production, our 7-layer waterfall catches most of your real visitors.`, { delay: 300 });
-        await ob.bot(`drop your work email and i'll pull your real profile.`);
+        await ob.bot(`couldn't identify you this time — and here's the honest reason worth knowing: beam resolves <b>US visitors</b> today. if you're browsing from outside the US (a lot of early traffic is), that's expected, not a miss.`, { delay: 300 });
+        await ob.bot(`on US company traffic, our 7-layer waterfall catches ~60-80%. drop a work email and i'll pull a real profile.`);
       }
 
       if (!id || !id.matched || id.level === 'device') {
@@ -527,7 +527,8 @@
       }
 
       const beats = [
-        { say: `every visitor that lands, i identify. 7 layers. 60-80% match rate.`, card: '' },
+        { say: `every US visitor that lands, i identify. 7 layers. 60-80% match rate.`, card: '' },
+        { say: `your number depends on how much of your traffic is US — once you connect your site, beam shows your <b>traffic-fit</b> up front, so you know it on day one.`, card: '' },
         { say: `then i find their socials.`, card: socialCard },
         { say: `then i draft a reply. personalized. in your voice.`, card: '' },
         { say: `you review, hit send. from your own account. no bans.`, card: '' },
