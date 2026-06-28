@@ -105,16 +105,7 @@ function SiteCard({ site }: { site: Site }) {
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Stats row */}
-        {stats && stats.total_visitors > 0 && (
-          <div className="grid grid-cols-3 gap-2">
-            <StatTile label="Visitors" value={stats.total_visitors} />
-            <StatTile label="Identified" value={stats.identified} tone="info" />
-            <StatTile label="Enriched" value={stats.enriched} tone="success" />
-          </div>
-        )}
-
-        {/* Pixel status + re-verify */}
+        {/* Pixel status + re-verify (above the numbers) */}
         <div className="space-y-1.5">
           <div className="flex items-center gap-1.5 text-xs">
             {pixelVerified ? (
@@ -150,6 +141,15 @@ function SiteCard({ site }: { site: Site }) {
             <p className="text-[11px] text-muted-foreground">{verifyMessage}</p>
           )}
         </div>
+
+        {/* Stats row */}
+        {stats && stats.total_visitors > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            <StatTile label="Visitors" value={stats.total_visitors} />
+            <StatTile label="Identified" value={stats.identified} tone="info" />
+            <StatTile label="Enriched" value={stats.enriched} tone="success" />
+          </div>
+        )}
       </CardContent>
     </Card>
   );
