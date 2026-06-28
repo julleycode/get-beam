@@ -9,6 +9,7 @@ import {
   periodToDays,
   type Period,
 } from "@/components/ui/period-toggle";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
 import {
   Card,
   CardContent,
@@ -83,7 +84,7 @@ export function TrafficFitCard({ siteId }: { siteId: string }) {
   const enough = data.status !== "insufficient_data";
 
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
@@ -104,12 +105,13 @@ export function TrafficFitCard({ siteId }: { siteId: string }) {
       <CardContent>
         {data.top_countries.length > 0 && (
           // 100%-stacked country bar — hover a segment for the country + share.
-          // The muted track shows any unlabeled remainder.
-          <div className="flex h-8 w-full overflow-hidden rounded-md bg-secondary">
+          // The muted track (rounded) shows any unlabeled remainder. No
+          // overflow-hidden on the row so the hover tooltip can escape it.
+          <div className="flex h-8 w-full rounded-md bg-secondary">
             {data.top_countries.map((c, i) => (
               <div
                 key={c.country}
-                className="group relative h-full min-w-[3px] cursor-default border-r border-background/60 transition-opacity last:border-r-0 hover:opacity-90"
+                className="group relative h-full min-w-[3px] cursor-default border-r border-background/60 transition-opacity first:rounded-l-md last:border-r-0 hover:opacity-90"
                 style={{ width: pct(c.share), backgroundColor: geoColor(c.country, i) }}
               >
                 <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md group-hover:block">
@@ -122,11 +124,22 @@ export function TrafficFitCard({ siteId }: { siteId: string }) {
         )}
 
         {enough && (
-          <div className="mt-3 border-t pt-3 text-sm">
+          <div className="mt-3 flex items-center gap-1 border-t pt-3 text-sm">
             <span className="font-mono font-medium tabular-nums">
               ~{pct(data.identifiable_estimate)}
-            </span>{" "}
+            </span>
             <span className="text-muted-foreground">identifiable</span>
+            <InfoTooltip label="What “identifiable” means" side="top" align="start">
+              <p className="font-medium">
+                ~{pct(data.identifiable_estimate)} of visitors are identifiable
+              </p>
+              <p className="mt-1">
+                Estimated share beam can put a name to. Person-level
+                identification is US-only, so this ≈ your US traffic share (
+                {pct(data.us_share)}) × the US match rate — non-US visitors
+                won’t resolve no matter how long the pixel runs.
+              </p>
+            </InfoTooltip>
           </div>
         )}
       </CardContent>

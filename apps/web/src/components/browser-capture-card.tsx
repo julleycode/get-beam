@@ -112,7 +112,7 @@ export function BrowserCaptureCard({ siteId }: { siteId: string }) {
   const abnormal = cov.status === "watch" || cov.status === "likely_blocked";
 
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-1.5">

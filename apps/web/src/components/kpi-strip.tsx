@@ -91,7 +91,7 @@ export function KpiStrip({ siteId }: { siteId: string }) {
   if (!data || data.visitors === 0) return null;
 
   return (
-    <Card>
+    <Card className="h-full">
       <CardHeader className="pb-2">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-sm">Overall</CardTitle>

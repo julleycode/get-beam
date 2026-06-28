@@ -154,7 +154,7 @@ export function VisitorWidgets({ siteId }: { siteId: string }) {
         </Button>
       </div>
 
-      <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
         {layout.map((id, i) => {
           const w = REGISTRY.find((x) => x.id === id);
           if (!w) return null;
@@ -163,6 +163,7 @@ export function VisitorWidgets({ siteId }: { siteId: string }) {
             <div
               key={id}
               className={cn(
+                "h-full",
                 editing &&
                   "min-h-[88px] overflow-hidden rounded-lg ring-2 ring-primary/30"
               )}
