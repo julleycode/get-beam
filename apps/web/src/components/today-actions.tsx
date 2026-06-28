@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Users, Layers, FileText, Megaphone, Send, Radio, CheckCircle2, X } from "lucide-react";
@@ -20,6 +20,14 @@ type ActionItem = {
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 const IGNORE_KEY = "beam_today_ignored_v1";
+// Remembers the day the "all caught up" card was dismissed, so it stays gone for
+// the rest of that day instead of re-appearing on every navigation back.
+const CAUGHT_UP_KEY = "beam_today_caughtup_v1";
+
+const todayKey = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+};
 
 // Persisted set of action keys the user dismissed so they stop nagging.
 function useIgnored() {
@@ -124,21 +132,52 @@ export function TodayActions({ sites }: { sites: Site[] }) {
   const [leavePhase, setLeavePhase] = useState<"show" | "leaving" | "gone">(
     "show"
   );
+  // Whether we already dismissed the empty card earlier today (persisted). Once
+  // true, the card never re-appears that day — no second show/fade on return.
+  const [cuReady, setCuReady] = useState(false);
+  const caughtUpToday = useRef(false);
+
   useEffect(() => {
+    try {
+      caughtUpToday.current = localStorage.getItem(CAUGHT_UP_KEY) === todayKey();
+    } catch {
+      /* storage blocked — treat as not dismissed */
+    }
+    setCuReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!cuReady) return;
     if (!showEmpty) {
       setLeavePhase("show");
       return;
     }
+    // Already dismissed today → vanish instantly, skip the linger/animation.
+    if (caughtUpToday.current) {
+      setLeavePhase("gone");
+      return;
+    }
     const t = setTimeout(() => setLeavePhase("leaving"), 1600);
     return () => clearTimeout(t);
-  }, [showEmpty]);
+  }, [showEmpty, cuReady]);
+
   useEffect(() => {
     if (leavePhase !== "leaving") return;
-    const t = setTimeout(() => setLeavePhase("gone"), 550); // match duration-500
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(CAUGHT_UP_KEY, todayKey());
+      } catch {
+        /* storage blocked — at least stays gone this session */
+      }
+      caughtUpToday.current = true;
+      setLeavePhase("gone");
+    }, 550); // match duration-500
     return () => clearTimeout(t);
   }, [leavePhase]);
 
   if (sites.length === 0 || leavePhase === "gone") return null;
+  // Dismissed earlier today: don't even flash the card while effects settle.
+  if (cuReady && showEmpty && caughtUpToday.current) return null;
 
   return (
     <div
@@ -154,7 +193,7 @@ export function TodayActions({ sites }: { sites: Site[] }) {
         <CardTitle className="text-base">Today&apos;s actions</CardTitle>
       </CardHeader>
       <CardContent>
-        {isLoading || !hydrated ? (
+        {isLoading || !hydrated || !cuReady ? (
           <ListCardSkeleton rows={3} />
         ) : showEmpty ? (
           <div className="flex flex-col items-center gap-2 py-6 text-center">
