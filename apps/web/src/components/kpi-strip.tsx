@@ -14,7 +14,6 @@ import {
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -81,7 +80,7 @@ export function KpiStrip({ siteId }: { siteId: string }) {
     return (
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Funnel</CardTitle>
+          <CardTitle className="text-sm">Overall</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-xs text-muted-foreground">Loading…</p>
@@ -94,13 +93,8 @@ export function KpiStrip({ siteId }: { siteId: string }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <CardTitle className="text-sm">Funnel</CardTitle>
-            <CardDescription className="text-xs">
-              {period === "lifetime" ? "all time" : `last ${data.window_days} days`}
-            </CardDescription>
-          </div>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-sm">Overall</CardTitle>
           <div className="flex shrink-0 items-center gap-2">
             {/* Numbers ↔ graph view toggle */}
             <div className="inline-flex rounded-md border border-border bg-secondary/40 p-0.5">
@@ -186,12 +180,6 @@ export function KpiStrip({ siteId }: { siteId: string }) {
                 <span className="text-muted-foreground">action rate</span>
               </div>
             </div>
-            {!data.reply_tracking_available && (
-              <p className="text-xs text-muted-foreground">
-                Reply rate &amp; the wedge metric (visitor-reply vs cold) need reply
-                tracking — coming next.
-              </p>
-            )}
           </>
         )}
       </CardContent>

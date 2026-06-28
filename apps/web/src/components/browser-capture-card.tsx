@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AlertTriangle } from "lucide-react";
 import { api, BrowserBreakdown } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import {
   PeriodToggle,
   periodToDays,
@@ -10,7 +12,6 @@ import {
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -94,7 +95,7 @@ export function BrowserCaptureCard({ siteId }: { siteId: string }) {
     return (
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Capture by browser</CardTitle>
+          <CardTitle className="text-sm">Browser type</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-xs text-muted-foreground">Loading…</p>
@@ -106,76 +107,66 @@ export function BrowserCaptureCard({ siteId }: { siteId: string }) {
 
   const cov = data.safari_coverage;
   const s = STATUS_STYLES[cov.status] ?? STATUS_STYLES.insufficient_data;
+  // Only surface Safari coverage when it's a problem — a warning icon by the
+  // title, with the detail on hover. Healthy / not-enough-data stays silent.
+  const abnormal = cov.status === "watch" || cov.status === "likely_blocked";
 
   return (
     <Card>
       <CardHeader className="pb-2">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <CardTitle className="text-sm">Capture by browser</CardTitle>
-            <CardDescription className="text-xs">
-              {data.total_visitors} visitors ·{" "}
-              {period === "lifetime" ? "all time" : `last ${data.window_days} days`}
-            </CardDescription>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-1.5">
+            <CardTitle className="text-sm">Browser type</CardTitle>
+            {abnormal && (
+              <span className="group relative inline-flex">
+                <AlertTriangle
+                  className={cn(
+                    "h-4 w-4",
+                    cov.status === "likely_blocked"
+                      ? "text-destructive"
+                      : "text-warning"
+                  )}
+                  aria-label={`Safari coverage: ${s.label}`}
+                />
+                <div
+                  role="tooltip"
+                  className="pointer-events-none absolute left-0 top-full z-50 mt-1.5 hidden w-64 whitespace-normal rounded-md border bg-popover p-3 text-left text-xs font-normal text-popover-foreground shadow-md group-hover:block group-focus-within:block"
+                >
+                  <p className="font-medium">Safari coverage: {s.label}</p>
+                  <p className="mt-0.5 text-muted-foreground">{cov.message}</p>
+                  <p className="mt-1 text-muted-foreground">
+                    Captured {pct(cov.actual_share)} Safari vs ~
+                    {pct(cov.expected_share)} expected for your geo mix.
+                  </p>
+                </div>
+              </span>
+            )}
           </div>
           <PeriodToggle value={period} onChange={setPeriod} />
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Safari-coverage flag */}
-        <div
-          className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${s.box}`}
-        >
-          <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${s.dot}`} />
-          <div>
-            <p className="font-medium">Safari coverage: {s.label}</p>
-            <p className="mt-0.5 opacity-90">{cov.message}</p>
-            {cov.status !== "insufficient_data" && (
-              <p className="mt-1 opacity-75">
-                Captured {pct(cov.actual_share)} Safari vs ~
-                {pct(cov.expected_share)} expected for your geo mix.
-              </p>
-            )}
-          </div>
-        </div>
-
+      <CardContent>
         {/* Per-browser 100% stacked bar — hover a segment for details */}
-        <div>
-          <div className="flex h-8 w-full">
-            {data.browsers.map((b, i) => (
-              <div
-                key={b.browser}
-                className="group relative h-full min-w-[3px] cursor-default border-r border-background/60 transition-opacity first:rounded-l-md last:rounded-r-md last:border-r-0 hover:opacity-90"
-                style={{
-                  width: pct(b.share),
-                  backgroundColor: colorFor(b.browser, i),
-                }}
-              >
-                {/* Tooltip — escapes the bar (no overflow-hidden on the row) */}
-                <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md group-hover:block">
-                  <div className="font-medium">{b.browser}</div>
-                  <div className="mt-0.5 text-muted-foreground">
-                    {b.captured} visitors · {pct(b.share)} · ID{" "}
-                    {pct(b.identification_rate)}
-                  </div>
+        <div className="flex h-8 w-full">
+          {data.browsers.map((b, i) => (
+            <div
+              key={b.browser}
+              className="group relative h-full min-w-[3px] cursor-default border-r border-background/60 transition-opacity first:rounded-l-md last:rounded-r-md last:border-r-0 hover:opacity-90"
+              style={{
+                width: pct(b.share),
+                backgroundColor: colorFor(b.browser, i),
+              }}
+            >
+              {/* Tooltip — escapes the bar (no overflow-hidden on the row) */}
+              <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md group-hover:block">
+                <div className="font-medium">{b.browser}</div>
+                <div className="mt-0.5 text-muted-foreground">
+                  {b.captured} visitors · {pct(b.share)} · ID{" "}
+                  {pct(b.identification_rate)}
                 </div>
               </div>
-            ))}
-          </div>
-
-          {/* Legend */}
-          <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
-            {data.browsers.map((b, i) => (
-              <div key={b.browser} className="flex items-center gap-1.5">
-                <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                  style={{ backgroundColor: colorFor(b.browser, i) }}
-                />
-                <span className="font-medium">{b.browser}</span>
-                <span className="text-muted-foreground">{pct(b.share)}</span>
-              </div>
-            ))}
-          </div>
+            </div>
+          ))}
         </div>
       </CardContent>
     </Card>

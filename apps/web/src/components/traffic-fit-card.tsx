@@ -12,7 +12,6 @@ import {
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -33,8 +32,11 @@ const STATUS: Record<
   },
 };
 
-// US (servable) reads green; everything else is a muted "outside coverage" grey.
-const dotColor = (country: string) => (country === "US" ? "#22c55e" : "#94a3b8");
+// US (servable) always reads green; other countries get a stable palette color
+// by index so the stacked bar's segments are distinguishable.
+const GEO_PALETTE = ["#6366f1", "#06b6d4", "#f97316", "#a855f7", "#f43f5e", "#14b8a6"];
+const geoColor = (country: string, i: number) =>
+  country === "US" ? "#22c55e" : GEO_PALETTE[i % GEO_PALETTE.length];
 
 /**
  * Traffic-fit readout — what share of this site's visitors beam can actually
@@ -66,7 +68,7 @@ export function TrafficFitCard({ siteId }: { siteId: string }) {
     return (
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Traffic fit</CardTitle>
+          <CardTitle className="text-sm">Geo</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-xs text-muted-foreground">Loading…</p>
@@ -84,55 +86,47 @@ export function TrafficFitCard({ siteId }: { siteId: string }) {
     <Card>
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <CardTitle className="text-sm">Traffic fit</CardTitle>
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1 text-xs font-medium",
-                  s.tone
-                )}
-              >
-                <Icon className="h-4 w-4" aria-hidden="true" />
-                {s.label}
-              </span>
-            </div>
-            <CardDescription className="text-xs">
-              {data.located_visitors.toLocaleString()} located ·{" "}
-              {period === "lifetime" ? "all time" : `last ${data.window_days} days`}
-            </CardDescription>
+          <div className="flex min-w-0 items-center gap-2">
+            <CardTitle className="text-sm">Geo</CardTitle>
+            <span
+              className={cn(
+                "inline-flex items-center gap-1 text-xs font-medium",
+                s.tone
+              )}
+            >
+              <Icon className="h-4 w-4" aria-hidden="true" />
+              {s.label}
+            </span>
           </div>
           <PeriodToggle value={period} onChange={setPeriod} />
         </div>
       </CardHeader>
       <CardContent>
-        {enough && (
-          <div className="mb-3">
-            <span className="font-mono text-2xl font-medium tabular-nums">
-              ~{pct(data.identifiable_estimate)}
-            </span>
-            <span className="ml-2 text-sm text-muted-foreground">
-              of your visitors are identifiable
-            </span>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {pct(data.us_share)} US · beam resolves US traffic only
-            </p>
-          </div>
-        )}
-        <p className="text-xs text-muted-foreground">{data.message}</p>
-
         {data.top_countries.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5 text-xs">
-            {data.top_countries.map((c) => (
-              <div key={c.country} className="flex items-center gap-1.5">
-                <span
-                  className="h-2.5 w-2.5 shrink-0 rounded-sm"
-                  style={{ backgroundColor: dotColor(c.country) }}
-                />
-                <span className="font-medium">{c.country}</span>
-                <span className="text-muted-foreground">{pct(c.share)}</span>
+          // 100%-stacked country bar — hover a segment for the country + share.
+          // The muted track shows any unlabeled remainder.
+          <div className="flex h-8 w-full overflow-hidden rounded-md bg-secondary">
+            {data.top_countries.map((c, i) => (
+              <div
+                key={c.country}
+                className="group relative h-full min-w-[3px] cursor-default border-r border-background/60 transition-opacity last:border-r-0 hover:opacity-90"
+                style={{ width: pct(c.share), backgroundColor: geoColor(c.country, i) }}
+              >
+                <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md group-hover:block">
+                  <div className="font-medium">{c.country}</div>
+                  <div className="mt-0.5 text-muted-foreground">{pct(c.share)}</div>
+                </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {enough && (
+          <div className="mt-3 border-t pt-3 text-sm">
+            <span className="font-mono font-medium tabular-nums">
+              ~{pct(data.identifiable_estimate)}
+            </span>{" "}
+            <span className="text-muted-foreground">identifiable</span>
           </div>
         )}
       </CardContent>

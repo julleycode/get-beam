@@ -27,9 +27,9 @@ type WidgetDef = {
 // The catalogue of widgets a user can show on the Visitors page. Add new
 // insight cards here and they become available in the "Add widget" picker.
 const REGISTRY: WidgetDef[] = [
-  { id: "funnel", label: "Funnel", Component: KpiStrip },
-  { id: "traffic_fit", label: "Traffic fit", Component: TrafficFitCard },
-  { id: "browser", label: "Capture by browser", Component: BrowserCaptureCard },
+  { id: "funnel", label: "Overall", Component: KpiStrip },
+  { id: "traffic_fit", label: "Geo", Component: TrafficFitCard },
+  { id: "browser", label: "Browser type", Component: BrowserCaptureCard },
 ];
 
 const DEFAULT_LAYOUT: WidgetId[] = ["funnel", "traffic_fit", "browser"];
