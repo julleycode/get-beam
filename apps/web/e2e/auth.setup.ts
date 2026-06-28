@@ -18,10 +18,13 @@ setup("authenticate", async ({ page }) => {
   const { access_token } = await res.json();
   expect(access_token).toBeTruthy();
 
-  // Navigate to the app and set token in localStorage
+  // Navigate to the app and set token in localStorage. Also mark the onboarding
+  // tour as seen — otherwise its full-screen modal auto-launches on first
+  // dashboard visit and its overlay intercepts every click (60s timeouts).
   await page.goto("/");
   await page.evaluate((token) => {
     localStorage.setItem("auth_token", token);
+    localStorage.setItem("beam_tour_done_v1", "1");
   }, access_token);
 
   // Save auth state
