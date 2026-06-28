@@ -335,9 +335,13 @@ export default function VisitorsPage() {
         }
       />
 
-      <KpiStrip siteId={siteId} />
-      <TrafficFitCard siteId={siteId} />
-      <BrowserCaptureCard siteId={siteId} />
+      {siteId && (
+        <div className="mb-6 grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <KpiStrip siteId={siteId} />
+          <TrafficFitCard siteId={siteId} />
+          <BrowserCaptureCard siteId={siteId} />
+        </div>
+      )}
 
       {siteId && (
         <div className="mb-4 flex flex-wrap items-end gap-4 rounded-lg border bg-muted/30 p-3">

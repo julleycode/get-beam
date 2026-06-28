@@ -5,6 +5,11 @@ import { AlertTriangle, CheckCircle2, Globe, XCircle } from "lucide-react";
 import { api, TrafficFit } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
+  PeriodToggle,
+  periodToDays,
+  type Period,
+} from "@/components/ui/period-toggle";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -41,24 +46,25 @@ export function TrafficFitCard({ siteId }: { siteId: string }) {
   const [data, setData] = useState<TrafficFit | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [period, setPeriod] = useState<Period>("30d");
 
   useEffect(() => {
     if (!siteId) return;
     setLoading(true);
     setError(false);
     api
-      .getTrafficFit(siteId)
+      .getTrafficFit(siteId, periodToDays(period))
       .then(setData)
       .catch(() => setError(true))
       .finally(() => setLoading(false));
-  }, [siteId]);
+  }, [siteId, period]);
 
   // Stay invisible until there's something worth showing — no site, an error, or
   // zero located visitors shouldn't add an empty card to the page.
   if (!siteId || error) return null;
   if (loading && !data) {
     return (
-      <Card className="mb-6">
+      <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">Traffic fit</CardTitle>
         </CardHeader>
@@ -75,25 +81,28 @@ export function TrafficFitCard({ siteId }: { siteId: string }) {
   const enough = data.status !== "insufficient_data";
 
   return (
-    <Card className="mb-6">
+    <Card>
       <CardHeader className="pb-2">
         <div className="flex items-start justify-between gap-2">
-          <div>
-            <CardTitle className="text-sm">Traffic fit</CardTitle>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <CardTitle className="text-sm">Traffic fit</CardTitle>
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1 text-xs font-medium",
+                  s.tone
+                )}
+              >
+                <Icon className="h-4 w-4" aria-hidden="true" />
+                {s.label}
+              </span>
+            </div>
             <CardDescription className="text-xs">
-              {data.located_visitors.toLocaleString()} located · last{" "}
-              {data.window_days} days
+              {data.located_visitors.toLocaleString()} located ·{" "}
+              {period === "lifetime" ? "all time" : `last ${data.window_days} days`}
             </CardDescription>
           </div>
-          <span
-            className={cn(
-              "inline-flex items-center gap-1 text-xs font-medium",
-              s.tone
-            )}
-          >
-            <Icon className="h-4 w-4" aria-hidden="true" />
-            {s.label}
-          </span>
+          <PeriodToggle value={period} onChange={setPeriod} />
         </div>
       </CardHeader>
       <CardContent>

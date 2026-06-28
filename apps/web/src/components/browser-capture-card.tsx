@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import { api, BrowserBreakdown } from "@/lib/api";
 import {
+  PeriodToggle,
+  periodToDays,
+  type Period,
+} from "@/components/ui/period-toggle";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -69,24 +74,25 @@ export function BrowserCaptureCard({ siteId }: { siteId: string }) {
   const [data, setData] = useState<BrowserBreakdown | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [period, setPeriod] = useState<Period>("30d");
 
   useEffect(() => {
     if (!siteId) return;
     setLoading(true);
     setError(false);
     api
-      .getBrowserBreakdown(siteId)
+      .getBrowserBreakdown(siteId, periodToDays(period))
       .then(setData)
       .catch(() => setError(true))
       .finally(() => setLoading(false));
-  }, [siteId]);
+  }, [siteId, period]);
 
   // Stay invisible until there's something worth showing — no site, an error,
   // or zero captured visitors shouldn't add an empty card to the page.
   if (!siteId || error) return null;
   if (loading && !data) {
     return (
-      <Card className="mb-6">
+      <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">Capture by browser</CardTitle>
         </CardHeader>
@@ -102,12 +108,18 @@ export function BrowserCaptureCard({ siteId }: { siteId: string }) {
   const s = STATUS_STYLES[cov.status] ?? STATUS_STYLES.insufficient_data;
 
   return (
-    <Card className="mb-6">
+    <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm">Capture by browser</CardTitle>
-        <CardDescription className="text-xs">
-          {data.total_visitors} visitors · last {data.window_days} days
-        </CardDescription>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <CardTitle className="text-sm">Capture by browser</CardTitle>
+            <CardDescription className="text-xs">
+              {data.total_visitors} visitors ·{" "}
+              {period === "lifetime" ? "all time" : `last ${data.window_days} days`}
+            </CardDescription>
+          </div>
+          <PeriodToggle value={period} onChange={setPeriod} />
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Safari-coverage flag */}
