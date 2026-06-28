@@ -165,16 +165,22 @@ async def create_checkout_session(
 
     variant_id = _resolve_variant_id(body.plan, body.interval)
 
+    # Lemon Squeezy rejects an empty/null checkout_data.name (422 "must be a
+    # string"), so only include name when the user actually has one.
+    checkout_data: dict = {
+        "email": user.email,
+        # Carried back on every webhook as meta.custom_data.user_id.
+        "custom": {"user_id": str(user.id)},
+    }
+    full_name = (user.full_name or "").strip()
+    if full_name:
+        checkout_data["name"] = full_name
+
     payload = {
         "data": {
             "type": "checkouts",
             "attributes": {
-                "checkout_data": {
-                    "email": user.email,
-                    "name": user.full_name or "",
-                    # Carried back on every webhook as meta.custom_data.user_id.
-                    "custom": {"user_id": str(user.id)},
-                },
+                "checkout_data": checkout_data,
                 "product_options": {
                     "redirect_url": f"{settings.frontend_url}/dashboard/billing?success=1",
                 },
