@@ -141,27 +141,27 @@ export function TodayActions({ sites }: { sites: Site[] }) {
         ) : (
           // Horizontal carousel: ~3.5 cards per view, snap-scroll, min-width
           // floor so cards stay usable (and scrollable) on narrow screens.
-          <div className="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-2">
+          <div className="-mx-1 flex snap-x snap-mandatory gap-2.5 overflow-x-auto px-1 pb-2">
             {visible.map((a) => (
               <div
                 key={a.key}
-                className="relative flex min-w-[220px] shrink-0 snap-start flex-col gap-3 rounded-xl border border-border bg-secondary/30 p-4 basis-[28%]"
+                className="relative flex min-w-[160px] shrink-0 snap-start flex-col gap-2 rounded-lg border border-border bg-secondary/30 p-3 basis-[23%]"
               >
                 <button
                   type="button"
                   onClick={() => ignore(a.key)}
                   aria-label="Ignore this"
                   title="Ignore — don't show again"
-                  className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="h-3 w-3" />
                 </button>
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-secondary text-muted-foreground">
-                  <a.icon className="h-4 w-4" />
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+                  <a.icon className="h-3.5 w-3.5" />
                 </span>
-                <span className="flex-1 pr-4 text-sm font-medium">{a.text}</span>
+                <span className="flex-1 pr-3 text-xs font-medium leading-snug">{a.text}</span>
                 <Link href={a.href} className="mt-auto">
-                  <Button variant="outline" size="sm" className="w-full">
+                  <Button variant="outline" size="sm" className="h-7 w-full px-2 text-xs">
                     {a.cta}
                   </Button>
                 </Link>
