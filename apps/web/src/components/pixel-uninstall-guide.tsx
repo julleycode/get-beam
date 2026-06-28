@@ -41,48 +41,48 @@ const REMOVAL_GUIDES: Record<string, RemovalGuide> = {
     showSnippet: false,
     steps: [
       {
-        title: "Mở Shopify Admin",
-        description: "Vào cửa hàng Shopify của bạn, mở mục Apps.",
+        title: "Open Shopify Admin",
+        description: "Go to your Shopify store and open the Apps section.",
       },
       {
-        title: "Gỡ app Beam",
+        title: "Remove the Beam app",
         description:
-          "Mở Shopify Admin → Apps → gỡ app Beam. ScriptTag sẽ tự biến mất.",
+          "Shopify Admin → Apps → remove the Beam app. The ScriptTag is removed automatically.",
       },
     ],
-    note: "Không cần sửa code — gỡ app là pixel tự bị xoá khỏi mọi trang.",
+    note: "No code changes needed — removing the app deletes the pixel from every page.",
   },
   wordpress: {
     name: "WordPress",
     showSnippet: false,
     steps: [
       {
-        title: "Mở danh sách Plugins",
-        description: "Vào WordPress admin → Plugins.",
+        title: "Open the Plugins list",
+        description: "Go to your WordPress admin → Plugins.",
       },
       {
-        title: "Tắt và xoá plugin",
-        description: "Vào Plugins → Deactivate rồi Delete plugin Beam Pixel.",
+        title: "Deactivate and delete",
+        description: "Plugins → Deactivate, then Delete the Beam Pixel plugin.",
       },
     ],
-    note: "Sau khi xoá plugin, pixel sẽ không còn chạy trên web nữa.",
+    note: "Once the plugin is deleted, the pixel no longer runs on your site.",
   },
   unknown: {
-    name: "Website của bạn",
+    name: "Your website",
     showSnippet: true,
     steps: [
       {
-        title: "Mở HTML của trang",
+        title: "Open your page HTML",
         description:
-          "Vào nơi bạn đã dán đoạn code trước đây (thường là phần Custom Code / Header Scripts trong settings).",
+          "Go to wherever you pasted the snippet before (usually Custom Code / Header Scripts in your settings).",
       },
       {
-        title: "Xoá đoạn script Beam",
+        title: "Delete the Beam script",
         description:
-          "Xoá đoạn <script ...tracker.js...> ngay trước </head>. Dùng đoạn code bên dưới để tìm đúng vị trí.",
+          "Remove the <script ...tracker.js...> tag just before </head>. Use the code below to find the exact spot.",
       },
     ],
-    note: "Sau khi xoá, lưu lại và publish trang để thay đổi có hiệu lực.",
+    note: "After removing it, save and publish your page for the change to take effect.",
   },
 };
 
@@ -140,7 +140,7 @@ export function PixelUninstallGuide({
       if (result.verified === false) {
         setCheckResult({
           status: "removed",
-          message: "✓ Đã gỡ pixel khỏi web.",
+          message: "✓ Pixel removed from your site.",
         });
         if (onRemoved) {
           setTimeout(onRemoved, 1500);
@@ -148,13 +148,13 @@ export function PixelUninstallGuide({
       } else {
         setCheckResult({
           status: "still-present",
-          message: "Vẫn thấy pixel — thử lại sau khi xoá khỏi web.",
+          message: "Pixel still detected — try again after removing it from your site.",
         });
       }
     } catch {
       setCheckResult({
         status: "error",
-        message: "Không kiểm tra được. Vui lòng thử lại.",
+        message: "Couldn't check. Please try again.",
       });
     } finally {
       setChecking(false);
@@ -171,8 +171,8 @@ export function PixelUninstallGuide({
       </div>
 
       <p className="text-sm text-muted-foreground">
-        Bạn có thể gỡ pixel bất cứ lúc nào. Làm theo các bước dưới đây, sau đó
-        bấm “Kiểm tra đã gỡ” để chắc chắn pixel đã được xoá khỏi web.
+        You can remove the pixel any time. Follow the steps below, then click
+        “Check if removed” to confirm the pixel is gone from your site.
       </p>
 
       {/* Removal steps */}
@@ -204,7 +204,7 @@ export function PixelUninstallGuide({
       {guide.showSnippet && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Đoạn code cần xoá</CardTitle>
+            <CardTitle className="text-sm">Code to remove</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="relative">
@@ -217,7 +217,7 @@ export function PixelUninstallGuide({
                 className="absolute top-2 right-2"
                 onClick={handleCopy}
               >
-                {copied ? "Đã copy!" : "Copy"}
+                {copied ? "Copied!" : "Copy"}
               </Button>
             </div>
             <div className="mt-3 flex flex-col gap-1.5">
@@ -227,11 +227,11 @@ export function PixelUninstallGuide({
                 className="w-full sm:w-auto"
                 onClick={handleCopyPrompt}
               >
-                {promptCopied ? "Đã copy prompt ✓" : "Copy prompt to Claude"}
+                {promptCopied ? "Prompt copied ✓" : "Copy prompt to Claude"}
               </Button>
               <p className="text-xs text-muted-foreground">
-                Dán vào Cursor, Claude Code, hoặc bất kỳ AI coding agent nào — nó
-                sẽ tự tìm và xoá đoạn script Beam khỏi web của bạn.
+                Paste it into Cursor, Claude Code, or any AI coding agent — it
+                will find and delete the Beam script from your site.
               </p>
             </div>
           </CardContent>
@@ -248,10 +248,10 @@ export function PixelUninstallGuide({
           variant={checkResult?.status === "removed" ? "default" : "outline"}
         >
           {checking
-            ? "Đang kiểm tra web..."
+            ? "Checking your site..."
             : checkResult?.status === "removed"
-              ? "Đã gỡ pixel ✓"
-              : "Kiểm tra đã gỡ"}
+              ? "Pixel removed ✓"
+              : "Check if removed"}
         </Button>
 
         {checkResult && (

@@ -70,7 +70,7 @@ function planLabel(plan: string): string {
 }
 
 function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString("vi-VN", {
+  return new Date(value).toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
     day: "numeric",
@@ -280,8 +280,8 @@ function BillingContent() {
 
               {canceledUntil && (
                 <div className="rounded-md border border-warning/30 bg-warning-muted px-4 py-3 text-sm text-warning">
-                  Gói của bạn còn dùng tới {formatDate(canceledUntil)}, sau đó về
-                  Free. Dữ liệu của bạn vẫn được giữ.
+                  Your plan stays active until {formatDate(canceledUntil)}, then
+                  drops to Free. Your data is kept.
                 </div>
               )}
 
@@ -303,7 +303,7 @@ function BillingContent() {
                         className="text-muted-foreground hover:text-destructive"
                         onClick={() => setCancelOpen(true)}
                       >
-                        Huỷ gói
+                        Cancel plan
                       </Button>
                     )}
                 </div>
@@ -434,22 +434,21 @@ function BillingContent() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Huỷ gói {planLabel(billing?.plan ?? "")}?</DialogTitle>
+            <DialogTitle>Cancel {planLabel(billing?.plan ?? "")} plan?</DialogTitle>
             <DialogDescription>
               {billing?.current_period_end ? (
                 <>
-                  Gói của bạn vẫn hoạt động bình thường tới{" "}
+                  Your plan stays fully active until{" "}
                   <span className="font-medium text-foreground">
                     {formatDate(billing.current_period_end)}
                   </span>
-                  , sau đó tài khoản về gói Free. Toàn bộ dữ liệu của bạn được
-                  giữ nguyên — bạn có thể mua lại bất cứ lúc nào.
+                  , then your account drops to Free. All your data is kept — you
+                  can resubscribe any time.
                 </>
               ) : (
                 <>
-                  Gói của bạn sẽ về Free vào cuối kỳ thanh toán hiện tại. Toàn bộ
-                  dữ liệu của bạn được giữ nguyên — bạn có thể mua lại bất cứ lúc
-                  nào.
+                  Your plan drops to Free at the end of the current billing
+                  period. All your data is kept — you can resubscribe any time.
                 </>
               )}
             </DialogDescription>
@@ -460,14 +459,14 @@ function BillingContent() {
               onClick={() => setCancelOpen(false)}
               disabled={cancelLoading}
             >
-              Giữ gói
+              Keep plan
             </Button>
             <Button
               variant="destructive"
               onClick={handleCancel}
               disabled={cancelLoading}
             >
-              {cancelLoading ? "Đang huỷ..." : "Xác nhận huỷ"}
+              {cancelLoading ? "Cancelling..." : "Confirm cancellation"}
             </Button>
           </DialogFooter>
         </DialogContent>

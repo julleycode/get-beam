@@ -37,7 +37,7 @@ function ExportDataLink({ onNavigate }: { onNavigate?: () => void }) {
       onClick={onNavigate}
       className="text-sm text-info hover:underline"
     >
-      📥 Tải dữ liệu trước khi đi
+      📥 Download your data before you go
     </Link>
   );
 }
@@ -100,7 +100,7 @@ export default function SettingsPage() {
   const [pauseBusy, setPauseBusy] = useState(false);
   const [pauseError, setPauseError] = useState<string | null>(null);
 
-  // "Rời Beam?" offboarding flows
+  // "Leaving Beam?" offboarding flows
   const [uninstallOpen, setUninstallOpen] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
@@ -191,11 +191,11 @@ export default function SettingsPage() {
     }
   }
 
-  // Offboarding: pause directly from the "Rời Beam?" card (reuses the same
+  // Offboarding: pause directly from the "Leaving Beam?" card (reuses the same
   // backend toggle as the standalone pause Card — no duplicated logic).
   async function handlePauseFromExit() {
     if (!site || !site.tracking_enabled) return;
-    if (!window.confirm("Tạm dừng thu thập? Pixel vẫn nằm trên web, bật lại bất cứ lúc nào.")) {
+    if (!window.confirm("Pause tracking? The pixel stays on your site — turn it back on any time.")) {
       return;
     }
     await handleToggleTracking();
@@ -208,7 +208,7 @@ export default function SettingsPage() {
       const res = await api.cancelSubscription(cancelReason.trim() || undefined);
       setCancelDone(res.current_period_end);
     } catch (err) {
-      setCancelError(err instanceof Error ? err.message : "Không thể huỷ gói");
+      setCancelError(err instanceof Error ? err.message : "Couldn't cancel the plan");
     } finally {
       setCancelBusy(false);
     }
@@ -559,19 +559,19 @@ export default function SettingsPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Tạm dừng thu thập</CardTitle>
+              <CardTitle className="text-base">Pause tracking</CardTitle>
               <CardDescription>
-                Tắt thu thập dữ liệu mà vẫn giữ nguyên gói, dữ liệu và pixel.
-                Bật lại bất cứ lúc nào — không mất gì.
+                Stop collecting data while keeping your plan, data, and pixel.
+                Turn it back on any time — nothing is lost.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Trạng thái</span>
+                  <span className="text-muted-foreground">Status</span>
                   <StatusBadge
                     status={site.tracking_enabled ? "active" : "paused"}
-                    label={site.tracking_enabled ? "Đang thu thập" : "Đã tạm dừng"}
+                    label={site.tracking_enabled ? "Collecting" : "Paused"}
                   />
                 </div>
                 <Button
@@ -581,15 +581,15 @@ export default function SettingsPage() {
                   disabled={pauseBusy}
                 >
                   {pauseBusy
-                    ? "Đang lưu…"
+                    ? "Saving…"
                     : site.tracking_enabled
-                      ? "Tạm dừng thu thập"
-                      : "Bật lại thu thập"}
+                      ? "Pause tracking"
+                      : "Resume tracking"}
                 </Button>
               </div>
               {!site.tracking_enabled && (
                 <p className="text-xs text-muted-foreground">
-                  Pixel vẫn nằm trên web — bật lại bất cứ lúc nào.
+                  The pixel stays on your site — turn it back on any time.
                 </p>
               )}
               {pauseError && (
@@ -617,22 +617,22 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
 
-          {/* ── Rời Beam? (offboarding — reassuring, not destructive) ── */}
+          {/* ── Leaving Beam? (offboarding — reassuring, not destructive) ── */}
           <Card className="border-warning">
             <CardHeader>
-              <CardTitle className="text-base">Rời Beam?</CardTitle>
+              <CardTitle className="text-base">Leaving Beam?</CardTitle>
               <CardDescription>
-                Ta giữ nguyên tài khoản và dữ liệu của bạn — bạn có thể quay lại
-                bất cứ lúc nào. Chọn mức phù hợp, từ nhẹ tới dứt khoát.
+                We keep your account and data — you can come back any time.
+                Pick what fits, from gentle to final.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
-              {/* 1. Tạm dừng (nhẹ nhất) — reuse pause toggle above */}
+              {/* 1. Pause (softest) — reuse pause toggle above */}
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="font-medium text-foreground">Tạm dừng thu thập</p>
+                  <p className="font-medium text-foreground">Pause tracking</p>
                   <p className="text-muted-foreground">
-                    Chưa chắc muốn đi? Cứ tạm tắt thu thập, giữ nguyên mọi thứ.
+                    Not sure yet? Just pause collection and keep everything as is.
                   </p>
                 </div>
                 <Button
@@ -643,21 +643,21 @@ export default function SettingsPage() {
                   disabled={pauseBusy || !site.tracking_enabled}
                 >
                   {!site.tracking_enabled
-                    ? "Đã tạm dừng"
+                    ? "Paused"
                     : pauseBusy
-                      ? "Đang lưu…"
-                      : "Tạm dừng"}
+                      ? "Saving…"
+                      : "Pause"}
                 </Button>
               </div>
 
               <Separator />
 
-              {/* 2. Gỡ pixel */}
+              {/* 2. Remove pixel */}
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="font-medium text-foreground">Gỡ pixel</p>
+                  <p className="font-medium text-foreground">Remove pixel</p>
                   <p className="text-muted-foreground">
-                    Hướng dẫn tháo đoạn mã khỏi website — cài lại lúc nào cũng được.
+                    A guide to take the snippet off your site — reinstall any time.
                   </p>
                 </div>
                 <Button
@@ -666,18 +666,18 @@ export default function SettingsPage() {
                   className="shrink-0"
                   onClick={() => setUninstallOpen(true)}
                 >
-                  Gỡ pixel
+                  Remove pixel
                 </Button>
               </div>
 
               <Separator />
 
-              {/* 3. Huỷ gói (dứt khoát nhất) */}
+              {/* 3. Cancel plan (most final) */}
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="font-medium text-foreground">Huỷ gói</p>
+                  <p className="font-medium text-foreground">Cancel plan</p>
                   <p className="text-muted-foreground">
-                    Về gói Free vào cuối kỳ. Tài khoản và dữ liệu vẫn được giữ.
+                    Drop to Free at the end of the period. Account and data are kept.
                   </p>
                 </div>
                 <Button
@@ -690,20 +690,20 @@ export default function SettingsPage() {
                     setCancelOpen(true);
                   }}
                 >
-                  Huỷ gói
+                  Cancel plan
                 </Button>
               </div>
             </CardContent>
           </Card>
 
-          {/* Gỡ pixel dialog */}
+          {/* Remove pixel dialog */}
           <Dialog open={uninstallOpen} onOpenChange={setUninstallOpen}>
             <DialogContent className="max-h-[85vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>Gỡ pixel khỏi website</DialogTitle>
+                <DialogTitle>Remove the pixel from your site</DialogTitle>
                 <DialogDescription>
-                  Theo các bước dưới đây để tháo pixel. Dữ liệu đã thu thập vẫn
-                  được giữ nguyên.
+                  Follow the steps below to take the pixel off. Data you've
+                  already collected is kept.
                 </DialogDescription>
               </DialogHeader>
               <PixelUninstallGuide
@@ -717,7 +717,7 @@ export default function SettingsPage() {
             </DialogContent>
           </Dialog>
 
-          {/* Huỷ gói dialog */}
+          {/* Cancel plan dialog */}
           <Dialog
             open={cancelOpen}
             onOpenChange={(o) => {
@@ -726,29 +726,29 @@ export default function SettingsPage() {
           >
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>Huỷ gói?</DialogTitle>
+                <DialogTitle>Cancel plan?</DialogTitle>
                 <DialogDescription>
                   {cancelDone !== null ? (
                     <>
-                      Đã ghi nhận yêu cầu huỷ. Gói của bạn vẫn dùng được
+                      Cancellation requested. Your plan stays active
                       {cancelDone ? (
                         <>
-                          {" "}tới{" "}
+                          {" "}until{" "}
                           <span className="font-medium text-foreground">
                             {formatPeriodEnd(cancelDone)}
                           </span>
                         </>
                       ) : (
-                        " tới hết kỳ thanh toán hiện tại"
+                        " until the end of the current billing period"
                       )}
-                      , sau đó về gói Free. Tài khoản và dữ liệu của bạn được giữ
-                      nguyên — quay lại bất cứ lúc nào.
+                      , then drops to Free. Your account and data are kept — come
+                      back any time.
                     </>
                   ) : (
                     <>
-                      Gói sẽ về Free vào cuối kỳ thanh toán hiện tại. Tài khoản và
-                      dữ liệu của bạn được giữ nguyên — bạn có thể mua lại bất cứ
-                      lúc nào.
+                      Your plan drops to Free at the end of the current billing
+                      period. Your account and data are kept — you can resubscribe
+                      any time.
                     </>
                   )}
                 </DialogDescription>
@@ -760,14 +760,14 @@ export default function SettingsPage() {
                     htmlFor="cancel-reason"
                     className="text-sm font-medium"
                   >
-                    Vì sao bạn rời đi? (không bắt buộc)
+                    Why are you leaving? (optional)
                   </label>
                   <textarea
                     id="cancel-reason"
                     value={cancelReason}
                     onChange={(e) => setCancelReason(e.target.value)}
                     rows={3}
-                    placeholder="Phản hồi của bạn giúp Beam tốt hơn…"
+                    placeholder="Your feedback helps make Beam better…"
                     className="w-full px-3 py-2 bg-muted rounded-md text-sm border border-border resize-none"
                     disabled={cancelBusy}
                   />
@@ -786,14 +786,14 @@ export default function SettingsPage() {
                       onClick={() => setCancelOpen(false)}
                       disabled={cancelBusy}
                     >
-                      Giữ gói
+                      Keep plan
                     </Button>
                     <Button onClick={handleCancelSubscription} disabled={cancelBusy}>
-                      {cancelBusy ? "Đang huỷ…" : "Xác nhận huỷ"}
+                      {cancelBusy ? "Cancelling…" : "Confirm cancellation"}
                     </Button>
                   </>
                 ) : (
-                  <Button onClick={() => setCancelOpen(false)}>Đã hiểu</Button>
+                  <Button onClick={() => setCancelOpen(false)}>Got it</Button>
                 )}
               </DialogFooter>
             </DialogContent>
