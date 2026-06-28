@@ -33,5 +33,11 @@ class Site(Base):
     hot_alert_enabled: Mapped[bool] = mapped_column(
         default=True, nullable=False, server_default="true"
     )
+    # When False, the ingest endpoint silently drops events for this site — the
+    # offboarding "pause" toggle. Pixel stays installed on the customer's page and
+    # the plan/data are left untouched; flip back on to resume collection anytime.
+    tracking_enabled: Mapped[bool] = mapped_column(
+        default=True, nullable=False, server_default="true"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

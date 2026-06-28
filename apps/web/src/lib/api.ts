@@ -441,6 +441,15 @@ class ApiClient {
     });
   }
 
+  // Partial site update (PATCH). Used by the offboarding "pause tracking" toggle
+  // and any other per-site field. Returns the updated site.
+  async updateSite(siteId: string, patch: Partial<SiteUpdate>) {
+    return this.request<Site>(`/api/v1/sites/${siteId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  }
+
   async verifyPixel(siteId: string) {
     return this.request<{
       site_id: string;
@@ -806,6 +815,13 @@ class ApiClient {
     });
   }
 
+  async cancelSubscription(reason?: string) {
+    return this.request<CancelSubscriptionResponse>("/api/v1/billing/cancel", {
+      method: "POST",
+      body: JSON.stringify({ reason: reason ?? null }),
+    });
+  }
+
   async getBillingStatus() {
     return this.request<BillingStatus>("/api/v1/billing/status");
   }
@@ -1023,7 +1039,17 @@ export interface Site {
   daily_resolution_budget: number;
   auto_identify_enabled: boolean;
   hot_alert_enabled: boolean;
+  tracking_enabled: boolean;
+  /** Optional — backend SiteOut may not return it; callers fall back to "unknown". */
+  detected_platform?: string | null;
   created_at: string;
+}
+
+// Partial site update payload — mirrors the backend SiteUpdate schema.
+export interface SiteUpdate {
+  auto_identify_enabled: boolean;
+  hot_alert_enabled: boolean;
+  tracking_enabled: boolean;
 }
 
 export interface FeatureRequest {
@@ -1464,5 +1490,10 @@ export interface BillingStatus {
   monthly_identified_count: number;
   monthly_limit: number | null;  // null = unlimited
   trial_ends_at: string | null;
+  current_period_end: string | null;
+}
+
+export interface CancelSubscriptionResponse {
+  subscription_status: string | null;
   current_period_end: string | null;
 }

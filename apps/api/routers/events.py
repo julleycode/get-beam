@@ -65,10 +65,16 @@ async def ingest_events(
     from apps.api.models.site import Site
 
     site_check = await db.execute(
-        select(Site.site_id).where(Site.site_id == batch.site_id).limit(1)
+        select(Site.tracking_enabled).where(Site.site_id == batch.site_id).limit(1)
     )
-    if not site_check.scalar_one_or_none():
+    tracking_enabled = site_check.scalar_one_or_none()
+    if tracking_enabled is None:
+        # Site does not exist — reject to prevent arbitrary data injection.
         return Response(status_code=403)
+    if tracking_enabled is False:
+        # Tracking paused for this site — silently drop the events (same pattern
+        # as the bot filter above). Pixel stays installed; no error surfaced.
+        return Response(status_code=204)
 
     ip_address = _extract_ip(request)
 

@@ -136,6 +136,8 @@ async def update_site(
         site.auto_identify_enabled = body.auto_identify_enabled
     if body.hot_alert_enabled is not None:
         site.hot_alert_enabled = body.hot_alert_enabled
+    if body.tracking_enabled is not None:
+        site.tracking_enabled = body.tracking_enabled
 
     await db.commit()
     await db.refresh(site)
@@ -227,6 +229,9 @@ async def verify_pixel_endpoint(
 
     if verify_result["verified"] and not site.pixel_verified:
         site.pixel_verified = True
+        await db.commit()
+    elif not verify_result["verified"] and site.pixel_verified:
+        site.pixel_verified = False
         await db.commit()
 
     return PixelVerifyResponse(

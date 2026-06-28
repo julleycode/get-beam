@@ -17,6 +17,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogFooter,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 // ── Plan metadata ──────────────────────────────────────────────────────────
 
@@ -61,6 +69,14 @@ function planLabel(plan: string): string {
   return PLANS.find((p) => p.id === plan)?.name ?? plan;
 }
 
+function formatDate(value: string): string {
+  return new Date(value).toLocaleDateString("vi-VN", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
 
 function BillingContent() {
@@ -72,6 +88,9 @@ function BillingContent() {
   const [actionPlan, setActionPlan] = useState<string | null>(null);
   const [portalLoading, setPortalLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelLoading, setCancelLoading] = useState(false);
+  const [canceledUntil, setCanceledUntil] = useState<string | null>(null);
 
   const successParam = searchParams.get("success");
   const canceledParam = searchParams.get("canceled");
@@ -126,6 +145,30 @@ function BillingContent() {
       setError((e as Error).message);
     } finally {
       setPortalLoading(false);
+    }
+  }
+
+  async function handleCancel() {
+    setCancelLoading(true);
+    setError(null);
+    try {
+      const res = await api.cancelSubscription();
+      // Show the date access lasts until; fall back to whatever the status has.
+      const until =
+        res.current_period_end ?? billing?.current_period_end ?? null;
+      setCanceledUntil(until);
+      setCancelOpen(false);
+      // Refresh billing so the badge/status reflect the cancellation.
+      try {
+        const status = await api.getBillingStatus();
+        setBilling(status);
+      } catch {
+        // Non-fatal: the success message already shows the key date.
+      }
+    } catch (e: unknown) {
+      setError((e as Error).message);
+    } finally {
+      setCancelLoading(false);
     }
   }
 
@@ -235,15 +278,35 @@ function BillingContent() {
                 </p>
               )}
 
+              {canceledUntil && (
+                <div className="rounded-md border border-warning/30 bg-warning-muted px-4 py-3 text-sm text-warning">
+                  Gói của bạn còn dùng tới {formatDate(canceledUntil)}, sau đó về
+                  Free. Dữ liệu của bạn vẫn được giữ.
+                </div>
+              )}
+
               {billing.plan !== "free" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handlePortal}
-                  disabled={portalLoading}
-                >
-                  {portalLoading ? "Redirecting..." : "Manage subscription"}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handlePortal}
+                    disabled={portalLoading}
+                  >
+                    {portalLoading ? "Redirecting..." : "Manage subscription"}
+                  </Button>
+                  {billing.subscription_status !== "cancelled" &&
+                    !canceledUntil && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-muted-foreground hover:text-destructive"
+                        onClick={() => setCancelOpen(true)}
+                      >
+                        Huỷ gói
+                      </Button>
+                    )}
+                </div>
               )}
             </>
           ) : (
@@ -361,6 +424,54 @@ function BillingContent() {
           })}
         </div>
       </div>
+
+      {/* Cancel confirmation */}
+      <Dialog
+        open={cancelOpen}
+        onOpenChange={(o) => {
+          if (!cancelLoading) setCancelOpen(o);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Huỷ gói {planLabel(billing?.plan ?? "")}?</DialogTitle>
+            <DialogDescription>
+              {billing?.current_period_end ? (
+                <>
+                  Gói của bạn vẫn hoạt động bình thường tới{" "}
+                  <span className="font-medium text-foreground">
+                    {formatDate(billing.current_period_end)}
+                  </span>
+                  , sau đó tài khoản về gói Free. Toàn bộ dữ liệu của bạn được
+                  giữ nguyên — bạn có thể mua lại bất cứ lúc nào.
+                </>
+              ) : (
+                <>
+                  Gói của bạn sẽ về Free vào cuối kỳ thanh toán hiện tại. Toàn bộ
+                  dữ liệu của bạn được giữ nguyên — bạn có thể mua lại bất cứ lúc
+                  nào.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setCancelOpen(false)}
+              disabled={cancelLoading}
+            >
+              Giữ gói
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleCancel}
+              disabled={cancelLoading}
+            >
+              {cancelLoading ? "Đang huỷ..." : "Xác nhận huỷ"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

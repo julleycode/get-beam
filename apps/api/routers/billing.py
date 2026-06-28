@@ -52,6 +52,15 @@ class PortalResponse(BaseModel):
     portal_url: str
 
 
+class CancelRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+class CancelResponse(BaseModel):
+    subscription_status: Optional[str]
+    current_period_end: Optional[datetime]
+
+
 class BillingStatusResponse(BaseModel):
     plan: str
     subscription_status: Optional[str]
@@ -210,6 +219,43 @@ async def create_portal_session(
 
     logger.info("lemonsqueezy_portal_created", user_id=str(user.id))
     return PortalResponse(portal_url=portal_url)
+
+
+@router.post("/cancel", response_model=CancelResponse)
+async def cancel_subscription(
+    body: CancelRequest,
+    user: User = Depends(get_current_user),
+) -> CancelResponse:
+    """Cancel the user's paid plan via the Lemon Squeezy API.
+
+    LS DELETE on a subscription cancels at the period end (status -> "cancelled",
+    access continues until renews_at). The authoritative state sync happens via
+    the `subscription_cancelled` webhook; this endpoint only returns enough for
+    immediate UI feedback ("you can use it until X").
+    """
+    if not user.stripe_subscription_id:
+        raise HTTPException(status_code=400, detail="No active paid plan to cancel.")
+
+    # Length-bound the optional reason so a runaway payload never hits the logs.
+    reason = body.reason.strip()[:1000] if body.reason else None
+    logger.info(
+        "subscription_cancel_requested", user_id=str(user.id), reason=reason
+    )
+
+    resp = await _ls_request(
+        "DELETE", f"/subscriptions/{user.stripe_subscription_id}"
+    )
+    attrs: dict = resp.get("data", {}).get("attributes", {}) or {}
+
+    period_end = (
+        _parse_dt(attrs.get("ends_at"))
+        or _parse_dt(attrs.get("renews_at"))
+        or user.current_period_end
+    )
+    status = attrs.get("status") or user.subscription_status
+
+    logger.info("lemonsqueezy_subscription_cancel", user_id=str(user.id), status=status)
+    return CancelResponse(subscription_status=status, current_period_end=period_end)
 
 
 @router.get("/status", response_model=BillingStatusResponse)

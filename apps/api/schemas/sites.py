@@ -18,10 +18,12 @@ class SiteOut(BaseModel):
     url: str
     description: str | None
     category: str | None
+    detected_platform: str | None
     pixel_verified: bool
     daily_resolution_budget: int
     auto_identify_enabled: bool
     hot_alert_enabled: bool
+    tracking_enabled: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -32,6 +34,7 @@ class SiteUpdate(BaseModel):
 
     auto_identify_enabled: bool | None = None
     hot_alert_enabled: bool | None = None
+    tracking_enabled: bool | None = None
 
 
 class SitePixelSnippet(BaseModel):
