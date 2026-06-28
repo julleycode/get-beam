@@ -113,15 +113,43 @@ export function TodayActions({ sites }: { sites: Site[] }) {
     enabled: sites.length > 0,
   });
 
-  if (sites.length === 0) return null;
-
   const visible = (actions ?? []).filter((a) => !ignored.has(a.key));
   // Hold the empty state until localStorage hydrates, else SSR shows
   // "caught up" then flickers to the real list.
-  const showEmpty = hydrated && !isLoading && visible.length === 0;
+  const showEmpty =
+    hydrated && !isLoading && sites.length > 0 && visible.length === 0;
+
+  // When everything's done, linger on the "all caught up" note briefly, then
+  // collapse + fade the whole card out and unmount so "Your sites" slides up.
+  const [leavePhase, setLeavePhase] = useState<"show" | "leaving" | "gone">(
+    "show"
+  );
+  useEffect(() => {
+    if (!showEmpty) {
+      setLeavePhase("show");
+      return;
+    }
+    const t = setTimeout(() => setLeavePhase("leaving"), 1600);
+    return () => clearTimeout(t);
+  }, [showEmpty]);
+  useEffect(() => {
+    if (leavePhase !== "leaving") return;
+    const t = setTimeout(() => setLeavePhase("gone"), 550); // match duration-500
+    return () => clearTimeout(t);
+  }, [leavePhase]);
+
+  if (sites.length === 0 || leavePhase === "gone") return null;
 
   return (
-    <Card>
+    <div
+      className={`grid transition-all duration-500 ease-in-out ${
+        leavePhase === "leaving"
+          ? "grid-rows-[0fr] opacity-0"
+          : "grid-rows-[1fr] opacity-100"
+      }`}
+    >
+      <div className="min-h-0 overflow-hidden">
+        <Card>
       <CardHeader>
         <CardTitle className="text-base">Today&apos;s actions</CardTitle>
       </CardHeader>
@@ -170,6 +198,8 @@ export function TodayActions({ sites }: { sites: Site[] }) {
           </div>
         )}
       </CardContent>
-    </Card>
+        </Card>
+      </div>
+    </div>
   );
 }
