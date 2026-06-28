@@ -421,12 +421,13 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       {/* Clerk auth guard (only when Clerk is active) */}
       {HAS_CLERK && <ClerkAuthGuard />}
 
-      {/* Desktop sidebar (md and up) */}
-      <aside className="hidden w-56 shrink-0 flex-col border-r border-border bg-card p-4 md:flex">
+      {/* Desktop sidebar (md and up). Full viewport height + own scroll so it
+          stays put while the main column scrolls — never slides off on scroll. */}
+      <aside className="hidden w-56 shrink-0 flex-col overflow-y-auto border-r border-border bg-card p-4 md:flex">
         <SidebarBody
           userEmail={userEmail}
           isAdmin={isAdmin}
@@ -470,7 +471,7 @@ export default function DashboardLayout({
           </span>
         </header>
 
-        <main className="flex-1 overflow-auto p-6">
+        <main className="bg-pixel-sky flex-1 overflow-auto p-6">
           {HAS_CLERK ? <ClerkTokenGate>{children}</ClerkTokenGate> : children}
         </main>
       </div>
