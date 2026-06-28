@@ -36,7 +36,15 @@ Cần:
 
 Rủi ro: dependency mới + endmpoint mới; query nặng nếu data lớn (hiện prod nhỏ nên ok).
 
-## P3 — "Add widget" tùy biến  ⬜ TODO (tách plan riêng khi làm)
+## P3 — "Add widget" tùy biến  ✅ DONE (2026-06-29)
+
+- [x] `components/visitor-widgets.tsx` — widget registry (funnel / traffic_fit / browser), Customize edit-mode, add/remove/reorder (←→✕), "Add widget" dashed tile + picker.
+- [x] Layout persisted in `localStorage["beam_visitor_widgets_v1"]` (per-browser; load filters unknown ids, keeps order). Backend per-user sync = future sub-phase.
+- [x] Visitors page renders `<VisitorWidgets siteId/>` (removed direct card imports).
+- [x] Adversarial review applied: edit controls moved from absolute overlay → in-flow top **control bar** (no collision with the Funnel widget's own toggles) + `min-h` so a no-data widget stays a labeled, removable placeholder instead of orphaning floating controls.
+- Note: localStorage only (per-device). Drag-drop reorder skipped (used ←→ buttons). Backend-synced layout = optional next sub-phase.
+
+### P3 (old TODO notes — kept for reference)
 
 Cần:
 1. **Widget registry**: danh sách widget khả dụng (funnel, traffic-fit, browser, +mới).

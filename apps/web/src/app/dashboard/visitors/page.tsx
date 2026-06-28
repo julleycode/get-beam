@@ -10,9 +10,7 @@ import { TableSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { EmptyState } from "@/components/empty-state";
 import { SiteSelector } from "@/components/site-selector";
-import { BrowserCaptureCard } from "@/components/browser-capture-card";
-import { TrafficFitCard } from "@/components/traffic-fit-card";
-import { KpiStrip } from "@/components/kpi-strip";
+import { VisitorWidgets } from "@/components/visitor-widgets";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -335,13 +333,7 @@ export default function VisitorsPage() {
         }
       />
 
-      {siteId && (
-        <div className="mb-6 grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
-          <KpiStrip siteId={siteId} />
-          <TrafficFitCard siteId={siteId} />
-          <BrowserCaptureCard siteId={siteId} />
-        </div>
-      )}
+      {siteId && <VisitorWidgets siteId={siteId} />}
 
       {siteId && (
         <div className="mb-4 flex flex-wrap items-end gap-4 rounded-lg border bg-muted/30 p-3">
