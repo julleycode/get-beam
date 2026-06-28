@@ -5,13 +5,23 @@ name: keep-warm
 # dashboard as "Network error: unable to reach API (signal is aborted without
 # reason)". See the cold-start note in apps/web/src/lib/api.ts (fetchWithRetry).
 #
-# Caveat: GitHub may delay scheduled runs by 5-15+ min under load, and disables
-# the schedule after 60 days of zero repo activity. For rock-solid keep-warm use
-# an external monitor (UptimeRobot / cron-job.org, free, 5-min interval).
+# COST: this repo is PRIVATE, so GitHub Actions minutes are metered (2,000 free/
+# month, then ~$0.006/min Linux). The old "*/5" schedule = ~288 runs/day ≈ ~8.6k
+# min/month → blew past the free tier and drove the Actions overage bill. Dropped
+# to "*/30" (~48 runs/day ≈ ~1.4k min/month) to pull usage back near free.
+#
+# ⭐ TRUE $0 + always-warm path: move this ping to a FREE external monitor
+#    (UptimeRobot or cron-job.org, 5-min interval, no GitHub minutes), then DELETE
+#    this whole workflow. External monitors are also more reliable — GitHub delays
+#    scheduled runs 5-15+ min under load and disables them after 60 days idle.
+#    (If prod Railway is on a PAID plan it doesn't sleep at all → just delete this.)
+#
+# Caveat: */30 may not fully prevent a sleep between pings; the external 5-min
+# monitor above is the real fix.
 
 on:
   schedule:
-    - cron: "*/5 * * * *" # every 5 minutes
+    - cron: "*/30 * * * *" # every 30 minutes (was */5 — see COST note above)
   workflow_dispatch: {} # manual "Run workflow" button
 
 jobs:
