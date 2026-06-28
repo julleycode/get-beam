@@ -1,9 +1,9 @@
 "use client";
 
-import type { ComponentType } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import Link from "next/link";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { Users, Layers, FileText, Megaphone, Send, Radio, CheckCircle2 } from "lucide-react";
+import { Users, Layers, FileText, Megaphone, Send, Radio, CheckCircle2, X } from "lucide-react";
 import { api, type Site } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,38 @@ type ActionItem = {
 };
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+const IGNORE_KEY = "beam_today_ignored_v1";
+
+// Persisted set of action keys the user dismissed so they stop nagging.
+function useIgnored() {
+  const [ignored, setIgnored] = useState<Set<string>>(new Set());
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(IGNORE_KEY);
+      if (raw) setIgnored(new Set(JSON.parse(raw) as string[]));
+    } catch {
+      /* ignore corrupt storage */
+    }
+    setHydrated(true);
+  }, []);
+
+  const ignore = (key: string) => {
+    setIgnored((prev) => {
+      const next = new Set(prev).add(key);
+      try {
+        localStorage.setItem(IGNORE_KEY, JSON.stringify(Array.from(next)));
+      } catch {
+        /* storage full / unavailable — keep in-memory */
+      }
+      return next;
+    });
+  };
+
+  return { ignored, ignore, hydrated };
+}
 
 // Compose the day's to-do list from real data across the user's sites. Drafts
 // are per-user (one global count); everything else is summed per site.
@@ -74,6 +106,7 @@ async function computeActions(sites: Site[], qc: QueryClient): Promise<ActionIte
 
 export function TodayActions({ sites }: { sites: Site[] }) {
   const qc = useQueryClient();
+  const { ignored, ignore, hydrated } = useIgnored();
   const { data: actions, isLoading } = useQuery({
     queryKey: ["today-actions", sites.map((s) => s.site_id).sort().join(",")],
     queryFn: () => computeActions(sites, qc),
@@ -82,15 +115,20 @@ export function TodayActions({ sites }: { sites: Site[] }) {
 
   if (sites.length === 0) return null;
 
+  const visible = (actions ?? []).filter((a) => !ignored.has(a.key));
+  // Hold the empty state until localStorage hydrates, else SSR shows
+  // "caught up" then flickers to the real list.
+  const showEmpty = hydrated && !isLoading && visible.length === 0;
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Today&apos;s actions</CardTitle>
       </CardHeader>
       <CardContent>
-        {isLoading ? (
+        {isLoading || !hydrated ? (
           <ListCardSkeleton rows={3} />
-        ) : !actions || actions.length === 0 ? (
+        ) : showEmpty ? (
           <div className="flex flex-col items-center gap-2 py-6 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-success-muted text-success">
               <CheckCircle2 className="h-6 w-6" />
@@ -101,24 +139,35 @@ export function TodayActions({ sites }: { sites: Site[] }) {
             </p>
           </div>
         ) : (
-          <ul className="divide-y divide-border">
-            {actions.map((a) => (
-              <li
+          // Horizontal carousel: ~3.5 cards per view, snap-scroll, min-width
+          // floor so cards stay usable (and scrollable) on narrow screens.
+          <div className="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-2">
+            {visible.map((a) => (
+              <div
                 key={a.key}
-                className="flex items-center gap-3 py-3 first:pt-0 last:pb-0"
+                className="relative flex min-w-[220px] shrink-0 snap-start flex-col gap-3 rounded-xl border border-border bg-secondary/30 p-4 basis-[28%]"
               >
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-secondary text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={() => ignore(a.key)}
+                  aria-label="Ignore this"
+                  title="Ignore — don't show again"
+                  className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-secondary text-muted-foreground">
                   <a.icon className="h-4 w-4" />
                 </span>
-                <span className="flex-1 text-sm">{a.text}</span>
-                <Link href={a.href}>
-                  <Button variant="outline" size="sm">
+                <span className="flex-1 pr-4 text-sm font-medium">{a.text}</span>
+                <Link href={a.href} className="mt-auto">
+                  <Button variant="outline" size="sm" className="w-full">
                     {a.cta}
                   </Button>
                 </Link>
-              </li>
+              </div>
             ))}
-          </ul>
+          </div>
         )}
       </CardContent>
     </Card>

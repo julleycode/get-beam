@@ -248,6 +248,7 @@ export default function DashboardPage() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
+  const [showAllSites, setShowAllSites] = useState(false);
 
   const { data: me } = useQuery({
     queryKey: ["me"],
@@ -295,44 +296,61 @@ export default function DashboardPage() {
             </Link>
           </div>
 
-          {/* Ask Beam anything */}
+          {/* 1. Ask Beam anything */}
           <AskAi siteId={sites[0]?.site_id} />
 
-          {/* Quick actions */}
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {QUICK_ACTIONS.map((qa) => (
-              <Link key={qa.href} href={qa.href}>
-                <Card className="h-full transition-colors hover:bg-secondary/50">
-                  <CardContent className="flex items-start gap-3 p-4">
-                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
-                      <qa.icon className="h-5 w-5" />
-                    </span>
-                    <div>
-                      <p className="text-sm font-medium">{qa.title}</p>
-                      <p className="text-xs text-muted-foreground">{qa.subtitle}</p>
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </div>
-
-          {/* Today's actions (real data) */}
+          {/* 2. Today's actions (real data) */}
           <TodayActions sites={sites} />
 
-          <BeamLoopWidget />
-
-          {/* Sites */}
+          {/* 3. Your sites — first 3, rest behind "See all" */}
           <div className="space-y-3">
-            <h2 className="font-serif text-lg font-semibold tracking-tight">
-              Your sites
-            </h2>
+            <div className="flex items-center justify-between">
+              <h2 className="font-serif text-lg font-semibold tracking-tight">
+                Your sites
+              </h2>
+              {sites.length > 3 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowAllSites((v) => !v)}
+                >
+                  {showAllSites ? "Show less" : `See all ${sites.length}`}
+                </Button>
+              )}
+            </div>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {sites.map((site) => (
+              {(showAllSites ? sites : sites.slice(0, 3)).map((site) => (
                 <SiteCard key={site.site_id} site={site} />
               ))}
             </div>
           </div>
+
+          {/* 4. Features / quick actions */}
+          <div className="space-y-3">
+            <h2 className="font-serif text-lg font-semibold tracking-tight">
+              Quick actions
+            </h2>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {QUICK_ACTIONS.map((qa) => (
+                <Link key={qa.href} href={qa.href}>
+                  <Card className="h-full transition-colors hover:bg-secondary/50">
+                    <CardContent className="flex items-start gap-3 p-4">
+                      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-secondary text-primary">
+                        <qa.icon className="h-5 w-5" />
+                      </span>
+                      <div>
+                        <p className="text-sm font-medium">{qa.title}</p>
+                        <p className="text-xs text-muted-foreground">{qa.subtitle}</p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          {/* Beam Loop — engagement flywheel, secondary */}
+          <BeamLoopWidget />
         </div>
       )}
     </>

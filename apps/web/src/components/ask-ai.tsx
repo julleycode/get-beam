@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Sparkles, ArrowUp } from "lucide-react";
 import { api } from "@/lib/api";
 import { Card, CardContent } from "@/components/ui/card";
@@ -12,6 +12,33 @@ const SUGGESTIONS = [
   "Who's worth reaching out to?",
 ];
 
+/** Reveals `text` progressively, like the model is typing it out.
+ *  Returns the slice shown so far plus whether it's still typing. */
+function useTypewriter(text: string | null, charsPerTick = 2, tickMs = 16) {
+  const [shown, setShown] = useState("");
+  const frame = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (frame.current) clearInterval(frame.current);
+    if (!text) {
+      setShown("");
+      return;
+    }
+    setShown("");
+    let i = 0;
+    frame.current = setInterval(() => {
+      i = Math.min(i + charsPerTick, text.length);
+      setShown(text.slice(0, i));
+      if (i >= text.length && frame.current) clearInterval(frame.current);
+    }, tickMs);
+    return () => {
+      if (frame.current) clearInterval(frame.current);
+    };
+  }, [text, charsPerTick, tickMs]);
+
+  return { shown, typing: !!text && shown.length < text.length };
+}
+
 /** The Clay-style "ask Beam anything" box — input + suggestion chips + answer.
  *  Backed by the real /api/v1/ai/ask Gemini endpoint. */
 export function AskAi({ siteId }: { siteId?: string }) {
@@ -19,6 +46,7 @@ export function AskAi({ siteId }: { siteId?: string }) {
   const [answer, setAnswer] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { shown, typing } = useTypewriter(answer);
 
   async function submit(q: string) {
     const trimmed = q.trim();
@@ -93,7 +121,10 @@ export function AskAi({ siteId }: { siteId?: string }) {
               <p className="text-destructive">{error}</p>
             ) : (
               <p className="whitespace-pre-wrap leading-relaxed text-foreground">
-                {answer}
+                {shown}
+                {typing && (
+                  <span className="ml-0.5 inline-block h-4 w-[2px] -mb-0.5 animate-pulse bg-primary align-middle" />
+                )}
               </p>
             )}
           </CardContent>
