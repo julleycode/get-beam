@@ -80,6 +80,21 @@ class TestAutomationTools:
         assert is_bot(ua) is True
 
 
+class TestAgentBrowsers:
+    """AI-agent / cloud automation UAs that spoof a real browser but carry an
+    agent token must be detected (learned from getbeam.fyi datacenter traffic)."""
+
+    @pytest.mark.parametrize("ua", [
+        # AWS Bedrock AgentCore browser (real UA seen in prod)
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Amazon-Bedrock-AgentCore",
+        # Shap-User tool (real UA seen in prod)
+        "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; Shap-User/0.1.0",
+        "Mozilla/5.0 (compatible; PerplexityBot/1.0; +https://perplexity.ai/bot)",
+    ])
+    def test_detects_agent_browsers(self, ua: str):
+        assert is_bot(ua) is True
+
+
 class TestInAppBrowsers:
     """Real-world social in-app browser UAs are humans, NOT bots."""
 

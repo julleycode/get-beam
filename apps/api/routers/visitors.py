@@ -25,6 +25,7 @@ from apps.api.schemas.visitors import (
 from apps.api.services.billing import check_usage_allowed, increment_usage
 from apps.api.services.conviction import build_conviction
 from apps.api.services.enricher import Enricher
+from apps.api.services.identity_classification import identity_level
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.resolution_runner import run_resolution_for_site
 from apps.api.services.osint_scanner import run_osint_scan
@@ -218,12 +219,13 @@ async def list_visitors(
                 IdentifiedVisitor.visitor_id,
                 IdentifiedVisitor.email,
                 IdentifiedVisitor.full_name,
+                IdentifiedVisitor.resolution_provider,
             ).where(
                 IdentifiedVisitor.site_id == site_id,
                 IdentifiedVisitor.visitor_id.in_(vids),
             )
         )
-        id_map = {r.visitor_id: (r.email, r.full_name) for r in id_rows}
+        id_map = {r.visitor_id: (r.email, r.full_name, r.resolution_provider) for r in id_rows}
 
         # Merged visitors carry their identity on the canonical row, not their
         # own — resolve email/name from canonical_visitor_id so deduped
@@ -242,23 +244,27 @@ async def list_visitors(
                     IdentifiedVisitor.visitor_id,
                     IdentifiedVisitor.email,
                     IdentifiedVisitor.full_name,
+                    IdentifiedVisitor.resolution_provider,
                 ).where(
                     IdentifiedVisitor.site_id == site_id,
                     IdentifiedVisitor.visitor_id.in_(set(canon_of.values())),
                 )
             )
-            canon_id_map = {r.visitor_id: (r.email, r.full_name) for r in canon_rows}
+            canon_id_map = {
+                r.visitor_id: (r.email, r.full_name, r.resolution_provider) for r in canon_rows
+            }
             for vid, cvid in canon_of.items():
                 if cvid in canon_id_map:
                     id_map[vid] = canon_id_map[cvid]
 
         for v in visitors:
             if v.visitor_id in id_map:
-                v.email, v.full_name = id_map[v.visitor_id]
+                v.email, v.full_name, _prov = id_map[v.visitor_id]
+                v.identity_level = identity_level(_prov)
 
         # Flag rows whose email is in the owner's known-contacts list (badge).
         # One query for the page: hash this page's emails, look them up by hash.
-        page_hashes = {vid: email_hash(em) for vid, (em, _fn) in id_map.items() if em}
+        page_hashes = {vid: email_hash(em) for vid, (em, _fn, _prov) in id_map.items() if em}
         if page_hashes:
             known_rows = await db.execute(
                 select(KnownContact.email_hash, KnownContact.source).where(
@@ -727,6 +733,7 @@ async def get_visitor_detail(
             "country": identified.country,
             "resolution_provider": identified.resolution_provider,
             "confidence_score": identified.confidence_score,
+            "identity_level": identity_level(identified.resolution_provider),
         })
 
     enrich_result = await db.execute(

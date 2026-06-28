@@ -1180,6 +1180,9 @@ export interface Visitor {
   enrichment_status: string;
   email?: string | null;
   full_name?: string | null;
+  // 'person' = the real visitor; 'company' = an arbitrary employee guessed
+  // from the visitor's IP→company domain (Hunter/Apollo), NOT the real person.
+  identity_level?: "person" | "company" | null;
   is_known?: boolean;
   known_source?: string | null;
   conviction?: string | null;
@@ -1490,6 +1493,7 @@ export interface CrmPushResult {
   failed: number;
   skipped: number;
   errors: string[];
+  queued?: boolean;
 }
 
 // ── EasyEngage types ──────────────────────────────────

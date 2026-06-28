@@ -1,7 +1,48 @@
 """Tests for apps.api.services.company_resolver."""
 
+import httpx
 import pytest
-from apps.api.services.company_resolver import _extract_domain, resolve_company_from_ip
+from apps.api.config import settings as app_settings
+from apps.api.services import company_resolver
+from apps.api.services.company_resolver import (
+    _extract_domain,
+    is_datacenter_ip,
+    resolve_company_from_ip,
+)
+
+
+class _FakeResp:
+    def __init__(self, org, status=200):
+        self.status_code = status
+        self._org = org
+
+    def json(self):
+        return {"org": self._org}
+
+
+def _fake_client(org, status=200):
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, *a, **k):
+            return _FakeResp(org, status)
+
+    return _Client
+
+
+@pytest.fixture
+def _no_redis(monkeypatch):
+    """Force the no-cache path so the httpx mock is exercised deterministically."""
+    def _raise():
+        raise RuntimeError("no redis in test")
+    monkeypatch.setattr("apps.api.services.redis_client.get_redis", _raise)
 
 
 class TestExtractDomain:
@@ -70,3 +111,57 @@ class TestResolveCompanyFromIp:
         """Invalid IPs should not crash, just return None."""
         result = await resolve_company_from_ip("not-an-ip")
         assert result is None
+
+
+class TestIsDatacenterIp:
+    """is_datacenter_ip blocks cloud-compute traffic, fails open on errors."""
+
+    @pytest.mark.asyncio
+    async def test_private_ip_false(self):
+        assert await is_datacenter_ip("192.168.1.1") is False
+
+    @pytest.mark.asyncio
+    async def test_empty_or_none_false(self):
+        assert await is_datacenter_ip("") is False
+        assert await is_datacenter_ip(None) is False
+
+    @pytest.mark.asyncio
+    async def test_no_token_false(self, monkeypatch):
+        monkeypatch.setattr(app_settings, "ipinfo_token", "")
+        assert await is_datacenter_ip("8.8.8.8") is False
+
+    @pytest.mark.asyncio
+    async def test_azure_ip_is_datacenter(self, monkeypatch, _no_redis):
+        monkeypatch.setattr(app_settings, "ipinfo_token", "tok")
+        monkeypatch.setattr(httpx, "AsyncClient", _fake_client("AS8075 Microsoft Corporation"))
+        assert await is_datacenter_ip("135.232.20.19") is True
+
+    @pytest.mark.asyncio
+    async def test_aws_and_gcp_are_datacenter(self, monkeypatch, _no_redis):
+        monkeypatch.setattr(app_settings, "ipinfo_token", "tok")
+        monkeypatch.setattr(httpx, "AsyncClient", _fake_client("AS16509 Amazon.com, Inc."))
+        assert await is_datacenter_ip("52.1.2.3") is True
+        monkeypatch.setattr(httpx, "AsyncClient", _fake_client("AS396982 Google LLC"))
+        assert await is_datacenter_ip("34.72.1.2") is True
+
+    @pytest.mark.asyncio
+    async def test_residential_isp_not_datacenter(self, monkeypatch, _no_redis):
+        monkeypatch.setattr(app_settings, "ipinfo_token", "tok")
+        monkeypatch.setattr(httpx, "AsyncClient", _fake_client("AS7922 Comcast Cable Communications, LLC"))
+        assert await is_datacenter_ip("73.11.22.33") is False
+
+    @pytest.mark.asyncio
+    async def test_cloudflare_cdn_excluded(self, monkeypatch, _no_redis):
+        # CDN/relay must NOT be treated as datacenter — Apple Private Relay / WARP
+        # route real human traffic through these.
+        monkeypatch.setattr(app_settings, "ipinfo_token", "tok")
+        monkeypatch.setattr(httpx, "AsyncClient", _fake_client("AS13335 Cloudflare, Inc."))
+        assert await is_datacenter_ip("1.1.1.1") is False
+
+    @pytest.mark.asyncio
+    async def test_fails_open_on_error(self, monkeypatch, _no_redis):
+        monkeypatch.setattr(app_settings, "ipinfo_token", "tok")
+        def _boom(*a, **k):
+            raise RuntimeError("ipinfo down")
+        monkeypatch.setattr(httpx, "AsyncClient", _boom)
+        assert await is_datacenter_ip("135.232.20.19") is False

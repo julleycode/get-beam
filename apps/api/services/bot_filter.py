@@ -22,6 +22,8 @@ _BOT_PATTERN = re.compile(
     r"go-http-client|\bjava\b|ruby|perl|php|node-fetch|"
     r"postman|insomnia|httpie|axios|got/|undici|"
     r"claudebot|anthropic|openai|gptbot|chatgpt|"
+    r"bedrock-agentcore|agentcore|shap-user|perplexitybot|"
+    r"playwright|webdriver|cypress|okhttp|apache-httpclient|"
     r"archive\.org|ia_archiver|"
     r"feedfetcher|feedparser|rssowl|"
     r"\bpreview\b|prerender|\bsnap|\bembed|"

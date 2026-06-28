@@ -27,6 +27,10 @@ class VisitorOut(BaseModel):
     # Lets the list show a real email/name instead of the opaque visitor_id.
     email: str | None = None
     full_name: str | None = None
+    # 'person' = the actual visitor (captured email / person-graph match).
+    # 'company' = an arbitrary employee guessed from the visitor's IP→company
+    # domain (Hunter/Apollo) — NOT the real person. None = no identity yet.
+    identity_level: str | None = None
     # True when this visitor's email matches the site owner's uploaded
     # known-contacts list (existing customer / prior lead). Matched by hash.
     is_known: bool = False

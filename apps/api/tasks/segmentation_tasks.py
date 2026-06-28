@@ -99,6 +99,12 @@ async def _run_segmentation_for_site(db, site: Site) -> None:
 
     logger.info("segmentation_triggered", site_id=site.site_id, segments=len(segments))
 
+    # Opt-in: auto-sync the freshly built segments to any connected CRM.
+    # Best-effort — never let a CRM hiccup break segmentation.
+    from apps.api.services.crm_push import auto_push_segments
+
+    await auto_push_segments(db, site.site_id, [str(s.id) for s in segments])
+
 
 @celery_app.task(name="apps.api.tasks.segmentation_tasks.run_segmentation_manual")
 def run_segmentation_manual(site_id: str) -> dict:

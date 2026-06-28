@@ -544,6 +544,14 @@ export default function VisitorsPage() {
                           Known
                         </span>
                       )}
+                      {v.identity_level === "company" && (
+                        <span
+                          className="shrink-0 rounded bg-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-warning"
+                          title="Company-level guess: matched to this company via IP, then an employee was inferred. This is likely NOT the actual visitor — don't email them."
+                        >
+                          Company-level
+                        </span>
+                      )}
                     </div>
                     {v.conviction && (
                       <div

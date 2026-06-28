@@ -267,6 +267,16 @@ export default function VisitorDetailPage() {
             <CardTitle className="text-base">Identity</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
+            {visitor.identity_level === "company" && (
+              <div className="rounded-md bg-warning-muted px-3 py-2 text-xs text-warning">
+                <span className="font-medium">Company-level match.</span> This
+                visitor&apos;s IP maps to this company, and an employee was
+                inferred from it — it&apos;s likely{" "}
+                <span className="font-medium">not</span>{" "}
+                the actual person who visited. Treat as an account signal, not a
+                verified contact; don&apos;t email this address.
+              </div>
+            )}
             {visitor.full_name && (
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Name</span>

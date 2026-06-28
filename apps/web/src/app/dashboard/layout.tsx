@@ -10,7 +10,7 @@ import {
   Users,
   Layers,
   Megaphone,
-  Download,
+  Plug,
   Rss,
   FileText,
   AtSign,
@@ -48,7 +48,7 @@ const EASYTRACK_ITEMS: NavItem[] = [
   { href: "/dashboard/visitors", label: "Visitors", icon: Users, tour: "visitors" },
   { href: "/dashboard/segments", label: "Segments", icon: Layers, tour: "segments" },
   { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone, tour: "campaigns" },
-  { href: "/dashboard/exports", label: "Exports", icon: Download, tour: "exports" },
+  { href: "/dashboard/connectors", label: "Connectors", icon: Plug, tour: "connectors" },
 ];
 
 const EASYENGAGE_ITEMS: NavItem[] = [

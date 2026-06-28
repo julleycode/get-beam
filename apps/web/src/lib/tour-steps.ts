@@ -47,10 +47,10 @@ export const TOUR_STEPS: TourStep[] = [
     body: "Turn segments into email and social touchpoints. Nothing sends without your approval.",
   },
   {
-    id: "exports",
-    target: "exports",
-    title: "Exports — take your data",
-    body: "Download visitor and segment data as CSV to use anywhere.",
+    id: "connectors",
+    target: "connectors",
+    title: "Connectors — move your data",
+    body: "Export segments as CSV for ad platforms, push identified visitors into your CRM, and import known contacts — all in one place.",
   },
   {
     id: "feed",

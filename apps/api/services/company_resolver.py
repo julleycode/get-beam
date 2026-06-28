@@ -218,6 +218,70 @@ def is_ip_suspicious(privacy: dict | None) -> bool:
     return any(privacy.get(k, False) for k in ("vpn", "proxy", "tor", "relay", "hosting"))
 
 
+# Cloud COMPUTE providers — these host servers, not consumer eyeballs. CDN/relay
+# orgs (Cloudflare, Fastly, Akamai, Gcore) are deliberately EXCLUDED because they
+# front real human traffic via Apple Private Relay / Cloudflare WARP.
+_DATACENTER_ORG_TOKENS = (
+    "microsoft", "azure", "google", "amazon", "aws", "digitalocean", "ovh",
+    "hetzner", "vultr", "choopa", "linode", "alibaba", "tencent", "oracle",
+    "scaleway", "leaseweb", "datacamp", "m247", "contabo", "upcloud",
+    "ibm", "rackspace", "softlayer", "hostinger", "godaddy", "ionos",
+    "constant company", "quadranet", "psychz", "limestone", "cogent",
+    "hosting", "datacenter", "data center", "colocation",
+)
+_DATACENTER_CACHE_PREFIX = "ip_datacenter:"
+_DATACENTER_CACHE_TTL = 30 * 24 * 3600  # 30 days
+
+
+async def is_datacenter_ip(ip: str) -> bool:
+    """True if `ip` belongs to a cloud-compute provider (server/bot traffic).
+
+    Uses IPinfo's standard endpoint `org` (ASN) field — available on the free
+    token (unlike the paid /privacy module). Cached in Redis 30 days. Fail-open:
+    returns False on private IP, missing token, or any error, so a real visitor's
+    events are NEVER dropped because of a lookup hiccup.
+    """
+    from apps.api.config import settings
+
+    if not ip or _PRIVATE_RE.match(ip):
+        return False
+    if not settings.ipinfo_token:
+        return False
+
+    cache_key = f"{_DATACENTER_CACHE_PREFIX}{ip}"
+    try:
+        from apps.api.services.redis_client import get_redis
+        redis = get_redis()
+        cached = await redis.get(cache_key)
+        if cached is not None:
+            return cached == "1"
+    except Exception:
+        redis = None
+
+    org: str | None = None
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            resp = await client.get(
+                f"https://ipinfo.io/{ip}", params={"token": settings.ipinfo_token}
+            )
+            if resp.status_code == 200:
+                org = resp.json().get("org")
+    except Exception as exc:
+        logger.debug("datacenter_check_failed", ip=ip[:8] + "...", error=str(exc))
+        return False  # fail-open
+
+    is_dc = bool(org) and any(tok in org.lower() for tok in _DATACENTER_ORG_TOKENS)
+    try:
+        if redis is not None:
+            await redis.setex(cache_key, _DATACENTER_CACHE_TTL, "1" if is_dc else "0")
+    except Exception:
+        pass
+    if is_dc:
+        logger.info("datacenter_ip_blocked", ip=ip[:8] + "...", org=org)
+    return is_dc
+
+
 async def resolve_company_cached(ip: str) -> str | None:
     """Resolve IP to company domain with Redis caching (30-day TTL).
 

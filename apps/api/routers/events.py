@@ -78,6 +78,16 @@ async def ingest_events(
 
     ip_address = _extract_ip(request)
 
+    # Datacenter / cloud-compute traffic = bots (Azure/AWS/GCP server scanners,
+    # AI-agent browsers that spoof a real Chrome UA and slip past is_bot above).
+    # Drop silently like the UA filter. Cached + fail-open: a lookup error never
+    # blocks a real visitor's events.
+    from apps.api.config import settings as _settings
+    if _settings.block_datacenter_traffic:
+        from apps.api.services.company_resolver import is_datacenter_ip
+        if await is_datacenter_ip(ip_address):
+            return Response(status_code=204)
+
     # Client Hints extraction (best-effort)
     ch_ua = request.headers.get("sec-ch-ua", "")
     ch_platform = request.headers.get("sec-ch-ua-platform", "").strip('"')

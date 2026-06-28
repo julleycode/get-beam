@@ -93,6 +93,11 @@ class Settings(BaseSettings):
     fullcontact_pixel_id: str = ""        # FullContact Acumen webtag ID
     customers_ai_pixel_id: str = ""       # Customers.ai X-Ray pixel ID
 
+    # When true, drop ingest events whose client IP belongs to a cloud-compute
+    # provider (Azure/AWS/GCP/DO/OVH/…) — server/bot traffic, never real eyeballs.
+    # Cached + fail-open: an IPinfo error never blocks a real visitor's events.
+    block_datacenter_traffic: bool = True
+
     # ─── Waterfall enrichment providers ───
     ipinfo_token: str = ""          # IP → company/geolocation (50K free/month)
     hunter_api_key: str = ""        # Domain → employee emails (25 free/month)
@@ -101,6 +106,32 @@ class Settings(BaseSettings):
     # Shopify
     shopify_api_key: str = ""
     shopify_api_secret: str = ""
+
+    # ─── CRM Connectors (push identified visitors OUT to a CRM) ───
+    # When true, every external connector call returns deterministic fakes
+    # instead of hitting the provider — lets us dev/test/demo without real
+    # credentials or credit burn (CLAUDE.md "every external API has a mock").
+    mock_external_apis: bool = False
+    hubspot_client_id: str = ""
+    hubspot_client_secret: str = ""
+    hubspot_redirect_uri: str = "http://localhost:8000/api/v1/crm/callback/hubspot"
+    pipedrive_client_id: str = ""
+    pipedrive_client_secret: str = ""
+    pipedrive_redirect_uri: str = "http://localhost:8000/api/v1/crm/callback/pipedrive"
+    salesforce_client_id: str = ""
+    salesforce_client_secret: str = ""
+    salesforce_redirect_uri: str = "http://localhost:8000/api/v1/crm/callback/salesforce"
+    # Per-site cap on CRM push operations per clock hour (abuse / runaway guard).
+    max_crm_pushes_per_hour_per_site: int = 20
+    # Offload large pushes to Celery. OFF by default — only safe when a Celery
+    # worker is actually running (prod currently has none). When off, every push
+    # runs synchronously in the request.
+    crm_async_push: bool = False
+    crm_async_push_threshold: int = 200  # segment member count above which async kicks in
+    # Auto-push every newly created segment to all connected CRMs. OFF by
+    # default — syncing to a customer's CRM unattended is a strong side effect,
+    # so operators opt in explicitly.
+    crm_auto_push: bool = False
 
     # Supabase Storage (blog image uploads). No service-role key → mock mode.
     supabase_url: str = ""
