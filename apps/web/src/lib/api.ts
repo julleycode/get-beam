@@ -379,6 +379,12 @@ class ApiClient {
     return this.request<SiteKpis>(`/api/v1/sites/${siteId}/kpis?days=${days}`);
   }
 
+  async getSiteTimeseries(siteId: string, days = 30) {
+    return this.request<SiteTimeseries>(
+      `/api/v1/sites/${siteId}/timeseries?days=${days}`
+    );
+  }
+
   async getCostSummary(siteId: string, days = 30) {
     return this.request<CostSummary>(
       `/api/v1/costs/${siteId}/summary?days=${days}`
@@ -537,6 +543,52 @@ class ApiClient {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  // CRM connectors — push identified visitors OUT to a CRM / webhook
+  async listCrmConnections(siteId: string) {
+    return this.request<CrmConnection[]>(`/api/v1/crm/${siteId}/connections`);
+  }
+
+  async saveGenericWebhook(siteId: string, webhookUrl: string, secret: string) {
+    return this.request<CrmConnection>(
+      `/api/v1/crm/${siteId}/connections/generic_webhook`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ webhook_url: webhookUrl, secret }),
+      }
+    );
+  }
+
+  async connectCrm(siteId: string, provider: string) {
+    return this.request<{ auth_url: string }>(
+      `/api/v1/crm/${siteId}/connections/${provider}/connect`,
+      { method: "POST" }
+    );
+  }
+
+  async testCrmConnection(siteId: string, provider: string) {
+    return this.request<{ provider: string; is_valid: boolean; message: string }>(
+      `/api/v1/crm/${siteId}/connections/${provider}/test`,
+      { method: "POST" }
+    );
+  }
+
+  async pushSegmentToCrm(siteId: string, provider: string, segmentId: string) {
+    return this.request<CrmPushResult>(
+      `/api/v1/crm/${siteId}/connections/${provider}/push`,
+      {
+        method: "POST",
+        body: JSON.stringify({ segment_id: segmentId }),
+      }
+    );
+  }
+
+  async disconnectCrm(siteId: string, provider: string) {
+    return this.request<{ status: string }>(
+      `/api/v1/crm/${siteId}/connections/${provider}`,
+      { method: "DELETE" }
+    );
   }
 
   // BYOK API Keys
@@ -1335,6 +1387,19 @@ export interface SiteKpis {
   reply_tracking_available: boolean;
 }
 
+export interface TimeseriesPoint {
+  date: string; // YYYY-MM-DD
+  visitors: number;
+  identified: number;
+  high_intent: number;
+}
+
+export interface SiteTimeseries {
+  site_id: string;
+  window_days: number;
+  series: TimeseriesPoint[];
+}
+
 export interface SiteStats {
   total_visitors: number;
   identified: number;
@@ -1384,6 +1449,32 @@ export interface ApiKeyInfo {
   key_hint: string;
   is_valid: boolean;
   created_at: string;
+}
+
+export type CrmProvider = "generic_webhook" | "hubspot" | "pipedrive" | "salesforce";
+
+export interface CrmConnection {
+  provider: CrmProvider;
+  auth_type: "oauth" | "webhook";
+  status: "pending" | "connected" | "error" | "disconnected";
+  direction: string;
+  external_account_label: string | null;
+  webhook_url: string | null;
+  secret_hint: string | null;
+  field_mapping: Record<string, string>;
+  is_valid: boolean;
+  last_pushed_at: string | null;
+  last_error: string | null;
+  created_at: string;
+}
+
+export interface CrmPushResult {
+  provider: string;
+  segment_id: string;
+  pushed: number;
+  failed: number;
+  skipped: number;
+  errors: string[];
 }
 
 // ── EasyEngage types ──────────────────────────────────

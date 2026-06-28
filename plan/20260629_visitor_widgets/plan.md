@@ -15,7 +15,15 @@ Tham khảo style: thẻ nhỏ, có nút period + "View As Graph" + "Add Widget"
 - [x] Trang Visitors: gom 3 card vào grid `md:grid-cols-2 xl:grid-cols-3` (gọn, ít diện tích).
 - Backend: không đổi — 3 endpoint đã nhận `days/window_days`.
 
-## P2 — "View as graph": line graph theo ngày  ⬜ TODO
+## P2 — "View as graph": line graph theo ngày  ✅ DONE (2026-06-29)
+
+- [x] Backend `services/timeseries.py` (`compute_timeseries` + pure `build_series` gap-fill) + endpoint `GET /sites/{id}/timeseries?days=` (same window/predicates as kpis, bucket `func.date(last_seen)`, days cap 365).
+- [x] Tests: `tests/test_timeseries.py` (4 unit) + `tests/integration/test_timeseries_endpoint.py` (2, Postgres) — all pass.
+- [x] Frontend: `getSiteTimeseries` + types, `recharts@^2.15` dep, `FunnelTrendChart`, Funnel widget gets Numbers↔Graph toggle (lazy fetch, period-aware).
+- [x] Adversarial review applied: graph-fetch error state, stale-series ignore-flag, explicit chart height. (UTC-cast finding skipped — last_seen is naive `timestamp WITHOUT time zone`, `date()` doesn't tz-convert.)
+- Note: lifetime graph = last 365 days (backend cap), not literally all-time. Graph view added to Funnel widget only (distributions stay as bars).
+
+### P2 (old TODO notes — kept for reference)
 
 Cần:
 1. **Backend**: endpoint chuỗi theo ngày, ví dụ

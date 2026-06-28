@@ -346,6 +346,27 @@ async def site_kpis(
     return await compute_kpis(db, site_id, days=max(1, min(days, 365)))
 
 
+@router.get("/{site_id}/timeseries")
+async def site_timeseries(
+    site_id: str,
+    days: int = 30,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Per-day funnel series (visitors → identified → high-intent) for the
+    "View as graph" widget. Same window + predicates as /kpis, bucketed by day."""
+    result = await db.execute(
+        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
+    )
+    site = result.scalar_one_or_none()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+
+    from apps.api.services.timeseries import compute_timeseries
+
+    return await compute_timeseries(db, site_id, days=max(1, min(days, 365)))
+
+
 # ──────────────────────── WordPress Plugin ─────────────────────────────
 
 
