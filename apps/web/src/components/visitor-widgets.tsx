@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -9,6 +9,7 @@ import {
   Settings2,
   X,
 } from "lucide-react";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { KpiStrip } from "@/components/kpi-strip";
@@ -37,38 +38,75 @@ const LAYOUT_KEY = "beam_visitor_widgets_v1";
 const isWidgetId = (s: string): s is WidgetId =>
   REGISTRY.some((w) => w.id === s);
 
+const readLocal = (): WidgetId[] | null => {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY);
+    if (!raw) return null;
+    // Keep only ids still in the registry (a removed widget must not crash
+    // render); preserve saved order.
+    const ids = (JSON.parse(raw) as string[]).filter(isWidgetId) as WidgetId[];
+    return ids.length ? ids : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeLocal = (ids: WidgetId[]) => {
+  try {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify(ids));
+  } catch {
+    /* storage blocked — server is the source of truth anyway */
+  }
+};
+
 /**
  * Customizable widget grid for the Visitors page. Users add / remove / reorder
- * the insight cards; the layout (ordered list of widget ids) persists in
- * localStorage so it survives reloads. Per-browser for now — a backend sync
- * could replace the storage layer without touching this UI.
+ * the insight cards; the layout (ordered widget ids) is synced **per-user** to
+ * the backend (GET/PUT /auth/widget-layout) so it follows them across devices,
+ * with localStorage as an offline cache + instant first paint.
  */
 export function VisitorWidgets({ siteId }: { siteId: string }) {
-  const [layout, setLayout] = useState<WidgetId[]>(DEFAULT_LAYOUT);
+  const [layout, setLayout] = useState<WidgetId[]>(
+    () => readLocal() ?? DEFAULT_LAYOUT
+  );
   const [editing, setEditing] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Load the server layout once. Server wins; if the server has none but this
+  // browser does (pre-sync local), upload it once so it follows the user.
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LAYOUT_KEY);
-      if (raw) {
-        // Keep only ids that still exist in the registry (a removed widget in
-        // saved layout must not crash render), preserve the saved order.
-        const ids = (JSON.parse(raw) as string[]).filter(isWidgetId);
-        setLayout(ids as WidgetId[]);
-      }
-    } catch {
-      /* corrupt / blocked storage — keep the default layout */
-    }
+    let ignore = false;
+    api
+      .getWidgetLayout()
+      .then((r) => {
+        if (ignore) return;
+        const serverIds = (r.layout ?? []).filter(isWidgetId) as WidgetId[];
+        if (serverIds.length) {
+          setLayout(serverIds);
+          writeLocal(serverIds);
+        } else {
+          const local = readLocal();
+          if (local) api.saveWidgetLayout(local).catch(() => {});
+        }
+      })
+      .catch(() => {
+        /* server unreachable — keep the local/default layout already shown */
+      });
+    return () => {
+      ignore = true;
+    };
   }, []);
 
+  // User-initiated change: update UI + local cache immediately, debounce the
+  // server write so a flurry of reorders is one request.
   const persist = (next: WidgetId[]) => {
     setLayout(next);
-    try {
-      localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
-    } catch {
-      /* storage blocked — keep it in-memory for this session */
-    }
+    writeLocal(next);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      api.saveWidgetLayout(next).catch(() => {});
+    }, 600);
   };
 
   const remove = (id: WidgetId) => persist(layout.filter((x) => x !== id));

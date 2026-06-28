@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, Integer, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from apps.api.models.database import Base
@@ -39,6 +39,11 @@ class User(Base):
     current_period_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     monthly_identified_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
     billing_cycle_reset_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # ─── Dashboard prefs ───
+    # Per-surface widget layout, e.g. {"visitors": ["funnel", "traffic_fit"]}.
+    # Nullable: a NULL/absent surface means "use the default layout".
+    dashboard_layout: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     # EasyEngage relationships
     social_accounts = relationship("SocialAccount", back_populates="user", cascade="all, delete-orphan")

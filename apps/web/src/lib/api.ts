@@ -385,6 +385,21 @@ class ApiClient {
     );
   }
 
+  // Per-user dashboard widget layout (synced across devices). `layout` is null
+  // when the user hasn't customised the surface → client uses its default.
+  async getWidgetLayout(surface = "visitors") {
+    return this.request<{ surface: string; layout: string[] | null }>(
+      `/api/v1/auth/widget-layout?surface=${encodeURIComponent(surface)}`
+    );
+  }
+
+  async saveWidgetLayout(layout: string[], surface = "visitors") {
+    return this.request<{ surface: string; layout: string[] }>(
+      `/api/v1/auth/widget-layout`,
+      { method: "PUT", body: JSON.stringify({ surface, layout }) }
+    );
+  }
+
   async getCostSummary(siteId: string, days = 30) {
     return this.request<CostSummary>(
       `/api/v1/costs/${siteId}/summary?days=${days}`

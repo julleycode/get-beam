@@ -6,12 +6,14 @@ supports both Clerk (RS256) and legacy HS256 tokens.
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.database import get_db
 from apps.api.models.user import User
 from apps.api.schemas.auth import LoginRequest, Token, UserCreate, UserOut
+from apps.api.schemas.preferences import WidgetLayoutResponse, WidgetLayoutUpdate
 from apps.api.services.auth import (
     authenticate_user,
     create_access_token,
@@ -54,3 +56,31 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> Token
 @router.get("/me", response_model=UserOut)
 async def get_me(user: User = Depends(get_current_user)) -> UserOut:
     return UserOut.model_validate(user)
+
+
+@router.get("/widget-layout", response_model=WidgetLayoutResponse)
+async def get_widget_layout(
+    surface: str = Query("visitors", max_length=50),
+    user: User = Depends(get_current_user),
+) -> WidgetLayoutResponse:
+    """The caller's saved widget order for a dashboard surface (None = default)."""
+    layouts = user.dashboard_layout or {}
+    return WidgetLayoutResponse(surface=surface, layout=layouts.get(surface))
+
+
+@router.put("/widget-layout", response_model=WidgetLayoutResponse)
+async def put_widget_layout(
+    body: WidgetLayoutUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WidgetLayoutResponse:
+    """Persist the caller's widget order for one surface. Merges into the JSONB
+    map so other surfaces are untouched; written via UPDATE so it doesn't depend
+    on the user being attached to this request's session."""
+    layouts = dict(user.dashboard_layout or {})
+    layouts[body.surface] = body.layout
+    await db.execute(
+        update(User).where(User.id == user.id).values(dashboard_layout=layouts)
+    )
+    await db.commit()
+    return WidgetLayoutResponse(surface=body.surface, layout=body.layout)

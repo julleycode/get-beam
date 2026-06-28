@@ -42,7 +42,14 @@ Rủi ro: dependency mới + endmpoint mới; query nặng nếu data lớn (hi�
 - [x] Layout persisted in `localStorage["beam_visitor_widgets_v1"]` (per-browser; load filters unknown ids, keeps order). Backend per-user sync = future sub-phase.
 - [x] Visitors page renders `<VisitorWidgets siteId/>` (removed direct card imports).
 - [x] Adversarial review applied: edit controls moved from absolute overlay → in-flow top **control bar** (no collision with the Funnel widget's own toggles) + `min-h` so a no-data widget stays a labeled, removable placeholder instead of orphaning floating controls.
-- Note: localStorage only (per-device). Drag-drop reorder skipped (used ←→ buttons). Backend-synced layout = optional next sub-phase.
+- Note: drag-drop reorder skipped (used ←→ buttons).
+
+### P3b — backend per-user sync  ✅ DONE (2026-06-29)
+
+- [x] `User.dashboard_layout` JSONB (nullable, surface-keyed) + Alembic migration `e3a9c1d57b42` (chained from committed head `c5d8e1f3a7b9`, NOT the uncommitted CRM `d9f2b6e4c8a1`, to keep deploy single-head).
+- [x] `GET/PUT /api/v1/auth/widget-layout` (auth-scoped, merges per surface via UPDATE) + `schemas/preferences.py`. Integration test `tests/integration/test_widget_layout.py` (3, Postgres) pass.
+- [x] Frontend: `getWidgetLayout`/`saveWidgetLayout`; VisitorWidgets loads server layout (server wins), one-time uploads a pre-sync localStorage layout, debounced (600ms) save on change, localStorage kept as offline cache + instant first paint.
+- Layout now follows the user across devices. localStorage is cache only.
 
 ### P3 (old TODO notes — kept for reference)
 
