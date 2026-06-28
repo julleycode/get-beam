@@ -115,7 +115,11 @@ test.describe("Blog — admin editor", () => {
     // Seed the admin token into the app's localStorage (legacy JWT auth path —
     // Clerk is disabled in E2E).
     await page.goto("/");
-    await page.evaluate((t) => localStorage.setItem("auth_token", t), token);
+    await page.evaluate((t) => {
+      localStorage.setItem("auth_token", t);
+      // Suppress the first-run tour — its modal overlay blocks editor clicks.
+      localStorage.setItem("beam_tour_done_v1", "1");
+    }, token);
 
     // Create a draft through the editor UI.
     await page.goto("/dashboard/blog/new");
@@ -143,7 +147,11 @@ test.describe("Blog — admin editor", () => {
   test("SEO assistant scores the post as you write", async ({ page, request }) => {
     const token = await getAdminToken(request);
     await page.goto("/");
-    await page.evaluate((t) => localStorage.setItem("auth_token", t), token);
+    await page.evaluate((t) => {
+      localStorage.setItem("auth_token", t);
+      // Suppress the first-run tour — its modal overlay blocks editor clicks.
+      localStorage.setItem("beam_tour_done_v1", "1");
+    }, token);
     await page.goto("/dashboard/blog/new");
 
     // Empty editor → poor score.
@@ -167,7 +175,11 @@ test.describe("Blog — admin editor", () => {
   test("markdown toolbar inserts formatting into the body", async ({ page, request }) => {
     const token = await getAdminToken(request);
     await page.goto("/");
-    await page.evaluate((t) => localStorage.setItem("auth_token", t), token);
+    await page.evaluate((t) => {
+      localStorage.setItem("auth_token", t);
+      // Suppress the first-run tour — its modal overlay blocks editor clicks.
+      localStorage.setItem("beam_tour_done_v1", "1");
+    }, token);
     await page.goto("/dashboard/blog/new");
 
     await page.fill("#body", "hello");

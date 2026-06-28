@@ -702,7 +702,7 @@ export default function SettingsPage() {
               <DialogHeader>
                 <DialogTitle>Remove the pixel from your site</DialogTitle>
                 <DialogDescription>
-                  Follow the steps below to take the pixel off. Data you've
+                  Follow the steps below to take the pixel off. Data you&apos;ve
                   already collected is kept.
                 </DialogDescription>
               </DialogHeader>
