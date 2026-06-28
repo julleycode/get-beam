@@ -4,7 +4,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Sparkles, Users, FileText, Megaphone, AtSign } from "lucide-react";
+import { RefreshCw, Users, FileText, Megaphone, AtSign } from "lucide-react";
 import { api, Site } from "@/lib/api";
 import { SiteCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
@@ -48,6 +48,11 @@ function SiteCard({ site }: { site: Site }) {
   const [pixelVerified, setPixelVerified] = useState(site.pixel_verified);
   const [verifying, setVerifying] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
+  const [shotFailed, setShotFailed] = useState(false);
+
+  // Free, key-less landing-page screenshot (WordPress mShots). First hit may
+  // return a "generating" placeholder; on error we fall back to a gradient.
+  const shot = `https://s0.wp.com/mshots/v1/${encodeURIComponent(site.url)}?w=1200`;
 
   // Shared cache key with TodayActions (queryClient.fetchQuery) — one stats
   // request per site, and cached across navigation back to Overview.
@@ -73,10 +78,31 @@ function SiteCard({ site }: { site: Site }) {
   }
 
   return (
-    <Card>
+    <Card className="overflow-hidden">
+      {/* Cover: a screenshot of the site's landing page. */}
+      <div className="relative aspect-[16/9] w-full bg-gradient-to-br from-primary/15 via-secondary to-info/15">
+        {!shotFailed && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={shot}
+            alt={`${site.name} landing page`}
+            loading="lazy"
+            onError={() => setShotFailed(true)}
+            className="absolute inset-0 h-full w-full object-cover object-top"
+          />
+        )}
+      </div>
+
       <CardHeader>
-        <CardTitle className="text-base">{site.name}</CardTitle>
-        <CardDescription className="truncate">{site.url}</CardDescription>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <CardTitle className="truncate text-base">{site.name}</CardTitle>
+            <CardDescription className="truncate">{site.url}</CardDescription>
+          </div>
+          <Link href={`/dashboard/visitors?site=${site.site_id}`} className="shrink-0">
+            <Button size="sm">Beaming</Button>
+          </Link>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Stats row */}
@@ -86,18 +112,6 @@ function SiteCard({ site }: { site: Site }) {
             <StatTile label="Identified" value={stats.identified} tone="info" />
             <StatTile label="Enriched" value={stats.enriched} tone="success" />
           </div>
-        )}
-
-        {/* Enrichment nudge */}
-        {stats && stats.could_enrich_more > 0 && (
-          <p className="flex items-center gap-1.5 text-xs text-warning">
-            <Sparkles className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              {stats.could_enrich_more} visitor
-              {stats.could_enrich_more > 1 ? "s" : ""} could be enriched further
-              with BYOK keys
-            </span>
-          </p>
         )}
 
         {/* Pixel status + re-verify */}
@@ -135,24 +149,6 @@ function SiteCard({ site }: { site: Site }) {
           {verifyMessage && !pixelVerified && (
             <p className="text-[11px] text-muted-foreground">{verifyMessage}</p>
           )}
-        </div>
-
-        <div className="flex gap-2">
-          <Link href={`/dashboard/visitors?site=${site.site_id}`}>
-            <Button variant="outline" size="sm">
-              Visitors
-            </Button>
-          </Link>
-          <Link href={`/dashboard/segments?site=${site.site_id}`}>
-            <Button variant="outline" size="sm">
-              Segments
-            </Button>
-          </Link>
-          <Link href={`/dashboard/campaigns?site=${site.site_id}`}>
-            <Button variant="outline" size="sm">
-              Campaigns
-            </Button>
-          </Link>
         </div>
       </CardContent>
     </Card>
