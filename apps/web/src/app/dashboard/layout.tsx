@@ -11,15 +11,12 @@ import {
   Layers,
   Megaphone,
   Download,
-  Receipt,
   Rss,
   FileText,
   AtSign,
-  BookOpen,
   Lightbulb,
   CreditCard,
-  ListChecks,
-  Inbox,
+  Shield,
   Settings,
   Menu,
   HelpCircle,
@@ -52,7 +49,6 @@ const EASYTRACK_ITEMS: NavItem[] = [
   { href: "/dashboard/segments", label: "Segments", icon: Layers, tour: "segments" },
   { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone, tour: "campaigns" },
   { href: "/dashboard/exports", label: "Exports", icon: Download, tour: "exports" },
-  { href: "/dashboard/costs", label: "API Costs", icon: Receipt, adminOnly: true },
 ];
 
 const EASYENGAGE_ITEMS: NavItem[] = [
@@ -61,16 +57,28 @@ const EASYENGAGE_ITEMS: NavItem[] = [
   { href: "/dashboard/social-accounts", label: "Social Accounts", icon: AtSign },
 ];
 
-// adminOnly items are hidden until /auth/me confirms is_admin (no flash for
-// non-admins while loading — the backend rejects non-admins on those pages).
-const BOTTOM_ITEMS: NavItem[] = [
-  { href: "/dashboard/blog", label: "Blog", icon: BookOpen, adminOnly: true },
+// Everyone (non-admin) bottom links.
+const GENERAL_ITEMS: NavItem[] = [
   { href: "/dashboard/feature-board", label: "Feature Board", icon: Lightbulb },
   { href: "/dashboard/billing", label: "Billing", icon: CreditCard },
-  { href: "/dashboard/waitlist", label: "Waitlist", icon: ListChecks, adminOnly: true },
-  { href: "/dashboard/feature-requests", label: "Feature Requests", icon: Inbox, adminOnly: true },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings, tour: "settings" },
 ];
+
+// Single entry point to all admin tools (API Costs, Blog, Waitlist, Feature
+// Requests). Only shown once /auth/me confirms is_admin; the hub page at
+// /dashboard/admin links out to each tool.
+const ADMIN_ITEM: NavItem = {
+  href: "/dashboard/admin",
+  label: "Admin",
+  icon: Shield,
+  adminOnly: true,
+};
+
+const SETTINGS_ITEM: NavItem = {
+  href: "/dashboard/settings",
+  label: "Settings",
+  icon: Settings,
+  tour: "settings",
+};
 
 // Set by the sign-up page so the invite token survives Clerk's multi-step
 // signup flow (see sign-up/[[...sign-up]]/page.tsx).
@@ -305,9 +313,9 @@ function SidebarBody({
           />
         ))}
 
-        <div className="flex-1" />
+        <Separator className="my-2" />
 
-        {BOTTOM_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => (
+        {GENERAL_ITEMS.map((item) => (
           <NavLink
             key={item.href}
             href={item.href}
@@ -318,6 +326,28 @@ function SidebarBody({
             tour={item.tour}
           />
         ))}
+
+        {/* One "Admin" tab → the hub that gathers every admin tool. */}
+        {isAdmin && (
+          <NavLink
+            href={ADMIN_ITEM.href}
+            label={ADMIN_ITEM.label}
+            icon={ADMIN_ITEM.icon}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+        )}
+
+        <div className="flex-1" />
+
+        <NavLink
+          href={SETTINGS_ITEM.href}
+          label={SETTINGS_ITEM.label}
+          icon={SETTINGS_ITEM.icon}
+          pathname={pathname}
+          onNavigate={onNavigate}
+          tour={SETTINGS_ITEM.tour}
+        />
       </nav>
       <Separator className="my-2" />
       {onReplayTour && (
