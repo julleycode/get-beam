@@ -73,18 +73,31 @@ ENRICH_CACHE_TTL_SECONDS = 7 * 86400
 _CACHE_MISS_MARKER = "__no_match__"
 
 
+class _PDLNonTransientError(Exception):
+    """PDL returned a non-transient, non-404 error (e.g. 401 bad key, 400).
+    NOT a definitive no-match — the caller must leave the visitor retryable."""
+
+
 def _apply_proxycurl(profile, proxycurl_data: dict) -> None:
-    """Copy Proxycurl fields onto the profile (behavior preserved verbatim)."""
-    profile.linkedin_headline = proxycurl_data.get("linkedin_headline")
-    profile.linkedin_summary = proxycurl_data.get("linkedin_summary")
-    profile.linkedin_follower_count = proxycurl_data.get("linkedin_follower_count")
+    """Copy Proxycurl fields onto the profile. Never clobber an existing value
+    with a null/missing key — a partial 200 response must not wipe good data."""
+    if (v := proxycurl_data.get("linkedin_headline")) is not None:
+        profile.linkedin_headline = v
+    if (v := proxycurl_data.get("linkedin_summary")) is not None:
+        profile.linkedin_summary = v
+    if (v := proxycurl_data.get("linkedin_follower_count")) is not None:
+        profile.linkedin_follower_count = v
 
 
 def _apply_twitter(profile, twitter_data: dict) -> None:
-    """Copy Twitter fields onto the profile (behavior preserved verbatim)."""
-    profile.twitter_bio = twitter_data.get("twitter_bio")
-    profile.twitter_follower_count = twitter_data.get("twitter_follower_count")
-    profile.twitter_recent_topics = twitter_data.get("twitter_recent_topics", [])
+    """Copy Twitter fields onto the profile. Never clobber existing values with
+    nulls; topics are populate-only (a fresh empty response won't wipe prior)."""
+    if (v := twitter_data.get("twitter_bio")) is not None:
+        profile.twitter_bio = v
+    if (v := twitter_data.get("twitter_follower_count")) is not None:
+        profile.twitter_follower_count = v
+    if topics := twitter_data.get("twitter_recent_topics"):
+        profile.twitter_recent_topics = topics
 
 
 class Enricher:
@@ -151,7 +164,13 @@ class Enricher:
         # A transient PDL failure (timeout/5xx after retries) raises out of
         # here and the caller leaves the status retryable; only a definitive
         # no-match marks "failed".
-        pdl_data = await self._enrich_pdl(identified.email, visitor=visitor)
+        try:
+            pdl_data = await self._enrich_pdl(identified.email, visitor=visitor)
+        except _PDLNonTransientError:
+            # Bad/expired PDL key (or 400): leave the visitor retryable instead
+            # of marking it permanently "failed" on a key problem.
+            logger.warning("enrichment_pdl_non_transient_retryable", visitor_id=visitor.visitor_id[:8])
+            return None
         if not pdl_data:
             visitor.enrichment_status = "failed"
             await self.db.commit()
@@ -389,10 +408,14 @@ class Enricher:
                 logger.debug("pdl_enrich_no_match", email_prefix=email[:5])
                 await self._cache_set(cache_key, None)
                 await self._log_enrich(visitor, "pdl", "person_enrich", False)
+                return None
             else:
                 logger.warning("pdl_enrich_error", status=resp.status_code)
                 if resp.status_code in _TRANSIENT_HTTP_STATUSES:
                     resp.raise_for_status()
+                # Non-transient (401 bad key / 403 / 400): NOT a no-match. Don't
+                # negative-cache; signal the caller to keep the visitor retryable.
+                raise _PDLNonTransientError(f"PDL non-transient {resp.status_code}")
         return None
 
     async def _enrich_proxycurl(

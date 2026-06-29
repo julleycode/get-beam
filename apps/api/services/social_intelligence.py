@@ -200,7 +200,7 @@ class SocialIntelligence:
                 ]
         except Exception:
             logger.exception("twitter_api_call_failed", handle=handle_clean)
-            return self._mock_tweets(handle, limit)
+            return []
 
     def _extract_topics(self, posts: list[dict]) -> list[str]:
         """Extract topic labels from post content using keyword matching."""

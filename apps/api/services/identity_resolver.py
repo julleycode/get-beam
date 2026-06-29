@@ -660,22 +660,26 @@ class IdentityResolver:
         """Decide whether an identity-graph record belongs to this visitor.
 
         Returns (matched, weak):
-          - (False, False): record is not this visitor (IP mismatch, or
-            timestamped outside the recency window) — caller must skip it.
+          - (False, False): record is not this visitor — IP mismatch, OR no
+            usable timestamp (IP equality alone is refused), OR timestamped
+            outside the recency window. Caller must skip it.
           - (True, False):  IP matches AND record timestamp is within
             _IDENTITY_MATCH_WINDOW of the visitor's activity — strong match.
-          - (True, True):   IP matches but the record has no usable timestamp —
-            weak evidence; caller must cap confidence at <= 0.6.
+          - (True, True):   no longer produced — IP-only matches are refused.
         """
         record_ts = self._parse_record_timestamp(record)
         if record_ts is None:
-            logger.warning(
-                "weak_ip_only_match",
+            # No usable timestamp → IP equality ALONE is not enough to attach an
+            # identity. Identity-graph feeds are account-wide and office/CGNAT
+            # IPs are shared by many people, so a timestamp-less record could be
+            # anyone who shared that IP. Refuse rather than save a likely-wrong
+            # person at low confidence.
+            logger.info(
+                "identity_graph_record_no_timestamp_skipped",
                 provider=provider,
                 visitor_id=visitor.visitor_id[:8],
-                detail="record has no usable timestamp; IP equality only",
             )
-            return (True, True)
+            return (False, False)
 
         delta = abs(record_ts - self._visitor_activity_utc(visitor))
         if delta > self._IDENTITY_MATCH_WINDOW:
