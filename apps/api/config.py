@@ -1,17 +1,24 @@
 from pydantic_settings import BaseSettings
 
+# Only these app_env values skip production safety checks. ANYTHING else — a
+# typo like "prod"/"produciton", or "staging" holding prod data — is treated as
+# production-strict, so a fat-fingered APP_ENV can't silently disable the
+# encryption-key / secret requirements (and the PII blind index with them).
+_KNOWN_NONPROD_ENVS = {"development", "test", "local", "ci"}
+
 
 class Settings(BaseSettings):
     app_env: str = "development"
     app_secret_key: str = "change-me-in-production"
 
     def validate_production(self) -> None:
-        """Fail fast on startup if any critical config is unsafe in production.
+        """Fail fast on startup if any critical config is unsafe.
 
-        Collects ALL violations and raises a single RuntimeError so the operator
-        sees every problem at once rather than one-at-a-time.
+        Runs for production AND any UNRECOGNIZED app_env (so a typo can't bypass
+        it). Collects ALL violations and raises a single RuntimeError so the
+        operator sees every problem at once rather than one-at-a-time.
         """
-        if self.app_env != "production":
+        if self.app_env in _KNOWN_NONPROD_ENVS:
             return
 
         violations: list[str] = []
@@ -19,17 +26,13 @@ class Settings(BaseSettings):
         if self.app_secret_key == "change-me-in-production":
             violations.append("APP_SECRET_KEY is still the insecure default — set a strong random value")
 
-        if self.jwt_secret == "change-me-in-production" and not self.clerk_secret_key:
-            violations.append(
-                "JWT_SECRET is still the insecure default and no CLERK_SECRET_KEY is set — "
-                "set one of these to secure authentication"
-            )
-
         if not self.token_encryption_key:
             violations.append("TOKEN_ENCRYPTION_KEY is empty — OAuth tokens cannot be encrypted at rest")
 
         if not self.encryption_key:
-            violations.append("ENCRYPTION_KEY is empty — BYOK API keys cannot be encrypted at rest")
+            violations.append(
+                "ENCRYPTION_KEY is empty — BYOK API keys + the PII blind index cannot be secured"
+            )
 
         if violations:
             bullet_list = "\n  - ".join(violations)
@@ -65,8 +68,6 @@ class Settings(BaseSettings):
     # ─── Clerk Authentication ───
     clerk_secret_key: str = ""
     clerk_publishable_key: str = ""
-    jwt_secret: str = "change-me-in-production"  # Legacy HS256 fallback
-    jwt_algorithm: str = "HS256"
     # Gate new-account creation to waitlist-approved emails. Default open now
     # that the private beta is over; set INVITE_ONLY=true to re-gate.
     invite_only: bool = False
@@ -228,9 +229,6 @@ class Settings(BaseSettings):
     default_daily_resolution_budget: int = 50   # Free tier: 50 visitor identifications/day per site (BYOK = unlimited)
     default_daily_enrichment_budget: int = 3    # Free tier: 3 deep research/day (BYOK = unlimited)
     max_emails_per_hour_per_site: int = 50
-
-    # CORS — comma-separated origins allowed
-    cors_origins: str = "http://localhost:3000"
 
     model_config = {"env_file": ("../../.env", ".env"), "extra": "ignore"}
 

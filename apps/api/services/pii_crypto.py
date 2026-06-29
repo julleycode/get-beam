@@ -33,7 +33,12 @@ _fernet: Optional[Fernet] = None
 
 
 def _hmac_key() -> bytes:
-    key = settings.pii_hmac_key or settings.encryption_key or "beam-pii-fallback-key"
+    key = settings.pii_hmac_key or settings.encryption_key
+    if not key:
+        raise RuntimeError(
+            "PII blind-index key missing: set PII_HMAC_KEY or ENCRYPTION_KEY. "
+            "Refusing to hash with a known constant — that would defeat the blind index."
+        )
     return key.encode()
 
 

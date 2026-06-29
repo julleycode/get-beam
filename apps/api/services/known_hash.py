@@ -21,13 +21,14 @@ def normalize_email(email: str) -> str:
 
 def _hmac_key() -> bytes:
     # pii_hmac_key may not exist on the deployed config; fall back to the
-    # always-present ENCRYPTION_KEY, then a constant. Determinism is what
-    # matters — the same address must always map to the same hash.
-    key = (
-        getattr(settings, "pii_hmac_key", None)
-        or getattr(settings, "encryption_key", None)
-        or "beam-known-contacts-fallback-key"
-    )
+    # always-present ENCRYPTION_KEY. Never fall back to a constant — a known key
+    # turns the blind index into a public membership oracle.
+    key = getattr(settings, "pii_hmac_key", None) or getattr(settings, "encryption_key", None)
+    if not key:
+        raise RuntimeError(
+            "Known-contacts blind-index key missing: set PII_HMAC_KEY or ENCRYPTION_KEY. "
+            "Refusing to hash with a known constant."
+        )
     return key.encode()
 
 
