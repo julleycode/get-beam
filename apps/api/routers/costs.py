@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.dependencies import require_admin
+from apps.api.dependencies import require_admin, verify_site_access as _verify_site_access
 from apps.api.models.api_usage import ApiUsageLog
 from apps.api.models.database import get_db
 from apps.api.models.site import Site
@@ -20,18 +20,6 @@ from apps.api.schemas.costs import (
 logger = structlog.get_logger()
 
 router = APIRouter()
-
-
-async def _verify_site_access(db: AsyncSession, site_id: str, user: User) -> Site:
-    """A site belongs to exactly one user; 404 (not 403) if it isn't theirs so
-    we don't leak which site_ids exist. Mirrors visitors._verify_site_access."""
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
-    return site
 
 
 # success is a Boolean column; sum a 1/0 case so one query yields both the call

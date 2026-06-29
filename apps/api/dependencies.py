@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.models.database import get_db
+from apps.api.models.site import Site
 from apps.api.models.user import User
 from apps.api.models.waitlist import WaitlistSignup
 from apps.api.services.pii import mask_email
@@ -23,6 +24,23 @@ _bearer = HTTPBearer(auto_error=False)
 
 # Cache Clerk JWKS keys in memory
 _clerk_jwks: Optional[dict] = None
+
+
+async def verify_site_access(db: AsyncSession, site_id: str, user: User) -> Site:
+    """Return the Site iff it exists AND belongs to ``user``; else 404.
+
+    404 (not 403) so we never leak which site_ids exist. The single shared
+    site-ownership check for every site-scoped router (was copy-pasted as
+    per-router _verify_site_access / _owned_site helpers).
+    """
+    site = (
+        await db.execute(
+            select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
+        )
+    ).scalar_one_or_none()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    return site
 
 
 async def _get_clerk_jwks() -> dict:

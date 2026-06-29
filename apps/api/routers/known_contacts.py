@@ -18,7 +18,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.dependencies import get_current_user
+from apps.api.dependencies import get_current_user, verify_site_access as _verify_site_access
 from apps.api.models.database import get_db
 from apps.api.models.known_contact import KnownContact
 from apps.api.models.site import Site
@@ -53,16 +53,6 @@ class KnownCountOut(BaseModel):
 
 class KnownDeleteResult(BaseModel):
     deleted: int
-
-
-async def _verify_site_access(db: AsyncSession, site_id: str, user: User) -> Site:
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
-    return site
 
 
 @router.post("/{site_id}/known-contacts/upload", response_model=KnownUploadResult)

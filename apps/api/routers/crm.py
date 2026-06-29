@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
-from apps.api.dependencies import get_current_user
+from apps.api.dependencies import get_current_user, verify_site_access as _owned_site
 from apps.api.models.crm_connection import CrmConnection
 from apps.api.models.database import get_db
 from apps.api.models.segment import Segment, SegmentMember
@@ -54,16 +54,6 @@ _OAUTH_CREDENTIALS = {
 def _require_provider(provider: str) -> None:
     if provider not in ALLOWED_CRM_PROVIDERS:
         raise HTTPException(status_code=404, detail="Unknown CRM provider")
-
-
-async def _owned_site(db: AsyncSession, site_id: str, user: User) -> Site:
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
-    return site
 
 
 # Connection lookup + token refresh live in services/crm_push (shared with the

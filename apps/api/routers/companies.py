@@ -9,25 +9,10 @@ from apps.api.models.company import Company
 from apps.api.models.database import get_db
 from apps.api.models.site import Site
 from apps.api.models.user import User
-from apps.api.dependencies import get_current_user
+from apps.api.dependencies import get_current_user, verify_site_access
 
 router = APIRouter()
 logger = structlog.get_logger()
-
-
-async def _verify_site_access(
-    site_id: str,
-    user: User,
-    db: AsyncSession,
-) -> Site:
-    """Return the Site if it exists and belongs to the current user; raise 404 otherwise."""
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
-    return site
 
 
 @router.get("/{site_id}")
@@ -39,7 +24,7 @@ async def list_companies(
     user: User = Depends(get_current_user),
 ) -> dict:
     """List companies identified for a site, ordered by intent score."""
-    await _verify_site_access(site_id, user, db)
+    await verify_site_access(db, site_id, user)
 
     offset = (page - 1) * page_size
 

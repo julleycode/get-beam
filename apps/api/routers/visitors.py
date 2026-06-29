@@ -13,7 +13,7 @@ from apps.api.models.known_contact import KnownContact
 from apps.api.models.site import Site
 from apps.api.models.user import User
 from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog, Visitor
-from apps.api.dependencies import get_current_user
+from apps.api.dependencies import get_current_user, verify_site_access as _verify_site_access
 from apps.api.schemas.visitors import (
     ManualIdentifyRequest,
     VisitorCountryOut,
@@ -42,16 +42,6 @@ from apps.api.services.usage_limits import (
 logger = structlog.get_logger()
 
 router = APIRouter()
-
-
-async def _verify_site_access(db: AsyncSession, site_id: str, user: User) -> Site:
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
-    return site
 
 
 def _row_to_dict(obj) -> dict:
