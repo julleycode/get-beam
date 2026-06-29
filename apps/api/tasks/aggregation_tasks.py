@@ -13,7 +13,7 @@ logger = structlog.get_logger()
 
 @celery_app.task(name="apps.api.tasks.aggregation_tasks.aggregate_all_sites")
 def aggregate_all_sites() -> dict:
-    return asyncio.get_event_loop().run_until_complete(_aggregate_all())
+    return asyncio.run(_aggregate_all())
 
 
 async def _aggregate_all() -> dict:

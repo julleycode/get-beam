@@ -21,7 +21,7 @@ logger = structlog.get_logger()
 
 @celery_app.task(name="apps.api.tasks.resolution_tasks.process_all_pending_visitors")
 def process_all_pending_visitors() -> dict:
-    return asyncio.get_event_loop().run_until_complete(_process_all())
+    return asyncio.run(_process_all())
 
 
 async def _process_all() -> dict:
@@ -149,7 +149,7 @@ async def _process_site(db, site_id: str) -> tuple[int, int]:
 
 @celery_app.task(name="apps.api.tasks.resolution_tasks.process_single_site")
 def process_single_site(site_id: str) -> dict:
-    r, e = asyncio.get_event_loop().run_until_complete(_run_single(site_id))
+    r, e = asyncio.run(_run_single(site_id))
     return {"resolved": r, "enriched": e}
 
 
@@ -167,7 +167,7 @@ async def _run_single(site_id: str) -> tuple[int, int]:
 @celery_app.task(name="apps.api.tasks.resolution_tasks.enrich_visitor_tier2")
 def enrich_visitor_tier2(visitor_id: str, site_id: str, user_id: str) -> dict:
     """Celery task for on-demand Tier 2 enrichment."""
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _enrich_tier2(visitor_id, site_id, user_id)
     )
 

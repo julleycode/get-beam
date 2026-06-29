@@ -56,6 +56,10 @@ async def _run_segmentation_for_site(db, site: Site) -> None:
         select(Visitor).where(
             Visitor.site_id == site.site_id,
             Visitor.enrichment_status == "enriched",
+            # Only NEW (unsegmented) visitors — match the trigger predicate so the
+            # next hourly tick doesn't re-pull the same top-50 and re-bill Gemini,
+            # and genuinely-new lower-intent visitors past row 50 aren't starved.
+            Visitor.segmented == False,  # noqa: E712 — SQLAlchemy needs ==
         ).order_by(Visitor.intent_score.desc()).limit(50)
     )
     visitors = list(result.scalars().all())

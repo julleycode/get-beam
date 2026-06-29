@@ -15,7 +15,7 @@ from apps.api.models.database import get_db
 from apps.api.models.draft import Draft, DraftStatus, DraftType
 from apps.api.models.post import Post
 from apps.api.models.user import User
-from apps.api.models.social_account import Platform
+from apps.api.models.social_account import Platform, SocialAccount
 from apps.api.models.voice_example import FeedbackType, VoiceExample
 
 logger = structlog.get_logger()
@@ -123,7 +123,14 @@ async def generate_new_draft(
     if not body.post_id:
         raise HTTPException(status_code=400, detail="post_id is required")
 
-    post_result = await db.execute(select(Post).where(Post.id == body.post_id))
+    # Ownership: only draft against a post on one of the caller's OWN social
+    # accounts (Post -> SocialAccount.user_id). Without this any authed user
+    # could pass any post_id (IDOR) and burn LLM budget drafting against it.
+    post_result = await db.execute(
+        select(Post)
+        .join(SocialAccount, Post.social_account_id == SocialAccount.id)
+        .where(Post.id == body.post_id, SocialAccount.user_id == current_user.id)
+    )
     post = post_result.scalar_one_or_none()
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
