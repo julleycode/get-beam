@@ -54,3 +54,6 @@ playwright==1.49.1
 user-scanner==1.4.0.1  # email → 103 sites existence + rich extra (username/avatar/joined)
 holehe==1.61           # email → 121 sites existence (megadose/holehe)
 maigret==0.6.1         # username → 3000+ sites profile URLs (HEAVY: pulls Flask/ipython/lxml/curl_cffi)
+
+# DNS — real MX lookup in email_validator (replaced a fake getaddrinfo:25 check)
+dnspython==2.8.0

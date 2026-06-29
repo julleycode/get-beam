@@ -9,21 +9,26 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 
-def _is_transient_error(exc: BaseException) -> bool:
-    """Return True for HTTP errors worth retrying (5xx, 429)."""
-    if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code in (429, 500, 502, 503, 504)
-    if isinstance(exc, (httpx.ConnectError, httpx.ReadTimeout)):
+def _is_write_retryable(exc: BaseException) -> bool:
+    """Retry policy for WRITE ops (post_comment) — retry ONLY when the request
+    provably never reached the server, so a retry can't double-post: connection
+    failures and 429 (rate-limited, no write occurred). A 5xx or a read timeout
+    means the write MAY have succeeded — do NOT retry.
+    """
+    if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
         return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code == 429
     return False
 
 
 # Shared retry policy for platform write ops (post_comment): 3 attempts,
-# exponential backoff (1→10s), retry only transient HTTP errors, then re-raise.
+# exponential backoff (1→10s). Only retries failures where no write could have
+# happened, so a retry never double-posts.
 post_retry = retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=10),
-    retry=retry_if_exception(_is_transient_error),
+    retry=retry_if_exception(_is_write_retryable),
     reraise=True,
 )
 

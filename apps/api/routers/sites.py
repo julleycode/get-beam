@@ -471,6 +471,9 @@ async def shopify_callback(
         logger.info("shopify_connected", shop=shop, site_id=site_id)
     except Exception as e:
         logger.error("shopify_callback_failed", error=str(e), shop=shop)
+        return RedirectResponse(
+            url=f"{settings.frontend_url}/dashboard?shopify=error&site={site_id}"
+        )
 
     return RedirectResponse(
         url=f"{settings.frontend_url}/dashboard?shopify=connected&site={site_id}"

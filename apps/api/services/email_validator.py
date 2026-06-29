@@ -6,7 +6,6 @@ to avoid wasting enrichment credits on bad addresses.
 
 import asyncio
 import re
-import socket
 
 import structlog
 
@@ -133,17 +132,29 @@ async def _check_mx(domain: str) -> bool:
     except Exception:
         pass
 
+    def _resolve_mx() -> bool:
+        import dns.resolver
+
+        try:
+            return len(dns.resolver.resolve(domain, "MX")) > 0
+        except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN):
+            # No MX record — many small domains accept mail on their A/AAAA host
+            # (implicit MX), so fall back to a plain address lookup.
+            try:
+                dns.resolver.resolve(domain, "A")
+                return True
+            except Exception:
+                return False
+        except Exception:
+            return False
+
     try:
         loop = asyncio.get_event_loop()
-        result = await asyncio.wait_for(
-            loop.run_in_executor(
-                None,
-                lambda: socket.getaddrinfo(domain, 25, socket.AF_INET, socket.SOCK_STREAM),
-            ),
+        valid = await asyncio.wait_for(
+            loop.run_in_executor(None, _resolve_mx),
             timeout=5.0,
         )
-        valid = len(result) > 0
-    except (socket.gaierror, asyncio.TimeoutError, OSError):
+    except Exception:
         valid = False
 
     try:

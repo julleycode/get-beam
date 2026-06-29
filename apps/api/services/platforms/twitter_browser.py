@@ -652,16 +652,13 @@ class TwitterBrowserPoster:
         except Exception:
             pass
 
-        # Generate a synthetic ID if we couldn't capture the real one
-        # This is acceptable because the reply was still posted successfully
-        synthetic_id = f"browser_reply_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
-        logger.warning(
-            "twitter_browser_reply_id_not_captured",
-            msg="Reply appears to have been posted but couldn't capture tweet ID. "
-            "Using synthetic ID.",
-            synthetic_id=synthetic_id,
+        # The network capture is the ONLY trustworthy success signal — toast /
+        # cleared-composer heuristics can't tell a posted reply from a
+        # rate-limit / duplicate / blocked failure. Without a real rest_id, fail
+        # rather than persist a fake ID and mark the draft "sent".
+        raise TwitterBrowserError(
+            "reply post-state unconfirmed: no tweet ID captured from the network response"
         )
-        return synthetic_id
 
     async def _save_error_screenshot(self, page, context: str) -> None:  # noqa: ANN001
         """Save a screenshot for debugging on failure."""

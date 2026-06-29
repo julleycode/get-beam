@@ -82,9 +82,10 @@ async def verify_pixel(url: str, site_id: str) -> VerifyResult:
     if has_tracker and not has_correct_site:
         logger.info("pixel_wrong_site", url=url, site_id=site_id)
         return VerifyResult(
-            status="verified",
-            verified=True,
-            message="Beam pixel detected and working! Site ID will be updated automatically.",
+            status="wrong_site",
+            verified=False,
+            message="A Beam pixel was found, but its Site ID does not match this site. "
+            "Make sure you installed the snippet generated for THIS site.",
         )
 
     logger.info("pixel_not_found", url=url, site_id=site_id)
