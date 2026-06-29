@@ -6,6 +6,8 @@ from typing import TypedDict
 import httpx
 import structlog
 
+from apps.api.services.url_guard import is_safe_public_url, safe_get
+
 logger = structlog.get_logger()
 
 BROWSER_UA = (
@@ -136,14 +138,21 @@ async def detect_platform(url: str) -> PlatformResult:
     if not url.startswith(("http://", "https://")):
         url = f"https://{url}"
 
+    # SSRF guard: refuse private/loopback/link-local/metadata targets before the
+    # server makes any outbound request on a user-supplied URL.
+    if not await is_safe_public_url(url):
+        logger.warning("platform_detect_url_blocked", url=url)
+        return PlatformResult(
+            platform="unknown", confidence=0.0, has_gtm=False, gtm_id=None
+        )
+
     try:
         async with httpx.AsyncClient(
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=15.0,
             headers=BROWSER_HEADERS,
-            verify=False,  # Some sites have cert issues
         ) as client:
-            response = await client.get(url)
+            response = await safe_get(client, url)
             html = response.text
             headers = {k.lower(): v for k, v in response.headers.items()}
 
@@ -186,10 +195,9 @@ async def detect_platform(url: str) -> PlatformResult:
     if best_score < 0.3:
         try:
             async with httpx.AsyncClient(
-                follow_redirects=True,
+                follow_redirects=False,
                 timeout=10.0,
                 headers=BROWSER_HEADERS,
-                verify=False,
             ) as client:
                 if await _probe_shopify_api(client, url):
                     best_platform = "shopify"

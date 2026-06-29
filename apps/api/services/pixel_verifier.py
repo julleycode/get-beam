@@ -6,6 +6,8 @@ from typing import TypedDict
 import httpx
 import structlog
 
+from apps.api.services.url_guard import is_safe_public_url, safe_get
+
 logger = structlog.get_logger()
 
 BROWSER_UA = (
@@ -25,14 +27,23 @@ async def verify_pixel(url: str, site_id: str) -> VerifyResult:
     if not url.startswith(("http://", "https://")):
         url = f"https://{url}"
 
+    # SSRF guard: never let a user-supplied site URL point our fetch at an
+    # internal / cloud-metadata address.
+    if not await is_safe_public_url(url):
+        logger.warning("pixel_verify_url_blocked", url=url, site_id=site_id)
+        return VerifyResult(
+            status="fetch_error",
+            verified=False,
+            message="Could not reach your website. Please check the URL is correct.",
+        )
+
     try:
         async with httpx.AsyncClient(
-            follow_redirects=True,
+            follow_redirects=False,
             timeout=15.0,
             headers={"User-Agent": BROWSER_UA},
-            verify=False,
         ) as client:
-            response = await client.get(url)
+            response = await safe_get(client, url)
             html = response.text
     except httpx.TimeoutException:
         logger.warning("pixel_verify_timeout", url=url, site_id=site_id)

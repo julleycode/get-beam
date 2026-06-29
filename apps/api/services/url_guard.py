@@ -17,6 +17,7 @@ import ipaddress
 import socket
 from urllib.parse import urlparse
 
+import httpx
 import structlog
 
 logger = structlog.get_logger()
@@ -53,3 +54,26 @@ def _is_public_http_url(url: str) -> bool:
 async def is_safe_public_url(url: str) -> bool:
     """Async wrapper — DNS resolution runs in a thread so it never blocks the loop."""
     return await asyncio.to_thread(_is_public_http_url, url)
+
+
+async def safe_get(
+    client: httpx.AsyncClient, url: str, *, max_redirects: int = 3
+) -> httpx.Response:
+    """GET that follows redirects MANUALLY, re-validating each hop against the
+    SSRF guard so a public URL cannot 30x into a private/internal address.
+
+    The caller's client should be created with follow_redirects=False. Raises
+    httpx.RequestError if a redirect points at a non-public URL.
+    """
+    resp = await client.get(url)
+    redirects = 0
+    while resp.is_redirect and redirects < max_redirects:
+        location = resp.headers.get("location")
+        if not location:
+            break
+        next_url = str(httpx.URL(resp.url).join(location))
+        if not await is_safe_public_url(next_url):
+            raise httpx.RequestError("redirect to non-public URL blocked")
+        resp = await client.get(next_url)
+        redirects += 1
+    return resp
