@@ -12,7 +12,7 @@ from apps.api.config import settings
 from apps.api.models.database import get_db
 from apps.api.models.site import Site
 from apps.api.models.user import User
-from apps.api.dependencies import get_current_user
+from apps.api.dependencies import get_current_user, verify_site_access
 from apps.api.schemas.sites import (
     PlatformDetectRequest,
     PlatformDetectResponse,
@@ -108,12 +108,7 @@ async def get_site(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SiteOut:
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
+    site = await verify_site_access(db, site_id, user)
     return SiteOut.model_validate(site)
 
 
@@ -125,12 +120,7 @@ async def update_site(
     db: AsyncSession = Depends(get_db),
 ) -> SiteOut:
     """Partial site update. Currently the auto-identify toggle; owner-scoped."""
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
+    site = await verify_site_access(db, site_id, user)
 
     if body.auto_identify_enabled is not None:
         site.auto_identify_enabled = body.auto_identify_enabled
@@ -150,12 +140,7 @@ async def get_pixel_snippet(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SitePixelSnippet:
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
+    site = await verify_site_access(db, site_id, user)
 
     # Build identity providers list for multi-provider pixel stacking
     providers: list[dict[str, str]] = []
@@ -218,12 +203,7 @@ async def verify_pixel_endpoint(
     db: AsyncSession = Depends(get_db),
 ) -> PixelVerifyResponse:
     """Verify that the tracking pixel is installed on the site."""
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
+    site = await verify_site_access(db, site_id, user)
 
     verify_result = await verify_pixel(site.url, site_id)
 
@@ -252,12 +232,7 @@ async def detection_preview(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Scan the installed pixel and report which detection signals are active."""
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
+    site = await verify_site_access(db, site_id, user)
 
     from apps.api.services.detection_scanner import scan_detection_signals
 
@@ -287,12 +262,7 @@ async def browser_breakdown(
 ) -> dict:
     """Per-browser captured/identified counts + a geo-weighted Safari-coverage
     estimate — surfaces whether ITP/content-blockers are eating Safari traffic."""
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
+    await verify_site_access(db, site_id, user)
 
     from apps.api.services.browser_breakdown import compute_browser_breakdown
 
@@ -311,12 +281,7 @@ async def traffic_fit(
     """US-coverage fit estimate — "what share of this site's traffic can beam
     actually identify?" Person-level identification is US-only, so a mostly
     non-US site will never resolve; this surfaces that up front."""
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
+    await verify_site_access(db, site_id, user)
 
     from apps.api.services.traffic_fit import compute_traffic_fit
 
@@ -334,12 +299,7 @@ async def site_kpis(
 ) -> dict:
     """Per-site KPI funnel — visitors → identified → high-intent → acted-on,
     plus identify/action rates. The numbers a growth marketer reads to judge ROI."""
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
+    await verify_site_access(db, site_id, user)
 
     from apps.api.services.kpi import compute_kpis
 
@@ -355,12 +315,7 @@ async def site_timeseries(
 ) -> dict:
     """Per-day funnel series (visitors → identified → high-intent) for the
     "View as graph" widget. Same window + predicates as /kpis, bucketed by day."""
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
+    await verify_site_access(db, site_id, user)
 
     from apps.api.services.timeseries import compute_timeseries
 
@@ -377,12 +332,7 @@ async def download_wordpress_plugin(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     """Download auto-generated WordPress plugin with pre-configured site ID."""
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
+    await verify_site_access(db, site_id, user)
 
     zip_bytes = generate_plugin_zip(site_id, settings.api_base_url)
 
@@ -412,12 +362,7 @@ async def shopify_connect(
             detail="Shopify integration not configured. Please set SHOPIFY_API_KEY.",
         )
 
-    result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    site = result.scalar_one_or_none()
-    if not site:
-        raise HTTPException(status_code=404, detail="Site not found")
+    await verify_site_access(db, site_id, user)
 
     from apps.api.services.shopify_integration import get_install_url
 
