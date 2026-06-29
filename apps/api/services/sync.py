@@ -248,7 +248,8 @@ async def _save_posts(
     incoming_ids = [fp.platform_post_id for fp in feed_posts]
     existing_result = await db.execute(
         select(Post.platform_post_id).where(
-            Post.platform_post_id.in_(incoming_ids)
+            Post.social_account_id == account.id,
+            Post.platform_post_id.in_(incoming_ids),
         )
     )
     existing_ids = set(existing_result.scalars().all())

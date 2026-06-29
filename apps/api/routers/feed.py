@@ -146,9 +146,14 @@ async def import_post(
     if not platform_post_id:
         platform_post_id = f"imported_{uuid.uuid4().hex[:12]}"
 
-    # Check if already imported
+    # Check if already imported on THIS user's account (matches the composite
+    # unique (social_account_id, platform_post_id) — a tweet another customer
+    # imported must not block this user).
     existing = await db.execute(
-        select(Post).where(Post.platform_post_id == platform_post_id)
+        select(Post).where(
+            Post.platform_post_id == platform_post_id,
+            Post.social_account_id == account.id,
+        )
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="This post is already in your feed.")

@@ -10,6 +10,7 @@ from sqlalchemy import (
     Index,
     String,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, UUID
@@ -23,6 +24,10 @@ class Post(Base):
     __tablename__ = "posts"
     __table_args__ = (
         Index("idx_posts_account_posted", "social_account_id", "posted_at"),
+        UniqueConstraint(
+            "social_account_id", "platform_post_id",
+            name="uq_posts_account_platform_post",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -31,7 +36,7 @@ class Post(Base):
     )
     platform: Mapped[Platform] = mapped_column(Enum(Platform))
     platform_post_id: Mapped[str] = mapped_column(
-        String(255), unique=True, index=True
+        String(255), index=True
     )
     author_name: Mapped[str] = mapped_column(String(255))
     author_username: Mapped[str] = mapped_column(String(255))
