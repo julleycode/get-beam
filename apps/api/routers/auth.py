@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.config import settings
 from apps.api.models.database import get_db
 from apps.api.models.user import User
 from apps.api.schemas.auth import LoginRequest, Token, UserCreate, UserOut
@@ -27,6 +28,12 @@ router = APIRouter()
 
 @router.post("/signup", response_model=Token)
 async def signup(body: UserCreate, db: AsyncSession = Depends(get_db)) -> Token:
+    # Legacy email/password signup is a dev/test-only convenience. In production
+    # Clerk is the sole signup path; this endpoint bypassed the invite gate and
+    # created accounts orphaned from Clerk, so it is disabled there.
+    if settings.app_env == "production":
+        raise HTTPException(status_code=404, detail="Not found")
+
     existing = await get_user_by_email(db, body.email)
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
