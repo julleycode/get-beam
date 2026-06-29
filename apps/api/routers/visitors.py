@@ -516,9 +516,19 @@ async def export_visitor_data(
     posts: list = []
     handle = (enrichment.twitter_handle or "").lstrip("@").strip() if enrichment else ""
     if handle:
+        # Scope to the requesting user's own social accounts. The posts table is
+        # global with no site_id/visitor_id; the only tenancy link is
+        # social_account_id -> SocialAccount.user_id. Without this join a DSAR
+        # export would include posts another customer imported for the same handle.
+        from apps.api.models.social_account import SocialAccount
         posts = (
             await db.execute(
-                select(Post).where(func.lower(Post.author_username) == handle.lower())
+                select(Post)
+                .join(SocialAccount, Post.social_account_id == SocialAccount.id)
+                .where(
+                    SocialAccount.user_id == user.id,
+                    func.lower(Post.author_username) == handle.lower(),
+                )
             )
         ).scalars().all()
 
