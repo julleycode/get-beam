@@ -247,12 +247,11 @@
     } catch(e) {}
   })();
 
-  // --- Form email capture ---
-  // Listen for any form submission on the page. If the form contains an email
-  // field, send a form_email_capture event so the backend can link the email
-  // to this visitor cookie for future identification.
+  // Form email capture → links the email to this visitor cookie. Skipped on
+  // GPC/DNT opt-out (visitor asked not to be tracked — never transmit the PII).
   document.addEventListener("submit", function(e) {
     try {
+      if (OPTOUT) return;
       var form = e.target;
       if (!form || form.nodeName !== "FORM") return;
       var emailInput = form.querySelector(

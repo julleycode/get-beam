@@ -18,6 +18,10 @@ logger = structlog.get_logger()
 
 # Keep strong references to background tasks so they aren't GC'd
 _background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+# Sites with an aggregation already in-flight — coalesce so a burst of ingest
+# batches for one site spawns at most one aggregation at a time (the in-flight
+# run reads current state, so it covers the newly-arrived events).
+_aggregating: set[str] = set()
 
 
 def _extract_ip(request: Request) -> str:
@@ -157,11 +161,20 @@ async def ingest_events(
     # Process identification signal events (form email capture + UTM _bid)
     await _process_signal_events(db, batch)
 
-    # Run aggregation in background so we don't block the 204 response
+    # Run aggregation in background so we don't block the 204 response — but
+    # coalesce per site so a burst of batches can't spawn an unbounded pile of
+    # overlapping aggregations.
     site_id = batch.site_id
-    task = asyncio.create_task(_background_aggregate(site_id))
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    if site_id not in _aggregating:
+        _aggregating.add(site_id)
+        task = asyncio.create_task(_background_aggregate(site_id))
+        _background_tasks.add(task)
+
+        def _done(t: "asyncio.Task", _sid: str = site_id) -> None:
+            _background_tasks.discard(t)
+            _aggregating.discard(_sid)
+
+        task.add_done_callback(_done)
 
     # Server-side Set-Cookie: first-party HttpOnly cookie survives Safari ITP.
     # Named _rta_svid (server-side visitor ID) to coexist with client _rta_vid.
