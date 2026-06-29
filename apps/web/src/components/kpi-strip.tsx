@@ -40,13 +40,23 @@ export function KpiStrip({ siteId }: { siteId: string }) {
 
   useEffect(() => {
     if (!siteId) return;
+    let ignore = false;
     setLoading(true);
     setError(false);
     api
       .getSiteKpis(siteId, periodToDays(period))
-      .then(setData)
-      .catch(() => setError(true))
-      .finally(() => setLoading(false));
+      .then((d) => {
+        if (!ignore) setData(d);
+      })
+      .catch(() => {
+        if (!ignore) setError(true);
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
   }, [siteId, period]);
 
   // Lazy-load the daily series only when the graph view is open (and refetch on

@@ -26,6 +26,7 @@ export default function SegmentsPage() {
   const searchParams = useSearchParams();
   const [siteId, setSiteId] = useState(searchParams.get("site") || "");
   const [triggering, setTriggering] = useState(false);
+  const [triggerError, setTriggerError] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -37,6 +38,7 @@ export default function SegmentsPage() {
 
   async function handleTrigger() {
     setTriggering(true);
+    setTriggerError(null);
     try {
       await api.triggerSegmentation(siteId);
       // Segmentation runs async on the backend — give it a moment, then refetch.
@@ -44,7 +46,8 @@ export default function SegmentsPage() {
         () => queryClient.invalidateQueries({ queryKey: ["segments", siteId] }),
         3000
       );
-    } catch {
+    } catch (e) {
+      setTriggerError(e instanceof Error ? e.message : "Couldn't start segmentation");
     } finally {
       setTriggering(false);
     }
@@ -65,6 +68,12 @@ export default function SegmentsPage() {
           </>
         }
       />
+
+      {triggerError && (
+        <div className="mt-4">
+          <ErrorBanner message={triggerError} onRetry={handleTrigger} />
+        </div>
+      )}
 
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view segments.</p>

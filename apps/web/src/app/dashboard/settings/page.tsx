@@ -138,10 +138,14 @@ export default function SettingsPage() {
 
   useEffect(loadApiKeys, []);
 
-  function handleCopy() {
-    navigator.clipboard.writeText(snippet);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(snippet);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard unavailable (insecure origin / permission denied) — no-op
+    }
   }
 
   async function handleVerify() {
@@ -225,8 +229,8 @@ export default function SettingsPage() {
     try {
       await api.deleteApiKey(provider);
       setApiKeys((prev) => prev.filter((k) => k.provider !== provider));
-    } catch {
-      // ignore
+    } catch (err) {
+      setKeyError(err instanceof Error ? err.message : "Failed to delete key");
     }
   }
 

@@ -49,16 +49,20 @@ export function PixelInstallGuide({
   const [shopifyShop, setShopifyShop] = useState("");
   const [connectingShopify, setConnectingShopify] = useState(false);
 
-  function handleCopy() {
-    navigator.clipboard.writeText(snippet);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(snippet);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard unavailable (insecure origin / permission denied) — no-op
+    }
   }
 
   // Hand the whole install to an AI coding agent. This is the answer to "CLI
   // would be nice" — vibe coders get one-shot setup from their editor without
   // pulling the product out of the dashboard.
-  function handleCopyPrompt() {
+  async function handleCopyPrompt() {
     const steps = guide.steps
       .map((s, i) => `${i + 1}. ${s.title} — ${s.description}`)
       .join("\n");
@@ -75,9 +79,13 @@ export function PixelInstallGuide({
     ]
       .join("\n")
       .trim();
-    navigator.clipboard.writeText(prompt);
-    setPromptCopied(true);
-    setTimeout(() => setPromptCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setPromptCopied(true);
+      setTimeout(() => setPromptCopied(false), 2000);
+    } catch {
+      // clipboard unavailable (insecure origin / permission denied) — no-op
+    }
   }
 
   async function handleVerify() {
