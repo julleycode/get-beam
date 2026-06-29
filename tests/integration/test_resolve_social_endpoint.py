@@ -123,7 +123,7 @@ class TestResolveSocialEndpoint:
             await db.commit()
             return {"status": "complete", "profiles": 1, "paid_used": False}
 
-        monkeypatch.setattr("apps.api.routers.visitors.resolve_social", fake_resolve)
+        monkeypatch.setattr("apps.api.routers.visitors_helpers.resolve_social", fake_resolve)
 
         resp = await test_client.post(
             f"/api/v1/visitors/{setup['site_id']}/v-id/resolve-social",
