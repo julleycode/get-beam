@@ -8,11 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.models.campaign import Campaign
 from apps.api.models.database import get_db
 from apps.api.models.segment import Segment, SegmentMember
-from apps.api.models.site import Site
 from apps.api.models.social_account import SocialAccount
 from apps.api.models.user import User
 from apps.api.models.visitor import Visitor
-from apps.api.dependencies import get_current_user
+from apps.api.dependencies import get_current_user, verify_site_access
 from apps.api.schemas.campaigns import CampaignListResponse, CampaignOut, CampaignStatusUpdate
 from apps.api.agents.campaign_planner import plan_campaign
 from apps.api.services.campaign_sender import send_campaign_emails
@@ -34,11 +33,7 @@ async def list_campaigns(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CampaignListResponse:
-    site_result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    if not site_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Site not found")
+    await verify_site_access(db, site_id, user)
 
     result = await db.execute(
         select(Campaign).where(Campaign.site_id == site_id).order_by(Campaign.created_at.desc())
@@ -60,11 +55,7 @@ async def create_campaign_from_segment(
     social accounts, and generates a multi-channel campaign plan that includes
     social outreach for visitors with known social handles.
     """
-    site_result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    if not site_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Site not found")
+    await verify_site_access(db, site_id, user)
 
     seg_result = await db.execute(
         select(Segment).where(Segment.id == segment_id, Segment.site_id == site_id)
@@ -142,11 +133,7 @@ async def get_campaign(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CampaignOut:
-    site_result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    if not site_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Site not found")
+    await verify_site_access(db, site_id, user)
 
     result = await db.execute(
         select(Campaign).where(Campaign.id == campaign_id, Campaign.site_id == site_id)
@@ -165,11 +152,7 @@ async def update_campaign_status(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CampaignOut:
-    site_result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    if not site_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Site not found")
+    await verify_site_access(db, site_id, user)
 
     result = await db.execute(
         select(Campaign).where(Campaign.id == campaign_id, Campaign.site_id == site_id)
@@ -214,11 +197,7 @@ async def send_campaign(
     injects a signed unsubscribe link (via EmailSender), and is idempotent per
     recipient so re-invoking never double-sends.
     """
-    site_result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    if not site_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Site not found")
+    await verify_site_access(db, site_id, user)
 
     result = await db.execute(
         select(Campaign).where(Campaign.id == campaign_id, Campaign.site_id == site_id)

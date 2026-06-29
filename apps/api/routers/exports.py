@@ -5,9 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.database import get_db
 from apps.api.models.segment import Segment
-from apps.api.models.site import Site
 from apps.api.models.user import User
-from apps.api.dependencies import get_current_user
+from apps.api.dependencies import get_current_user, verify_site_access
 from apps.api.services.csv_exporter import export_google_csv, export_linkedin_csv, export_meta_csv
 
 router = APIRouter()
@@ -27,11 +26,7 @@ async def export_segment(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
-    site_result = await db.execute(
-        select(Site).where(Site.site_id == site_id, Site.user_id == user.id)
-    )
-    if not site_result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Site not found")
+    await verify_site_access(db, site_id, user)
 
     seg_result = await db.execute(
         select(Segment).where(Segment.id == segment_id, Segment.site_id == site_id)
