@@ -1,0 +1,572 @@
+[
+  {
+    "slice": "apps/api/services identity-resolution cluster: identity_resolver.py, identity_classification.py, company_resolver.py, social_resolver.py, social_intelligence.py, social_rules.py, conviction.py, traffic_fit.py, resolution_runner.py, known_hash.py",
+    "file": "apps/api/services/social_intelligence.py",
+    "locator": "_fetch_recent_tweets, line 203: `return self._mock_tweets(handle, limit)`",
+    "bug": "_mock_tweets is called in the Twitter-API exception handler but is never defined on SocialIntelligence (grep confirms only the call site exists, no `def _mock_tweets`). Any exception during the real Twitter API call raises AttributeError instead of returning mock data, masking the original error.",
+    "impact": "When the Twitter API throws (timeout, network, JSON error) for a high-intent (>=60) identified visitor, the handler itself crashes with AttributeError. This propagates up through fetch_social_context into the resolution_tasks Celery path (resolution_tasks.py:107) unless caught higher up — at minimum the social-context enrichment for that visitor fails hard rather than degrading to mock/empty.",
+    "fix": "Change line 203 from `return self._mock_tweets(handle, limit)` to `return []`, matching the no-token branch at line 150 and the existing graceful-degradation pattern. (The proposed fix is correct; severity is lower than stated since resolution_tasks.py:107 already catches the exception at line 133, so it is a silently-dropped enrichment for one visitor plus a masked original error, not a task-level hard failure.)",
+    "severity": "medium",
+    "confidence": 0.9
+  },
+  {
+    "slice": "apps/api/services identity-resolution cluster: identity_resolver.py, identity_classification.py, company_resolver.py, social_resolver.py, social_intelligence.py, social_rules.py, conviction.py, traffic_fit.py, resolution_runner.py, known_hash.py",
+    "file": "apps/api/services/campaign_sender.py",
+    "locator": "send_campaign_emails loop, lines 77-90 (selects IdentifiedVisitor by site+visitor, emails iv.email with no provider/identity_level check)",
+    "bug": "The email send gate does NOT consult resolution_provider / identity_level. identity_classification.py explicitly labels hunter+apollo results as 'company' level — a RANDOM employee at the visitor's company domain (emails[0]/people[0]), not the actual visitor. That label is shown on the dashboard (visitors.py:736) but is never enforced before emailing. A company-level guess that lands in a segment will be emailed as if it were the real visitor.",
+    "impact": "Cold-emailing an arbitrary employee who never visited the site (CAN-SPAM / reputation / trust risk). The whole point of the company-vs-person classification is defeated at the one place it matters most — the send path. Same gap exists in hot_alert.py (emails owner about the guessed person) and the CRM push path.",
+    "fix": "Centralize the gate so all outbound paths share it, rather than filtering only the campaign send. Add identity_level(iv.resolution_provider) == \"person\" (or store an is_company_level flag at resolve time) and apply it in: (1) campaign_sender send loop, (2) csv_exporter._get_segment_visitors (covers both CRM push and CSV export since both call it), and (3) hot_alert.maybe_send_hot_alert. Excluding at segmentation membership alone is insufficient because campaigns/exports/alerts each read IdentifiedVisitor independently; the cleanest fix is to filter at the IdentifiedVisitor read in _get_segment_visitors plus the campaign loop and the hot-alert gate. Unknown providers (identity_level == None, e.g. beam_identity_graph/leadpipe variants not in the frozensets) should also be decided explicitly — default-allowing them re-opens the same hole for any provider not yet classified.",
+    "severity": "high",
+    "confidence": 0.92
+  },
+  {
+    "slice": "apps/api/services identity-resolution cluster: identity_resolver.py, identity_classification.py, company_resolver.py, social_resolver.py, social_intelligence.py, social_rules.py, conviction.py, traffic_fit.py, resolution_runner.py, known_hash.py",
+    "file": "apps/api/services/identity_resolver.py",
+    "locator": "_record_matches_visitor 657-689 (weak path returns (True, True)); consumed in _call_leadpipe_api 809-820 and _call_capturify_api 931-942",
+    "bug": "When an identity-graph record has NO parseable timestamp, the record is accepted on IP-equality ALONE (returns matched=True, weak=True) and saved at confidence <=0.6. The code's own comment (lines 588-592) warns that identity-graph feeds are account-wide and office/CGNAT IPs are shared by many humans across hours/days. So a timestamp-less record from anyone who shared that IP gets attached as THIS visitor's identity.",
+    "impact": "False-positive person identification on shared/corporate/CGNAT IPs — the exact 'wrong human attached' failure the recency window was added to prevent, reopened whenever the provider omits a timestamp field. Saved as a real IdentifiedVisitor (identity_status='identified'), feeding segments/campaigns/emails.",
+    "fix": "Best fix: in _record_matches_visitor, treat a missing/unparseable timestamp as non-matching — return (False, False) instead of (True, True) — so IP equality alone can never attach an identity. If weak IP-only matches must be retained for any provider, then (a) additionally require a corroborating signal (matching device fingerprint or a captured form email) before accepting, AND (b) actually enforce the 0.6 ceiling downstream by adding a confidence_score threshold filter in csv_exporter.py and campaign_sender.py — today the cap is stored but never read, so weak matches are fully export- and campaign-eligible.",
+    "severity": "medium",
+    "confidence": 0.85
+  },
+  {
+    "slice": "apps/api/services/platforms/ (base, facebook, instagram, linkedin, pkce, tiktok, twitter, twitter_browser, twitter_scraper) + apps/api/services/platform_detector.py",
+    "file": "apps/api/services/platform_detector.py",
+    "locator": "detect_platform() lines 140-146, 188-193 (verify=False, follow_redirects=True); reached from routers/sites.py:202 and routers/demo.py:66",
+    "bug": "SSRF: an arbitrary user-supplied URL (body.url) is fetched server-side with follow_redirects=True and TLS verification disabled (verify=False). There is no allow/deny-list, no block of private/loopback/link-local/metadata IP ranges (169.254.169.254, 127.0.0.1, 10.0.0.0/8, etc.), and the Shopify probe even appends /cart.js and /products.json to the attacker-chosen base. The sites.py endpoint requires auth but NOT site ownership, and the demo.py endpoint (demo_detect_platform) is reachable without auth, so any visitor can make the Railway backend issue arbitrary GET requests to internal/cloud-metadata endpoints. verify=False also strips MITM protection.",
+    "impact": "Server-side request forgery against internal network / cloud metadata service from a production host; response status/body differences leak whether an internal host/port is reachable. Disabled cert verification weakens transport security.",
+    "fix": "Proposed fix is correct and sufficient: validate the URL scheme (http/https only), resolve the hostname and reject loopback/link-local/private/metadata IP ranges (127/8, 10/8, 172.16/12, 192.168/16, 169.254/16 incl. 169.254.169.254, ::1, fc00::/7) BEFORE connecting; disable or cap redirects and re-validate the resolved IP on every hop (guard against DNS-rebinding by pinning the validated IP for the actual connection); remove verify=False (or gate behind an explicit non-default flag); and put the unauthenticated demo endpoint behind a non-spoofable rate limit / the existing demo daily budget.",
+    "severity": "high",
+    "confidence": 0.95
+  },
+  {
+    "slice": "apps/api/services/platforms/ (base, facebook, instagram, linkedin, pkce, tiktok, twitter, twitter_browser, twitter_scraper) + apps/api/services/platform_detector.py",
+    "file": "apps/api/services/platforms/twitter_browser.py",
+    "locator": "_click_reply_and_get_id() lines 655-664; persisted via sender.py:123-129",
+    "bug": "When the real reply tweet ID cannot be captured from the network response, the method fabricates a synthetic ID `browser_reply_<UTC timestamp>` and returns it as if it were the platform comment ID. The comment 'This is acceptable because the reply was still posted successfully' is an unverified assumption: the captured_event may have timed out (line 634) precisely because the reply FAILED (rate-limited, duplicate, content blocked) — there is no positive success check beyond an optional toast log. sender.py then sets draft.status=sent, post.commented=True and stores this fake ID.",
+    "impact": "False-positive persisted data: drafts marked 'sent' and posts marked 'commented' when no reply was actually posted; the fake ID can never resolve to a real tweet, breaking any later lookup/dedup and corrupting send metrics.",
+    "fix": "Raise TwitterBrowserError when no real rest_id was captured instead of returning a synthetic ID. Do not rely on the toast/compose-box-cleared heuristics alone to flip failure into success — they are UI-fragile; the network capture is the only trustworthy signal. Optionally capture the non-200 CreateTweet response body (currently swallowed at line 602) to surface the real failure reason (rate-limit/duplicate/blocked) in the raised error.",
+    "severity": "high",
+    "confidence": 0.93
+  },
+  {
+    "slice": "apps/api/services/platforms/ (base, facebook, instagram, linkedin, pkce, tiktok, twitter, twitter_browser, twitter_scraper) + apps/api/services/platform_detector.py",
+    "file": "apps/api/services/platforms/twitter.py",
+    "locator": "post_comment() @retry decorator lines 231-271",
+    "bug": "The tenacity retry wraps the entire POST /2/tweets call with no idempotency key. If the create succeeds on Twitter's side but the response is a retryable 429/5xx (or resp.raise_for_status() at line 270 raises on a transient code), tenacity re-invokes the whole method and POSTs the same reply text again — duplicate tweets. The Facebook/Instagram/TikTok/LinkedIn post_comment methods share the same retry-around-a-non-idempotent-POST pattern.",
+    "impact": "Duplicate comments/replies posted to the user's real social accounts under transient network conditions; user-visible spam, possible platform rate-limit/abuse flags.",
+    "fix": "For write operations, scope retries to connection-establishment failures only (httpx.ConnectError/ConnectTimeout — where the request provably never reached the server) plus 429 (no write occurred); stop retrying on httpx.ReadTimeout and on 5xx-after-send, since the write may already have committed. Twitter v2 POST /2/tweets has no idempotency key, so the dedup-token option only applies to platforms that support it; the predicate narrowing is the portable fix across all five services.",
+    "severity": "medium",
+    "confidence": 0.83
+  },
+  {
+    "slice": "apps/api/services: enricher.py, osint_scanner.py, maigret_engine.py, paid_osint.py, pixel_verifier.py, browser_breakdown.py",
+    "file": "apps/api/services/enricher.py",
+    "locator": "lines 161-164 (and 173-176)",
+    "bug": "Cascade overwrites populated profile fields with None. When a proxycurl/twitter call returns 200 but with a partial body, `profile.linkedin_headline = proxycurl_data.get('linkedin_headline')` assigns None directly, blanking any value a prior enrichment had set. enrich_tier2 (line 220) only runs proxycurl when `not profile.linkedin_headline`, so once tier1 nulls it, the field can't be re-filled, and re-running tier1 wipes good data with a partial second response.",
+    "impact": "Enrichment data silently regresses on re-enrich; completeness score drops; UI loses LinkedIn headline/summary it previously had.",
+    "fix": "Guard every cascade assignment so a null/missing key never clobbers an existing value, mirroring lines 277-279. E.g.: `if (h := proxycurl_data.get('linkedin_headline')) is not None: profile.linkedin_headline = h` (and likewise for linkedin_summary, linkedin_follower_count, twitter_bio, twitter_follower_count). For twitter_recent_topics keep the populate-only behavior: only assign when the returned list is non-empty so a fresh empty response doesn't wipe prior topics.",
+    "severity": "medium",
+    "confidence": 0.6
+  },
+  {
+    "slice": "apps/api/services: enricher.py, osint_scanner.py, maigret_engine.py, paid_osint.py, pixel_verifier.py, browser_breakdown.py",
+    "file": "apps/api/services/enricher.py",
+    "locator": "lines 146-150",
+    "bug": "A definitive PDL no-match (404) and a non-transient error (e.g. 401 bad key, 400) are conflated. _enrich_pdl returns None on 404 AND falls through to `return None` on any non-transient status (lines 392-396 only re-raise transient codes). enrich_tier1 then unconditionally sets enrichment_status='failed' and commits (line 148). The module's own docstring/comment at 132-134 says a key-less/401 case must stay retryable, but a 401 from a present-but-invalid key marks the visitor permanently 'failed'.",
+    "impact": "A misconfigured or rate-limited (non-429) PDL key permanently marks visitors 'failed' so they are never retried after the key is fixed — silent enrichment outage.",
+    "fix": "Right diagnosis. In _enrich_pdl, treat only 404 as a definitive no-match (return None + negative-cache), and for other non-transient statuses (401/403/400) signal 'not failed, leave status untouched' so the caller doesn't mark 'failed'. Prefer a sentinel/distinct return over raising: enrich_tier1's call site in resolution_tasks.py line 100 is NOT wrapped in try/except, so raising would abort the per-visitor sweep loop. If raising is chosen, also wrap the enrich_tier1 call so one auth error doesn't kill the whole site sweep. Do NOT negative-cache 401/403 results.",
+    "severity": "medium",
+    "confidence": 0.9
+  },
+  {
+    "slice": "apps/api/services: enricher.py, osint_scanner.py, maigret_engine.py, paid_osint.py, pixel_verifier.py, browser_breakdown.py",
+    "file": "apps/api/services/pixel_verifier.py",
+    "locator": "lines 29-35",
+    "bug": "Server-side fetch of a user-controlled URL (site.url) with TLS verification disabled (verify=False) and follow_redirects=True, no host/IP allow-listing. site.url is set by the site owner (sites.py:228) and the request is auth-gated, but an owner can register a site URL pointing at internal infrastructure (e.g. http://169.254.169.254/, http://localhost:port, RFC1918 hosts) and trigger a server-side GET from the API host. The 30x follow also lets an external page redirect into the internal network.",
+    "impact": "SSRF: blind internal port-scan / metadata-endpoint reachability from the API host. Response body isn't returned to the user (only verified/not_found), limiting exfiltration, but reachability + timing is observable. verify=False additionally allows silent MITM/cert-spoof of the verification.",
+    "fix": "Reuse the existing apps/api/services/url_guard.py is_safe_public_url helper (already applied at crm.py:100) on the resolved host before fetching, rejecting private/loopback/link-local/metadata ranges; set follow_redirects=False (or cap hops and re-validate each redirect target's resolved IP); and remove verify=False so TLS is verified.",
+    "severity": "medium",
+    "confidence": 0.93
+  },
+  {
+    "slice": "apps/api/services: enricher.py, osint_scanner.py, maigret_engine.py, paid_osint.py, pixel_verifier.py, browser_breakdown.py",
+    "file": "apps/api/services/pixel_verifier.py",
+    "locator": "lines 71-77",
+    "bug": "When tracker.js is present but the embedded data-site does NOT match the requested site_id, the function returns status='verified', verified=True with message 'Site ID will be updated automatically.' Nothing in this function or the caller (sites.py:228-235) actually updates the site_id; the caller only flips site.pixel_verified. So a site that has SOMEONE ELSE'S pixel (or an old/wrong site_id) is reported as correctly installed and marked verified.",
+    "impact": "False-positive verification: a site with a mismatched/foreign pixel is marked verified, so the owner believes tracking works when events are being attributed to a different site_id. Onboarding 'green check' lies.",
+    "fix": "In the has_tracker && !has_correct_site branch, return a distinct status (e.g. \"wrong_site\") with verified=False and an honest message (\"A Beam pixel was found but its Site ID does not match this site\"). Do not claim auto-update behavior that no code implements; if auto-reconciliation is genuinely wanted, implement it explicitly (and guard against hijacking another user's site_id).",
+    "severity": "medium",
+    "confidence": 0.95
+  },
+  {
+    "slice": "apps/api/services: enricher.py, osint_scanner.py, maigret_engine.py, paid_osint.py, pixel_verifier.py, browser_breakdown.py",
+    "file": "apps/api/services/social_resolver.py",
+    "locator": "lines 235-238 (paid_osint.lookup at paid_osint.py:126)",
+    "bug": "Race window in the paid OSINT budget guard. osint_paid_budget_left(site_id) is checked (line 235), then lookup() makes the billable call, then increment_osint_paid_usage() runs (line 238). Two concurrent resolutions for the same site both pass the budget check before either increments, so the daily paid cap can be exceeded. There's no atomic check-and-increment and no DB/Redis lock.",
+    "impact": "Daily paid OSINT spend cap ($1/credit) can be overshot under concurrency — unbounded-ish cost in a burst of simultaneous resolutions.",
+    "fix": "Atomic reserve-then-verify: INCR the daily key FIRST, and if the returned count > osint_paid_daily_budget, abort and DECR (don't call lookup). Proceed with lookup() only when within budget. Crucially, also DECR when the call was NOT billable (cache hit / pr[\"used\"] is False), otherwise cache hits would wrongly consume budget — i.e. the credit is only truly spent when used=True. A per-site Redis/advisory lock around check+lookup+increment is an equally valid alternative. Note: real overshoot is bounded by concurrency width (~N-1 distinct emails, since the 30-day per-email cache blocks re-billing the same email), not the \"unbounded-ish\" cost the auditor claims.",
+    "severity": "medium",
+    "confidence": 0.8
+  },
+  {
+    "slice": "Event ingestion + aggregation + Celery tasks + AI agents (visitor_aggregator, sync, segmentation_trigger, timeseries, retention, events router, aggregation/resolution/segmentation/crm tasks, segmenter, campaign_planner, prompt_safety, jobs/scheduler+run_sweep_once)",
+    "file": "apps/api/tasks/resolution_tasks.py",
+    "locator": "lines 24, 152, 170 (asyncio.get_event_loop().run_until_complete) and aggregation_tasks.py:16",
+    "bug": "Celery tasks process_all_pending_visitors, process_single_site, enrich_visitor_tier2, and aggregate_all_sites use asyncio.get_event_loop().run_until_complete(). The sibling tasks segmentation_tasks.py:23/112 and crm_tasks.py:22 were explicitly migrated to asyncio.run() with the comment 'reusing the worker's loop across tasks breaks asyncpg (attached to a different loop) after the first task.' These four tasks still use the broken pattern, so the SECOND resolution/aggregation/tier2 task a Celery worker runs will raise asyncpg 'Future attached to a different loop' (and on Python 3.12 get_event_loop() in a thread with no running loop is deprecated/errors).",
+    "impact": "On a deployed Celery worker, the first task per worker process succeeds but every subsequent resolution/aggregation/tier2 task fails with an asyncpg loop error — identity resolution and aggregation silently stop after one run. Currently masked because prod runs the in-process APScheduler sweep, not Celery (per memory), but this is a live latent bug the moment a worker is enabled.",
+    "fix": "Replace asyncio.get_event_loop().run_until_complete(coro) with asyncio.run(coro) in all four entrypoints, matching segmentation_tasks/crm_tasks. (Fix as proposed is correct.)",
+    "severity": "high",
+    "confidence": 0.9
+  },
+  {
+    "slice": "Event ingestion + aggregation + Celery tasks + AI agents (visitor_aggregator, sync, segmentation_trigger, timeseries, retention, events router, aggregation/resolution/segmentation/crm tasks, segmenter, campaign_planner, prompt_safety, jobs/scheduler+run_sweep_once)",
+    "file": "apps/api/tasks/segmentation_tasks.py",
+    "locator": "_run_segmentation_for_site lines 54-61 vs 90-97",
+    "bug": "The visitor selection re-segments ALREADY-segmented visitors. It selects WHERE enrichment_status == 'enriched' with NO 'segmented == False' filter (limit 50, ordered by intent desc), then at the end marks exactly those 50 segmented=True. The trigger/count logic everywhere else (check_segmentation_trigger, _check_triggers) counts only segmented==False. So once a site has >50 enriched visitors, each trigger re-pulls the same top-50 highest-intent (mostly already-segmented) visitors, re-runs Gemini, and creates duplicate Segments/Campaigns for them, while genuinely-new lower-intent enriched visitors past row 50 may never get segmented.",
+    "impact": "Duplicate segments and campaigns (and repeated Gemini billing) for high-intent visitors; new-but-lower-intent enriched visitors can be starved. Contradicts the 'only count genuinely new' design stated in segmentation_trigger.py docstring.",
+    "fix": "Add `Visitor.segmented == False` to the select in _run_segmentation_for_site (segmentation_tasks.py:56-59) so the segmented batch matches the trigger predicate. Keep the intent_score desc ordering and LIMIT 50; this also makes the manual path (_run_manual) consistently segment only unsegmented visitors. (Optionally, if a single tick can have >50 new visitors, loop or raise the limit so the count can actually drain below threshold.)",
+    "severity": "high",
+    "confidence": 0.93
+  },
+  {
+    "slice": "Event ingestion + aggregation + Celery tasks + AI agents (visitor_aggregator, sync, segmentation_trigger, timeseries, retention, events router, aggregation/resolution/segmentation/crm tasks, segmenter, campaign_planner, prompt_safety, jobs/scheduler+run_sweep_once)",
+    "file": "apps/api/routers/events.py",
+    "locator": "ingest_events lines 160-179 (background aggregate + Set-Cookie) and 46-47 rate limit",
+    "bug": "Aggregation is fired as an unbounded asyncio.create_task(_background_aggregate(site_id)) on EVERY ingest batch (rate limit is 100/min per the limiter). aggregate_visitors_for_site does a full-history window-function recompute over the entire events table for the site (visitor_aggregator.py:248-288, no time bound) plus up to 20 company resolutions. Under sustained ingest this schedules many concurrent full-table re-aggregations of the same site, each opening its own DB session — N overlapping heavy scans with no dedup/debounce.",
+    "impact": "On a busy site this is a self-inflicted DB load amplifier: every beacon triggers a full re-scan + 20 external company lookups, concurrent runs of the same site race on the visitors upsert and pile DB connections (Supabase session pooler cap is small per memory). Wasted compute and potential connection exhaustion.",
+    "fix": "Guard per-site aggregation with a non-blocking coalescing lock before spawning the task: e.g. SET a Redis key `agg:dirty:{site_id}` (or pg_try_advisory_lock keyed on a site hash) and skip create_task if a run is already in-flight, having it re-run once if marked dirty; or drop the per-batch trigger entirely and rely on the existing aggregate_all_sites Celery sweep (optionally tightened to a shorter interval). Note the rate limit is per-client-IP (get_remote_address), not a global per-site 100/min, so on a busy multi-visitor site the amplification is worse than the auditor implied.",
+    "severity": "medium",
+    "confidence": 0.9
+  },
+  {
+    "slice": "Event ingestion + aggregation + Celery tasks + AI agents (visitor_aggregator, sync, segmentation_trigger, timeseries, retention, events router, aggregation/resolution/segmentation/crm tasks, segmenter, campaign_planner, prompt_safety, jobs/scheduler+run_sweep_once)",
+    "file": "apps/api/services/segmentation_trigger.py",
+    "locator": "check_and_trigger_segmentation lines 60-92",
+    "bug": "TOCTOU between the unsegmented-count and the lock: the count (60-69) and the threshold check (70) happen BEFORE _acquire_lock (73). Two concurrent resolution jobs can both read count>=10, then one acquires the lock and the other gets False and returns — that part is fine — BUT _acquire_lock fails OPEN on any Redis error (returns True at line 45), so if Redis is unavailable two concurrent callers both proceed and both run _run_segmentation_for_site, double-billing Gemini and creating duplicate segments. The docstring claims the lock prevents double-firing/double-billing, but the fail-open path defeats that exact guarantee.",
+    "impact": "When Redis is down/flaky, concurrent resolution paths double-run segmentation: duplicate segments+campaigns and 2x Gemini cost — the precise outcome the lock was added to prevent.",
+    "fix": "Prefer the DB-level guard over fail-closed-only: atomically claim the batch with UPDATE visitors SET segmented=true WHERE site_id=:s AND enrichment_status='enriched' AND segmented=false RETURNING visitor_id, then run segmentation only over the returned rows. This bounds concurrency even when Redis is healthy-but-racy (the TTL window) and closes the count/check TOCTOU regardless of Redis state, leaving the Redis lock as a best-effort optimization rather than the sole correctness mechanism. (Plain fail-closed on Redis error also fixes the reported case but leaves the residual TOCTOU during the lock's TTL window and a fragile dependency on Redis availability.)",
+    "severity": "medium",
+    "confidence": 0.9
+  },
+  {
+    "slice": "Event ingestion + aggregation + Celery tasks + AI agents (visitor_aggregator, sync, segmentation_trigger, timeseries, retention, events router, aggregation/resolution/segmentation/crm tasks, segmenter, campaign_planner, prompt_safety, jobs/scheduler+run_sweep_once)",
+    "file": "apps/api/routers/events.py",
+    "locator": "ingest_events lines 105-141 (event_rows build + on_conflict_do_nothing) with NULL event_id",
+    "bug": "Idempotency only works for rows WITH a client event_id. The comment at 134-141 acknowledges 'Rows with NULL event_id (older pixel builds) never conflict' — but on_conflict_do_nothing(index_elements=['event_id']) requires a unique index on event_id that permits at most one NULL (Postgres treats NULLs as distinct by default, so multiple NULLs are allowed). A re-delivered beacon from an older pixel (NULL event_id) is therefore double-counted into pageviews/sessions/intent, the exact thing the idempotent insert claims to prevent. Also, if event_id is client-generated and not namespaced by site_id, a collision across sites would be silently dropped (cross-tenant data loss).",
+    "impact": "Older-pixel traffic is not deduped (intent/session inflation on beacon retries). If event_id isn't site-scoped, a client-id collision across two sites silently drops the second site's event (tenant data loss).",
+    "fix": "The real (minor) gap is legacy NULL-event_id events; a partial unique index does NOT help because multiple NULLs are still distinct. Either reject events lacking event_id, or synthesize a deterministic id server-side (hash of site_id+visitor_id+type+ts+url) so legacy retries dedupe. Switching the index to (site_id, event_id) is harmless but unnecessary for the collision concern (random 122-bit UUIDs make cross-site collisions negligible). At minimum, document that legacy-pixel events are non-idempotent — which the code already does.",
+    "severity": "medium",
+    "confidence": 0.6
+  },
+  {
+    "slice": "apps/api/routers: visitors.py, sites.py, demo.py, dashboard.py, feed.py, companies.py",
+    "file": "apps/api/routers/demo.py",
+    "locator": "demo_detect_platform (line 57-75) -> detect_platform(body.url)",
+    "bug": "Public, unauthenticated SSRF. POST /api/v1/demo/detect-platform takes a fully attacker-controlled `url` and passes it to services/platform_detector.detect_platform, which does httpx.AsyncClient(follow_redirects=True, verify=False).get(url) with NO host/IP allowlist or private-range block (platform_detector.py:140-146). An attacker can target http://169.254.169.254/latest/meta-data/ (cloud metadata), http://localhost:<port>, or internal Railway service hostnames. follow_redirects=True also lets a public URL 302 into an internal one. Only guard is a 12/min IP rate limit keyed on spoofable X-Forwarded-For.",
+    "impact": "Server-side request forgery from the production backend: probe/reach internal services and cloud-metadata endpoints, exfiltrate via redirect/timing/status differences. Classic credential-theft vector on Railway/cloud hosts.",
+    "fix": "Reuse the existing is_safe_public_url from apps/api/services/url_guard.py inside detect_platform before fetching (after the http(s) normalization), and apply it to both the primary GET and the _probe_shopify_api follow-up. Because follow_redirects=True, a one-time pre-check is insufficient — also set follow_redirects=False (or re-validate the resolved host on each redirect hop) to close the public-URL-302-to-internal and DNS-rebinding paths, and keep the same guard on sites.detect_platform_endpoint.",
+    "severity": "high",
+    "confidence": 0.97
+  },
+  {
+    "slice": "apps/api/routers: visitors.py, sites.py, demo.py, dashboard.py, feed.py, companies.py",
+    "file": "apps/api/routers/feed.py",
+    "locator": "import_post existing-check (line 150-154)",
+    "bug": "Cross-user collision on the globally-unique platform_post_id. Post.platform_post_id is `unique=True` globally (models/post.py:33-34). import_post checks `select(Post).where(Post.platform_post_id == platform_post_id)` with NO scoping to the current user's accounts. If user A already imported tweet 12345, user B importing the same public tweet gets HTTP 400 'This post is already in your feed.' — but it is NOT in B's feed. B can never import that tweet, and the message is false. (Also leaks that some other user imported it.)",
+    "impact": "A public tweet imported by any one user becomes un-importable for every other user, with a misleading error. Multi-tenant feature breakage that worsens as the table grows.",
+    "fix": "Replace the global unique on platform_post_id with a composite unique on (social_account_id, platform_post_id): drop the existing unique index in a migration (the global unique=True is the real landmine, not just the message), add UniqueConstraint(\"social_account_id\",\"platform_post_id\") to Post.__table_args__, and scope both the import existing-check (feed.py:151) and the sync dedup (_save_posts, sync.py:266-267) to the current user's account_ids. Scoping the check alone is insufficient because the DB constraint would still reject the second user's INSERT.",
+    "severity": "medium",
+    "confidence": 0.95
+  },
+  {
+    "slice": "apps/api/routers: visitors.py, sites.py, demo.py, dashboard.py, feed.py, companies.py",
+    "file": "apps/api/routers/demo.py",
+    "locator": "demo_identify BeamIdentityNode lookup (line 162-201)",
+    "bug": "Cross-tenant identity disclosure in the public demo. demo_identify (unauthenticated, 6/min) takes a client-supplied `fingerprint` and queries BeamIdentityNode across ALL Beam sites for any node with that fingerprint + non-null email, then returns full_name + email + PDL enrichment to the anonymous caller. There is no tenant scoping and the fingerprint is fully attacker-controlled in the request body.",
+    "impact": "Anyone who can obtain or guess a fp2_ fingerprint value (they are emitted client-side by the pixel and visible in any site's network traffic) can POST it to the public demo and retrieve the real name + email of a person identified on a DIFFERENT customer's site. PII leak across tenants via an unauthenticated endpoint.",
+    "fix": "On the public/unauthenticated demo path, never read identity from the cross-site BeamIdentityNode graph. Restrict the reuse to a visitor row created in THIS demo session: only return an identity when the same fingerprint matches a Visitor row whose site_id belongs to the authenticated onboarding account (gate the id_node block behind that ownership check), or move identity reuse entirely behind auth. If cross-site reuse must stay, require server-issued proof the caller owns the fingerprint (e.g. a signed token bound to a fingerprint the server itself observed for this session) rather than trusting the client-supplied value, and never echo back email/full_name/enrichment for a fingerprint the caller hasn't proven they own.",
+    "severity": "high",
+    "confidence": 0.93
+  },
+  {
+    "slice": "apps/api/routers: visitors.py, sites.py, demo.py, dashboard.py, feed.py, companies.py",
+    "file": "apps/api/routers/visitors.py",
+    "locator": "manual_identify_visitor logger.info (line 1007)",
+    "bug": "PII in logs, violating the project's own convention. The log emits `email=body.email[:5] + \"***\"`, which leaks the first 5 characters of the local part. CLAUDE.md states 'Never store PII in logs' and the repo ships services/pii.mask_email exactly for this; demo.py uses mask_email correctly (e.g. line 681), but this call does not.",
+    "impact": "Low-severity PII leak into structured logs (5 chars of local-part can be enough to identify short addresses). Compliance/convention violation rather than a functional bug.",
+    "fix": "Replace with email=mask_email(body.email) and add `from apps.api.services.pii import mask_email` to the imports in apps/api/routers/visitors.py. body.email is a required field already assigned/returned, so the None branch of mask_email is not a concern here.",
+    "severity": "low",
+    "confidence": 0.9
+  },
+  {
+    "slice": "apps/api/routers: visitors.py, sites.py, demo.py, dashboard.py, feed.py, companies.py",
+    "file": "apps/api/routers/sites.py",
+    "locator": "shopify_callback (line 431-477)",
+    "bug": "OAuth callback swallows the install failure and still redirects to '?shopify=connected'. handle_oauth_callback is wrapped in try/except that only logs on error (line 472-473); execution then falls through to the RedirectResponse with shopify=connected regardless. The earlier `site.pixel_verified = True` inside the try is skipped on failure, but the user is told 'connected'.",
+    "impact": "If the Shopify ScriptTag install fails, the merchant is redirected to a success state ('shopify=connected') while the pixel was never installed — silent onboarding failure with a false-positive UI.",
+    "fix": "In the except branch, return RedirectResponse to a failure URL (e.g. f\"{settings.frontend_url}/dashboard?shopify=error&site={site_id}\") so success and failure diverge. Ideally also avoid leaking raw error detail to the URL and rollback the db session on failure.",
+    "severity": "medium",
+    "confidence": 0.95
+  },
+  {
+    "slice": "apps/api/routers: visitors.py, sites.py, demo.py, dashboard.py, feed.py, companies.py",
+    "file": "apps/api/routers/visitors.py",
+    "locator": "export_visitor_data social-posts query (line 515-523)",
+    "bug": "GDPR export cross-tenant over-match on social posts. Posts tied to the visitor are fetched purely by `func.lower(Post.author_username) == handle.lower()` with NO site_id/account scoping. The Post table is global; any post by anyone with that Twitter handle (e.g. another customer's imported/crawled posts) is returned in this visitor's DSAR export.",
+    "impact": "A subject-access export can include social posts that belong to / were imported by other tenants for the same handle, mixing unrelated data into one visitor's GDPR export. Data-accuracy and minor cross-tenant exposure issue in a compliance feature.",
+    "fix": "Scope the Post query to social accounts owned by the requesting user — e.g. select(Post).join(SocialAccount).where(SocialAccount.user_id == user.id, func.lower(Post.author_username) == handle.lower()) — mirroring feed.py's account_ids filter. Note: posts have NO site_id/visitor_id column, so the proposed \"visitor_id/site_id linkage\" does not exist; the only available tenancy linkage is social_account_id -> SocialAccount.user_id. (Same unscoped pattern also exists in social_intelligence.py:118-122, worth fixing together.)",
+    "severity": "low",
+    "confidence": 0.85
+  },
+  {
+    "slice": "apps/api/routers/ (billing, crm, drafts, feature_requests, campaigns, segments, exports, costs, api_keys, known_contacts, engagement, privacy, unsubscribe, waitlist, webhooks, social_accounts, social_auth, ai, blog, auth)",
+    "file": "apps/api/routers/auth.py",
+    "locator": "signup() lines 28-44",
+    "bug": "The legacy POST /api/v1/auth/signup endpoint creates a User with email+password and returns a valid access token with NO invite-gate / waitlist check. It is mounted live in main.py (line 160) and is called directly by the frontend onboarding (apps/web/public/beam/onboarding-steps.js:837 and apps/web/src/lib/api.ts:177). The Clerk path and the waitlist/invite system (waitlist.py validate-invite / consume-invite) are bypassed entirely: anyone can POST an email+password and get a working account + JWT, regardless of INVITE_ONLY.",
+    "impact": "Invite-only gate (a deliberate product control per project memory) is fully bypassable via the legacy endpoint; unbounded self-serve account creation against prod. Also creates accounts unknown to Clerk, orphaned from the Clerk user model.",
+    "fix": "Two caveats on the proposed fix. (1) The exploitability of the invite-gate bypass is conditional: invite_only defaults to False (gate currently OFF per config.py:72), so the gate-bypass only bites when an operator sets INVITE_ONLY=true — but the orphaned-from-Clerk problem exists unconditionally. (2) Note the frontend only calls the legacy endpoint as a fallback when Clerk is unavailable (onboarding-steps.js:811-834 returns early on the Clerk path), so in prod (Clerk configured) it is largely an unused-but-exposed HTTP route. Best fix: since Clerk is the sole intended prod signup path, remove the legacy signup() endpoint (login()/get_current_user legacy HS256 can stay for any remaining legacy tokens). If kept, gate it behind the same `settings.invite_only and _is_email_allowlisted(email)` check the Clerk path uses.",
+    "severity": "high",
+    "confidence": 0.82
+  },
+  {
+    "slice": "apps/api/routers/ (billing, crm, drafts, feature_requests, campaigns, segments, exports, costs, api_keys, known_contacts, engagement, privacy, unsubscribe, waitlist, webhooks, social_accounts, social_auth, ai, blog, auth)",
+    "file": "apps/api/routers/feature_requests.py",
+    "locator": "_notify_admin_new_request lines 57-67; _notify_requester_status_change lines 84,92-101",
+    "bug": "User-controlled values are interpolated unescaped into HTML email bodies: req.title / req.detail / req.email in the admin notification, and req.admin_note / req.title in the requester notification. create_feature_request is a fully PUBLIC endpoint (line 108-113), so an attacker controls title/detail/email. The strings go straight into f-string HTML with no escaping.",
+    "impact": "Stored/email HTML injection. A public submitter can inject arbitrary HTML/links into the admin notification email (phishing the operator) and, via admin_note round-tripping, into requester emails. Title is truncated to 120 chars but not escaped.",
+    "fix": "Proposed fix is correct: wrap every user-controlled interpolation (req.title, req.detail, req.email in admin notify; req.title and req.admin_note in requester notify) in html.escape() or render via an autoescaping Jinja2 template. Note urgency_text/new_label are from fixed allow-list maps so are safe, but req.title still reaches the requester email so must be escaped there too.",
+    "severity": "medium",
+    "confidence": 0.95
+  },
+  {
+    "slice": "apps/api/routers/ (billing, crm, drafts, feature_requests, campaigns, segments, exports, costs, api_keys, known_contacts, engagement, privacy, unsubscribe, waitlist, webhooks, social_accounts, social_auth, ai, blog, auth)",
+    "file": "apps/api/routers/webhooks.py",
+    "locator": "sendgrid_events lines 65-70",
+    "bug": "On a hard-bounce/dropped/spamreport event the handler sets do_not_email=True ONLY on IdentifiedVisitor rows matching by email. Unlike unsubscribe.py (which also walks VisitorEmail rows and, more importantly, the suppression blind-index), it does not record the address in the suppression_list / VisitorEmail. So a bounced address stored only under visitor_emails (or later re-identified into a fresh IdentifiedVisitor row) is not suppressed.",
+    "impact": "An address that hard-bounced can be re-mailed after re-identification or if it lived only in visitor_emails, hurting deliverability and CAN-SPAM compliance (the stated purpose of the endpoint).",
+    "fix": "Do NOT just \"mirror unsubscribe.py\" — unsubscribe.py also fails to write SuppressionEntry, so mirroring it leaves the re-identification hole open. Instead, on a hard-bounce/dropped/spamreport the webhook should call services.suppression.add_suppression(db, email, scope=\"do_not_email\", reason=\"hard_bounce\"), which both cascades do_not_email onto existing rows AND writes the durable email_hash blind-index that the resolver's is_email_suppressed pre-gate consults — pre-suppressing any future re-identification. Apply the same upgrade to unsubscribe.py for parity.",
+    "severity": "medium",
+    "confidence": 0.72
+  },
+  {
+    "slice": "apps/api/routers/ (billing, crm, drafts, feature_requests, campaigns, segments, exports, costs, api_keys, known_contacts, engagement, privacy, unsubscribe, waitlist, webhooks, social_accounts, social_auth, ai, blog, auth)",
+    "file": "apps/api/routers/feature_requests.py",
+    "locator": "submit_board_request lines 264-303 (and create_feature_request 108)",
+    "bug": "POST /feature-requests/board and POST /feature-requests both create a FeatureRequest with no rate limiting and no per-user cap. board requires only get_current_user; create_feature_request is fully public. Each create also fires an admin email (_notify_admin_new_request).",
+    "impact": "A logged-in user (or anyone, for the public endpoint) can spam unlimited rows + trigger unlimited admin emails — DB growth and email-quota / inbox flooding (unbounded cost). The public create path is the worse of the two.",
+    "fix": "Apply the existing slowapi limiter to both endpoints (e.g. @limiter.limit(\"5/minute\") on submit_board_request keyed per-user, and a tighter per-IP limit on the public create_feature_request). Because the public path has no user key (only get_remote_address/IP), per-IP limiting alone is weak against rotating IPs — add a CAPTCHA/Turnstile or require auth on the public landing submit, and/or debounce the admin notification (batch/coalesce) so even bursts that pass the limiter cannot flood the inbox.",
+    "severity": "medium",
+    "confidence": 0.9
+  },
+  {
+    "slice": "apps/api/routers/ (billing, crm, drafts, feature_requests, campaigns, segments, exports, costs, api_keys, known_contacts, engagement, privacy, unsubscribe, waitlist, webhooks, social_accounts, social_auth, ai, blog, auth)",
+    "file": "apps/api/routers/unsubscribe.py",
+    "locator": "decode_unsubscribe_token / link_decorator.py:81-87",
+    "bug": "decode_unsubscribe_token uses Fernet.decrypt() with NO ttl, so tokens never expire, yet the endpoint docstring (lines 64-69) and the decoder docstring claim 'expired' tokens are rejected. The 'expired' claim is false.",
+    "impact": "Not a security hole (token is still authenticated/tamper-proof), but a correctness/doc mismatch: unsubscribe links are valid forever, and any code/operator relying on the documented expiry is misled. Low real-world impact for an unsubscribe link.",
+    "fix": "Either correct the three docstrings (link_decorator.py lines 54 and 85, and unsubscribe.py line 68) to drop the 'expired' wording since tokens are intentionally permanent, OR if expiry is actually desired, add a ttl to the single decrypt call at link_decorator.py:62 (e.g. fernet.decrypt(token, ttl=SECONDS)) so InvalidToken fires on stale tokens — but note this would also affect decode_bid's other caller (events.py:258), so a ttl should be threaded as a parameter rather than hardcoded for the unsubscribe path alone.",
+    "severity": "low",
+    "confidence": 0.9
+  },
+  {
+    "slice": "apps/api security-critical core: config, main, dependencies (auth), and services (bot_filter, redis_client, clickhouse_client, rate_limiter, email_rate_limiter, usage_limits, usage_logger, key_vault, encryption, pii, pii_crypto, pii_encryption_hooks, geoip, url_guard, oauth_state, auth)",
+    "file": "/Users/apple/Downloads/retargeting user/apps/api/main.py",
+    "locator": "lifespan() lines 45-50; validate_secret_key called at 47, create_all at 49-50",
+    "bug": "Production config validation runs inside the FastAPI lifespan startup, but BEFORE that, register_pii_encryption_hooks() and Settings() instantiation happen at import time, and create_all runs immediately after validation. The bigger issue: validate_production() ONLY raises when app_env=='production' (config.py:14). If APP_ENV is left at its default 'development' in the Railway prod environment (easy misconfiguration), every guard is silently skipped — insecure default app_secret_key, empty ENCRYPTION_KEY, etc. are all accepted, and key_vault/_get_fernet would then throw at first BYOK use instead of at boot. There is no assertion that a live deployment actually sets app_env=production.",
+    "impact": "A single missing/typo'd APP_ENV var disables ALL production safety checks (secret key, encryption keys) with no startup error — the app boots 'successfully' in an insecure state.",
+    "fix": "Make validation independent of an opt-in env string. Best: always assert encryption_key/token_encryption_key present and app_secret_key/jwt_secret non-default whenever the app is not explicitly in a known non-prod mode — i.e. add an allowlist {development, test, ci, staging, production} and refuse to boot on any unknown app_env, AND require a deployment to positively declare a non-production env to skip the secret checks (default-deny), rather than treating \"development\" as the safe-to-skip default. Avoid the auditor's \"treat unset as production\" variant alone since it would force local/CI boots (which legitimately use insecure defaults) to fail; pair env-allowlist enforcement with a loud startup log of app_env.",
+    "severity": "medium",
+    "confidence": 0.8
+  },
+  {
+    "slice": "apps/api security-critical core: config, main, dependencies (auth), and services (bot_filter, redis_client, clickhouse_client, rate_limiter, email_rate_limiter, usage_limits, usage_logger, key_vault, encryption, pii, pii_crypto, pii_encryption_hooks, geoip, url_guard, oauth_state, auth)",
+    "file": "/Users/apple/Downloads/retargeting user/apps/api/config.py",
+    "locator": "validate_production lines 22-26",
+    "bug": "The production validator checks self.jwt_secret against the insecure default, but jwt_secret is DEAD: nothing signs or verifies tokens with it. Legacy tokens are signed with app_secret_key (auth.py:29 create_access_token) and verified with app_secret_key (dependencies.py:338). social_auth.py:6-7 documents that the only producer of jwt_secret-signed tokens was removed. So this validation branch guards a value that has no security effect, while giving false confidence that 'legacy auth is secured'. The real legacy signing key (app_secret_key) IS validated at line 19, so auth is actually covered — but the jwt_secret check is misleading dead validation.",
+    "impact": "No direct exploit (app_secret_key is the real key and is validated), but the dead check obscures the real auth surface and could mislead a future maintainer into thinking JWT_SECRET protects something.",
+    "fix": "Remove the jwt_secret field (config.py:68), its jwt_algorithm sibling (line 69), and the dead validation branch (lines 22-26). Because there are two more live references, also: (a) fix tests/conftest.py:153 — the auth_token fixture is unused but still imports settings.jwt_secret, so repoint it to settings.app_secret_key or delete the fixture; and (b) drop JWT_SECRET=change-me-jwt-secret from infra/.env.example:33. Net effect: app_secret_key (already validated at config.py:19) remains the single legacy HS256 key, so auth coverage is unchanged.",
+    "severity": "low",
+    "confidence": 0.9
+  },
+  {
+    "slice": "apps/api security-critical core: config, main, dependencies (auth), and services (bot_filter, redis_client, clickhouse_client, rate_limiter, email_rate_limiter, usage_limits, usage_logger, key_vault, encryption, pii, pii_crypto, pii_encryption_hooks, geoip, url_guard, oauth_state, auth)",
+    "file": "/Users/apple/Downloads/retargeting user/apps/api/services/pii_crypto.py",
+    "locator": "_hmac_key lines 35-37",
+    "bug": "The PII blind-index HMAC key falls back to a HARDCODED literal 'beam-pii-fallback-key' when both pii_hmac_key and encryption_key are empty. In production, encryption_key empty is blocked by validate_production (config.py:31) — but ONLY when app_env=='production'. If app_env is misconfigured (see main.py finding) OR in any non-prod environment that still holds real PII (staging clone of prod data), email_hash() silently uses a publicly-known constant key. An attacker who knows this constant can precompute the blind index for any email and confirm whether a given person is in the database (membership oracle), defeating the whole point of the blind index.",
+    "impact": "Blind-index HMAC degrades to a known-key hash → offline confirmation/enumeration of whether specific emails exist in the system; cross-environment hash collisions.",
+    "fix": "Remove the string fallback in _hmac_key() and raise if neither pii_hmac_key nor encryption_key is set (mirroring key_vault.py's hard ENCRYPTION_KEY requirement) — but the fix is incomplete as proposed: the twin implementation in apps/api/services/known_hash.py:_hmac_key() has the identical flaw with the constant \"beam-known-contacts-fallback-key\" and must be fixed the same way (or unified). Additionally, harden validate_production to also fail when app_env is unrecognized/misconfigured, so a fat-fingered app_env can't silently bypass the encryption_key requirement.",
+    "severity": "high",
+    "confidence": 0.7
+  },
+  {
+    "slice": "apps/api security-critical core: config, main, dependencies (auth), and services (bot_filter, redis_client, clickhouse_client, rate_limiter, email_rate_limiter, usage_limits, usage_logger, key_vault, encryption, pii, pii_crypto, pii_encryption_hooks, geoip, url_guard, oauth_state, auth)",
+    "file": "/Users/apple/Downloads/retargeting user/apps/api/services/usage_limits.py",
+    "locator": "get_osint_paid_usage lines 230-236 vs increment_osint_paid_usage 239-247",
+    "bug": "The paid-OSINT credit guard reads and writes the counter in two separate non-atomic Redis operations across different call sites (get_osint_paid_usage to check budget, then later increment_osint_paid_usage after the call). Two concurrent requests can both read usage < budget and both proceed, overspending the hard daily credit cap. This is a check-then-act race on a billable resource. (The free OSINT meter has the same shape but is non-billable.) The email_rate_limiter at email_rate_limiter.py:30-36 does this CORRECTLY — atomic INCR then conditional DECR — so the pattern exists in the codebase but wasn't applied to the paid guard.",
+    "impact": "Concurrent paid OSINT lookups can exceed osint_paid_daily_budget, causing real credit overspend beyond the configured hard cap.",
+    "fix": "Apply the check_and_reserve_email pattern to the paid guard: replace osint_paid_budget_left with a single reserve_osint_paid(site_id) that does INCR, sets the 2-day TTL on first hit, and if the resulting count > osint_paid_daily_budget does DECR and returns False; drop the now-redundant separate increment_osint_paid_usage from the call site. Critically, preserve the existing fail-CLOSED semantics on Redis error (return False / refuse) rather than the email limiter's fail-open, since the paid path's stated intent is to never risk burning credits.",
+    "severity": "medium",
+    "confidence": 0.9
+  },
+  {
+    "slice": "Outbound side-effects: CRM connectors (HubSpot/Pipedrive/Salesforce/generic webhook), crm_push, crm_rate_limiter, email_sender, email_validator, campaign_sender, sender, suppression, shopify_integration, billing, api_pricing, link_decorator, engagement_tracker, hot_alert.",
+    "file": "apps/api/services/email_sender.py",
+    "locator": "_is_suppressed (20-34) + send (52)",
+    "bug": "The email send suppression check only queries IdentifiedVisitor.do_not_email. It never consults the privacy suppression_list (services/suppression.is_email_suppressed). The export/CRM path (csv_exporter._get_segment_visitors:48) checks BOTH the do_not_email flag AND is_email_suppressed(...,'do_not_sell'), but the actual email-sending path does not. A person who opts out via add_suppression(scope='do_not_email') is protected only if they already exist as an IdentifiedVisitor row at opt-out time (the cascade sets do_not_email on existing rows). If that same email is identified for the FIRST time after the suppression entry was created, the suppression list is never re-checked at send time, so a campaign/hot-alert email can still go out.",
+    "impact": "Possible email to a GDPR/CCPA opt-out (scope do_not_email) who was identified after opting out — a compliance violation and the kind of thing that triggers spam complaints. Narrow window (only newly-identified emails; do_not_process/all is caught by the resolver recheck at identity_resolver.py:164).",
+    "fix": "Add the suppression-list check on the campaign send path itself, not just in _is_suppressed. In campaign_sender.send_campaign_emails, after the `if iv.do_not_email` check (line 88), also `if await is_email_suppressed(db, iv.email, 'do_not_email'): skip` (covers the 'all' scope too, matches by blind-index hash). Independently, harden EmailSender._is_suppressed to also call is_email_suppressed(db, to_email, 'do_not_email') so any future caller that does pass db is protected. Both are needed because the campaign path currently passes no db and bypasses _is_suppressed entirely. Optionally, make the resolver/_save_identified set do_not_email=True when the email is on the do_not_email suppression list, closing the gap at write time.",
+    "severity": "high",
+    "confidence": 0.82
+  },
+  {
+    "slice": "Outbound side-effects: CRM connectors (HubSpot/Pipedrive/Salesforce/generic webhook), crm_push, crm_rate_limiter, email_sender, email_validator, campaign_sender, sender, suppression, shopify_integration, billing, api_pricing, link_decorator, engagement_tracker, hot_alert.",
+    "file": "apps/api/services/campaign_sender.py",
+    "locator": "send_campaign_emails loop (107-133)",
+    "bug": "Race/over-send under the per-site hourly cap is mostly handled, but the bigger issue: the loop commits once per recipient (await db.commit() at 132) AND the idempotency guard (CampaignTouchpoint 'sent' row) is written only AFTER a successful send and commit. If two concurrent invocations of send_campaign_emails run for the same active campaign (e.g. retry + cron, or double-clicked send), both read the same visitor_ids, both see no existing 'sent' touchpoint, and both send — there is no unique constraint enforced here and no row-lock. The CampaignTouchpoint insert is the only idempotency mechanism and it is not contention-safe.",
+    "impact": "Duplicate emails to the same recipient for the same campaign step when two sends overlap. Also burns the hourly cap twice. Low likelihood at current volume but real if the send endpoint is retried/double-invoked.",
+    "fix": "Proposed fix is sound; prefer the unique constraint on (campaign_id, visitor_id, channel, touchpoint_order) + INSERT ... ON CONFLICT DO NOTHING (claim-then-send) over the advisory lock alone since the constraint also protects future callers and Celery workers. Refinement: claim the row with a non-'sent' status (e.g. 'pending'/'claimed') BEFORE sending and flip to 'sent' after delivery — or delete/rollback the claim on send failure — otherwise a failed send leaves a claimed row that permanently blocks legitimate retries.",
+    "severity": "medium",
+    "confidence": 0.85
+  },
+  {
+    "slice": "Outbound side-effects: CRM connectors (HubSpot/Pipedrive/Salesforce/generic webhook), crm_push, crm_rate_limiter, email_sender, email_validator, campaign_sender, sender, suppression, shopify_integration, billing, api_pricing, link_decorator, engagement_tracker, hot_alert.",
+    "file": "apps/api/services/billing.py",
+    "locator": "increment_usage (72-79) vs check_usage_allowed (60)",
+    "bug": "check_usage_allowed and increment_usage are separate, non-atomic operations (check reads monthly_identified_count, increment does an UPDATE ... +1 later). Resolution runs concurrently across the request path (visitors.py:873/885), the Celery task (resolution_tasks.py:83/98) and resolution_runner.py:73/87. Two concurrent resolutions for a user at count = limit-1 both pass check_usage_allowed, then both increment, so monthly_identified_count exceeds the plan limit. There is no SELECT FOR UPDATE or atomic compare-and-increment.",
+    "impact": "Plan limit (free=10, pro=50) can be exceeded under concurrency — each over-count is a paid identity lookup the customer's plan didn't authorize (unbounded-ish cost leak) and lets free users slightly over-consume. Magnitude bounded by concurrency, not catastrophic.",
+    "fix": "Proposed fix is correct: replace the read-then-write with a single atomic UPDATE User SET monthly_identified_count = monthly_identified_count + 1 WHERE id=:id AND monthly_identified_count < :limit RETURNING ...; 0 rows updated = limit reached. Caveat: the lazy monthly-reset and unlimited-plan (limit=None) branches currently live inside check_usage_allowed, so run the reset/anchor logic first (or fold it in) before the atomic gate, and short-circuit unlimited plans, otherwise the rollover and unlimited cases break.",
+    "severity": "medium",
+    "confidence": 0.85
+  },
+  {
+    "slice": "Outbound side-effects: CRM connectors (HubSpot/Pipedrive/Salesforce/generic webhook), crm_push, crm_rate_limiter, email_sender, email_validator, campaign_sender, sender, suppression, shopify_integration, billing, api_pricing, link_decorator, engagement_tracker, hot_alert.",
+    "file": "apps/api/services/hot_alert.py",
+    "locator": "maybe_send_hot_alert (79-96)",
+    "bug": "Visitor-derived strings (identified.full_name, identified.email, site.name) are interpolated raw into body_html with no html.escape(). These values originate from external enrichment providers (PDL/Hunter/Apollo) and from user-set site names, i.e. partly attacker-influenceable. The email_sender.send() does NOT escape body_html (it wraps it as-is). So a crafted enriched name like '<img src=x onerror=...>' is injected unescaped into the owner's HTML email.",
+    "impact": "HTML/markup injection into the site owner's own inbox (not stored XSS to third parties). Owner is the only recipient, so blast radius is small, but it is unsanitized externally-sourced HTML in an outbound email — phishing-link injection is possible.",
+    "fix": "Apply html.escape() to name, site.name, and identified.email before interpolation (as proposed). Additionally escape the link inside the href with escape(link, quote=True) — the proposed fix omits it; risk there is low since visitor_id/site_id are machine-generated IDs, but it should match email_sender.py's own treatment of the unsubscribe URL for completeness.",
+    "severity": "low",
+    "confidence": 0.9
+  },
+  {
+    "slice": "Outbound side-effects: CRM connectors (HubSpot/Pipedrive/Salesforce/generic webhook), crm_push, crm_rate_limiter, email_sender, email_validator, campaign_sender, sender, suppression, shopify_integration, billing, api_pricing, link_decorator, engagement_tracker, hot_alert.",
+    "file": "apps/api/services/email_validator.py",
+    "locator": "_check_mx (140-145)",
+    "bug": "MX validity is approximated with socket.getaddrinfo(domain, 25, AF_INET, SOCK_STREAM) — that resolves an A record for the domain on port 25, it does NOT look up MX records. A domain with an A record but no mail server passes; a domain that only has MX (no A on the apex) could be marked invalid. The function and cache key are named 'mx' / 'mx_valid' but the check is really 'does the apex have an IPv4 A record'.",
+    "impact": "Bad emails on A-record-only domains slip through as valid (wasting enrichment credits — the stated purpose of the guard), and the success is cached for 7 days under a key that claims MX validity. Some legitimate IPv6-only or MX-only domains are wrongly rejected. Correctness of a guard that is supposed to gate spend.",
+    "fix": "Apply the proposed fix (dnspython resolver.resolve(domain,'MX') in an executor, fall back to A/AAAA when no MX, rename to drop the false 'mx' semantics, keep the Redis cache), and additionally: add dnspython to apps/api/requirements.txt (CI fails on missing deps per CLAUDE.md), and include AAAA in the A-record fallback so legitimate IPv6-only domains are not rejected.",
+    "severity": "medium",
+    "confidence": 0.97
+  },
+  {
+    "slice": "apps/api/services/: ai_reply.py, gemini_client.py, auto_drafter.py, blog_service.py, blog_storage.py, wordpress_plugin_generator.py, csv_exporter.py, kpi.py (AI + content)",
+    "file": "apps/api/routers/drafts.py",
+    "locator": "generate_new_draft, lines 126-156 (consumes ai_reply.generate_multi_drafts)",
+    "bug": "The /drafts/generate endpoint loads Post by body.post_id with NO ownership check (line 126: `select(Post).where(Post.id == body.post_id)`, no join to SocialAccount.user_id). Any authenticated user can pass any post_id and trigger generate_multi_drafts, which calls the LLM 1-3 times per request against the app-level OpenRouter key (or the victim's BYOK key resolved by user_id... actually the caller's own user_id). This is an IDOR + unbounded-cost surface: a script can loop /generate to burn OpenRouter credits since there is no per-user rate limit on this endpoint and each call spends up to 3 model completions.",
+    "impact": "Cross-tenant data exposure (drafting against another user's post content) and unbounded LLM spend — a single authed account can rack up API cost by looping the endpoint; no rate limit or quota gate exists on draft generation (unlike resolution which has check_usage_allowed).",
+    "fix": "Apply the proposed fix: join Post -> SocialAccount and require SocialAccount.user_id == current_user.id (else 404). Add a per-user daily draft cap/rate limit before calling generate_multi_drafts, ideally reusing the existing billing check_usage_allowed gate for symmetry with resolution. Note: spend hits the caller's BYOK key when present and only falls back to the app-level settings.openrouter_api_key when the caller has no BYOK, but the app-key default case makes the unbounded-cost risk real.",
+    "severity": "high",
+    "confidence": 0.9
+  },
+  {
+    "slice": "apps/api/services/: ai_reply.py, gemini_client.py, auto_drafter.py, blog_service.py, blog_storage.py, wordpress_plugin_generator.py, csv_exporter.py, kpi.py (AI + content)",
+    "file": "apps/api/services/auto_drafter.py",
+    "locator": "_generate_draft_text lines 157-163, persisted by generate_for_visitor lines 99-111",
+    "bug": "When the real LLM call fails for ANY reason (no API key, OpenRouter 4xx/5xx, network), the except block silently substitutes a canned _mock_draft ('this is so real', 'Loved your recent post...') and generate_for_visitor persists it as a real Draft with auto_generated=True. There is no flag distinguishing a genuine AI draft from a fallback template, and no MOCK_EXTERNAL_APIS gate — this happens in production. The user reviews/sends a generic templated message believing it was AI-personalized.",
+    "impact": "In prod, any LLM outage turns auto-drafts into low-quality canned templates saved to the user's queue indistinguishably from real AI output, risking the user sending obviously-templated outreach to a high-intent lead. Degrades the core product promise silently.",
+    "fix": "Gate the fallback on settings.mock_external_apis: in _generate_draft_text's except block, only return _mock_draft when settings.mock_external_apis is true; otherwise re-raise. The outer handler at resolution_tasks.py:127 already catches it and logs auto_draft_failed, so generate_for_visitor simply creates no draft on a real LLM outage. (The sibling CRM services already use exactly this `if settings.mock_external_apis` gating pattern.) Optionally also add an is_fallback column to Draft so any persisted fallback can be flagged in the UI.",
+    "severity": "medium",
+    "confidence": 0.95
+  },
+  {
+    "slice": "apps/api/services/: ai_reply.py, gemini_client.py, auto_drafter.py, blog_service.py, blog_storage.py, wordpress_plugin_generator.py, csv_exporter.py, kpi.py (AI + content)",
+    "file": "apps/api/services/csv_exporter.py",
+    "locator": "export_google_csv lines 106-110 and export_linkedin_csv lines 122-126",
+    "bug": "CSV formula-injection: the Google and LinkedIn exporters write raw first_name/last_name/company_name/job_title/city values straight into CSV cells with no neutralization. A visitor-controlled field beginning with =, +, -, @ (e.g. an enriched company_name like `=cmd|...` or a name pulled from an external enrichment provider) becomes an active formula when the exported file is opened in Excel/Sheets. The Meta exporter is safe because every field is SHA-256 hashed, but Google/LinkedIn export plaintext.",
+    "impact": "A malicious or poisoned enrichment value exported to a marketer's machine can execute a spreadsheet formula (DDE/command injection, data exfiltration via HYPERLINK) when the CSV is opened. The data originates from third-party enrichment (PDL/Proxycurl) and visitor input, i.e. not trusted.",
+    "fix": "Add a shared _csv_safe(value) helper that, when a stringified cell starts with = + - @ (or tab/CR, or a leading whitespace followed by one of those), prepends a single apostrophe (preferred over a leading space, which alters the displayed value). Apply it to every plaintext field in export_google_csv and export_linkedin_csv. Meta exporter is already safe via _sha256, so no change needed there.",
+    "severity": "medium",
+    "confidence": 0.9
+  },
+  {
+    "slice": "apps/api/services/: ai_reply.py, gemini_client.py, auto_drafter.py, blog_service.py, blog_storage.py, wordpress_plugin_generator.py, csv_exporter.py, kpi.py (AI + content)",
+    "file": "apps/api/services/ai_reply.py",
+    "locator": "_call_openrouter lines 463 + 450; generate_multi_drafts loop lines 402-423",
+    "bug": "No hard cap on aggregate LLM cost per request. max_tokens=300 is per call, but generate_multi_drafts loops over up to 3 strategies, and EACH strategy call independently walks a 5-model fallback chain (line 447) on failure with a 60s httpx timeout each. A failing primary can mean up to 3 strategies x 5 models = 15 sequential 60s HTTP attempts (~15 min worst case) for one /generate request, and each successful attempt bills tokens. Combined with the missing rate limit (see drafts.py bug) this is the unbounded-cost surface the context hint warns about.",
+    "impact": "Worst-case latency of minutes per request (client/proxy timeout, wasted compute) and uncontrolled token spend when models error-storm; no circuit breaker or per-request model-attempt budget.",
+    "fix": "Fix is correct but two refinements: (1) The \"5 models\" figure is only reached when a BYOK key sets a non-default primary; with the default model deepseek/deepseek-v4-flash:free (which is already _FREE_MODEL_FALLBACKS[0] and gets deduped by line 447), the chain is 4 models, so default worst case is 3x4=12 attempts (~12 min), still pathological. (2) On 401 (bad key) and 402 (no credits), abort the ENTIRE /generate request immediately rather than just the current strategy's chain — these are account-level and identical across all 3 strategies, so per-strategy retry wastes 3x the attempts. Otherwise: lower per-attempt timeout (~15-20s), cap total model attempts per request, treat 429 as a skip/backoff, and optionally run strategies via asyncio.gather under a global deadline. Also add a per-user/IP rate limit on POST /api/v1/drafts/generate.",
+    "severity": "medium",
+    "confidence": 0.8
+  },
+  {
+    "slice": "apps/api/models/*.py (SQLAlchemy models) and apps/api/schemas/*.py (Pydantic schemas)",
+    "file": "apps/api/models/waitlist.py:26",
+    "locator": "approved_at: Mapped[None] = mapped_column(DateTime(timezone=True), nullable=True)",
+    "bug": "approved_at is annotated Mapped[None] — meaning the column's Python type is NoneType, so the ORM/type-checker treats any non-None datetime assignment as a type error and tooling will think the attribute is always None. Almost certainly a typo for Mapped[datetime | None] (the very next field used_at on line 28 uses the correct Mapped[datetime | None]).",
+    "impact": "Static typing/IDE believes approved_at can only ever be None; any code that sets/reads it as a datetime is mistyped. Runtime works (SQLAlchemy ignores the wrong hint) but it defeats the type-hint contract CLAUDE.md mandates and masks real bugs.",
+    "fix": "Change line 26 to `approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)` to match the column's nullable-timestamp semantics and the sibling used_at field.",
+    "severity": "low",
+    "confidence": 0.97
+  },
+  {
+    "slice": "apps/web/src/lib/ — frontend API client and static config (api.ts, blog-fetch.ts, platform-guides.ts, tour-steps.ts, utils.ts, admin-nav.ts)",
+    "file": "apps/web/src/lib/api.ts",
+    "locator": "downloadExport (537-561) and downloadWordPressPlugin (509-529)",
+    "bug": "These two authenticated blob downloads use a raw `fetch` with only `this.getToken()` and have NO 401→fresh-Clerk-token retry, unlike uploadImage (962-972) and uploadKnownContacts (995-1005) which DO retry once on an expired token. Clerk tokens expire ~60s (see clerk-token-sync.tsx:40-41); if the cached token is stale when the user clicks Export CSV or Download WordPress plugin, the request 401s and the method throws a generic `Failed to download export` / `Failed to download plugin` with no recovery, even though a fresh token is one getter call away.",
+    "impact": "Intermittent, hard-to-reproduce 'Failed to download export' errors for users who sit on the Connectors/Install pages longer than the token TTL before clicking download. The CSV-export and WP-plugin-download are core onboarding/activation paths.",
+    "fix": "Proposed fix is correct. Refinement: since getToken() (cached) is reused by other raw-fetch methods too (e.g. line 847), extract a shared authedBlobFetch(path, init?) helper that runs the send(token) closure and the 401→clerkTokenGetter()→setClerkToken→re-send-once logic, then route both download methods (and ideally other raw fetches) through it rather than copy-pasting the retry block into each.",
+    "severity": "medium",
+    "confidence": 0.95
+  },
+  {
+    "slice": "apps/web/src/app/dashboard/: visitors/page.tsx, visitors/[visitorId]/page.tsx, settings/page.tsx, onboarding/page.tsx, layout.tsx, page.tsx, costs/page.tsx",
+    "file": "apps/web/src/app/dashboard/onboarding/page.tsx",
+    "locator": "handlePlanClick 184-195",
+    "bug": "If createCheckout throws, the catch silently routes to /dashboard/billing?plan=... swallowing the real error (e.g. Lemon Squeezy 503 when ls env vars are missing — see billing-lemonsqueezy memory). The user is bounced to the billing page with no explanation of why checkout didn't open. `setError('')` is set before the try but never populated on failure.",
+    "impact": "When checkout is misconfigured/down, the paying user silently lands on /dashboard/billing with no error shown — looks like a dead button, hurts conversion.",
+    "fix": "On catch, set a visible error on the onboarding page (e.g. setError(\"Couldn't start checkout — please try again or use the billing page\")) instead of/before any silent redirect. If the redirect-to-billing fallback is kept intentionally, also make billing/page.tsx consume the plan/interval query params (pre-select plan + interval and show a non-blocking \"checkout couldn't start\" notice) so the fallback isn't a dead-end carrying stale, ignored params.",
+    "severity": "low",
+    "confidence": 0.72
+  },
+  {
+    "slice": "apps/web/src/app/dashboard/: visitors/page.tsx, visitors/[visitorId]/page.tsx, settings/page.tsx, onboarding/page.tsx, layout.tsx, page.tsx, costs/page.tsx",
+    "file": "apps/web/src/app/dashboard/settings/page.tsx",
+    "locator": "handleCopy 141-145",
+    "bug": "navigator.clipboard.writeText(snippet) is called without awaiting/catching the returned promise. On non-secure contexts or when clipboard permission is denied, the promise rejects (unhandled) but the UI still flips to 'Copied!' — a false success. The snippet was never copied.",
+    "impact": "User sees 'Copied!', pastes nothing, and the pixel snippet silently isn't on their clipboard. Same false-success pattern in the dashboard could mislead during install.",
+    "fix": "Wrap in try/catch around an awaited write so it also handles navigator.clipboard being undefined (insecure context throws synchronously, not just rejects): `async function handleCopy(){ try { await navigator.clipboard.writeText(snippet); setCopied(true); setTimeout(()=>setCopied(false),2000);} catch { /* show 'Press Ctrl/Cmd+C to copy' fallback or select the snippet text */ } }`. The auditor's proposed fix is correct; just ensure the try wraps the call itself (not only the await) to cover the undefined-clipboard throw.",
+    "severity": "low",
+    "confidence": 0.78
+  },
+  {
+    "slice": "apps/web/src/app/dashboard/: visitors/page.tsx, visitors/[visitorId]/page.tsx, settings/page.tsx, onboarding/page.tsx, layout.tsx, page.tsx, costs/page.tsx",
+    "file": "apps/web/src/app/dashboard/settings/page.tsx",
+    "locator": "handleDeleteKey 224-231",
+    "bug": "deleteApiKey failure is fully swallowed (`catch {}`) yet the key is still optimistically removed from local state at 227 only inside the try-after-await — actually it removes after await resolves, so on failure the key stays in the list with NO error shown. The empty catch means a failed delete is completely invisible to the user.",
+    "impact": "A failed key deletion gives no feedback; user assumes it worked or is confused why the key remains. Silent error-swallow violates the repo's 'never swallow exceptions' convention.",
+    "fix": "In the catch, set the existing keyError state (e.g. setKeyError(err instanceof Error ? err.message : \"Failed to delete key\")) so the failure surfaces in the already-present keyError/ErrorBanner UI, mirroring handleAddKey at line 218.",
+    "severity": "low",
+    "confidence": 0.8
+  },
+  {
+    "slice": "apps/web/src/app/dashboard: billing, feed, connectors, campaigns, segments, exports, drafts, feature-requests, feature-board, social-accounts, waitlist, admin, blog (+ shared layout.tsx, crm-connect-panel.tsx, api.ts auth path read for context)",
+    "file": "apps/web/src/app/dashboard/feed/page.tsx",
+    "locator": "DraftPicker loading prop, line 362: loading={approvingDraft !== null}",
+    "bug": "approvingDraft is a single page-level string, so while ONE post's reply is being approved, EVERY rendered DraftPicker receives loading=true and disables its buttons. With multiple posts showing draft suggestions, approving a reply on post A locks the approve/reject controls on posts B, C, etc. until A resolves.",
+    "impact": "UI-wide control lockout during any single approve; on a busy feed the user perceives the whole page as frozen. Functional, not data-corrupting.",
+    "fix": "Track the in-flight post, not just the draft: add approvingPostId state, set both in handleApproveDraft, and pass loading={approvingPostId === post.id} to each DraftPicker (mirroring the existing generatingFor === post.id pattern). Comparing draftId alone is insufficient because DraftPicker receives a boolean, so the comparison must happen at the call site per post.",
+    "severity": "low",
+    "confidence": 0.8
+  },
+  {
+    "slice": "apps/web/src/app/dashboard: billing, feed, connectors, campaigns, segments, exports, drafts, feature-requests, feature-board, social-accounts, waitlist, admin, blog (+ shared layout.tsx, crm-connect-panel.tsx, api.ts auth path read for context)",
+    "file": "apps/web/src/app/dashboard/segments/page.tsx",
+    "locator": "handleTrigger, lines 38-51 (empty catch {} at 47, setTimeout invalidate at 43-46)",
+    "bug": "Two issues: (1) the catch block is completely empty, so if triggerSegmentation 4xx/5xx (e.g. plan limit, no enriched visitors) the user gets zero feedback — the button just flips back to 'Re-run segmentation' as if it worked. (2) Success relies on a blind 3000ms setTimeout then invalidate; if backend segmentation takes longer the list silently shows stale/empty data with no indication it's still running.",
+    "impact": "User clicks Re-run, sees nothing change, can't tell if it failed or is still processing. Drives repeat clicks / support confusion. The empty catch also masks real backend errors.",
+    "fix": "Capture the error explicitly (catch (e)) and surface it via an ErrorBanner/toast state instead of swallowing it; replace the fixed 3000ms setTimeout with a short poll or repeated invalidate driven by the returned { status }, and keep a \"segmentation queued — refreshing…\" affordance visible until fresh data arrives rather than reverting the button immediately in finally.",
+    "severity": "medium",
+    "confidence": 0.95
+  },
+  {
+    "slice": "apps/web/src/app/dashboard: billing, feed, connectors, campaigns, segments, exports, drafts, feature-requests, feature-board, social-accounts, waitlist, admin, blog (+ shared layout.tsx, crm-connect-panel.tsx, api.ts auth path read for context)",
+    "file": "apps/web/src/app/dashboard/social-accounts/page.tsx",
+    "locator": "connectMut.onSuccess, lines 27-29: window.open(data.auth_url, \"_blank\")",
+    "bug": "OAuth consent URL is opened with window.open(url, '_blank') WITHOUT rel=\"noopener\". The opened OAuth page gets a live window.opener reference back to the dashboard tab and can navigate it (reverse tabnabbing). Other external links in this slice correctly use rel=noopener (waitlist site_url line 137, blog View line 165), so this one is an inconsistent omission on a security-sensitive auth handoff.",
+    "impact": "A malicious/compromised OAuth-provider page (or a redirect off it) can call window.opener.location = phishing-url and silently swap the user's dashboard tab to a credential-harvesting clone. Low likelihood (trusted providers) but a real reverse-tabnabbing surface.",
+    "fix": "window.open(data.auth_url, \"_blank\", \"noopener,noreferrer\") is correct and the return value is already discarded so nulling the handle is harmless. (Same-tab location.href would also work but changes UX since OAuth here is expected to open a new tab.)",
+    "severity": "medium",
+    "confidence": 0.7
+  },
+  {
+    "slice": "apps/web/src/components/ (dashboard + blog + ui React components)",
+    "file": "/Users/apple/Downloads/retargeting user/apps/web/src/components/kpi-strip.tsx",
+    "locator": "41-50 (first useEffect)",
+    "bug": "The KPI fetch effect (getSiteKpis) has NO ignore/cancellation flag, unlike the timeseries effect right below it (54-76) which explicitly added one. On a rapid siteId or period change, a slower in-flight getSiteKpis response for the previous site can resolve after the newer one and call setData(staleData), painting the previous site's funnel numbers under the current site's header.",
+    "impact": "Stale KPI numbers can flash/persist for the wrong site or period when the user switches quickly (the exact race the author guarded against in the very next effect). Visible data correctness bug on a money metric (visitors/identified/leads).",
+    "fix": "Mirror the timeseries effect: inside the KPI effect add `let ignore = false;`, gate each setState (`if(!ignore) setData(...)`, `setError`, `setLoading`) and add `return () => { ignore = true; };`. The proposed fix is correct.",
+    "severity": "medium",
+    "confidence": 0.78
+  },
+  {
+    "slice": "apps/web/src/components/ (dashboard + blog + ui React components)",
+    "file": "/Users/apple/Downloads/retargeting user/apps/web/src/components/pixel-install-guide.tsx",
+    "locator": "52-56 handleCopy / 118-127 handleDownloadPlugin",
+    "bug": "navigator.clipboard.writeText (handleCopy, handleCopyPrompt) is called with no try/catch; on http origins or browsers that reject clipboard permission the promise rejects unhandled and the UI still flips to 'Copied!' even though nothing was copied. Separately handleDownloadPlugin awaits api.downloadWordPressPlugin (which triggers a blob download) but gives NO success feedback and only surfaces failure via verifyResult — a successful download is silent and a failure shows in an unrelated 'verify' message area.",
+    "impact": "Copy can claim success while clipboard is empty (user pastes nothing). WP plugin download has confusing/absent feedback. Both are UX-correctness, not data loss.",
+    "fix": "Proposed fix is correct. Strengthen slightly: handle that navigator.clipboard can be undefined on insecure origins (synchronous throw, not just promise rejection) — use a try/catch around an awaited writeText (or check navigator.clipboard exists, with a document.execCommand fallback) and only set copied=true on success; give the WP plugin download its own status state (success + error) instead of reusing verifyResult.",
+    "severity": "low",
+    "confidence": 0.9
+  },
+  {
+    "slice": "apps/web auth + marketing shell: layout.tsx, providers.tsx, page.tsx, middleware.ts, login/, sign-in/, sign-up/, signup/, onboarding/ (top-level), pricing/, blog/ (public)",
+    "file": "apps/web/src/app/blog/[slug]/page.tsx",
+    "locator": "80-83 (dangerouslySetInnerHTML JSON.stringify(jsonLd))",
+    "bug": "JSON-LD is injected via dangerouslySetInnerHTML with raw JSON.stringify output. JSON.stringify does NOT escape '<' or '/', so a post field that reaches jsonLd (title, author_name, meta_description, excerpt) containing the literal string '</script>' breaks out of the <script type=\"application/ld+json\"> block and can inject arbitrary markup/script into the public page served to every visitor. Fields come from the DB (blog post body/title authored via the admin blog editor).",
+    "impact": "Stored XSS / markup-injection on the public blog post page if a post field contains '</script>...'. Reach is limited because blog authoring is admin-only (apps/api/routers/blog.py create/update gated by require_admin), so this is admin-trusted content, not user-supplied — but it still ships to all anonymous visitors and is a latent injection if the admin account is ever compromised or an author pastes untrusted text.",
+    "fix": "Escape the serialized JSON before injection: JSON.stringify(jsonLd).replace(/</g, \"\\\\u003c\"). The auditor's fix is correct and sufficient; replacing < alone closes the </script> breakout. Optionally also escape u2028/u2029 line separators; escaping / is cosmetic and not required.",
+    "severity": "low",
+    "confidence": 0.9
+  },
+  {
+    "slice": "apps/web auth + marketing shell: layout.tsx, providers.tsx, page.tsx, middleware.ts, login/, sign-in/, sign-up/, signup/, onboarding/ (top-level), pricing/, blog/ (public)",
+    "file": "apps/web/src/middleware.ts",
+    "locator": "8-14 + 44-45 (geoRedirect on /onboarding → /login)",
+    "bug": "Non-US visitors hitting /onboarding are redirected to /login, which is itself a client-side redirect-only page (app/login/page.tsx replaces to /sign-in). So a non-US user clicking the landing 'get started free' CTA experiences a double hop: /onboarding → 302 /login → JS replace /sign-in. The intermediate /login renders a 'Loading...' flash. Also note geoRedirect runs even when Clerk is unconfigured, and the redirect target /login bypasses the geo logic entirely (no loop, but the chain is wasteful).",
+    "impact": "Extra redirect hop + a 'Loading...' flash for every non-US onboarding click; minor UX/perf cost, not a correctness break. Worth pointing the geo-redirect straight at /sign-in to drop the dead middle hop.",
+    "fix": "Redirect non-US /onboarding directly to \"/sign-in\" in geoRedirect (change new URL(\"/login\", req.url) to new URL(\"/sign-in\", req.url)); optionally retire the redirect-only app/login/page.tsx. /sign-in is already in the public route matcher so no auth loop results.",
+    "severity": "low",
+    "confidence": 0.9
+  },
+  {
+    "slice": "apps/pixel/src/tracker.js, apps/pixel/src/worker.js, infra/docker-compose.yml, Dockerfile, requirements.txt, pyproject.toml, railway.json, scripts/ (seed.py, seed_blog.py, create_beam_site.py, test.sh), apps/pixel/wrangler.toml, apps/api/requirements.txt",
+    "file": "/Users/apple/Downloads/retargeting user/apps/pixel/src/worker.js",
+    "locator": "line 6: const trackerCode = TRACKER_JS;",
+    "bug": "The Cloudflare Worker references a global `TRACKER_JS` that is never defined or bound. wrangler.toml has NO [vars], no [[text_blobs]], and no [build] step that injects the tracker source (verified: grep for text_blob/[vars]/[build] in wrangler.toml returns nothing; grep for TRACKER_JS across repo finds only this one reference). If this worker is ever deployed, every request to /t.js throws a ReferenceError and returns a 500 — the pixel would not load at all on customer sites configured to use pixel.getbeam.fyi.",
+    "impact": "Total pixel outage for any site pointed at the Cloudflare route (pixel.getbeam.fyi/*). Currently masked because prod serves the pixel from FastAPI at /pixel/tracker.js (apps/api/main.py:217), so this Worker path appears unused — but it is wired in wrangler.toml [env.production] routes and is a live foot-gun.",
+    "fix": "Prefer option (a): delete worker.js and the [env.production] route since the FastAPI /pixel/tracker.js path is canonical. If keeping the Worker, note this is Modules format (export default {fetch}), so [[text_blobs]] (a Service-Worker feature) is the wrong binding — instead either import @cloudflare/kv-asset-handler's getAssetFromKV to read tracker.js from the existing [site] __STATIC_CONTENT KV, or use an [assets] binding (env.ASSETS.fetch), or `import trackerCode from \"./tracker.js\"` with a bundler. Confirm serving path before touching prod DNS/routes.",
+    "severity": "medium",
+    "confidence": 0.9
+  },
+  {
+    "slice": "apps/pixel/src/tracker.js, apps/pixel/src/worker.js, infra/docker-compose.yml, Dockerfile, requirements.txt, pyproject.toml, railway.json, scripts/ (seed.py, seed_blog.py, create_beam_site.py, test.sh), apps/pixel/wrangler.toml, apps/api/requirements.txt",
+    "file": "/Users/apple/Downloads/retargeting user/apps/pixel/wrangler.toml",
+    "locator": "lines 5-6 ([site] bucket = \"./src\") with worker.js:16",
+    "bug": "wrangler `[site] bucket = \"./src\"` uploads the entire ./src directory (including tracker.js) as Workers Sites static assets and injects a __STATIC_CONTENT KV binding, but worker.js never serves from it — it hardcodes a 404 for every path except /t.js (returns `new Response(\"Not found\", { status: 404 })`). So the [site] config is inert and also pulls in the deprecated Workers Sites mechanism (superseded by the assets binding). Dead config that also means tracker.js source is published as a fetchable static asset with no route serving it.",
+    "impact": "No functional outage, but tracker.js is uploaded to KV needlessly on every deploy, and the deprecated Sites path can break on future wrangler upgrades. Misleads maintainers into thinking static serving is configured.",
+    "fix": "Remove the `[site]` block. But the deeper bug is that worker.js:6 references `TRACKER_JS`, a global defined NOWHERE (no `define`, no text_blob/data binding, no import, no package.json/bundler) — so /t.js would throw a ReferenceError at runtime regardless. The real fix must both drop `[site]` and actually wire the tracker source in: add a `[[text_blob]]` (or `data`) binding for src/tracker.js (or a build-time `define`/import), or migrate to the modern `assets` binding, so `TRACKER_JS` resolves. Note the claim's \"fetchable static asset\" wording is imprecise — `[site]` uploads to a __STATIC_CONTENT KV namespace that is NOT HTTP-fetchable without the worker serving it; the valid harms are the needless per-deploy KV upload, deprecation/upgrade fragility, and misleading config.",
+    "severity": "low",
+    "confidence": 0.8
+  },
+  {
+    "slice": "tests/ (root + unit + integration Python suites) and apps/web/e2e/ (Playwright specs) plus playwright.config.ts",
+    "file": "tests/conftest.py",
+    "locator": "auth_token fixture, lines 138-154",
+    "bug": "The `auth_token` fixture mints a JWT signed with `settings.jwt_secret` and `settings.jwt_algorithm`, but the application's real token issuer/verifier (apps/api/services/auth.py:24-35, `create_access_token`/decode) signs and verifies with `settings.app_secret_key` — a DIFFERENT config field. A token from this fixture would fail verification against the live auth path. The fixture is also dead: grep shows no test consumes it (all auth in the suite goes through the /signup+/login helpers).",
+    "impact": "Dead, misleading test scaffolding. If anyone wires a new auth test to this fixture (the obvious thing to reach for), it will produce 401s that look like an app bug, not a test bug — wasting debugging time. It also encodes a false belief that jwt_secret is the signing key.",
+    "fix": "Delete the fixture (cleanest — it's dead). If kept, replace its body with apps.api.services.auth.create_access_token(user.id) so it can never drift from the real signer, AND first create/persist a real User row whose id matches the token's `sub`: get_current_user does a DB lookup (dependencies.py:354), so even a correctly-signed token with sub=\"test-user-id\" would 401 with \"User not found\". Fixing only the secret key is insufficient.",
+    "severity": "low",
+    "confidence": 0.92
+  },
+  {
+    "slice": "tests/ (root + unit + integration Python suites) and apps/web/e2e/ (Playwright specs) plus playwright.config.ts",
+    "file": "tests/integration/test_events_ingest.py",
+    "locator": "test_valid_batch_returns_204, lines 46-68 (and the whole TestEventIngestion class)",
+    "bug": "No test in the event-ingestion suite ever queries `select(Event)` to confirm a batch was actually persisted — every case asserts only the HTTP status. Worse, `test_valid_batch_returns_204` sends NO User-Agent header; per the documented gotcha `is_bot(\"\")` returns True, so the batch is silently bot-filtered and 204'd. A silently-dropped batch and a successfully-stored batch BOTH return 204, so this 'happy path' test passes even if ingestion stores nothing.",
+    "impact": "The single most critical data path (pixel event ingestion) has zero positive persistence coverage. A regression that drops all events on the floor (e.g. an overzealous bot filter, a broken insert) would keep this suite green. This is false confidence on the product's core funnel.",
+    "fix": "Set headers User-Agent=_BROWSER_UA on test_valid_batch_returns_204, then assert persistence: await test_db.execute(select(Event).where(Event.site_id==test_site_id, Event.visitor_id==\"test-visitor-001\")) returns the expected row count. Apply the SAME fix to test_text_plain_content_type_works (line 126), which has the identical missing-UA defect and also never reaches the insert. Add a test asserting a bot batch (e.g. Googlebot UA) yields ZERO stored Event rows. Note: the root reason the happy path is filtered is httpx's default 'python-httpx/...' UA matching the 'httpx' bot token, not is_bot(\"\") — httpx always injects a UA.",
+    "severity": "medium",
+    "confidence": 0.9
+  },
+  {
+    "slice": "tests/ (root + unit + integration Python suites) and apps/web/e2e/ (Playwright specs) plus playwright.config.ts",
+    "file": "tests/integration/test_beam_identity.py",
+    "locator": "test_db_with_beam fixture (16-25) + test_cross_site_lookup (111-139), test_low_confidence_filtered_out (141-163)",
+    "bug": "The 'cross-site lookup' and 'low-confidence filtered' tests do not exercise any production code path — they hand-write the `select(...).where(confidence_score >= 0.5)` query inside the test itself, then assert the row they just inserted is/ isn't returned. This re-tests SQLAlchemy's WHERE clause, not the resolver's network-lookup logic (`_check_beam_identity_network` / the real 0.5 threshold constant). If the production threshold or query diverges from the hardcoded `0.5` here, these tests stay green.",
+    "impact": "The Beam cross-customer identity network — which surfaces one customer's identified person to another customer — is the highest-blast-radius privacy feature, and its integration coverage is a tautology that can't catch a threshold or query regression in the real code.",
+    "fix": "Have the tests instantiate IdentityResolver with the seeded session and assert on await resolver._check_beam_identity_network(visitor) returning (or not returning) an IdentifiedVisitor. Since 0.5 is currently a bare literal (only unrelated _WEAK_MATCH_MAX_CONFIDENCE=0.6 exists), first extract a named constant (e.g. _BEAM_MIN_CONFIDENCE = 0.5) used in identity_resolver.py:1659, then reference that same constant in the test boundary cases — otherwise there is no constant to point at.",
+    "severity": "medium",
+    "confidence": 0.92
+  }
+]

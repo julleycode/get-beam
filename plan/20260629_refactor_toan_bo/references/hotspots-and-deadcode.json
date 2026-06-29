@@ -1,0 +1,1320 @@
+[
+  {
+    "slice": "apps/api/services identity-resolution cluster: identity_resolver.py, identity_classification.py, company_resolver.py, social_resolver.py, social_intelligence.py, social_rules.py, conviction.py, traffic_fit.py, resolution_runner.py, known_hash.py",
+    "hotspots": [
+      {
+        "file": "apps/api/services/identity_resolver.py",
+        "loc": "1-1711 (whole file); resolve() 313-445",
+        "problem": "1711-line god-file mixing 6 concerns: waterfall orchestration, 7 provider HTTP clients + their response parsers, Redis caching, IP-privacy gating, persistence/merge logic, and the cross-customer Beam identity graph. resolve() alone is ~130 lines of branching control flow with inline cache logic. Provider methods come in near-identical pairs (a dead _try_* wrapper + the live _call_* + a _parse_*), tripling the surface for each provider.",
+        "severity": "medium",
+        "refactor": "Split into provider modules (one file per provider exposing a single async call(visitor)->dict|None), a thin ProviderResult dataclass, and keep IdentityResolver as the orchestrator that only sequences providers + persists. Move the Beam-network upsert/check (1595-1683) and _save_identified merge logic (1480-1593) into a dedicated persistence module. Delete the dead _try_* wrappers (see dead_or_dup).",
+        "behavior_risk": "medium",
+        "effort": "L"
+      },
+      {
+        "file": "apps/api/services/identity_resolver.py",
+        "loc": "_call_leadpipe_api 727-823; _call_capturify_api 878-945",
+        "problem": "Leadpipe and Capturify parsers are ~90% copy-paste: same IP-equality loop, same _record_matches_visitor call, same weak-confidence capping, same email-from-emails[] fallback. _parse_leadpipe_person and _parse_capturify_person are near-identical with only confidence_score and a couple field aliases differing. The Leadpipe method also still carries a TEMP shape-probe block (763-786) flagged for removal once prod confirms schema.",
+        "severity": "medium",
+        "refactor": "Extract a shared _match_identity_feed(records, visitor, provider, parser, base_confidence) helper that does the IP/recency loop + weak capping once; pass a per-provider field-map dict to one _parse_feed_person. Remove the TEMP probe block now that it logs on every call.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/identity_resolver.py",
+        "loc": "_org_to_domain 1246-1289",
+        "problem": "Heuristic domain synthesis builds a candidate domain by string-munging the IPinfo org name ('Acme Corp' -> 'acmecorp.com') via a chain of .replace() calls and a length heuristic. Fragile and hard to reason about; mis-synthesized domains feed Hunter/Apollo which then return a random employee at a possibly-wrong company. Naming (_org_to_domain) hides that it can fabricate a domain that was never observed.",
+        "severity": "medium",
+        "refactor": "Restrict synthesis to exact/partial map hits only, or gate every heuristic candidate behind the existing _verify_domain_exists DNS check before returning it (currently DNS-checked later in _call_ipinfo_api, but the heuristic still emits arbitrary strings). Rename to _org_to_domain_or_guess to signal the fabrication risk.",
+        "behavior_risk": "medium",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/social_resolver.py",
+        "loc": "resolve_social 146-317",
+        "problem": "Single 170-line function running the entire A-F pipeline: enrichment, OSINT scan, candidate derivation, concurrent Maigret+rule-base, identity verification, paid-fallback budget logic, persistence, and Gemini deep research — with multiple re-computations of confirmed_count and unified after each stage. Hard to test stages in isolation; the paid-fallback branch (231-263) is deeply nested.",
+        "severity": "medium",
+        "refactor": "Extract stage helpers (gather_free_signals, maybe_run_paid, build_blob) each returning the running account set + counts; have resolve_social compose them. The paid budget/log block is a self-contained unit that belongs in its own coroutine.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/identity_resolver.py",
+        "loc": "resolve() Redis branch 399-425",
+        "problem": "IP->domain cache read/write is inlined into resolve() with a subtle double-negative guard `if company_domain is None and (not self.redis or not await self._redis_has_key(cache_key))`. The '__none__' sentinel handling, the exists-check, and the setex live in three separate places, making the cached-miss path hard to follow and easy to break.",
+        "severity": "low",
+        "refactor": "Extract a _cached_ip_company(visitor) coroutine returning (domain|None, was_cached) so resolve() reads as `domain, hit = await self._cached_ip_company(...)`.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/services/social_intelligence.py",
+        "loc": "_extract_topics 205-217 / _TOPIC_KEYWORDS 28-35",
+        "problem": "Naive substring keyword matching with short tokens like 'ai', 'api', 'crm' will match inside unrelated words (e.g. 'ai' in 'said'/'maintain', 'api' in 'rapid'). Topic detection will over-fire. Minor (display-only) but misleading.",
+        "severity": "low",
+        "refactor": "Match on word boundaries (regex \\bkw\\b) and drop 2-letter keywords, or require token-level membership after splitting.",
+        "behavior_risk": "low",
+        "effort": "S"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dead",
+        "files": "apps/api/services/identity_resolver.py:698-725 (_try_leadpipe_identify), 851-876 (_try_capturify_identify), 975-1001 (_try_rb2b_identify), 1103-1120 (_try_pdl_ip_enrich), 1186-1198 (_try_ipinfo_company)",
+        "detail": "Five single-call provider wrapper methods are defined but never invoked anywhere in apps/api (grep confirms only the definitions; no callers in services, routers, tasks, or tests). The live resolve() flow uses _resolve_identity_graphs_parallel / _resolve_ip_company_parallel and the _call_* methods directly. These wrappers are leftover from the pre-parallel sequential waterfall and duplicate the logging/save logic now in the orchestrators."
+      },
+      {
+        "kind": "dead",
+        "files": "apps/api/services/identity_resolver.py:763-786 (Leadpipe TEMP shape-probe block)",
+        "detail": "A self-described TEMP diagnostic block ('REMOVE once a real prod response confirms the schema') runs on every Leadpipe 200 response, logging response structure. It is operational cruft that fires in prod on each call."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/identity_resolver.py:825-845 (_parse_leadpipe_person) vs 947-971 (_parse_capturify_person); _call_leadpipe_api 798-820 vs _call_capturify_api 922-942",
+        "detail": "Leadpipe and Capturify share near-identical record-matching loops and person-parsing (email-from-emails[] fallback, name assembly from first/last, IP-equality + _record_matches_visitor + weak-confidence cap). Differs only in confidence constant (0.95 vs 0.90) and a few field aliases. Candidate for a single parameterized feed matcher/parser."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/identity_resolver.py:64-75 (_url_to_host) vs apps/api/services/company_resolver.py:80-115 (_extract_domain); _PRIVATE_RE only in company_resolver but VPN/ISP keyword sets duplicated",
+        "detail": "Hostname/domain extraction and ISP/cloud keyword filtering exist in two forms: identity_resolver._ISP_KEYWORDS / _ORG_DOMAIN_MAP (1202-1244) and company_resolver._DOMAIN_PATTERNS / _DATACENTER_ORG_TOKENS (36-63, 224-231). Overlapping intent (filter ISPs/cloud, map org->domain) maintained in parallel; drift risk between the two resolvers."
+      }
+    ]
+  },
+  {
+    "slice": "apps/api/services/platforms/ (base, facebook, instagram, linkedin, pkce, tiktok, twitter, twitter_browser, twitter_scraper) + apps/api/services/platform_detector.py",
+    "hotspots": [
+      {
+        "file": "apps/api/services/platforms/twitter_browser.py",
+        "loc": "1-675",
+        "problem": "God-file. Single 674-line class TwitterBrowserPoster mixes 4 unrelated concerns: cookie/env hydration, interactive login setup, timeline scraping (DOM + 80-line inline JS string), and reply posting (navigate/find-box/human-type/click-and-capture). The inline JS at lines 364-447 is a brittle, untyped, untestable string embedded in Python. Selector lists are duplicated/hardcoded across _find_reply_box, _click_reply_and_get_id, _scrape_timeline.",
+        "severity": "medium",
+        "refactor": "Split into modules: a BrowserSession context-manager (launch/context/storage_state, used by both reply + timeline paths — currently copy-pasted at lines 165-176 and 200-211), a TimelineScraper, and a ReplyPoster. Move the inline JS to a separate .js asset loaded at runtime, or extract per-field Playwright locators. Centralize the magic selector strings into module constants.",
+        "behavior_risk": "medium",
+        "effort": "L"
+      },
+      {
+        "file": "apps/api/services/platforms/twitter_browser.py",
+        "loc": "165-176, 200-211",
+        "problem": "Copy-paste: the entire browser+context construction block (chromium.launch, new_context with storage_state, identical viewport, identical 3-line user-agent string) is duplicated verbatim between _do_post_reply and _do_fetch_timeline. The same UA string appears a third time in setup_login (82-86).",
+        "severity": "low",
+        "refactor": "Extract an async helper/contextmanager `_new_authed_context(p)` returning (browser, context, page) and a module-level USER_AGENT constant. Both call sites then share one definition.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/services/platform_detector.py",
+        "loc": "37-101",
+        "problem": "Five _detect_* functions are near-identical copy-paste (same score-accumulation shape, same min(score,1.0) tail, same generator-meta regex pattern). Adding a platform means cloning the whole block.",
+        "severity": "low",
+        "refactor": "Drive detection from a data table: per-platform list of (signal_check, weight). One loop computes the score. Keeps behavior identical while collapsing ~65 lines to a declarative dict.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/platforms/twitter.py",
+        "loc": "125-198",
+        "problem": "fetch_feed is a 74-line method doing browser-scrape primary path + 2 separate API fallback calls + dedup + sort, with three nested try/except blocks. Control flow (which path 'won') is implicit. The browser import + instantiation is inline.",
+        "severity": "medium",
+        "refactor": "Extract _fetch_via_browser(), _fetch_own_tweets(), _fetch_mentions() helpers returning list[FeedPost]; fetch_feed becomes a short orchestrator that concatenates + dedups. Dedup/sort is also duplicated with twitter_scraper.fetch_multiple_users_tweets — consider a shared _dedup_sort util.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/platforms/twitter_browser.py",
+        "loc": "230-355, 357-478, 480-534, 571-664",
+        "problem": "Multiple over-long methods with untyped `page` params (all annotated `# noqa: ANN001`, violating the project rule 'type hints on ALL functions'). _click_reply_and_get_id is 93 lines mixing a network listener, button-click loop, timeout wait, toast check, and synthetic-ID generation.",
+        "severity": "low",
+        "refactor": "Add `from playwright.async_api import Page` and type the params (import is local-only today to keep Playwright optional, so import under TYPE_CHECKING). Break _click_reply_and_get_id into _attach_create_listener / _click_submit / _resolve_reply_id.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/platforms/base.py",
+        "loc": "53-61, 90-94",
+        "problem": "Leaky abstraction: exchange_code carries a `state` param that only PKCE platforms (Twitter/TikTok) use; Facebook/Instagram/LinkedIn ignore it. send_reply default raises NotImplementedError while fetch_inbox default returns [] — inconsistent 'unsupported' contract for two sibling optional methods.",
+        "severity": "low",
+        "refactor": "Document the state contract on the ABC (done partially) and make the two optional-method defaults consistent (both raise, or both return empty + a `supports_dms()` capability flag).",
+        "behavior_risk": "low",
+        "effort": "S"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dead",
+        "files": "apps/api/services/platforms/twitter.py",
+        "detail": "Three static mock methods are never referenced anywhere in apps/ (grep confirms no callers): _mock_visitor_feed (lines 314-342), _mock_tokens (354-362), _mock_feed (364-386). CLAUDE.md mandates MOCK_EXTERNAL_APIS mock mode, but these are not wired to any settings.mock_external_apis check in twitter.py or its callers — so they are dead code, and the mock-mode contract is effectively unimplemented for the Twitter service."
+      },
+      {
+        "kind": "dead",
+        "files": "apps/api/services/platforms/twitter.py:317, twitter_browser.py:56",
+        "detail": "Function-local imports done lazily (`import random` inside _mock_visitor_feed:317; `import base64` inside _hydrate_cookies_from_env:56). The random import is dead alongside the dead _mock_visitor_feed; base64 should be a top-level import. Minor."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/platforms/twitter_browser.py (165-176, 200-211, 82-86)",
+        "detail": "Identical Playwright browser/context construction and the 3-line Chrome user-agent string are copy-pasted across _do_post_reply, _do_fetch_timeline, and setup_login."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/platforms/{twitter,tiktok,facebook,instagram,linkedin}.py",
+        "detail": "_is_transient_error is defined identically (verbatim) in all five platform modules (twitter.py:26-32, tiktok.py:24-29, facebook.py:20-25, instagram.py:19-24, linkedin.py:19-24). The @retry decorator config block (stop_after_attempt(3), wait_exponential(1,1,10), reraise) is also duplicated on every post_comment. Hoist both to base.py."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/platforms/twitter.py (190-198) vs twitter_scraper.py (155-157)",
+        "detail": "FeedPost dedup-by-id + sort-by-posted_at-desc logic is reimplemented in twitter.fetch_feed and twitter_scraper.fetch_multiple_users_tweets. Extract a shared dedup_sort_posts() helper."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/platforms/{facebook,instagram}.py",
+        "detail": "Instagram and Facebook modules share near-identical auth/token-exchange structure and identical _IG_/_FB_ URL constants pointing at the same graph.facebook.com/v19.0 endpoints; exchange_code/post_comment bodies are almost line-for-line duplicates differing only in the _get_me vs _get_ig_account tail."
+      }
+    ]
+  },
+  {
+    "slice": "apps/api/services: enricher.py, osint_scanner.py, maigret_engine.py, paid_osint.py, pixel_verifier.py, browser_breakdown.py",
+    "hotspots": [
+      {
+        "file": "apps/api/services/enricher.py",
+        "loc": "115-192",
+        "problem": "enrich_tier1 is a 77-line method that mixes orchestration, per-provider field-mapping, status transitions, and 3 separate commit points. The cascade copies provider fields one-by-one inline (lines 162-164, 174-176, 224-228, 235-239) — the exact same proxycurl/twitter field-copy block is duplicated verbatim between tier1 cascade and tier2.",
+        "severity": "medium",
+        "refactor": "Extract two private helpers `_apply_proxycurl(profile, data)` and `_apply_twitter(profile, data)` that own the field mapping, and have both enrich_tier1 and enrich_tier2 call them. Reduces tier1 body and kills the copy-paste.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/services/enricher.py",
+        "loc": "398-457",
+        "problem": "_enrich_proxycurl and _enrich_twitter are near-identical structurally (cache get, AsyncClient(timeout=10), 200/404 branch, _cache_set, _log_enrich, except HTTPError) but only _enrich_pdl carries the @_http_retry decorator. Inconsistent retry policy across the three providers plus duplicated HTTP-call scaffolding.",
+        "severity": "low",
+        "refactor": "Factor a shared `_cached_http_get(cache_key, request_coro, map_fn, provider, operation, visitor)` helper that all three providers use, and apply _http_retry uniformly. Note the divergent return types (_enrich_pdl -> dict|None, the other two -> dict) should be unified.",
+        "behavior_risk": "medium",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/enricher.py",
+        "loc": "60-71, 291-294",
+        "problem": "Two parallel completeness functions: module-level calculate_completeness(profile: dict) (line 68) and the method _profile_completeness(profile: EnrichmentProfile) (line 291) compute the same fraction over ENRICHMENT_FIELDS but one reads dict keys and one reads attributes. calculate_completeness appears unused by this slice.",
+        "severity": "low",
+        "refactor": "Drop calculate_completeness if no caller exists (verify with grep), or have it delegate to a single field-iteration helper that accepts a getter callable.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/services/osint_scanner.py",
+        "loc": "185-194",
+        "problem": "run_module result handling in UserScannerAdapter has dead/confusing logic: the `elif item is None: result.checked += 0` branch is a no-op with a comment admitting 'can't tell apart cheaply'. `checked` is therefore only ever incremented on hits, making the field semantically wrong (it claims 'modules run to completion' but counts only successes).",
+        "severity": "low",
+        "refactor": "Remove the no-op branch and rename/redefine `checked` to mean 'hits' OR have _bounded_check return a sentinel distinguishing 'ran, not found' from 'skipped/timed out' so checked can be counted accurately.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/paid_osint.py",
+        "loc": "75-123",
+        "problem": "_parse_response is a 49-line defensive parser with deeply nested key-fallback chains (data.get('username') or data.get('handle') or ... across 4-5 alternatives per field) against an API contract the module docstring admits is unverified (lines 12-16). High guess-density makes it brittle and hard to test.",
+        "severity": "low",
+        "refactor": "Once a real response is captured, replace the or-chains with a small explicit field-mapping table and a typed parse. Until then, add a unit test fixture with the community-documented shape to lock current behavior.",
+        "behavior_risk": "medium",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/browser_breakdown.py",
+        "loc": "44-65",
+        "problem": "classify_browser is order-dependent token matching with the ordering constraint only documented in a comment; fragile but acceptable. Bigger issue: SAFARI_BASELINE (lines 34-41) is a hardcoded static dict the comment says must be hand-refreshed from a monthly CSV — guaranteed to silently drift stale with no staleness signal.",
+        "severity": "low",
+        "refactor": "Move SAFARI_BASELINE to a dated data file (or config) with a `baseline_as_of` date surfaced in the API response so consumers know its vintage; classify_browser is fine as-is but worth a table-driven rewrite if it grows.",
+        "behavior_risk": "low",
+        "effort": "S"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dup",
+        "files": "apps/api/services/enricher.py:162-164,173-176 vs 224-228,235-239",
+        "detail": "The proxycurl field-copy block (linkedin_headline/summary/follower_count from proxycurl_data) and the twitter field-copy block (twitter_bio/follower_count/recent_topics from twitter_data) are duplicated verbatim between enrich_tier1's cascade and enrich_tier2. Extract _apply_proxycurl/_apply_twitter."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/osint_scanner.py:408-433 vs apps/api/services/paid_osint.py:47-72",
+        "detail": "_cache_key/_cache_get/_cache_set are near-identical between osint_scanner and paid_osint (same sha256(email) -> prefixed key, same try/except Redis-degrades-to-None, same jsonlib dumps with default=str). Only the prefix and TTL differ. Could share a tiny email-keyed Redis cache helper parameterized by (prefix, ttl)."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/osint_scanner.py:373-398 vs apps/api/services/social_resolver.py (_dedupe)",
+        "detail": "osint_scanner._dedupe and the _dedupe referenced in social_resolver (line 224/253) both collapse OsintAccount lists; verify they aren't two divergent copies of the same merge logic (richness-preference + engine-label join). If duplicated, consolidate into one shared dedupe on OsintAccount."
+      },
+      {
+        "kind": "dead",
+        "files": "apps/api/services/osint_scanner.py:189-191",
+        "detail": "The `elif item is None: result.checked += 0` branch is a literal no-op (adds zero) kept only for its explanatory comment. Dead code — remove and fold the explanation into the `checked` definition."
+      },
+      {
+        "kind": "dead",
+        "files": "apps/api/services/enricher.py:68-71",
+        "detail": "Module-level calculate_completeness(profile: dict) appears unused within this slice (the live path uses the _profile_completeness method). Confirm no external caller, then remove to avoid two drifting completeness implementations."
+      }
+    ]
+  },
+  {
+    "slice": "Event ingestion + aggregation + Celery tasks + AI agents (visitor_aggregator, sync, segmentation_trigger, timeseries, retention, events router, aggregation/resolution/segmentation/crm tasks, segmenter, campaign_planner, prompt_safety, jobs/scheduler+run_sweep_once)",
+    "hotspots": [
+      {
+        "file": "apps/api/tasks/segmentation_tasks.py",
+        "loc": "74-84",
+        "problem": "_run_segmentation_for_site contains a deeply-nested inline N+1 + dunder-import expression: for each segment it re-calls build_visitor_profiles(db, ...) over ALL visitors, then runs a SegmentMember query embedded via __import__('apps.api.models.segment', fromlist=['SegmentMember']) inside a list comprehension to filter profiles. The control flow is unreadable, re-fetches profiles per-segment, and uses runtime __import__ instead of a top-of-file import.",
+        "severity": "high",
+        "refactor": "Add a normal top-level import of SegmentMember. Call build_visitor_profiles once before the loop, build a {visitor_id: profile} map, and fetch all segment members for the freshly-created segment ids in one query, grouping by segment_id. Then per-segment look up profiles from the map. Removes the per-segment re-fetch and the __import__ hack.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/visitor_aggregator.py",
+        "loc": "90-141",
+        "problem": "calculate_intent_score has 9 positional/keyword params and inline tz-juggling at 114-121 that duplicates the tz-normalization already done at the call site (_upsert_visitor lines 173-175 force both datetimes to tz-aware UTC before calling). The branch at 115-120 (first_seen.tzinfo is None / last_seen replace) is effectively dead given the caller, and is confusing.",
+        "severity": "medium",
+        "refactor": "Document that the function contract requires tz-aware UTC datetimes (caller already guarantees this) and delete the defensive tz branch at 115-120, computing span_days directly from (last_seen - first_seen). Optionally group the scoring inputs into a small dataclass.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/services/sync.py",
+        "loc": "324-374",
+        "problem": "sync_user_accounts and sync_all_accounts are near-identical copy-paste: same per-account try/except, same counts dict keyed f'{platform}:{username}', same exception logging. Only difference is the SocialAccount filter (one extra user_id predicate).",
+        "severity": "low",
+        "refactor": "Extract a private _sync_accounts(db, accounts) helper that takes the resolved list and returns the counts dict; have both public functions build their query, fetch accounts, and delegate.",
+        "behavior_risk": "none",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/services/sync.py",
+        "loc": "82-95",
+        "problem": "_playwright_fetch_user_tweets is a stub that always returns [] (after an unused TwitterBrowserPoster() construction) and imports TwitterBrowserError without using it; it is never called anywhere in the module. Dead/misleading helper.",
+        "severity": "low",
+        "refactor": "Delete _playwright_fetch_user_tweets entirely (and the unused TwitterBrowserError import in _playwright_fetch_timeline if not needed).",
+        "behavior_risk": "none",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/routers/events.py",
+        "loc": "182-316",
+        "problem": "_process_signal_events is ~135 lines mixing fingerprint persistence, form-email parsing, utm_bid decoding, email validation, PII encryption/blind-index, and three separate commit/rollback paths. High cyclomatic complexity and repeated validate_email + per-row try/except.",
+        "severity": "medium",
+        "refactor": "Split into _store_fingerprint(db, batch), _collect_signal_emails(batch) -> list[dict] (parsing + validation), and _upsert_visitor_emails(db, rows) (crypto + insert). Keep a single commit at the end. Improves testability of each concern.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/agents/segmenter.py",
+        "loc": "194-244",
+        "problem": "_mock_segmentation is dead code: run_segmentation now hard-requires settings.gemini_api_key (raises if absent) and never falls back to the mock. Same for campaign_planner._mock_campaign_plan (campaign_planner.py:162-232). The CLAUDE.md MOCK_EXTERNAL_APIS contract is not honored here, so these large mock builders are unreachable.",
+        "severity": "low",
+        "refactor": "Either wire the mocks back in behind settings.mock_external_apis (restoring the documented mock mode) or delete them. Leaving them unreferenced rots and misleads readers into thinking mock mode works for AI agents.",
+        "behavior_risk": "low",
+        "effort": "S"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dead",
+        "files": "apps/api/services/sync.py:82-95",
+        "detail": "_playwright_fetch_user_tweets always returns [] and is never called anywhere; constructs an unused TwitterBrowserPoster and imports TwitterBrowserError without use."
+      },
+      {
+        "kind": "dead",
+        "files": "apps/api/agents/segmenter.py:194-244 (_mock_segmentation), apps/api/agents/campaign_planner.py:162-232 (_mock_campaign_plan)",
+        "detail": "Both mock builders are unreferenced. run_segmentation/plan_campaign now hard-raise when gemini_api_key is unset instead of falling back to the mock, so the documented MOCK_EXTERNAL_APIS path is dead for AI agents."
+      },
+      {
+        "kind": "dead",
+        "files": "apps/api/services/visitor_aggregator.py:73-87 (_decay_multiplier) lines 75-76",
+        "detail": "Inside _decay_multiplier, 'if last_seen.tzinfo is None: now = datetime.utcnow()' — but callers (_upsert_visitor:174-175) always pass tz-aware UTC, so the naive branch never executes; minor dead defensive branch (same pattern in calculate_intent_score:115-120)."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/sync.py:324-350 vs 353-374",
+        "detail": "sync_user_accounts and sync_all_accounts are ~95% identical (per-account try/except, counts dict, error logging); only the query filter differs."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/tasks/segmentation_tasks.py:38-45 vs apps/api/services/segmentation_trigger.py:60-69",
+        "detail": "The unsegmented-enriched count query (enrichment_status=='enriched' AND segmented==False, threshold 10) and SEGMENTATION_THRESHOLD constant are duplicated in two modules; should be a shared helper to avoid the two drifting."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/retention.py vs apps/api/services/visitor_aggregator.py:238-242",
+        "detail": "The 'does events table exist?' information_schema query is duplicated (retention._events_table_exists and the inline check in aggregate_visitors_for_site)."
+      }
+    ]
+  },
+  {
+    "slice": "apps/api/routers: visitors.py, sites.py, demo.py, dashboard.py, feed.py, companies.py",
+    "hotspots": [
+      {
+        "file": "apps/api/routers/visitors.py",
+        "loc": "1-1390",
+        "problem": "God-file router: 1390 lines, ~15 endpoints mixing list/stats/detail/GDPR-export/GDPR-delete/resolve/enrich/osint/social-resolution plus 4 background-job functions and skip-reason copy. The 3 background jobs (_run_osint_scan_job, _run_social_resolution_job, _run_resolution_job) each re-implement the same fetch-visitor/fetch-identified/fetch-or-create-profile boilerplate.",
+        "severity": "medium",
+        "refactor": "Split into visitors_core.py (list/stats/detail/countries), visitors_gdpr.py (export/delete/cleanup-test), and visitors_resolution.py (resolve/enrich/osint/social + the *_job functions). Extract a shared `_load_visitor_bundle(db, site_id, visitor_id)` helper returning (visitor, identified, profile) to kill the 3x copy-paste in the job functions.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/routers/visitors.py",
+        "loc": "933-1014",
+        "problem": "manual_identify_visitor commits twice (line 977 then 1005) within one request. The first commit sets identity_status='identified' and writes the IdentifiedVisitor; if the optional enrichment-profile block then raises, the visitor is left 'identified' with no profile and an inconsistent enrichment_status. Two-phase write with no transaction boundary.",
+        "severity": "low",
+        "refactor": "Build all ORM changes (identity + optional profile) before a single await db.commit() at the end, so the row state is all-or-nothing.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/routers/visitors.py",
+        "loc": "830-930",
+        "problem": "resolve_one_visitor is ~100 lines of branching: idempotency check, 3 pre-gates, resolve, success path, then a re-read + skip-reason reconstruction. The post-resolve status re-query (900-906) plus _resolution_skip_reason call duplicates logic already inside IdentityResolver.resolve and _resolution_skip_reason.",
+        "severity": "low",
+        "refactor": "Have IdentityResolver.resolve() return a small result object (status, identified, skip_reason) instead of just IdentifiedVisitor|None, so the endpoint doesn't re-derive the reason with a second query and a parallel copy of the gate order.",
+        "behavior_risk": "medium",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/routers/sites.py",
+        "loc": "248-367",
+        "problem": "Five near-identical site-scoped GET endpoints (detection-preview, browser-breakdown, traffic-fit, kpis, timeseries) each repeat the same 6-line `select(Site).where(site_id, user_id) -> scalar_one_or_none -> 404` ownership block. visitors.py already has _verify_site_access; sites.py re-inlines it everywhere.",
+        "severity": "low",
+        "refactor": "Add a `_verify_site_access(db, site_id, user)` dependency in sites.py (or share the one in a common deps module) and use it via Depends so each endpoint body drops to one service call.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/routers/companies.py",
+        "loc": "33-40",
+        "problem": "list_companies declares `page: int = 1, page_size: int = 50` as bare ints with no Query(ge=...) bounds. Negative or huge page_size is accepted; page_size has no upper cap so a client can request page_size=10_000_000.",
+        "severity": "medium",
+        "refactor": "Use `page: int = Query(1, ge=1)` and `page_size: int = Query(50, ge=1, le=100)` to match the bounded pattern already used in visitors.list_visitors and feed.get_feed.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/routers/visitors.py",
+        "loc": "428-464",
+        "problem": "delete_visitor_data builds DELETE statements via f-string table interpolation (`f\"DELETE FROM {table} ...\"`). Table names are a hardcoded tuple so it's not injectable today, but it's a raw-SQL string-format pattern in a GDPR deletion path that swallows per-table errors and still returns 'deleted'.",
+        "severity": "low",
+        "refactor": "Use the ORM models' .__table__.delete() (as cleanup_test_visitors already does) instead of sql_text f-strings, and surface any per-table failure in the response rather than only logging a warning.",
+        "behavior_risk": "low",
+        "effort": "S"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dup",
+        "files": "apps/api/routers/visitors.py:339-399 (_compute_visitor_stat_counts) vs apps/api/routers/dashboard.py:68-126 (get_overview aggregates)",
+        "detail": "The five visitor conditional-aggregate counts (total / identified / enriched / enriched_unsegmented / eligible_for_resolution) plus the could_enrich_more EnrichmentProfile count are implemented twice with identical filter logic — once per-site in visitors._compute_visitor_stat_counts and once grouped-by-site in dashboard.get_overview. The dashboard docstring even notes they 'MUST stay identical', i.e. a known manual-sync hazard. Extract one shared builder that returns the aggregate columns and reuse it in both the single-site and grouped paths."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/routers/companies.py:18-30 and apps/api/routers/visitors.py:47-54 and inline in sites.py",
+        "detail": "_verify_site_access (select Site where site_id+user_id, 404 if none) is reimplemented in companies.py, visitors.py, and inlined ~9 times across sites.py endpoints. Three+ copies of the same ownership check. Promote to one shared dependency in apps/api/dependencies.py."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/known_hash.py:34 (email_hash) vs apps/api/services/pii_crypto.py:61 (email_hash)",
+        "detail": "Two parallel email_hash blind-index implementations exist by design (known_hash.py docstring says it deliberately duplicates pii_crypto until the PII module lands). They are intended to compute the same HMAC-SHA256, but rely on possibly-different keys (known_hash falls back encryption_key -> constant). If the two ever diverge on key resolution, known-contacts hashes won't match suppression/PII hashes. Flagged as duplication to unify once pii_crypto is committed (the stated plan)."
+      },
+      {
+        "kind": "dead",
+        "files": "apps/api/routers/demo.py:328-330 (class JourneyBody) — fine; real item: demo.py:643 _X_HANDLE_INVALID is used, not dead",
+        "detail": "No confirmed dead code in scope. Noting that earlier-suspected items (_X_HANDLE_INVALID/_normalize_x_handle, fp_matched) are all live. The `import uuid` in sites.py:3 is used by _generate_site_id; the `import uuid` in feed.py is used. Nothing to remove."
+      }
+    ]
+  },
+  {
+    "slice": "apps/api/routers/ (billing, crm, drafts, feature_requests, campaigns, segments, exports, costs, api_keys, known_contacts, engagement, privacy, unsubscribe, waitlist, webhooks, social_accounts, social_auth, ai, blog, auth)",
+    "hotspots": [
+      {
+        "file": "apps/api/routers/feature_requests.py",
+        "loc": "50-106",
+        "problem": "Two helper functions build large HTML email bodies via f-strings that interpolate raw user-supplied fields (req.title, req.detail, req.admin_note, req.email) directly into HTML. The HTML template is also a copy-pasted, hard-to-maintain blob inside the router. Beyond maintainability this is an HTML-injection vector (see design_bugs).",
+        "severity": "medium",
+        "refactor": "Extract the two email templates into apps/api/services/email_templates/ (or a Jinja2 template with autoescaping) and pass escaped values. Keeps the router thin and removes inline HTML.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/routers/drafts.py",
+        "loc": "42-65, 51",
+        "problem": "_draft_to_response does a function-local `from datetime import datetime, timezone` (line 51) inside a hot helper called per-draft in list loops; imports should be module-level. The helper also has loose typing and mixes presentation defaults with model mapping.",
+        "severity": "low",
+        "refactor": "Hoist the datetime import to the module top (it is also imported again ad hoc in _save_voice_example implicitly). Type the params/return precisely. No behavior change.",
+        "behavior_risk": "none",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/routers/api_keys.py",
+        "loc": "126-177",
+        "problem": "_test_key is a long if/elif ladder hardcoding per-provider URLs, headers, and accepted status codes (twitter accepts 200|403, PDL accepts 200|404). Adding a provider means editing this ladder; the accepted-status quirks are undocumented magic.",
+        "severity": "low",
+        "refactor": "Move per-provider test config into a dict/registry (url, header builder, acceptable_status set) and iterate; or push into the existing services/key_vault or a provider-probe service. Behavior preserved.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/routers/campaigns.py",
+        "loc": "31-199",
+        "problem": "The owned-site lookup pattern (select Site where site_id + user_id, 404 if none) is duplicated verbatim in 5 endpoints here and again across costs.py, segments.py, exports.py, crm.py, known_contacts.py, ai.py. Each copy is a place an ownership check could silently drift.",
+        "severity": "medium",
+        "refactor": "Provide a single shared dependency (e.g. dependencies.owned_site / get_owned_site) returning the Site, and use Depends across all site-scoped routers. Removes ~8 copies of the auth check.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/routers/billing.py",
+        "loc": "75-101",
+        "problem": "_resolve_variant_id and _variant_to_plan maintain the same (plan,interval)->variant mapping in two directions by hand; a config change to one without the other silently breaks reverse-mapping (plan would fall back to 'free').",
+        "severity": "low",
+        "refactor": "Derive both directions from one canonical mapping list/dict of (plan, interval, variant_id) tuples. Keeps the two lookups consistent by construction.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/routers/waitlist.py",
+        "loc": "161-301",
+        "problem": "approve/grant/reject/delete all repeat the same 'select WaitlistSignup by id, 404 if missing' boilerplate, and approve_waitlist inlines a large HTML invite email body. Long router with mixed concerns (status mutation + email composition).",
+        "severity": "low",
+        "refactor": "Extract a _get_signup_or_404 helper and move the invite-email HTML into the email-templates module (mirrors the feature_requests cleanup).",
+        "behavior_risk": "none",
+        "effort": "S"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dup",
+        "files": "apps/api/routers/costs.py:25-34, campaigns.py:37-41, segments.py:25-29, exports.py:30-34, known_contacts.py:58-65, crm.py:59-66, ai.py:134-142",
+        "detail": "The site-ownership lookup 'select(Site).where(Site.site_id==site_id, Site.user_id==user.id)' followed by a 404 is copy-pasted as _verify_site_access / _owned_site / inline in at least 7 places across the slice. Should be one shared FastAPI dependency."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/routers/social_auth.py:88-178 vs crm.py:164-218",
+        "detail": "Two OAuth callback handlers (social platforms and CRM) duplicate the same structure: validate_oauth_state -> error redirect, exchange_code in try/except -> error redirect, upsert connection/account, success redirect. The state-validation + redirect-on-error scaffolding could be a shared helper."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/routers/social_auth.py:37-44 vs auth.py:56-58 (and social_accounts via UserResponse)",
+        "detail": "Two separate GET '/me' endpoints exist: /api/v1/social/me (social_auth.py, returns id/email/tone_preference) and /api/v1/auth/me (auth.py, returns full UserOut). Overlapping surfaces returning different shapes of the same current user; one is likely redundant."
+      },
+      {
+        "kind": "dead",
+        "files": "apps/api/services/link_decorator.py:72-87",
+        "detail": "generate_unsubscribe_token / decode_unsubscribe_token are thin pass-throughs to generate_bid / decode_bid with identical behavior (same Fernet key, no ttl). The separate names imply distinct signing/expiry semantics that don't exist — they add an indirection layer with no behavioral difference."
+      }
+    ]
+  },
+  {
+    "slice": "apps/api security-critical core: config, main, dependencies (auth), and services (bot_filter, redis_client, clickhouse_client, rate_limiter, email_rate_limiter, usage_limits, usage_logger, key_vault, encryption, pii, pii_crypto, pii_encryption_hooks, geoip, url_guard, oauth_state, auth)",
+    "hotspots": [
+      {
+        "file": "/Users/apple/Downloads/retargeting user/apps/api/dependencies.py",
+        "loc": "195-361",
+        "problem": "get_current_user is a 167-line function carrying three distinct auth strategies (Clerk verify, Clerk auto-create/relink/backfill, legacy HS256) plus side effects (welcome email, invite gating, self-heal email backfill) inline, with deeply nested try/except and a control-flow fall-through between Clerk and legacy. The nesting (try -> if user is None -> if user -> else -> if invite_only) and the multiple `global _clerk_jwks` mutations make the success/failure paths hard to follow and easy to break.",
+        "severity": "medium",
+        "refactor": "Extract three helpers: _authenticate_clerk(token, db) -> User|None, _get_or_create_clerk_user(payload, db) -> User, and _authenticate_legacy(token, db) -> User. Keep get_current_user as a thin dispatcher: try Clerk, then legacy. Move welcome-email and email-backfill into the get-or-create helper. No behavior change if the branch order is preserved.",
+        "behavior_risk": "medium",
+        "effort": "M"
+      },
+      {
+        "file": "/Users/apple/Downloads/retargeting user/apps/api/config.py",
+        "loc": "1-239",
+        "problem": "Settings is a single 200+ field god-class mixing auth, 6 billing providers, ~10 OAuth providers, OSINT, CRM, enrichment waterfall, and feature flags. The two validation methods sit at the top (lines 8-43) before the fields they reference are even declared (jwt_secret at 68, encryption_key at 171), so the class reads as two disjoint halves. validate_production references jwt_secret which is dead (see design bug).",
+        "severity": "low",
+        "refactor": "Group settings into nested pydantic sub-models (AuthSettings, BillingSettings, OAuthSettings, OsintSettings) or at least move validate_production/validate_secret_key to the bottom after all fields. Drop the dead jwt_secret branch. Behavior-preserving if field names/env mapping are kept.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "/Users/apple/Downloads/retargeting user/apps/api/main.py",
+        "loc": "84-101",
+        "problem": "CORS allowed origins are a hardcoded literal list of Vercel/getbeam URLs embedded in app wiring, duplicating settings.cors_origins which exists in config.py:233 but is never read here. Two sources of truth for allowed origins; adding a new frontend domain means editing source, not env.",
+        "severity": "low",
+        "refactor": "Build _cors_origins from settings.cors_origins (comma-split) unioned with settings.frontend_url, drop the hardcoded vercel/getbeam literals into env defaults. Keeps allow_credentials=True semantics. Verify the deployed CORS_ORIGINS env lists every needed origin before removing literals.",
+        "behavior_risk": "medium",
+        "effort": "S"
+      },
+      {
+        "file": "/Users/apple/Downloads/retargeting user/apps/api/services/usage_limits.py",
+        "loc": "92-157",
+        "problem": "check_identify_budget / check_enrich_budget / check_osint_budget are near-identical copy-paste: each does byok = is_full_byok(...); used = get_X_usage(...); limit = ...; then the same 'if byok return uncapped else return allowed<limit' dict assembly. Three copies of the same shape with one differing usage-getter and limit.",
+        "severity": "low",
+        "refactor": "Introduce a single _build_budget(byok, used, limit) -> dict helper returning the standard {allowed, used, limit, is_byok} dict, and have the three checkers call it. Pure de-dup, no behavior change.",
+        "behavior_risk": "none",
+        "effort": "S"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dead",
+        "files": "/Users/apple/Downloads/retargeting user/apps/api/config.py:68 (jwt_secret field) and 22-26 (its validation)",
+        "detail": "jwt_secret is never used to sign or verify any token. create_access_token (auth.py:29) and the legacy decode path (dependencies.py:338) both use app_secret_key. social_auth.py:6-7 documents that the only producer of jwt_secret-signed tokens was deleted. The field and its production-validation branch are dead."
+      },
+      {
+        "kind": "dead",
+        "files": "/Users/apple/Downloads/retargeting user/apps/api/config.py:41-43 (validate_secret_key)",
+        "detail": "validate_secret_key is a pure alias for validate_production kept 'for backward compatibility'; the only live caller is main.py:47 which could call validate_production directly. Harmless but redundant indirection."
+      },
+      {
+        "kind": "dead",
+        "files": "/Users/apple/Downloads/retargeting user/apps/api/config.py:233 (cors_origins setting)",
+        "detail": "settings.cors_origins is defined but main.py builds its CORS allow-list from a hardcoded literal list (main.py:84-92) and never reads settings.cors_origins. The setting is effectively dead config — changing CORS_ORIGINS env has no effect on the running CORS middleware."
+      },
+      {
+        "kind": "dup",
+        "files": "/Users/apple/Downloads/retargeting user/apps/api/services/usage_limits.py:116-157 and 196-216",
+        "detail": "check_identify_budget, check_enrich_budget, and check_osint_budget share an identical byok/used/limit -> {allowed,used,limit,is_byok} dict-assembly body; only the usage-getter and limit source differ. Three copies of the same shape."
+      },
+      {
+        "kind": "dup",
+        "files": "/Users/apple/Downloads/retargeting user/apps/api/services/key_vault.py:13-23 and /Users/apple/Downloads/retargeting user/apps/api/services/encryption.py:25-39 and /Users/apple/Downloads/retargeting user/apps/api/services/pii_crypto.py:40-53",
+        "detail": "Three separate lazy Fernet-singleton initializers (_get_fernet) with the same global-cache + key.encode() + try/except shape, differing only in which settings key they read and whether a missing key raises (key_vault) vs returns None (encryption, pii_crypto). Could share a build_fernet(key, strict: bool) helper."
+      }
+    ]
+  },
+  {
+    "slice": "Outbound side-effects: CRM connectors (HubSpot/Pipedrive/Salesforce/generic webhook), crm_push, crm_rate_limiter, email_sender, email_validator, campaign_sender, sender, suppression, shopify_integration, billing, api_pricing, link_decorator, engagement_tracker, hot_alert.",
+    "hotspots": [
+      {
+        "file": "apps/api/services/email_validator.py",
+        "loc": "20-90",
+        "problem": "A ~250-entry disposable-domain blocklist is hardcoded as a module-level Python set literal spanning 70 lines. It is a stale, hand-maintained snapshot embedded in source; updating it is a code change + redeploy, and it bloats the file that otherwise holds the validation logic.",
+        "severity": "low",
+        "refactor": "Move _DISPOSABLE_DOMAINS into a data file (e.g. disposable_domains.txt) loaded once at import, or pull from a maintained package. Keeps validate_email() readable and lets the list be updated without touching logic.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/services/crm/base.py",
+        "loc": "112-133",
+        "problem": "test_connection / upsert_contacts use a single keyword-only signature carrying access_token, webhook_url, secret, instance_url for ALL providers. Each connector ignores the args it doesn't need (HubSpot ignores instance_url; webhook ignores access_token). This is a leaky abstraction: the union-of-all-credentials shape forces every implementation to re-declare 4 unused params and obscures which credential each provider actually requires.",
+        "severity": "low",
+        "refactor": "Pass a small per-call credential object/dataclass (e.g. ConnCreds with provider-relevant fields) or split the OAuth vs webhook contracts into two protocols. Removes the repeated 4-arg boilerplate in all 4 connectors.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/crm/pipedrive.py",
+        "loc": "183-214",
+        "problem": "The upsert_contacts body (semaphore + inner _one + asyncio.gather + result tallying) is duplicated almost verbatim with salesforce.py:183-223 — only the per-contact search/create calls differ. Same pushed/failed/errors-dedup tail appears in both.",
+        "severity": "medium",
+        "refactor": "Extract a shared helper in base.py, e.g. _push_per_contact(contacts, push_one_coro_factory) that owns the Semaphore(PUSH_CONCURRENCY), gather, and PushResult assembly; each connector supplies only the per-contact upsert coroutine.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/sender.py",
+        "loc": "44-81, 130-153",
+        "problem": "_refresh_if_expired and send_draft both repeat the same exception-detail-extraction block (str(exc); if hasattr(exc,'response'): error_detail = f'HTTP {status}: {text}'). The 'unknown expiry -> log but fall through to the expired-token branch' control flow in _refresh_if_expired is also subtle: the early 'if not account.token_expires_at:' block only logs, then falls into the refresh path, which reads as if it might skip refresh.",
+        "severity": "low",
+        "refactor": "Extract a _format_http_exc(exc) helper for the duplicated detail block. Add a comment or restructure the unknown-expiry branch so the fall-through to refresh is explicit.",
+        "behavior_risk": "low",
+        "effort": "S"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dup",
+        "files": "apps/api/services/crm/pipedrive.py:183-214 and apps/api/services/crm/salesforce.py:183-223",
+        "detail": "Near-identical per-contact concurrent-upsert scaffolding: Semaphore(PUSH_CONCURRENCY), inner _one() try/except returning (ok,msg), asyncio.gather, and the pushed/failed/errors-dedup tail. Only the search-id + create-or-update calls differ. Should be one shared helper in base.py."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/sender.py:69-73 and 139-144",
+        "detail": "The 'if hasattr(exc,\"response\"): error_detail = f\"HTTP {exc.response.status_code}: {exc.response.text}\"' exception-detail block is copy-pasted in _refresh_if_expired and send_draft."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/crm_rate_limiter.py:19-39 and apps/api/services/email_rate_limiter.py:19-41",
+        "detail": "check_and_reserve_push and check_and_reserve_email are the same Redis incr/expire/decr fail-open hourly-cap algorithm with different key prefixes and cap settings. Could be one parameterized _reserve_hourly(prefix, site_id, cap) helper. (Both intentionally fail-open; behavior identical.)"
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/link_decorator.py:72-87",
+        "detail": "generate_unsubscribe_token / decode_unsubscribe_token are thin pass-throughs to generate_bid / decode_bid (same Fernet, same key, no added signing scope). Not dead, but the unsubscribe token and the UTM _bid token are cryptographically the same token — a leaked _bid in a tracked link IS a valid unsubscribe token for that email. Worth noting as a design smell rather than separate functions."
+      }
+    ]
+  },
+  {
+    "slice": "apps/api/services/: ai_reply.py, gemini_client.py, auto_drafter.py, blog_service.py, blog_storage.py, wordpress_plugin_generator.py, csv_exporter.py, kpi.py (AI + content)",
+    "hotspots": [
+      {
+        "file": "apps/api/services/ai_reply.py",
+        "loc": "297-384",
+        "problem": "generate_draft() is an 88-line function mixing 5 concerns: input sanitization, system-prompt assembly, voice-context fetch, user-prompt assembly, key resolution, and the API call + truncation. The prompt-building portion (lines 331-368) is the bulk and is independently testable but tangled into the network path.",
+        "severity": "low",
+        "refactor": "Extract a pure `_build_prompts(platform, safe_content, safe_author, safe_tone, voice_context, strategy, context) -> tuple[str, str]` helper that returns (system_prompt, user_prompt). generate_draft then becomes: sanitize -> fetch voice -> build prompts -> resolve key -> call. Makes prompt shape unit-testable without HTTP.",
+        "behavior_risk": "none",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/services/ai_reply.py",
+        "loc": "134-256",
+        "problem": "Five near-identical DB-helper coroutines (_fetch_voice_examples, _count_voice_examples, _get_preferred_strategy, _get_generation_count) each repeat the same `if not db or not user_id: return ...` guard, the same `from apps.api.models... import` lazy import, and the same bare `except Exception: return <empty>` swallow. Copy-paste with divergent error handling (some log, some silent).",
+        "severity": "low",
+        "refactor": "Collapse the guard + try/except into a small decorator or a single `_safe_count(db, user_id, stmt)` helper; move the model imports to module top (they are local app models, no cycle risk worth the per-call import). Standardize whether failures log.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/csv_exporter.py",
+        "loc": "21-75",
+        "problem": "_get_segment_visitors runs an N+1 query pattern: one query for members, then per-member a query for IdentifiedVisitor AND a query for EnrichmentProfile plus a per-member suppression check (is_email_suppressed). A 5,000-member segment = ~15,000 sequential awaits. This is the shared path for all 3 CSV exporters AND crm_push.",
+        "severity": "medium",
+        "refactor": "Replace the per-member loop with two bulk queries: join SegmentMember -> IdentifiedVisitor filtered by do_not_email, and a single IN-query for EnrichmentProfile keyed by (site_id, visitor_id); batch the suppression check into one query over the collected email hashes. Build dicts in memory.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/services/ai_reply.py",
+        "loc": "532-572",
+        "problem": "_mock_draft (40 lines of strategy/tone mock tables) is fully dead — never imported or called. The comment at line 370 ('user BYOK -> app default -> mock') implies a mock fallback path that does not exist; generate_draft raises RuntimeError at 374 instead. Misleading dead code.",
+        "severity": "low",
+        "refactor": "Delete _mock_draft and the strategy/tone mock dicts; fix the line-370 comment to '-> raise'. auto_drafter has its own live _mock_draft, so nothing depends on this one.",
+        "behavior_risk": "none",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/services/kpi.py",
+        "loc": "42-86",
+        "problem": "compute_kpis fires 8 sequential `await count(...)` round-trips (visitors, identified, enriched, high_intent, acted, acted_high, sent) each as its own DB execute. Same serial-COUNT anti-pattern the memory notes was already fixed once in visitors.py:96. At low scale it's fine, but it's the documented slow pattern repeated.",
+        "severity": "low",
+        "refactor": "Combine the 4 base counts into a single SELECT with FILTER (conditional aggregation) over Visitor, and the 3 draft counts into one grouped query. Cuts 8 trips to 2.",
+        "behavior_risk": "low",
+        "effort": "M"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dead",
+        "files": "apps/api/services/ai_reply.py:532-572",
+        "detail": "_mock_draft and its _strategy_mocks/tone_fallback tables are never imported or invoked anywhere in the codebase (grep confirms only the def + the misleading line-370 comment reference it). generate_draft raises RuntimeError instead of using it. auto_drafter.py has its own separate, live _mock_draft."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/ai_reply.py:26-32 vs apps/api/services/auto_drafter.py:39-45",
+        "detail": "CHAR_LIMITS / _CHAR_LIMITS — the identical per-platform character-limit dict (twitter 280, linkedin 3000, instagram 2200, tiktok 150, facebook 8000) is defined twice. Should live in one place (e.g. on the Platform enum or a shared constants module) so the two never drift."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/ai_reply.py:430-436 vs apps/api/routers/demo.py:604-628",
+        "detail": "OpenRouter call logic (endpoint URL, headers, chat-completions JSON body, response parsing) is reimplemented inline in demo.py's demo_generate_draft instead of reusing _call_openrouter. Two divergent OpenRouter clients (demo uses 8s timeout + a hardcoded claude model + no fallback chain; ai_reply uses 60s + free-model fallbacks). Drift risk on auth/header changes."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/services/ai_reply.py:134-256",
+        "detail": "_fetch_voice_examples / _count_voice_examples / _get_preferred_strategy / _get_generation_count repeat the same db/user_id guard, lazy model import, and broad try/except return-empty scaffolding four times with only the inner query differing."
+      }
+    ]
+  },
+  {
+    "slice": "apps/api/models/*.py (SQLAlchemy models) and apps/api/schemas/*.py (Pydantic schemas)",
+    "hotspots": [
+      {
+        "file": "apps/api/models/database.py:34-41",
+        "loc": "34-41",
+        "problem": "Base declares id (UUID), created_at, updated_at (both DateTime(timezone=True)), but almost every model REDECLARES all three. Visitor, Site, Company, Campaign, Segment, etc. redeclare created_at/updated_at as bare DateTime (naive, no timezone=True), silently shadowing Base's tz-aware columns. Same column name is naive in some tables and tz-aware in others. Reading the Base, you would wrongly assume all timestamps are tz-aware.",
+        "severity": "medium",
+        "refactor": "Either (a) make Base an abstract mixin nobody relies on and declare timestamps explicitly+consistently per model, or (b) standardize on DateTime(timezone=True) everywhere and delete the per-model redeclarations that match Base. Do NOT change column types on the live DB without a migration (see design_bug on naive datetime). For now, at minimum document that Base's columns are overridden and pick ONE timezone convention.",
+        "behavior_risk": "high",
+        "effort": "L"
+      },
+      {
+        "file": "apps/api/models/visitor.py:53-77",
+        "loc": "53-77",
+        "problem": "IdentifiedVisitor does NOT declare created_at/updated_at, so it inherits Base's tz-aware created_at + updated_at, AND additionally declares resolved_at (naive DateTime). Result: three timestamp columns with two different tz conventions on one table, and resolved_at duplicates the role of created_at. Confusing which one to query.",
+        "severity": "low",
+        "refactor": "Drop the redundant inherited columns or resolved_at — keep a single resolution timestamp. If resolved_at must stay distinct from row-insert time, make it DateTime(timezone=True) to match the inherited created_at and document the difference.",
+        "behavior_risk": "medium",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/models/visitor.py:29",
+        "loc": "29",
+        "problem": "pages_visited typed Mapped[dict] with default=list but is actually a JSON array (list[str]) everywhere it is read (schemas/visitors.py:17 declares list[str], visitor_aggregator._classify_funnel_stages takes list[str]). The Python type hint dict is wrong. Same pattern on segment.recommended_channels (Mapped[dict], default=list) and enrichment.twitter_recent_topics (Mapped[dict], default=list).",
+        "severity": "low",
+        "refactor": "Type these as Mapped[list[str]] (or Mapped[list]) to match reality. Pure annotation fix, no DB/behavior change.",
+        "behavior_risk": "none",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/models/event.py:14-43",
+        "loc": "14-43",
+        "problem": "Event uses legacy Column() style with bare class-level annotations (id: int = Column(...)) while every other model uses the modern Mapped[]/mapped_column() API. Inconsistent ORM style across the codebase; the `id: int` etc. annotations are not real Mapped[] typing and give no mypy benefit.",
+        "severity": "low",
+        "refactor": "Convert Event to Mapped[]/mapped_column() to match the rest of models/. Mechanical, but verify column nullability/defaults stay identical so no migration is generated.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/api/schemas/visitors.py:45-68",
+        "loc": "45-68",
+        "problem": "VisitorDetailOut subclasses VisitorOut and re-declares email and full_name (already defined identically on the parent at lines 28-29). Dead duplication; if the parent definition changes, these drift.",
+        "severity": "low",
+        "refactor": "Delete the redundant email/full_name redeclarations from VisitorDetailOut.",
+        "behavior_risk": "none",
+        "effort": "S"
+      },
+      {
+        "file": "apps/api/models/feature_request.py:15",
+        "loc": "15",
+        "problem": "FeatureRequest and FeatureRequestVote redeclare id (UUID) even though Base already provides an identical UUID id. Other models do the same (api_usage.py:31, beam_identity.py:31, etc.). Boilerplate redeclaration of an inherited column repeated ~20 times across the slice.",
+        "severity": "low",
+        "refactor": "Remove the redundant id redeclaration where it is byte-identical to Base.id, OR (cleaner) stop having Base declare concrete columns at all and declare id per-model on purpose. Pick one convention and apply repo-wide.",
+        "behavior_risk": "low",
+        "effort": "M"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dead",
+        "files": "apps/api/models/visitor.py:74-76, apps/api/models/beam_identity.py:38-40, apps/api/models/enrichment.py:39-42, apps/api/models/visitor_email.py:35-36",
+        "detail": "Phase-05 PII encryption columns (email_ciphertext, email_bidx, full_name_ciphertext, *_url_ciphertext) are declared on four models but every comment states 'added nullable, not yet read/written'. They are dead schema — populated nowhere, read nowhere — yet they add an index (email_bidx index=True) and imply encryption-at-rest is in force when the live path is still plaintext. Either finish the cutover or remove until the work is scheduled."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/schemas/auth.py:12-19 vs 44-47 (UserOut vs UserResponse); apps/api/schemas/auth.py:22-25 vs 39-41 (Token vs TokenResponse)",
+        "detail": "Two pairs of near-identical schemas. Token and TokenResponse are byte-identical (access_token + token_type='bearer'). UserOut and UserResponse are divergent user-output models. The 'EasyEngage social-auth schemas' block duplicates the core-auth block. Consolidate to one of each; the duplicates have already drifted (id type, missing is_admin)."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/schemas/visitors.py:28-29 vs 46-47",
+        "detail": "VisitorDetailOut re-declares email and full_name with the exact same type already inherited from VisitorOut. Redundant; delete from the subclass."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/api/schemas/blog.py:9-39 (BlogPostCreate vs BlogPostUpdate)",
+        "detail": "BlogPostCreate and BlogPostUpdate repeat the same ~11 SEO/content fields with the only difference being required-vs-optional title. Acceptable, but the field list is copy-pasted and will drift; consider a shared base with title overridden, or derive Update from Create."
+      }
+    ]
+  },
+  {
+    "slice": "apps/web/src/lib/ — frontend API client and static config (api.ts, blog-fetch.ts, platform-guides.ts, tour-steps.ts, utils.ts, admin-nav.ts)",
+    "hotspots": [
+      {
+        "file": "apps/web/src/lib/api.ts",
+        "loc": "1-1609 (whole file)",
+        "problem": "God-file: a 1033-line ApiClient class (lines 3-1033) plus ~570 lines of exported interfaces/types (1037-1609) live in one module. Every page imports `api` and pulls the entire surface; the file mixes transport (request/fetchWithRetry/backoff), auth token state, ~70 endpoint wrappers across 12 product areas (auth, sites, visitors, segments, campaigns, CRM, billing, blog, social/EasyEngage, waitlist, costs, AI), and all response typing. Editing one product area means scrolling a 1600-line file.",
+        "severity": "medium",
+        "refactor": "Split into a transport core (`api-client.ts`: ApiClient base with request/fetchWithRetry/backoff/token state) and per-domain method groups or a `types/` barrel. At minimum extract the type block (1037-1609) into `api-types.ts` and re-export. Keep the `api` singleton export stable so call sites don't change.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/web/src/lib/api.ts",
+        "loc": "946-1011",
+        "problem": "uploadImage (946-979) and uploadKnownContacts (982-1011) are near-identical copy-paste: same FormData build, same `send(token)` closure, same 401→getter→retry→re-send block, same error parsing. Only the URL and return type differ.",
+        "severity": "medium",
+        "refactor": "Extract a private `multipartRequest<T>(path, formData)` helper that owns the FormData send + 401 refresh-once + error parsing, and have both methods call it. Removes ~30 duplicated lines.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/web/src/lib/api.ts",
+        "loc": "282-354",
+        "problem": "listVisitors (282-320) and getVisitorCountries (326-354) duplicate the same URLSearchParams-building boilerplate for the shared filter set (identity_status, enrichment_status, visitor_type, known, *_from/*_to date bounds, min_intent). Any new shared filter must be added in two places and can silently drift.",
+        "severity": "low",
+        "refactor": "Extract a `buildVisitorFilterParams(params): URLSearchParams` helper; listVisitors adds page/page_size/country/sort_by on top. Single source of truth for the filter contract.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/web/src/lib/api.ts",
+        "loc": "27-35",
+        "problem": "getToken() is a getter with a hidden side effect: on the localStorage branch it mutates `this.token` (line 32). Calling a 'get' method writes instance state, which is surprising and makes the legacy/Clerk token precedence harder to reason about (clkToken preferred, else this.token, else lazily hydrated from localStorage and cached).",
+        "severity": "low",
+        "refactor": "Make getToken() pure (read localStorage without assigning), or rename to clarify it lazily-hydrates. Separate the legacy-token concern from the Clerk path entirely now that Clerk is primary.",
+        "behavior_risk": "medium",
+        "effort": "S"
+      },
+      {
+        "file": "apps/web/src/lib/api.ts",
+        "loc": "102-103, 975-976, 1007-1008",
+        "problem": "Error body is read as `const body = await res.json().catch(() => ({}))` then `.detail` is accessed. `res.json()` is typed `any`, so `body.detail` type-checks only because of the implicit-any escape hatch; there is no typed shape for the FastAPI error envelope. Three copies of this untyped access.",
+        "severity": "low",
+        "refactor": "Define `interface ApiErrorBody { detail?: string }`, type the catch as `Promise<ApiErrorBody>`, and centralize error extraction in one helper shared by request() and the two multipart methods.",
+        "behavior_risk": "low",
+        "effort": "S"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dup",
+        "files": "apps/web/src/lib/api.ts:946-979 vs 982-1011",
+        "detail": "uploadImage and uploadKnownContacts: near-identical multipart-send + 401-refresh-retry + error-parse blocks. ~30 lines duplicated; only URL and return type differ."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/web/src/lib/api.ts:302-319 vs 340-353",
+        "detail": "listVisitors and getVisitorCountries duplicate URLSearchParams construction for the shared visitor-filter set (identity_status, enrichment_status, visitor_type, known, first_seen_from/to, last_seen_from/to, min_intent)."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/web/src/lib/api.ts:11-43 / 78-99 / 962-972 / 995-1005 / 847-865 vs blog-fetch.ts:12",
+        "detail": "API_BASE default (`process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'`) is duplicated between api.ts:1 and blog-fetch.ts:12; the 401→fresh-Clerk-token→retry-once pattern is hand-copied in 4 places (request, uploadImage, uploadKnownContacts) while consumeInvite reimplements bare fetch without it. A shared constant + shared authed-fetch helper would remove the drift."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/web/src/lib/api.ts:103, 976, 1008",
+        "detail": "`throw new Error(body.detail || \\`...failed: ${res.status}\\`)` error-body parsing is copied in 3 places, each reading `.detail` off an untyped `{}`."
+      }
+    ]
+  },
+  {
+    "slice": "apps/web/src/app/dashboard/: visitors/page.tsx, visitors/[visitorId]/page.tsx, settings/page.tsx, onboarding/page.tsx, layout.tsx, page.tsx, costs/page.tsx",
+    "hotspots": [
+      {
+        "file": "apps/web/src/app/dashboard/visitors/[visitorId]/page.tsx",
+        "loc": "37-689 (whole component); polling 62-92; deep-research renderer 461-472; profile cards 478-686",
+        "problem": "God-component (~650 lines) doing data fetching, a hand-rolled 120s polling loop, a markdown mini-parser, and 4 large profile/OSINT cards inline. It is the only page in the slice that fetches with raw useState/useEffect instead of react-query (every other page uses useQuery), so it has no caching, no auto-retry-on-token, and bespoke loading/error handling. The inline markdown parser (split('\\n') -> manual h3/h4/li/p) and the duplicated profile-row rendering between Social Profiles and OSINT cards make this the hardest file to change safely.",
+        "severity": "medium",
+        "refactor": "Split into <VisitorBehaviorCard/>, <IdentityCard/>, <EnrichmentCard/>, <SocialProfilesCard/>, <OsintAccountsCard/> and a <DeepResearchMarkdown/> component. Move getVisitor to useQuery (matches the rest of the dashboard, gets the 401-retry path for free). Extract the polling into a useSocialResolution hook. Reuse renderProfileRow for the OSINT profiles list (currently re-implemented at 604-638).",
+        "behavior_risk": "low",
+        "effort": "L"
+      },
+      {
+        "file": "apps/web/src/app/dashboard/visitors/page.tsx",
+        "loc": "60-610; render helpers 231-280; filter bar JSX 338-447",
+        "problem": "610-line page mixing filter state (10 useState), faceted-query construction, two mutations, and a large inline filter bar + table. Filter UI copy is mixed VN/EN (dateWarning is Vietnamese at 102-104, empty-state at 469-473, but column headers/labels are English) which conflicts with the 'Beam UI = English only' convention in user memory.",
+        "severity": "low",
+        "refactor": "Extract <VisitorFilterBar/> (the date/country/type/known controls + dateWarning), a useVisitorFilters() hook returning facetParams + handlers, and <VisitorRow/>. Move the VN strings to English to match the documented English-only UI rule.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/web/src/app/dashboard/onboarding/page.tsx",
+        "loc": "81-582 (OnboardingFlow); 99 setInterval",
+        "problem": "Single 500-line flow component holding 18 useState fields and all four step bodies inline (create/install/done/plan). The 'done' step inlines an IIFE that groups signals by category (406-437). Naming smell: `const [interval, setInterval]` shadows the global window.setInterval (harmless here since timers aren't used, but a foot-gun if anyone later adds a timer in this file).",
+        "severity": "low",
+        "refactor": "Split each step into its own component (<CreateSiteStep/>, <InstallStep/>, <DetectionPreviewStep/>, <PlanStep/>). Rename the billing-interval state to billingInterval/setBillingInterval to avoid shadowing window.setInterval.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/web/src/app/dashboard/page.tsx",
+        "loc": "256-259",
+        "problem": "`const handleSites = useState(() => (s: Site[]) => {...})[0];` uses useState purely to memoize a stable callback. This is an obscure idiom (lazy-init useState, discard the setter) that reads as a bug. useCallback is the intended tool.",
+        "severity": "low",
+        "refactor": "Replace with `const handleSites = useCallback((s: Site[]) => { setSites(s); setLoaded(true); }, []);`",
+        "behavior_risk": "none",
+        "effort": "S"
+      },
+      {
+        "file": "apps/web/src/app/dashboard/settings/page.tsx",
+        "loc": "74-697; API-keys block 240-358; Leaving-Beam card 512-589; two dialogs 591-692",
+        "problem": "697-line page with two unrelated concerns (account-level API keys/BYOK + per-site settings/offboarding) and two inline Dialogs. The API-keys section (~120 lines incl. PROVIDERS) is logically separate from site settings and could be its own component/route.",
+        "severity": "low",
+        "refactor": "Extract <ApiKeysCard/> (owns apiKeys state, add/delete handlers, PROVIDERS), <LeavingBeamCard/>, and the two dialogs into <RemovePixelDialog/> / <CancelPlanDialog/>.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/web/src/app/dashboard/layout.tsx",
+        "loc": "ClerkAuthGuard 167-212, ClerkTokenGate 223-254, SidebarBody 261-370, DashboardLayout 372-518",
+        "problem": "Layout file bundles 6 components incl. two near-identical Clerk auth/token effects and a 250-line layout with onboarding-vs-normal branches that each re-render the same ClerkTokenGate/ClerkAuthGuard wiring (433/447 vs 456/505). Moderately tangled but each piece is individually clear.",
+        "severity": "low",
+        "refactor": "Move ClerkAuthGuard/ClerkTokenGate/ClerkSignOutButton/LegacySignOutButton into a clerk-guards module. Factor the shared `<main>{HAS_CLERK ? <ClerkTokenGate> : children}</main>` into one helper so onboarding and normal layouts don't duplicate the gate decision.",
+        "behavior_risk": "low",
+        "effort": "M"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dup",
+        "files": "apps/web/src/app/dashboard/visitors/[visitorId]/page.tsx",
+        "detail": "Profile-row rendering is duplicated: renderProfileRow (124-163) for the Social Profiles card vs a near-identical inline block for OSINT profiles (604-638) — both compute `username = extra?.username || extra?.name`, render a url/site_name link + badge. Consolidate to one helper."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/web/src/app/dashboard/visitors/[visitorId]/page.tsx",
+        "detail": "The resolveResult/resolution message banner with identical status->color logic is rendered twice: Enrichment card (353-367) and Social Profiles card (485-499). Same conditional className tree copy-pasted."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/web/src/app/dashboard/layout.tsx",
+        "detail": "ClerkAuthGuard (172-180) and ClerkTokenGate (227-239) both reimplement the same 'wait for isLoaded, then branch on isSignedIn' effect with the same dashboard<->sign-in-loop guarding comment. The isLoaded/isSignedIn gating could be a shared hook."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/web/src/app/dashboard/onboarding/page.tsx, apps/web/src/app/dashboard/page.tsx, apps/web/src/app/dashboard/settings/page.tsx",
+        "detail": "The green check-circle SVG (path d='M5 13l4 4L19 7') is hand-inlined many times across onboarding (225-237, 359-361, 422-424, 539-551) and elsewhere instead of using the lucide CheckCircle2 already imported in settings (line 9). Same checkmark path repeated ~5x in onboarding alone."
+      },
+      {
+        "kind": "dead",
+        "files": "apps/web/src/app/dashboard/onboarding/page.tsx",
+        "detail": "currentIndex (206-208) computes `steps.findIndex(s => s.key === step || (step === 'done' && s.key === 'done'))` — the second clause `step === 'done' && s.key === 'done'` is redundant with the first clause `s.key === step` (when step==='done' the first clause already matches s.key==='done'). Dead/no-op sub-condition."
+      }
+    ]
+  },
+  {
+    "slice": "apps/web/src/app/dashboard: billing, feed, connectors, campaigns, segments, exports, drafts, feature-requests, feature-board, social-accounts, waitlist, admin, blog (+ shared layout.tsx, crm-connect-panel.tsx, api.ts auth path read for context)",
+    "hotspots": [
+      {
+        "file": "apps/web/src/app/dashboard/feature-requests/page.tsx",
+        "loc": "52-114",
+        "problem": "This admin page is the ONLY data-driven page in the slice that hand-rolls useState/useEffect/useCallback fetching (loading/error/data triple, manual fetchRequests). Every other page (campaigns, segments, drafts, feed, feature-board, blog, social-accounts, waitlist) uses react-query with shared skeletons. The bespoke pattern duplicates loading/error wiring and diverges from the codebase convention (per MEMORY: react-query adopted repo-wide on 2026-06-13).",
+        "severity": "low",
+        "refactor": "Convert to useQuery(['feature-requests', filter], () => api.listFeatureRequests(...)) and a useMutation for status/note updates with optimistic or invalidate-on-success, matching feature-board/blog. Removes the manual setLoading/setError/setRequests bookkeeping.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/web/src/app/dashboard/billing/page.tsx",
+        "loc": "98-119",
+        "problem": "billing is the only page in the slice that manually re-implements the ClerkTokenGate handshake (wait for isLoaded/isSignedIn, getToken, api.setClerkToken) inside a useEffect, even though the dashboard layout already wraps all children in <ClerkTokenGate> which guarantees the token is set before children render. This is duplicated token-priming logic and a leftover from before the layout-level gate (P6 in MEMORY).",
+        "severity": "low",
+        "refactor": "Drop the getToken/setClerkToken priming and fetch billing with react-query (or a plain effect) trusting the layout gate; keeps one source of truth for token readiness. Verify the gate covers /dashboard/billing (it wraps every dashboard child) before removing.",
+        "behavior_risk": "medium",
+        "effort": "S"
+      },
+      {
+        "file": "apps/web/src/app/dashboard/feed/page.tsx",
+        "loc": "32-210",
+        "problem": "FeedPage is a ~380-line god-component holding 11 useState slices plus 7 handler functions (generate/approve/reject/edit/dismiss drafts, import, platform detect). Draft-orchestration state (draftData map, generatingFor, approvingDraft) and import state are unrelated concerns crammed into one component.",
+        "severity": "medium",
+        "refactor": "Extract a useFeedDrafts() hook owning draftData + generate/approve/reject/edit/dismiss, and an <ImportPostForm> component owning import state. The page then just wires query + renders. Cuts the file roughly in half and isolates the draft state machine.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/web/src/app/dashboard/feature-board/page.tsx",
+        "loc": "43-47, 110-131",
+        "problem": "Hardcoded hex/HSL color literals (bg-[hsl(345,100%,60%)], border-[rgba(43,37,48,0.12)], shadow-[...rgba(255,51,102,...)]) are inlined here, in feature-requests, blog, and waitlist. The repo has a semantic-token design system (per MEMORY dashboard-warm-design-system: 'no bg-white/hex, use tokens'). These pages violate that convention with copy-pasted brand-pink literals.",
+        "severity": "low",
+        "refactor": "Replace the raw hsl/rgba literals with the existing semantic tokens (primary / border / ring) so a future theme change doesn't miss these pages. Pure visual-token swap.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/web/src/app/dashboard/waitlist/page.tsx",
+        "loc": "22-38",
+        "problem": "Local StatusBadge re-implemented here with an inline color map; near-identical local StatusBadge components also exist in feature-board/page.tsx (18-26) and blog/page.tsx (18-29), and a shared <StatusBadge> from components/ui/status-badge already exists and is used in billing/campaigns/crm-connect-panel. Three divergent badge implementations for the same concept.",
+        "severity": "low",
+        "refactor": "Consolidate the per-domain status maps onto the shared ui/status-badge (it already accepts a tone), or a single thin wrapper. Removes 3 copies.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "apps/web/src/app/dashboard/connectors/page.tsx",
+        "loc": "61-70",
+        "problem": "Export-tab segments and known-contacts count are fetched with raw api.then().catch(()=>{}) into useState, while the sibling segments/campaigns pages fetch the same listSegments via react-query. Mixed data-fetching styles in the same feature; the silent .catch(()=>{}) also hides load failures from the user (segment dropdown just renders empty with no error).",
+        "severity": "low",
+        "refactor": "Move segment + known-count loading to useQuery keyed on siteId so caching is shared with the segments page and errors are surfacable. At minimum, set a visible error state instead of swallowing.",
+        "behavior_risk": "low",
+        "effort": "M"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dup",
+        "files": "apps/web/src/app/dashboard/waitlist/page.tsx:22-38, apps/web/src/app/dashboard/feature-board/page.tsx:18-26, apps/web/src/app/dashboard/blog/page.tsx:18-29",
+        "detail": "Three separate local StatusBadge components, each with its own inline color map, while a shared components/ui/status-badge (used in billing/campaigns/crm-connect-panel) already exists. Same concept implemented 3+ times."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/web/src/app/dashboard/feature-requests/page.tsx:18-28 and apps/web/src/app/dashboard/feature-board/page.tsx:12-16",
+        "detail": "URGENCY_LABEL map ({nice/useful/critical -> labels}) is duplicated verbatim in both feature pages (feature-requests also adds URGENCY_STYLE). Should live in one shared constant since both render the same landing-page urgency enum."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/web/src/app/dashboard/billing/page.tsx:72-78 vs 263-266 and 273-277",
+        "detail": "formatDate() helper exists (lines 72-78) but the same toLocaleDateString('en-US', {year,month,day}) call is inlined three more times (renews 263-266, trial 273-277) instead of reusing formatDate. Minor copy-paste of the date format."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/web/src/app/dashboard/feed/page.tsx:178-185 and ~189,275",
+        "detail": "detectPlatform(url) is the page's own platform-from-URL detector; the import flow calls it twice (handleImport line 189 and inline badge line 275 recomputes Detected: {detectPlatform(importUrl)} on every render). Re-derive once into a memo/var rather than calling twice."
+      }
+    ]
+  },
+  {
+    "slice": "apps/web/src/components/ (dashboard + blog + ui React components)",
+    "hotspots": [
+      {
+        "file": "/Users/apple/Downloads/retargeting user/apps/web/src/components/draft-picker.tsx",
+        "loc": "1-259 (esp. 60-142 single-draft and 144-258 multi-draft branches)",
+        "problem": "Two near-identical render trees (single-draft and multi-draft) duplicate the same edit textarea + Save/Cancel block, the Approve/Edit/Reject button row, the dismiss-X header, and inline hex brand colors. The edit-mode JSX at lines 86-108 and 196-218 is byte-for-byte the same except rows=3 vs rows=2. This file is the largest non-UI component and is entirely styled with raw hex (#FFF1F5, #FFCCD8, #FF3366, #E51F50, #FF5C82, #8F0F30, #FFE3EA) instead of the semantic tokens the rest of the slice uses (status-badge, kpi-strip, etc.).",
+        "severity": "medium",
+        "refactor": "Extract a single <DraftEditor> (textarea + Save/Cancel) and a <DraftActions> (Approve/Edit/Reject) subcomponent reused by both branches; map the hardcoded pinks to the design tokens (primary / primary-muted / destructive) already defined for the warm theme. Drives ~80 lines out and makes the brand-color refresh a one-line change.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "/Users/apple/Downloads/retargeting user/apps/web/src/components/today-actions.tsx",
+        "loc": "64-113 computeActions",
+        "problem": "computeActions fans out 2 requests per site (getVisitorStats + listCampaigns) in a Promise.all over sites, then sums client-side. For a user with many sites this is an N+1 of network round-trips on every dashboard home load. The whole to-do list is also recomputed/refetched whenever the sites array identity changes, and the per-site visitor-stats are cached via react-query but campaigns are fetched raw each time.",
+        "severity": "medium",
+        "refactor": "Add a single backend aggregate endpoint (e.g. /dashboard/today-actions) that returns the summed counts, or at minimum route listCampaigns through qc.fetchQuery like getVisitorStats so repeated visits hit cache. Keeps the per-site loop off the hot path.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "/Users/apple/Downloads/retargeting user/apps/web/src/components/today-actions.tsx",
+        "loc": "115-244 TodayActions",
+        "problem": "The dismiss/leave animation is driven by 4 interacting useState/useRef (leavePhase, cuReady, caughtUpToday, plus useIgnored) and 3 chained useEffects with magic timeouts (1600ms linger, 550ms 'match duration-500'). Control flow is hard to follow and the early-return guards at 178-180 partly duplicate the showEmpty logic. Brittle: changing the CSS duration silently desyncs the 550ms timer.",
+        "severity": "low",
+        "refactor": "Collapse the leave choreography into a single state machine (e.g. useReducer with 'idle'|'leaving'|'gone') keyed off showEmpty, and read the timeout from a named constant shared with the className duration. Or use onTransitionEnd instead of a hand-tuned setTimeout.",
+        "behavior_risk": "medium",
+        "effort": "M"
+      },
+      {
+        "file": "/Users/apple/Downloads/retargeting user/apps/web/src/components/traffic-fit-card.tsx",
+        "loc": "86-124 (stacked bar) vs browser-capture-card.tsx 148-170",
+        "problem": "TrafficFitCard and BrowserCaptureCard duplicate the entire 100%-stacked-bar-with-hover-tooltip pattern: same flex h-8 row, same group/relative segment with min-w-[3px], same border-r border-background/60, same pointer-events-none absolute tooltip, plus a near-identical color-palette-by-index helper (geoColor vs colorFor with parallel GEO_PALETTE / FALLBACK_COLORS arrays). Also both share the identical card-shell loading/empty/error scaffold (lines 67-80 vs 93-106).",
+        "severity": "medium",
+        "refactor": "Extract a <StackedShareBar segments={[{label,share,color,detail}]}/> component and a <WidgetCardShell title loading error empty> wrapper; both cards become thin data-mappers. Removes ~60 duplicated lines and one of the two divergent palette helpers.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "/Users/apple/Downloads/retargeting user/apps/web/src/components/pixel-install-guide.tsx",
+        "loc": "PLATFORM_COLORS 24-31; uninstall-guide REMOVAL_GUIDES 38-91",
+        "problem": "Two parallel platform tables drift apart. pixel-install-guide's PLATFORM_COLORS uses dark-mode-only utilities (bg-green-900/30, text-green-400) plus a raw hex webflow entry (#8F0F30), while the rest of the dashboard uses semantic tokens; pixel-uninstall-guide redefines its own RemovalGuide shape and getRemovalGuide fallback that mirrors getGuide() from lib/platform-guides but is maintained separately. handleCopyPrompt is also duplicated (install vs uninstall) with only the prose differing.",
+        "severity": "low",
+        "refactor": "Move platform color classes to tokens (or a shared platform-meta module alongside lib/platform-guides), and lift the copy-to-clipboard-with-2s-checkmark logic (handleCopy/handleCopyPrompt + copied/promptCopied state, repeated in both guides) into a useCopyToClipboard hook.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "/Users/apple/Downloads/retargeting user/apps/web/src/components/crm-connect-panel.tsx",
+        "loc": "95-175 handlers; 60 state",
+        "problem": "Six near-identical async handlers (handleConnectOAuth/handleSaveWebhook/handleTest/handleDisconnect/handlePush) all repeat the setBusy/setMsg(null)/try/catch err instanceof Error/finally setBusy(null) boilerplate. The single 'busy' string is overloaded to mean 'this provider is busy' AND 'the generic_webhook form is busy' AND 'a push is running', so two actions on different providers can't be distinguished and the Push button disables on segments.length===0 silently.",
+        "severity": "low",
+        "refactor": "Wrap the shared try/catch/busy dance in a runAction(key, fn) helper that sets busy=key, clears msg, and normalizes the error message. Reduces each handler to its one meaningful line.",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "/Users/apple/Downloads/retargeting user/apps/web/src/components/pixel-install-guide.tsx",
+        "loc": "265-275",
+        "problem": "verifyResult is typed {status,message} but status is compared against the literals 'verified' (button) and rendered as success when 'verified' else warning — yet handleVerify sets status from result.status (server string) AND sets a synthetic 'error' status in the catch. The render at 268-271 only has two visual branches (green for verified, yellow for everything else), so a real 'error' status from the catch shows as a yellow warning, not a red error. Loose stringly-typed status with no discriminated union.",
+        "severity": "low",
+        "refactor": "Type verifyResult.status as a union 'verified'|'pending'|'error' and add the red branch so genuine failures read as errors not warnings.",
+        "behavior_risk": "low",
+        "effort": "S"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dup",
+        "files": "/Users/apple/Downloads/retargeting user/apps/web/src/components/traffic-fit-card.tsx + /Users/apple/Downloads/retargeting user/apps/web/src/components/browser-capture-card.tsx",
+        "detail": "The 100%-stacked-share-bar + group-hover tooltip markup, the color-by-index palette helper (geoColor/GEO_PALETTE vs colorFor/FALLBACK_COLORS+BROWSER_COLORS), the pct() helper, and the loading/empty/error card-shell scaffold are duplicated almost verbatim between the two widget cards. KpiStrip also re-declares its own pct() and card-shell."
+      },
+      {
+        "kind": "dup",
+        "files": "/Users/apple/Downloads/retargeting user/apps/web/src/components/pixel-install-guide.tsx + /Users/apple/Downloads/retargeting user/apps/web/src/components/pixel-uninstall-guide.tsx",
+        "detail": "The copy-to-clipboard-with-2s-checkmark pattern (copied/promptCopied state + handleCopy + handleCopyPrompt), the steps-as-numbered-cards render block (Card+circle index+title/description), the platform badge, and the snippet-in-a-<pre>-with-Copy-button block are duplicated across both guides with only prose differences."
+      },
+      {
+        "kind": "dup",
+        "files": "/Users/apple/Downloads/retargeting user/apps/web/src/components/draft-picker.tsx + /Users/apple/Downloads/retargeting user/apps/web/src/components/draft-card.tsx",
+        "detail": "Two separate components implement the same draft edit/approve/reject UX (edit textarea, Save/Cancel, Approve&Send/Edit/Reject buttons, edited_content || ai_content fallback). draft-picker also internally duplicates this block twice (single-draft vs multi-draft branches). A shared <DraftEditor>/<DraftActions> would serve all three."
+      },
+      {
+        "kind": "dup",
+        "files": "/Users/apple/Downloads/retargeting user/apps/web/src/components/crm-connect-panel.tsx",
+        "detail": "Provider-display normalization conn.provider.replace(/_/g,' ') is repeated 4x (lines 140, 211, 338, and via toneFor). Minor; a providerLabel(conn) helper would centralize it. Also pct()-style and busy-handler boilerplate repeats across 5 handlers."
+      },
+      {
+        "kind": "dead",
+        "files": "/Users/apple/Downloads/retargeting user/apps/web/src/components/ui/select.tsx",
+        "detail": "SelectGroup is exported (line 5/79) but not used by any reviewed consumer (crm-connect-panel and site-selector use only Select/Trigger/Value/Content/Item). Low-value note — it's a generic primitive intentionally kept for the shadcn API surface, so likely intentional rather than removable."
+      }
+    ]
+  },
+  {
+    "slice": "apps/web auth + marketing shell: layout.tsx, providers.tsx, page.tsx, middleware.ts, login/, sign-in/, sign-up/, signup/, onboarding/ (top-level), pricing/, blog/ (public)",
+    "hotspots": [
+      {
+        "file": "apps/web/src/app/pricing/page.tsx",
+        "loc": "90-119",
+        "problem": "handlePlanClick mixes three concerns (free routing, anon-vs-authed gate via api.getToken(), and Lemon Squeezy checkout) and silently swallows the createCheckout error into a redirect with empty catch. A signed-in user whose checkout call fails gets bounced to /dashboard/billing with no error surfaced — they will see no reason their click 'did nothing'.",
+        "severity": "low",
+        "refactor": "Extract a useCheckout() hook (or call into the shared api client) that returns {status, error}; show a toast/inline error on failure instead of a silent router.push fallback. Keep PLANS/FAQ as module constants (already good).",
+        "behavior_risk": "low",
+        "effort": "S"
+      },
+      {
+        "file": "apps/web/src/app/pricing/page.tsx",
+        "loc": "101-105",
+        "problem": "Public marketing page reads api.getToken() to branch on auth. In the Clerk world the legacy localStorage token is never set, so the only thing populating getToken() here is ClerkTokenSync running in the layout; if that hasn't synced yet on a fresh public-page load the authed user is treated as anonymous and sent to /signup instead of straight to checkout. Coupling a public page to the auth-client singleton is a leaky abstraction.",
+        "severity": "low",
+        "refactor": "Use Clerk's useAuth().isSignedIn (already the source of truth elsewhere, e.g. app/page.tsx) to decide signed-in vs anonymous rather than the token cache.",
+        "behavior_risk": "medium",
+        "effort": "S"
+      },
+      {
+        "file": "apps/web/src/app/sign-in/[[...sign-in]]/page.tsx",
+        "loc": "1-28",
+        "problem": "sign-in and sign-up pages are near-identical copy-paste: same HAS_CLERK guard, same 'temporarily unavailable' fallback card, same centering wrapper. Any change to the unconfigured-auth message must be made in two places (drift risk).",
+        "severity": "low",
+        "refactor": "Extract a shared <AuthShell unavailableNoun=\"Sign-in\">{children}</AuthShell> wrapper that owns the HAS_CLERK guard + fallback card; each page just supplies <SignIn/> or <SignUp/>.",
+        "behavior_risk": "low",
+        "effort": "S"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dead",
+        "files": "apps/web/src/app/page.tsx; apps/web/src/app/onboarding/page.tsx; apps/web/next.config.mjs (rewrites)",
+        "detail": "next.config.mjs declares beforeFiles rewrites: '/' → /beam/index.html and '/onboarding' → /beam/onboarding.html. beforeFiles rewrites resolve before App Router filesystem routing, so in production the App Router components app/page.tsx (ClerkHome/LegacyHome session-redirect logic) and app/onboarding/page.tsx (redirect to /beam/onboarding.html) are NEVER rendered for / or /onboarding — the static HTML is served instead. The ClerkHome '/dashboard vs /sign-in' redirect logic and its anti-bounce-loop comment are dead. The onboarding redirect is doubly redundant (the rewrite already points at the same static file). Confirmed by e2e: onboarding.spec.ts targets /dashboard/onboarding, never /onboarding."
+      },
+      {
+        "kind": "dead",
+        "files": "apps/web/src/app/login/page.tsx",
+        "detail": "Pure client-side redirect shim to /sign-in for 'any remaining links to /login'. The only remaining producer is middleware.ts geoRedirect (which could target /sign-in directly) plus the static landing's 'log in' link (public/beam/index.html:89 → /sign-in already, not /login). Once geoRedirect points at /sign-in, this file has no inbound links and can be deleted. Currently it only adds a redirect hop + loading flash."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/web/public/beam/index.html (pricing section, lines ~254-302) vs apps/web/src/app/pricing/page.tsx (PLANS, lines 17-65)",
+        "detail": "Pricing tiers and prices are hardcoded in two independent places: the static marketing landing's #pricing section ($0 / $19 / $49, '10 / 50 / unlimited identified visitors') and the React /pricing PLANS array (free 0, pro 19/15, max 49/39, same limits/features). A price or limit change must be edited in both or the two surfaces drift. No shared constant."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/web/src/app/sign-in/[[...sign-in]]/page.tsx vs apps/web/src/app/sign-up/[[...sign-up]]/page.tsx",
+        "detail": "The HAS_CLERK guard, the 'temporarily unavailable (authentication is not configured)' fallback card with the same hello@getbeam.fyi copy, and the centered min-h-screen wrapper are duplicated verbatim across both pages (~13 lines each). Same fallback message in two files = drift risk."
+      }
+    ]
+  },
+  {
+    "slice": "apps/pixel/src/tracker.js, apps/pixel/src/worker.js, infra/docker-compose.yml, Dockerfile, requirements.txt, pyproject.toml, railway.json, scripts/ (seed.py, seed_blog.py, create_beam_site.py, test.sh), apps/pixel/wrangler.toml, apps/api/requirements.txt",
+    "hotspots": [
+      {
+        "file": "/Users/apple/Downloads/retargeting user/apps/pixel/src/tracker.js",
+        "loc": "1-405 (whole file)",
+        "problem": "Pixel gzips to 5003 bytes (measured: gzip -c src/tracker.js | wc -c = 5003). CLAUDE.md mandates <5KB gzipped; the file is already 3 bytes over 5000 and any further feature pushes it past the documented budget. The file has grown to a god-pixel: fingerprinting (17 signals), engagement scoring, SPA nav interception, form capture, UTM identify, queue persistence, AND third-party vendor stacking all in one IIFE.",
+        "severity": "medium",
+        "refactor": "Trim to fit budget without losing function: (a) drop the webglFp() extension lookup or the canvasFp() — each fingerprint signal that needs try/catch adds disproportionate bytes; (b) collapse the 4 lsGet/lsSet/lsDel wrappers; (c) gate the identity-vendor stacking block (lines 383-404) behind a separately-loaded chunk since it is strictly opt-in and most installs never use it. Set up a CI check that fails when gzip size >= 5000 so this never silently regresses in prod.",
+        "behavior_risk": "low",
+        "effort": "M"
+      },
+      {
+        "file": "/Users/apple/Downloads/retargeting user/apps/pixel/src/tracker.js",
+        "loc": "143",
+        "problem": "Magic fingerprint signal `Math.tan(-1e300)` with no comment. This is a known FP-Collect engine-detection trick (V8 vs SpiderMonkey return different values), but to a maintainer it reads like dead/garbage code and is a prime candidate for accidental deletion.",
+        "severity": "low",
+        "refactor": "Add a one-line comment naming the technique and why (JS-engine discriminator), or extract to a named helper `engineTanFp()`. Zero behavior change.",
+        "behavior_risk": "none",
+        "effort": "S"
+      },
+      {
+        "file": "/Users/apple/Downloads/retargeting user/requirements.txt",
+        "loc": "1-57 vs apps/api/requirements.txt 1-34",
+        "problem": "Two divergent Python dependency manifests. Root requirements.txt (what the Dockerfile installs, per the comment at line 52-53) is MISSING packages that apps/api/requirements.txt pins: sendgrid, maxminddb, geoip2, pyjwt[crypto], pytest-httpx, pytest. Conversely root has anthropic/celery/apscheduler that overlap. Pins also differ (asyncpg==0.29.0 pinned in root vs >=0.29.0 floor in api). A reader cannot tell which file is authoritative, and CLAUDE.md memory explicitly warns 'All Python deps must be in requirements.txt for CI — don't play whack-a-mole'.",
+        "severity": "medium",
+        "refactor": "Make root requirements.txt the single source of truth and have apps/api/requirements.txt either be removed or do `-r ../../requirements.txt`. Reconcile the pin mismatches (asyncpg) in one pass. Verify against actual imports before deleting any line — this is prod-deploy-critical.",
+        "behavior_risk": "medium",
+        "effort": "M"
+      },
+      {
+        "file": "/Users/apple/Downloads/retargeting user/Dockerfile",
+        "loc": "5",
+        "problem": "Base image is python:3.11-slim-bookworm, but CLAUDE.md tech stack and pyproject context describe Python 3.12. The 3.11 pin is deliberate (Playwright/Bookworm comment) but undocumented as a stack deviation — a future reader 'fixing' the version to match docs would break the documented Playwright workaround.",
+        "severity": "low",
+        "refactor": "Add a single comment line noting the intentional 3.11 (not 3.12) choice and that it is independent of the Bookworm pin, or update CLAUDE.md to state 3.11. No code change.",
+        "behavior_risk": "none",
+        "effort": "S"
+      },
+      {
+        "file": "/Users/apple/Downloads/retargeting user/scripts/seed.py",
+        "loc": "21-28",
+        "problem": "11 wildcard star-imports (`from apps.api.models.X import *  # noqa: F401,F403`) used purely to register SQLAlchemy mappers for create_all. This leaks every symbol from each module into the seed namespace, defeats linting, and is fragile copy-paste that must be hand-maintained as models are added.",
+        "severity": "low",
+        "refactor": "Replace the model star-imports with a single explicit `import apps.api.models  # noqa: F401` if the models package __init__ imports all model modules (common pattern), or list the concrete class names. Removes 11 noqa lines and the namespace pollution.",
+        "behavior_risk": "low",
+        "effort": "S"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dead",
+        "files": "/Users/apple/Downloads/retargeting user/apps/pixel/src/worker.js + apps/pixel/wrangler.toml",
+        "detail": "The Cloudflare Worker pixel-serving path appears dead/non-functional in practice: worker.js references an unbound TRACKER_JS global (would 500), and prod actually serves the pixel from FastAPI at /pixel/tracker.js (apps/api/main.py:217, referenced by sites.py:186, shopify_integration.py:58, wordpress_plugin_generator.py:22). worker.js has not been touched since the initial commit (git log shows only 625c8ce). Either the Worker is abandoned (delete it + the wrangler [env.production] route) or it is silently broken and needs the TRACKER_JS binding."
+      },
+      {
+        "kind": "dead",
+        "files": "/Users/apple/Downloads/retargeting user/apps/pixel/wrangler.toml lines 5-6",
+        "detail": "[site] bucket = \"./src\" is inert: worker.js never reads from the static-assets KV binding it creates (404s all non-/t.js paths). Deprecated Workers Sites config that does nothing but upload tracker.js to KV on each deploy."
+      },
+      {
+        "kind": "dup",
+        "files": "/Users/apple/Downloads/retargeting user/requirements.txt vs /Users/apple/Downloads/retargeting user/apps/api/requirements.txt",
+        "detail": "Two overlapping-but-divergent dependency lists. ~20 packages appear in both with some pin differences (asyncpg==0.29.0 vs >=0.29.0), and each file has packages the other lacks (root lacks sendgrid/maxminddb/geoip2/pyjwt/pytest; api lacks resend-only-floor differences, celery, apscheduler, anthropic versions). The Dockerfile installs ONLY root requirements.txt (comment at root line 52-53 explicitly warns about this), so anything in apps/api/requirements.txt but not root is absent from the prod image. Consolidate to one source of truth."
+      },
+      {
+        "kind": "dup",
+        "files": "/Users/apple/Downloads/retargeting user/scripts/seed.py:9-31 and scripts/seed_blog.py:9-15",
+        "detail": "Both seed scripts repeat the same engine/Base/async_session bootstrap + create_all preamble and overlapping model-registration import blocks. Minor, but could share a tiny seed-bootstrap helper."
+      }
+    ]
+  },
+  {
+    "slice": "tests/ (root + unit + integration Python suites) and apps/web/e2e/ (Playwright specs) plus playwright.config.ts",
+    "hotspots": [
+      {
+        "file": "apps/web/e2e/visitors.spec.ts",
+        "loc": "10-14, 28-34, 37-47",
+        "problem": "Several tests assert essentially nothing about behavior. `loads visitors page` only checks the URL and `body not empty`; `has search or filter controls` (named after controls it never looks for) and `shows 404 or redirect for invalid visitor ID` just assert `textContent(body)` is truthy. A blank-but-non-empty error page passes. These are smoke tests masquerading as feature tests.",
+        "severity": "low",
+        "refactor": "Either assert the real artifact (an actual search input via a stable selector, the empty-state text, a real 404 marker) or delete the test. Rename `has search or filter controls` to match what it checks, or make it locate the control.",
+        "behavior_risk": "none",
+        "effort": "S"
+      },
+      {
+        "file": "apps/web/e2e/companies.spec.ts",
+        "loc": "33-43",
+        "problem": "Test name `companies list shows domain and intent score` but the body only asserts `Dashboard`/`Overview` is visible on /dashboard — it never navigates to a companies list, never checks a domain or an intent score. The name promises coverage that does not exist.",
+        "severity": "medium",
+        "refactor": "Rename to `dashboard renders` or implement the real assertion against the companies UI once it has a nav entry. As-is it gives false confidence that the companies surface is tested.",
+        "behavior_risk": "none",
+        "effort": "S"
+      },
+      {
+        "file": "tests/integration/test_suppression_list.py",
+        "loc": "23-33, and duplicated in test_crm_push.py:22-32, test_backlog_fixes.py:23-34",
+        "problem": "The `_signup`/`_auth` helper pair (signup-or-login, return token; build Bearer header) is copy-pasted verbatim across at least 3 integration files. Each copy independently hardcodes the password `testpass123` and the same fallback-login logic.",
+        "severity": "low",
+        "refactor": "Lift `_signup`/`_auth` into a shared fixture or helper module (e.g. tests/integration/conftest.py) and import. Single source for the legacy-auth bootstrap.",
+        "behavior_risk": "none",
+        "effort": "S"
+      },
+      {
+        "file": "tests/unit/test_resolution_sweep.py",
+        "loc": "18-21",
+        "problem": "Module-level `import apps.api.main` solely to force all ORM mappers to register is repeated as a load-bearing side-effect import across multiple unit-test files (also in conftest test_engine:66). The reason lives only in comments; a reorder or lint autofix that drops the 'unused' import silently breaks mapper config in whichever test touches the ORM first.",
+        "severity": "low",
+        "refactor": "Centralize model registration in a single imported fixture/helper (e.g. `from tests.support import register_all_models`) so the dependency is explicit and not a comment-protected bare import.",
+        "behavior_risk": "low",
+        "effort": "M"
+      }
+    ],
+    "dead_or_dup": [
+      {
+        "kind": "dead",
+        "files": "tests/conftest.py:138-154",
+        "detail": "`auth_token` fixture is never referenced by any test (verified by grep across tests/). It is also wrong: signs with settings.jwt_secret while the app verifies with settings.app_secret_key. Remove or fix."
+      },
+      {
+        "kind": "dup",
+        "files": "tests/integration/test_suppression_list.py:23-37, tests/integration/test_crm_push.py:22-36, tests/integration/test_backlog_fixes.py:23-39",
+        "detail": "`_signup` (signup-or-login → token) and `_auth` (Bearer header) helpers are copy-pasted verbatim across these integration files, each independently hardcoding password 'testpass123'. Extract to a shared conftest/helper."
+      },
+      {
+        "kind": "dup",
+        "files": "apps/web/e2e/blog.spec.ts:118-122, 149-154, 178-182",
+        "detail": "The localStorage auth_token + beam_tour_done_v1 injection block is copy-pasted 3 times within the same admin-editor describe. Hoist into a helper (e.g. `seedAuth(page, token)`)."
+      },
+      {
+        "kind": "dead",
+        "files": "tests/unit/__pycache__/test_clerk_webhook.*.pyc, test_custom_domain_verifier.*.pyc, test_exa_client.*.pyc, test_cloudflare_saas.*.pyc",
+        "detail": "Stale .pyc bytecode for 4 test modules whose .py sources no longer exist (clerk webhook, custom-domain verifier, exa client, cloudflare SaaS). The Clerk user.created webhook (HMAC/Svix) and custom-domain verifier are real prod paths now with ZERO active test coverage — the orphaned pyc files imply these tests were deleted, not migrated. Worth re-adding coverage; at minimum `git clean` the pyc clutter."
+      }
+    ]
+  }
+]

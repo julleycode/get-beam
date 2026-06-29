@@ -1,0 +1,471 @@
+{
+  "executive_summary": "ReTargetAgent/Beam is a ~44k LOC live, auto-deploying SaaS with a healthy outer shell (good HMAC verification, react-query adoption, Alembic migrations, a real prompt-injection mitigation, blind-index PII hashing) wrapped around a decaying core. The two dominant decay themes are (1) god-files with heavy copy-paste — identity_resolver.py (1711 LOC), visitors.py (1390), api.ts (1609), twitter_browser.py (675) — and (2) a cluster of genuinely dangerous design bugs concentrated on the public/outbound surface: three SSRF holes (two unauthenticated), two cross-tenant PII leaks on the public demo path, an invite-gate-bypassing legacy signup, a hardcoded fallback HMAC key that defeats the blind index, and — most important commercially — an outbound email/CRM/alert path that will cold-email a RANDOM company employee because the 'company-level guess' classification is computed but never enforced at any send gate.\n\nBecause the repo auto-deploys to prod on every commit and the owner is non-technical and reviews each phase, the plan front-loads zero-risk, behavior-preserving wins (dead-code deletion, type-hint fixes, pure de-dup helpers) so the owner builds confidence on safe diffs, then isolates each confirmed bug into its own small, independently-verifiable phase. Migration-bearing model work and large god-file splits are deliberately pushed last and split into the smallest reviewable units. Every phase ships independently, has a concrete verification command, and avoids touching the working auth/HMAC/react-query infrastructure.\n\nRecommended path: approve Phases 1-4 (safe cleanup) as a batch, then take the security/outbound bugfix phases (5-9) one at a time with the owner watching prod after each deploy, then schedule the restructures (10-15) only when the test suite is green and there is appetite for review-heavy diffs.",
+  "health_score": 5,
+  "health_rationale": "Score 5/10: structurally average, with real but contained risk. POSITIVES that keep it off the floor: webhook HMAC verification uses timing-safe compare_digest everywhere; auth correctly prevents RS256/HS256 algorithm confusion; react-query is adopted repo-wide with a working layout-level token gate; Alembic migrations are in place; the pixel respects most privacy signals; prompt-injection has a genuine (if imperfect) mitigation; 503 tests collect cleanly and the documented Playwright anti-patterns have been eradicated. NEGATIVES that pull it down: four 1000-1700 LOC god-files with tripled provider surfaces and verbatim copy-paste; a confirmed false-positive identity pipeline (random company employee saved as a real person) whose 'company' label is enforced at ZERO outbound gates — the single highest-severity finding; three SSRF vectors (two unauthenticated on the public /demo surface) reachable from a live prod host; two cross-tenant PII disclosures on the public demo endpoints; a hardcoded fallback HMAC key that silently defeats the blind index when misconfigured; an invite-gate-bypassing legacy signup; broken asyncpg Celery patterns that will fail the moment a worker is enabled; a re-segmentation/double-billing loop; and pervasive timezone-naive datetime columns. The decay is concentrated (you can name the ~8 files), the dead code is unusually high (dead provider wrappers, dead mock builders, dead Cloudflare worker, dead schemas), and the security surface is the kind that bites a live B2B product hard — hence a middling 5, not higher.",
+  "themes": [
+    "God-files with tripled/copy-paste surfaces (identity_resolver 1711, visitors 1390, api.ts 1609, twitter_browser 675, enricher, csv_exporter)",
+    "Unenforced safety classifications: 'company-level' identity guesses and weak/timestampless matches flow unchecked into email/CRM/alert send gates",
+    "Public-surface security holes: 3x SSRF (2 unauthenticated), 2x cross-tenant PII leak on /demo, invite-gate-bypassing legacy signup, hardcoded fallback HMAC key",
+    "High dead-code load: dead provider wrappers, dead AI mock builders, dead Cloudflare worker, duplicate dependency manifests, dead schemas/fixtures",
+    "Latent concurrency/async bugs: broken asyncpg Celery loop pattern, non-atomic budget/usage check-then-increment races, re-segmentation double-billing",
+    "Timezone-naive datetime sprawl and inconsistent Base-column redeclaration across models",
+    "Silent error-swallowing and false-success UI (empty catches, false 'Copied!', false 'verified' pixel, mock-draft-on-LLM-failure persisted as real)"
+  ],
+  "phases": [
+    {
+      "n": 1,
+      "title": "Delete confirmed dead code (zero-behavior)",
+      "goal": "Remove provably-unreferenced code so every later phase reviews against a smaller, honest surface. No behavior change whatsoever — only definitions with zero callers (grep-confirmed) are deleted.",
+      "scope_files": [
+        "apps/api/services/identity_resolver.py",
+        "apps/api/services/platforms/twitter.py",
+        "apps/api/services/sync.py",
+        "apps/api/agents/segmenter.py",
+        "apps/api/agents/campaign_planner.py",
+        "apps/api/services/ai_reply.py",
+        "apps/api/services/enricher.py",
+        "tests/conftest.py"
+      ],
+      "kind": "cleanup",
+      "behavior_change": "none",
+      "risk": "low",
+      "roi": "high",
+      "effort": "M",
+      "depends_on": [],
+      "tasks": [
+        "Delete the five dead _try_* provider wrappers in identity_resolver.py (_try_leadpipe_identify ~698-725, _try_capturify_identify ~851-876, _try_rb2b_identify ~975-1001, _try_pdl_ip_enrich ~1103-1120, _try_ipinfo_company ~1186-1198) after re-confirming zero callers with grep",
+        "Delete the dead Leadpipe TEMP shape-probe block in identity_resolver.py (~763-786) that logs on every prod call",
+        "Delete dead twitter.py mock methods _mock_visitor_feed / _mock_tokens / _mock_feed and their function-local random import",
+        "Delete sync.py _playwright_fetch_user_tweets stub (always returns []) and the unused TwitterBrowserError import",
+        "Delete unreferenced AI mock builders: segmenter._mock_segmentation, campaign_planner._mock_campaign_plan, ai_reply._mock_draft + its strategy/tone tables; fix the misleading line-370 comment in ai_reply to say it raises",
+        "Delete enricher.calculate_completeness if grep confirms no caller (keep _profile_completeness method as the single impl)",
+        "Delete the dead, mis-keyed auth_token fixture in tests/conftest.py",
+        "For EACH deletion run grep across apps/ and tests/ to confirm zero references before removing"
+      ],
+      "verification": "Run `grep -rn '_try_leadpipe_identify\\|_mock_segmentation\\|_mock_campaign_plan\\|_playwright_fetch_user_tweets\\|calculate_completeness\\|auth_token' apps/ tests/` and confirm only intended (now-removed) sites remain; run the full pytest suite (pytest -q) and confirm the same pass count as before (503 collected); run frontend `npm run build` if any TS touched (none here)."
+    },
+    {
+      "n": 2,
+      "title": "Fix wrong type hints and trivially-broken annotations",
+      "goal": "Correct type hints that lie about runtime behavior (CLAUDE.md mandates type hints on all functions). Pure annotation changes, no runtime effect, immediate IDE/mypy value.",
+      "scope_files": [
+        "apps/api/models/waitlist.py",
+        "apps/api/models/visitor.py",
+        "apps/api/models/segment.py",
+        "apps/api/models/enrichment.py",
+        "apps/api/schemas/visitors.py",
+        "apps/api/schemas/auth.py"
+      ],
+      "kind": "cleanup",
+      "behavior_change": "none",
+      "risk": "low",
+      "roi": "high",
+      "effort": "S",
+      "depends_on": [],
+      "tasks": [
+        "Fix waitlist.py:26 approved_at from Mapped[None] to Mapped[datetime | None] (match sibling used_at)",
+        "Fix pages_visited (visitor.py:29), segment.recommended_channels, enrichment.twitter_recent_topics from Mapped[dict] to Mapped[list[str]] to match actual JSON-array usage",
+        "Delete redundant email/full_name redeclarations in schemas/visitors.py VisitorDetailOut (already inherited from VisitorOut)",
+        "Consolidate byte-identical Token/TokenResponse schemas in schemas/auth.py into one (keep both names as alias only if an importer needs it; verify importers first)",
+        "Do NOT change any DB column types or nullability — annotations only"
+      ],
+      "verification": "Run pyright/mypy (pyrightconfig.json exists) and confirm no NEW errors and the corrected lines no longer flag; run pytest -q (annotations are runtime no-ops so all tests must still pass); confirm no Alembic migration is generated (`alembic revision --autogenerate --sql` shows empty diff)."
+    },
+    {
+      "n": 3,
+      "title": "Backend pure de-duplication into shared helpers (no behavior change)",
+      "goal": "Collapse verbatim copy-paste into single shared helpers where behavior is provably identical. Each extraction preserves logic exactly; this is the safe, high-ROI maintainability win that shrinks later phases.",
+      "scope_files": [
+        "apps/api/services/platforms/base.py",
+        "apps/api/services/platforms/twitter.py",
+        "apps/api/services/platforms/tiktok.py",
+        "apps/api/services/platforms/facebook.py",
+        "apps/api/services/platforms/instagram.py",
+        "apps/api/services/platforms/linkedin.py",
+        "apps/api/services/usage_limits.py",
+        "apps/api/services/sync.py",
+        "apps/api/services/enricher.py",
+        "apps/api/services/sender.py"
+      ],
+      "kind": "cleanup",
+      "behavior_change": "none",
+      "risk": "low",
+      "roi": "high",
+      "effort": "M",
+      "depends_on": [
+        1
+      ],
+      "tasks": [
+        "Hoist the verbatim _is_transient_error and the @retry config to platforms/base.py; have all 5 platform modules import it (Phase 7 will change retry SEMANTICS — here only de-dup, behavior identical)",
+        "Extract usage_limits._build_budget(byok, used, limit) and route check_identify/enrich/osint_budget through it",
+        "Extract sync._sync_accounts(db, accounts) shared by sync_user_accounts and sync_all_accounts (95% identical)",
+        "Extract enricher._apply_proxycurl / _apply_twitter field-mappers used by both enrich_tier1 and enrich_tier2 (NOTE: keep current null-overwrite behavior here; the null-clobber FIX is Phase 8)",
+        "Extract sender._format_http_exc(exc) for the duplicated exception-detail block",
+        "Each extraction must be a literal move — diff the before/after call result mentally; add no new conditionals"
+      ],
+      "verification": "Run pytest -q (full suite must stay green); specifically run any platform/enricher/usage tests (`pytest tests/ -k 'platform or enrich or usage or sync'`); confirm git diff shows only extraction + call-site rewiring, no logic deltas."
+    },
+    {
+      "n": 4,
+      "title": "Frontend pure de-dup + safe UX error-handling fixes",
+      "goal": "Consolidate duplicated frontend helpers and fix silent error-swallowing / false-success UI. All low-risk, additive, behavior-improving (surfacing errors that were hidden) without touching the working auth/react-query/token-gate machinery.",
+      "scope_files": [
+        "apps/web/src/lib/api.ts",
+        "apps/web/src/app/dashboard/settings/page.tsx",
+        "apps/web/src/app/dashboard/segments/page.tsx",
+        "apps/web/src/app/dashboard/page.tsx",
+        "apps/web/src/components/kpi-strip.tsx",
+        "apps/web/src/components/pixel-install-guide.tsx"
+      ],
+      "kind": "cleanup",
+      "behavior_change": "low",
+      "risk": "low",
+      "roi": "high",
+      "effort": "M",
+      "depends_on": [],
+      "tasks": [
+        "api.ts: extract one multipartRequest<T>/authedBlobFetch helper owning the 401->fresh-Clerk-token->retry-once logic; route uploadImage, uploadKnownContacts, AND add the missing retry to downloadExport + downloadWordPressPlugin (confirmed bug: blob downloads lack the 401 retry)",
+        "api.ts: add typed ApiErrorBody {detail?:string} and one error-extraction helper for the 3 untyped body.detail sites",
+        "settings.tsx: wrap handleCopy clipboard write in try/catch (cover navigator.clipboard undefined on insecure origin); only flip 'Copied!' on success; surface keyError in handleDeleteKey catch instead of swallowing",
+        "segments.tsx: replace empty catch{} with surfaced error state and replace blind 3000ms setTimeout with status-driven invalidate/poll",
+        "page.tsx: replace the obscure useState-as-memo idiom with useCallback",
+        "kpi-strip.tsx: add the missing ignore/cancellation flag to the getSiteKpis effect (mirror the timeseries effect right below it) to fix stale-site race",
+        "pixel-install-guide.tsx: same clipboard try/catch + give WP-plugin download its own success/error state"
+      ],
+      "verification": "Run `npm run build` (Vercel runs next build/lint so this must pass — lint error blocks prod deploy); run the Playwright e2e subset that exercises settings/segments/onboarding (`npx playwright test settings visitors onboarding` or the CI-equivalent) and confirm green; manually confirm no `any` introduced (strict mode)."
+    },
+    {
+      "n": 5,
+      "title": "BUGFIX: Close all SSRF vectors (incl. 2 unauthenticated)",
+      "goal": "Stop the production host from issuing attacker-controlled server-side requests to internal/cloud-metadata endpoints. Reuse the EXISTING url_guard.is_safe_public_url helper consistently and remove verify=False / uncontrolled redirects. This is the highest external-attack-surface fix.",
+      "scope_files": [
+        "apps/api/services/platform_detector.py",
+        "apps/api/services/pixel_verifier.py",
+        "apps/api/routers/demo.py",
+        "apps/api/routers/sites.py",
+        "apps/api/services/url_guard.py"
+      ],
+      "kind": "bugfix",
+      "behavior_change": "medium",
+      "risk": "medium",
+      "roi": "high",
+      "effort": "M",
+      "depends_on": [],
+      "tasks": [
+        "platform_detector.detect_platform: before fetching, normalize scheme to http/https only, resolve host and reject loopback/link-local/private/metadata ranges via url_guard.is_safe_public_url; apply to BOTH the primary GET and the _probe_shopify_api /cart.js /products.json follow-ups",
+        "Set follow_redirects=False (or cap hops and re-validate each resolved hop IP to defeat DNS-rebinding) and REMOVE verify=False so TLS is verified",
+        "pixel_verifier (lines 29-35): apply the same is_safe_public_url guard to site.url, set follow_redirects=False, remove verify=False",
+        "Confirm both call sites are covered: demo.py demo_detect_platform (UNAUTHENTICATED) and sites.py detect_platform_endpoint (authed but no ownership)",
+        "Keep the existing demo IP rate limit but treat it as defense-in-depth only (X-Forwarded-For is spoofable)",
+        "Add a unit test that 169.254.169.254, 127.0.0.1, 10.0.0.0/8, localhost, and a public-URL-302-to-internal are all rejected"
+      ],
+      "verification": "New pytest cases asserting is_safe_public_url rejection for metadata/loopback/private hosts and that detect_platform/pixel_verifier refuse them; run `pytest tests/ -k 'ssrf or detect or pixel or url_guard'`; manually curl the public POST /api/v1/demo/detect-platform with url=http://169.254.169.254/ and confirm it is refused (not fetched); confirm legitimate public URLs still detect correctly."
+    },
+    {
+      "n": 6,
+      "title": "BUGFIX: Stop cross-tenant PII leaks & invite-gate bypass on public surface",
+      "goal": "Close the two unauthenticated cross-tenant identity disclosures on the public /demo endpoints and the legacy signup that bypasses the invite gate and orphans accounts from Clerk. These are isolated to the public/legacy auth surface, so paying-customer flows are untouched.",
+      "scope_files": [
+        "apps/api/routers/demo.py",
+        "apps/api/routers/feed.py",
+        "apps/api/routers/auth.py",
+        "apps/api/models/post.py",
+        "apps/api/routers/visitors.py",
+        "apps/api/services/social_intelligence.py"
+      ],
+      "kind": "bugfix",
+      "behavior_change": "medium",
+      "risk": "medium",
+      "roi": "high",
+      "effort": "L",
+      "depends_on": [],
+      "tasks": [
+        "demo.py demo_identify: stop reading identity from the cross-site BeamIdentityNode graph on the unauthenticated path; only return an identity for a Visitor row whose site_id belongs to the authenticated onboarding account, OR gate the whole id_node block behind ownership; never echo email/full_name/enrichment for a client-supplied fingerprint the caller hasn't proven they own",
+        "auth.py: remove the legacy POST /api/v1/auth/signup endpoint (Clerk is the sole intended prod signup; login()/legacy HS256 verify stay for existing tokens). Confirm frontend only calls it as a Clerk-unavailable fallback (onboarding-steps.js) before removing; if kept, gate behind settings.invite_only + allowlist like the Clerk path",
+        "feed.py + post.py: replace the GLOBAL unique on Post.platform_post_id with a composite unique (social_account_id, platform_post_id) via Alembic migration; scope the import existing-check and sync._save_posts dedup to the current user's account_ids (fixes cross-user 'already in your feed' false-block)",
+        "visitors.py export_visitor_data: scope the social-posts query by SocialAccount.user_id (DSAR cross-tenant over-match); apply same scoping to social_intelligence.py:118-122"
+      ],
+      "verification": "New integration tests: (a) anonymous POST /demo/identify with a fingerprint that exists only on another tenant returns NO email/full_name; (b) two users can both import the same public tweet (composite-unique migration applied); (c) legacy /auth/signup returns 404/410; (d) DSAR export for user A does not include user B's posts for the same handle. Run `pytest tests/integration -k 'demo or feed or auth or export'` and `alembic upgrade head` against a scratch DB."
+    },
+    {
+      "n": 7,
+      "title": "BUGFIX: Harden secrets/config validation and remove dead jwt_secret",
+      "goal": "Make production safety checks impossible to silently disable via a fat-fingered APP_ENV, remove the misleading hardcoded fallback HMAC keys that defeat the blind index, and delete the dead jwt_secret that gives false security confidence.",
+      "scope_files": [
+        "apps/api/config.py",
+        "apps/api/main.py",
+        "apps/api/services/pii_crypto.py",
+        "apps/api/services/known_hash.py",
+        "tests/conftest.py",
+        "infra/.env.example"
+      ],
+      "kind": "bugfix",
+      "behavior_change": "medium",
+      "risk": "medium",
+      "roi": "high",
+      "effort": "M",
+      "depends_on": [
+        2
+      ],
+      "tasks": [
+        "pii_crypto._hmac_key + known_hash._hmac_key: remove the hardcoded literal fallbacks ('beam-pii-fallback-key' / 'beam-known-contacts-fallback-key'); raise if neither pii_hmac_key nor encryption_key is set (mirror key_vault's hard requirement)",
+        "config.py validate_production: replace the app_env=='production'-only gate with an allowlist {development,test,ci,staging,production}; refuse to boot on any UNKNOWN app_env; require a deployment to positively declare a non-production env to skip secret checks (default-deny), so local/CI insecure defaults still boot but a typo'd prod env fails loudly. Log app_env loudly at startup",
+        "Remove dead jwt_secret + jwt_algorithm fields and their validate_production branch; drop JWT_SECRET from infra/.env.example; repoint/remove any tests/conftest reference (app_secret_key is the real, already-validated legacy key)"
+      ],
+      "verification": "Unit tests: booting with app_env='production' and empty ENCRYPTION_KEY raises; booting with an unknown app_env raises; booting with app_env='development' still works; email_hash raises (not silent constant) when no key set. Run `pytest tests/ -k 'config or secret or pii or hmac'`; grep confirms zero remaining references to jwt_secret. CAUTION: verify Railway prod has APP_ENV=production and ENCRYPTION_KEY set BEFORE deploying this phase."
+    },
+    {
+      "n": 8,
+      "title": "BUGFIX: Identity-resolution correctness (false-positive person matches)",
+      "goal": "Stop persisting fabricated/weak identities as real people. Treat timestamp-less identity-feed records as non-matching, and stop enrichment from silently nulling populated fields and permanently failing on auth errors.",
+      "scope_files": [
+        "apps/api/services/identity_resolver.py",
+        "apps/api/services/enricher.py",
+        "apps/api/services/social_intelligence.py",
+        "apps/api/tasks/resolution_tasks.py"
+      ],
+      "kind": "bugfix",
+      "behavior_change": "medium",
+      "risk": "medium",
+      "roi": "high",
+      "effort": "L",
+      "depends_on": [
+        1,
+        3
+      ],
+      "tasks": [
+        "identity_resolver._record_matches_visitor: when a record has no parseable timestamp, return (False, False) instead of (True, True) so IP-equality alone can never attach an identity on shared/CGNAT IPs",
+        "enricher.py cascade (lines 161-176): guard every assignment so a null/missing provider key never clobbers an existing value (mirror lines 277-279); for twitter_recent_topics only assign when the returned list is non-empty",
+        "enricher._enrich_pdl: treat ONLY 404 as definitive no-match; for 401/403/400 return a sentinel that leaves enrichment_status untouched (do NOT mark 'failed', do NOT negative-cache); wrap the enrich_tier1 call in resolution_tasks.py:100 so one auth error cannot abort the whole site sweep",
+        "social_intelligence.py:203: change the call to the undefined self._mock_tweets to `return []` (matches the no-token branch; fixes the AttributeError that masks the original error)"
+      ],
+      "verification": "Unit tests: a feed record with no timestamp does NOT produce an IdentifiedVisitor; a partial proxycurl 200 does not blank an existing linkedin_headline; a PDL 401 leaves enrichment_status unchanged and is retryable; _fetch_recent_tweets returns [] (not AttributeError) on Twitter API exception. Run `pytest tests/ -k 'resolver or enrich or identity or social'`."
+    },
+    {
+      "n": 9,
+      "title": "BUGFIX: Enforce identity-level + suppression at ALL outbound gates",
+      "goal": "The highest-severity finding: a 'company-level' guess (random employee at the visitor's company) or a suppressed/opted-out address must never be emailed, pushed to CRM, or alerted. Centralize the gate so every outbound path shares it. Also gate the LLM-mock-draft fallback so outages don't ship canned drafts as real AI.",
+      "scope_files": [
+        "apps/api/services/campaign_sender.py",
+        "apps/api/services/csv_exporter.py",
+        "apps/api/services/hot_alert.py",
+        "apps/api/services/email_sender.py",
+        "apps/api/services/identity_classification.py",
+        "apps/api/services/suppression.py",
+        "apps/api/services/auto_drafter.py",
+        "apps/api/routers/webhooks.py"
+      ],
+      "kind": "bugfix",
+      "behavior_change": "high",
+      "risk": "high",
+      "roi": "high",
+      "effort": "L",
+      "depends_on": [
+        8
+      ],
+      "tasks": [
+        "Add a single shared gate: identity_level(resolution_provider) == 'person' (decide unknown/None providers EXPLICITLY — default-deny). Apply in (1) campaign_sender send loop, (2) csv_exporter._get_segment_visitors (covers CRM push + CSV export), (3) hot_alert.maybe_send_hot_alert",
+        "Add suppression-list check on the campaign send path itself: after the do_not_email check, also `if await is_email_suppressed(db, iv.email, 'do_not_email'): skip`; harden EmailSender._is_suppressed to also consult is_email_suppressed when db is available",
+        "webhooks.py sendgrid hard-bounce: call suppression.add_suppression(db, email, scope='do_not_email', reason='hard_bounce') so future re-identification is pre-suppressed (don't just mirror unsubscribe.py which has the same hole); apply same upgrade to unsubscribe.py",
+        "auto_drafter._generate_draft_text: only return _mock_draft when settings.mock_external_apis is true; otherwise re-raise (outer handler already logs auto_draft_failed and creates no draft)",
+        "hot_alert + feature_requests: html.escape() user/enrichment-derived strings interpolated into email HTML"
+      ],
+      "verification": "Integration tests: a hunter/apollo (company-level) IdentifiedVisitor in a segment is NOT emailed/exported/alerted; an address on the do_not_email suppression list identified AFTER opt-out is skipped on the campaign path; a hard-bounce event writes a SuppressionEntry blind-index; with mock_external_apis=false an LLM failure persists NO draft. Run `pytest tests/integration -k 'campaign or suppress or export or hot_alert or draft or webhook'`. Owner watches prod sends after deploy."
+    },
+    {
+      "n": 10,
+      "title": "BUGFIX: Concurrency/async correctness (Celery, races, re-segmentation)",
+      "goal": "Fix the latent-but-real correctness bugs that bite under concurrency or once a Celery worker is enabled: broken asyncpg loop pattern, re-segmentation/double-billing, non-atomic budget/usage races, and the unbounded per-batch aggregation amplifier.",
+      "scope_files": [
+        "apps/api/tasks/resolution_tasks.py",
+        "apps/api/tasks/aggregation_tasks.py",
+        "apps/api/tasks/segmentation_tasks.py",
+        "apps/api/services/segmentation_trigger.py",
+        "apps/api/services/usage_limits.py",
+        "apps/api/services/billing.py",
+        "apps/api/routers/events.py",
+        "apps/api/routers/drafts.py"
+      ],
+      "kind": "bugfix",
+      "behavior_change": "medium",
+      "risk": "medium",
+      "roi": "medium",
+      "effort": "L",
+      "depends_on": [
+        8
+      ],
+      "tasks": [
+        "Replace asyncio.get_event_loop().run_until_complete() with asyncio.run() in resolution_tasks (3 sites) and aggregation_tasks (matches the already-fixed segmentation/crm tasks)",
+        "segmentation_tasks._run_segmentation_for_site: add Visitor.segmented == False to the select so the segmented batch matches the trigger predicate (stops re-segmenting/re-billing the top-50 and starving new visitors)",
+        "billing.increment_usage + usage_limits paid-OSINT guard: replace check-then-increment with atomic UPDATE ... WHERE count < limit RETURNING (or INCR-then-conditional-DECR like email_rate_limiter); preserve lazy monthly-reset and unlimited-plan branches and fail-CLOSED on Redis error for the paid path",
+        "segmentation_trigger: claim the batch atomically (UPDATE ... SET segmented=true ... RETURNING) so a Redis fail-open can't double-run Gemini",
+        "events.py: coalesce per-site background aggregation behind a non-blocking Redis dirty-key/advisory lock so every beacon doesn't schedule a full-table re-aggregate",
+        "drafts.py generate_new_draft: add the missing Post->SocialAccount.user_id ownership check (IDOR + unbounded LLM cost) and a per-user draft rate cap"
+      ],
+      "verification": "Unit tests: two concurrent increment_usage at limit-1 result in exactly one success; segmentation selects only segmented==False; a second draft-generate against another user's post_id returns 404. Run `pytest tests/ -k 'segmentation or usage or billing or draft or aggregate'`. Since prod runs APScheduler not Celery, the asyncio.run change is verified by the existing task unit tests plus a manual two-task loop in a scratch worker."
+    },
+    {
+      "n": 11,
+      "title": "BUGFIX: Pixel privacy + Cloudflare worker + dependency manifest",
+      "goal": "Fix the GPC/DNT opt-out email-capture contradiction in the pixel/ingest path, neutralize the broken-or-dead Cloudflare worker, and reconcile the two divergent Python dependency manifests (a prod-deploy hazard). Infra-adjacent but each is small and verifiable.",
+      "scope_files": [
+        "apps/pixel/src/tracker.js",
+        "apps/api/routers/events.py",
+        "apps/pixel/src/worker.js",
+        "apps/pixel/wrangler.toml",
+        "requirements.txt",
+        "apps/api/requirements.txt",
+        "apps/api/services/email_validator.py",
+        "apps/api/services/csv_exporter.py"
+      ],
+      "kind": "bugfix",
+      "behavior_change": "medium",
+      "risk": "medium",
+      "roi": "medium",
+      "effort": "M",
+      "depends_on": [],
+      "tasks": [
+        "Honor GPC/DNT in the form-email-capture path: when the browser signals Global Privacy Control / DNT, do not emit/persist the derived email (tracker.js:154 already promises this; enforce in tracker.js and the events.py:236-255 persistence)",
+        "Cloudflare worker: prefer DELETING worker.js + its wrangler [env.production] route since prod serves the pixel from FastAPI /pixel/tracker.js; if kept, wire TRACKER_JS via an assets/import binding so /t.js can't 500. Remove the inert [site] block",
+        "Reconcile dependency manifests: make root requirements.txt the single source of truth (Dockerfile installs only it); add the api-only packages (sendgrid, maxminddb, geoip2, pyjwt[crypto], pytest, pytest-httpx) and dnspython (needed by Phase 12 MX fix); resolve asyncpg pin mismatch; have apps/api/requirements.txt do `-r ../../requirements.txt` or delete it — verify against actual imports first",
+        "csv_exporter: add _csv_safe() neutralizing leading = + - @ (prepend apostrophe) for the Google/LinkedIn plaintext exporters (Meta is already hashed)"
+      ],
+      "verification": "Pixel: load a page with GPC enabled in a headless browser and confirm no form-email beacon is sent / no Visitor email persisted. Worker: if deleted, confirm /pixel/tracker.js (FastAPI) still serves and the e2e pixel-install test passes; if kept, deploy to a wrangler dev and curl /t.js for 200. Deps: `pip install -r requirements.txt` in a clean venv then `python -c 'import sendgrid, geoip2, maxminddb, dns.resolver'` and run pytest collection. CSV: unit test that a cell '=cmd()' exports as \"'=cmd()\"."
+    },
+    {
+      "n": 12,
+      "title": "BUGFIX: Email-validation + retry-idempotency + remaining correctness",
+      "goal": "Fix the remaining confirmed mid-severity bugs that don't fit earlier buckets: MX check that isn't an MX check, write-retries that can double-post to real social accounts, synthetic-tweet-ID false success, false-positive pixel 'verified', and the Shopify callback that lies about success.",
+      "scope_files": [
+        "apps/api/services/email_validator.py",
+        "apps/api/services/platforms/twitter.py",
+        "apps/api/services/platforms/twitter_browser.py",
+        "apps/api/services/pixel_verifier.py",
+        "apps/api/routers/sites.py"
+      ],
+      "kind": "bugfix",
+      "behavior_change": "medium",
+      "risk": "medium",
+      "roi": "medium",
+      "effort": "M",
+      "depends_on": [
+        3,
+        5,
+        11
+      ],
+      "tasks": [
+        "email_validator._check_mx: do a real MX lookup (dnspython resolver.resolve(domain,'MX') in an executor) with A/AAAA fallback; fix the misleading 'mx' naming; keep the 7-day Redis cache (dnspython added in Phase 11)",
+        "platform post_comment retries: narrow the @retry predicate to connection-establishment failures + 429 only (never ReadTimeout or 5xx-after-send) so a committed write isn't re-POSTed; apply across all 5 platform services (the de-dup'd retry block from Phase 3 makes this a one-place change)",
+        "twitter_browser._click_reply_and_get_id: raise TwitterBrowserError when no real rest_id was captured instead of fabricating browser_reply_<ts>; surface the swallowed non-200 CreateTweet body in the error",
+        "pixel_verifier: in the has_tracker && !has_correct_site branch return status='wrong_site', verified=False with an honest message; remove the false 'will be updated automatically' claim (no code does it)",
+        "sites.py shopify_callback: on the except branch redirect to a failure URL (shopify=error) instead of falling through to shopify=connected"
+      ],
+      "verification": "Unit tests: _check_mx resolves MX for a known-MX domain and rejects an A-only domain; a simulated 5xx-after-send does NOT trigger a second POST; a missing rest_id raises (no synthetic id persisted); a foreign-site pixel returns wrong_site/verified=False; a failing shopify install redirects to shopify=error. Run `pytest tests/ -k 'mx or retry or twitter or pixel or shopify'`."
+    },
+    {
+      "n": 13,
+      "title": "Shared ownership dependency + router de-dup (low-risk restructure)",
+      "goal": "Replace the ~12 copy-pasted site-ownership checks with one shared FastAPI dependency and consolidate other router-level duplication. Behavior-preserving but touches many routers, so isolated from the bugfix phases.",
+      "scope_files": [
+        "apps/api/dependencies.py",
+        "apps/api/routers/sites.py",
+        "apps/api/routers/companies.py",
+        "apps/api/routers/visitors.py",
+        "apps/api/routers/campaigns.py",
+        "apps/api/routers/segments.py",
+        "apps/api/routers/exports.py",
+        "apps/api/routers/costs.py",
+        "apps/api/routers/crm.py",
+        "apps/api/routers/known_contacts.py",
+        "apps/api/routers/ai.py"
+      ],
+      "kind": "restructure",
+      "behavior_change": "low",
+      "risk": "medium",
+      "roi": "medium",
+      "effort": "M",
+      "depends_on": [
+        5,
+        6
+      ],
+      "tasks": [
+        "Add a shared get_owned_site/_verify_site_access dependency in dependencies.py returning the Site (404 if not owned by current user)",
+        "Replace the inline ownership block in all listed routers with Depends(get_owned_site); preserve exact 404 semantics",
+        "Add Query(ge=1)/Query(ge=1, le=100) bounds to companies.list_companies page/page_size (currently unbounded)",
+        "Convert delete_visitor_data GDPR f-string DELETEs to ORM .__table__.delete() and surface per-table failures",
+        "Standardize the two divergent /me endpoints (auth.py vs social_auth.py) — keep one, alias or remove the other after confirming callers"
+      ],
+      "verification": "Run the full integration suite (`pytest tests/integration -q`) — ownership behavior is heavily exercised; add one test asserting a non-owner gets 404 from each refactored endpoint; confirm companies.list rejects page_size=10000000. `npm run build` not needed (backend only)."
+    },
+    {
+      "n": 14,
+      "title": "Split identity_resolver god-file into provider modules + persistence",
+      "goal": "Decompose the 1711-line identity_resolver into one-file-per-provider call() functions, a thin ProviderResult dataclass, a persistence module, and a slim orchestrator. Behavior-preserving but the largest restructure — done after its correctness bugs (Phase 8/9) are already fixed and locked by tests.",
+      "scope_files": [
+        "apps/api/services/identity_resolver.py",
+        "apps/api/services/company_resolver.py",
+        "apps/api/services/social_resolver.py",
+        "apps/api/services/social_intelligence.py"
+      ],
+      "kind": "restructure",
+      "behavior_change": "low",
+      "risk": "high",
+      "roi": "medium",
+      "effort": "XL",
+      "depends_on": [
+        1,
+        3,
+        8,
+        9
+      ],
+      "tasks": [
+        "Extract per-provider modules (leadpipe, capturify, rb2b, hunter, apollo, pdl_ip, ipinfo) each exposing async call(visitor)->ProviderResult|None; collapse the leadpipe/capturify near-identical parsers into one parameterized _match_identity_feed + _parse_feed_person",
+        "Move the Beam-network upsert/check and _save_identified merge logic into a dedicated persistence module",
+        "Extract _cached_ip_company(visitor)->(domain, was_cached) to de-tangle the double-negative Redis branch in resolve()",
+        "Unify _url_to_host vs company_resolver._extract_domain and the duplicated ISP/cloud keyword sets into one shared module",
+        "social_resolver.resolve_social: extract gather_free_signals / maybe_run_paid / build_blob stage helpers",
+        "Keep IdentityResolver as a thin orchestrator; preserve provider sequencing and the Phase-8/9 gates EXACTLY"
+      ],
+      "verification": "This phase must produce ZERO behavior change: run the FULL pytest suite plus the identity/resolver/Beam-network integration tests (`pytest tests/ -k 'resolver or identity or social or beam'`) and confirm identical pass set; diff resolve() output against a recorded fixture for a sample visitor before/after; deploy to a scratch/PR Railway env and resolve a known visitor, comparing the IdentifiedVisitor row to prod behavior."
+    },
+    {
+      "n": 15,
+      "title": "Split remaining god-files: visitors.py, api.ts, twitter_browser.py",
+      "goal": "Decompose the remaining oversized files into focused modules/components. Pure structural splits with the public surface (router prefixes, `api` singleton, class entrypoints) kept stable. Last because they are review-heavy and carry UI/router regression risk on a live app.",
+      "scope_files": [
+        "apps/api/routers/visitors.py",
+        "apps/web/src/lib/api.ts",
+        "apps/api/services/platforms/twitter_browser.py",
+        "apps/web/src/app/dashboard/visitors/[visitorId]/page.tsx"
+      ],
+      "kind": "restructure",
+      "behavior_change": "low",
+      "risk": "high",
+      "roi": "low",
+      "effort": "XL",
+      "depends_on": [
+        3,
+        4,
+        13
+      ],
+      "tasks": [
+        "visitors.py: split into visitors_core / visitors_gdpr / visitors_resolution; extract _load_visitor_bundle to kill the 3x job-function boilerplate; keep all route paths and the router prefix identical",
+        "api.ts: extract the type block (1037-1609) into api-types.ts and re-export; optionally split transport core from per-domain method groups; KEEP the `api` singleton export stable so no call site changes",
+        "twitter_browser.py: extract a _new_authed_context() helper + module-level USER_AGENT constant; split TimelineScraper / ReplyPoster / BrowserSession; move the inline 80-line JS string to a loadable asset; type the `page` params under TYPE_CHECKING",
+        "visitor detail page: split into VisitorBehaviorCard/IdentityCard/EnrichmentCard/SocialProfilesCard/OsintAccountsCard + a DeepResearchMarkdown component; move getVisitor to useQuery (gets the 401-retry for free); extract the polling into a useSocialResolution hook"
+      ],
+      "verification": "`npm run build` must pass (lint+typecheck gate prod deploy); run the full Playwright e2e suite (`npx playwright test`) and confirm green — these specs are the regression net for visitors + detail pages; backend: `pytest tests/ -k 'visitor'` plus confirm every route in visitors.py still resolves (`curl` the OpenAPI /docs or import the app and assert route count unchanged). Deploy behind the PR Railway env first."
+    }
+  ],
+  "sequencing_rationale": "The ordering is governed by three constraints stacked in priority: (1) the repo auto-deploys to prod on every commit, so the SAFEST diffs must come first to build owner trust and de-risk the early deploys; (2) the owner is non-technical and reviews each phase, so risky work must be split into the smallest independently-shippable units with concrete verification; (3) confirmed design bugs must be fixed BEFORE the large restructures that move their code, so the bugfix tests act as a behavior-lock before decomposition.\n\nPhases 1-4 are pure cleanup (dead-code deletion, type-hint fixes, behavior-identical de-dup, error-surfacing UX) — near-zero regression risk, high ROI, and they shrink the surface every later phase reviews against. They have almost no dependencies and can be approved as one batch.\n\nPhases 5-12 are the bugfixes, ordered by attack-surface severity and isolation. SSRF (5) and public-surface PII/auth bypass (6) come first because they are the only findings with live unauthenticated external reach and their fixes are isolated to the public/demo/legacy surface (paying-customer flows untouched). Secrets/config hardening (7) follows because it depends on the Phase-2 type fixes and gates the encryption that PII relies on. Identity-resolution correctness (8) precedes the outbound-gate enforcement (9) because the gate (9) consumes the corrected identity_level; (9) is the single highest-commercial-severity fix (stop cold-emailing random employees) and is marked high-risk because it changes who receives email. Concurrency/async (10) and pixel/infra/deps (11) and the remaining validation/idempotency bugs (12) follow, with 12 depending on the dnspython dependency added in 11 and the retry de-dup from 3.\n\nPhases 13-15 are the restructures, deliberately last: the router-ownership dependency (13) depends on the SSRF/PII fixes so it doesn't refactor around code that's about to change; the identity_resolver split (14) and the remaining god-file splits (15) are XL, high-review, and depend on their bugfixes being locked by tests first — splitting a file you're about to fix is how regressions hide. Each restructure's verification is explicitly 'zero behavior change, full suite + e2e green, deploy behind PR env first.'",
+  "global_risks": [
+    "Auto-deploy to prod on every commit: any phase that lands is live immediately. Mitigation — use the existing PR Railway preview env (pr-64 pattern in MEMORY) for the high-risk Phases 9, 14, 15 before merging to main; owner should watch prod for 10-15 min after each bugfix deploy.",
+    "Phase 9 changes who receives outbound email/CRM/alerts. If the identity_level gate is too aggressive it could silently suppress legitimate person-level sends; if too loose it re-opens the cold-email hole. Requires explicit decision on unknown/None providers (recommend default-deny) and post-deploy verification of actual send volume.",
+    "Phase 7 secrets hardening can BLOCK prod boot if Railway lacks APP_ENV=production or ENCRYPTION_KEY. Operator must confirm those env vars are set before this phase deploys, or the app will refuse to start (by design).",
+    "Migration-bearing phases (6 composite-unique on Post, plus any model changes) run against a populated prod DB via the Dockerfile auto-`upgrade head`. The Post.platform_post_id unique swap must drop-then-add carefully and be tested on a prod clone; a bad migration on a live table is the worst-case blast radius. Note MEMORY warns of a possible multi-head from an uncommitted CRM migration — check `alembic heads` before generating new revisions.",
+    "Vercel runs `next build` (with lint) on deploy, so any TS/lint error in frontend phases (4, 15) fails the prod deploy even when test.yml CI is green — always run `npm run build` locally before merging frontend work.",
+    "Test coverage gaps mean some bugfixes lack a strong existing net: event ingestion has no positive-persistence test, the Clerk webhook and custom-domain verifier have zero active tests, and the Beam cross-site identity tests are tautological. Several phases must ADD the verifying test as part of the phase rather than relying on existing coverage.",
+    "The two divergent requirements.txt manifests (Phase 11) mean a dependency that imports fine locally may be absent from the prod Docker image; reconcile and verify in a clean venv before relying on any new dep (dnspython for Phase 12 MX fix specifically).",
+    "Effort is back-loaded: Phases 14-15 are XL god-file splits on a live UI/router. They carry real regression risk and low immediate ROI, so they should only be scheduled when the suite is green and there is explicit appetite — it is legitimate to ship Phases 1-13 and defer 14-15 indefinitely."
+  ]
+}
