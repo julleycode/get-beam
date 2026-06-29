@@ -19,7 +19,7 @@ class Segment(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     characteristics: Mapped[dict] = mapped_column(JSONB, default=dict)
-    recommended_channels: Mapped[dict] = mapped_column(JSONB, default=list)
+    recommended_channels: Mapped[list[str]] = mapped_column(JSONB, default=list)
     messaging_angle: Mapped[str | None] = mapped_column(Text)
     priority: Mapped[str] = mapped_column(String(20), default="medium")
     visitor_count: Mapped[int] = mapped_column(Integer, default=0)

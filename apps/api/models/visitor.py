@@ -26,7 +26,7 @@ class Visitor(Base):
     total_sessions: Mapped[int] = mapped_column(Integer, default=0)
     avg_time_on_page: Mapped[float] = mapped_column(Float, default=0.0)
     max_scroll_depth: Mapped[int] = mapped_column(Integer, default=0)
-    pages_visited: Mapped[dict] = mapped_column(JSONB, default=list)
+    pages_visited: Mapped[list[str]] = mapped_column(JSONB, default=list)
     top_referrer: Mapped[str | None] = mapped_column(String(500))
     utm_source: Mapped[str | None] = mapped_column(String(200))
     utm_medium: Mapped[str | None] = mapped_column(String(200))
