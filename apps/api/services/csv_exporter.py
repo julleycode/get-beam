@@ -19,6 +19,16 @@ def _sha256(value: str) -> str:
     return hashlib.sha256(value.strip().lower().encode()).hexdigest()
 
 
+def _csv_safe(value) -> str:
+    """Neutralize CSV formula injection: a cell starting with =, +, -, @ (or a
+    leading tab/CR) is prefixed with an apostrophe so a spreadsheet can't run it
+    as a formula when the export is opened."""
+    s = "" if value is None else str(value)
+    if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + s
+    return s
+
+
 async def _get_segment_visitors(
     db: AsyncSession, segment_id: str
 ) -> list[dict]:
@@ -112,8 +122,8 @@ async def export_google_csv(db: AsyncSession, segment_id: str) -> str:
 
     for v in visitors:
         writer.writerow([
-            v["email"], v["phone"], v["first_name"],
-            v["last_name"], v["country"], "",
+            _csv_safe(v["email"]), _csv_safe(v["phone"]), _csv_safe(v["first_name"]),
+            _csv_safe(v["last_name"]), _csv_safe(v["country"]), "",
         ])
 
     logger.info("csv_exported", platform="google", segment_id=segment_id, count=len(visitors))
@@ -128,8 +138,8 @@ async def export_linkedin_csv(db: AsyncSession, segment_id: str) -> str:
 
     for v in visitors:
         writer.writerow([
-            v["email"], v["company_name"], v["job_title"],
-            v["first_name"], v["last_name"],
+            _csv_safe(v["email"]), _csv_safe(v["company_name"]), _csv_safe(v["job_title"]),
+            _csv_safe(v["first_name"]), _csv_safe(v["last_name"]),
         ])
 
     logger.info("csv_exported", platform="linkedin", segment_id=segment_id, count=len(visitors))

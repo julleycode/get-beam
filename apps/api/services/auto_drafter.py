@@ -160,7 +160,12 @@ class AutoDrafter:
                 visitor_name=visitor_name,
                 platform=platform.value,
             )
-            return self._mock_draft(visitor_name, visitor_role, recent_post, platform)
+            # Only fall back to a canned mock draft in explicit mock mode. In real
+            # mode an LLM failure must NOT persist a fake draft as if the AI wrote
+            # it — re-raise so the caller logs + skips this draft.
+            if settings.mock_external_apis:
+                return self._mock_draft(visitor_name, visitor_role, recent_post, platform)
+            raise
 
     def _mock_draft(
         self,

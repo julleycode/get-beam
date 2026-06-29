@@ -13,12 +13,11 @@ import hmac
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.models.database import get_db
-from apps.api.models.visitor import IdentifiedVisitor
+from apps.api.services.suppression import add_suppression
 
 logger = structlog.get_logger()
 
@@ -60,16 +59,13 @@ async def sendgrid_events(
             continue
         if event_type == "bounce" and (ev.get("type") or "bounce").lower() not in _HARD_BOUNCE_TYPES:
             continue
-        # Case-insensitive: stored emails may be mixed case (provider-supplied);
-        # `email` is already stripped + lowercased above.
-        await db.execute(
-            update(IdentifiedVisitor)
-            .where(func.lower(IdentifiedVisitor.email) == email)
-            .values(do_not_email=True)
+        # Write a suppression-list entry (blind-index) AND cascade do_not_email
+        # onto existing rows. The entry is what catches an address re-identified
+        # AFTER the bounce — flagging only existing rows left that hole open.
+        await add_suppression(
+            db, email, scope="do_not_email", reason=f"sendgrid_{event_type}"
         )
         suppressed += 1
 
-    if suppressed:
-        await db.commit()
     logger.info("sendgrid_events_processed", count=len(events), suppressed=suppressed)
     return {"processed": len(events), "suppressed": suppressed}
