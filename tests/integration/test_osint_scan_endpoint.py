@@ -145,7 +145,7 @@ class TestOsintScanEndpoint:
         async def fake_scan(email):
             return FAKE_BLOB
 
-        monkeypatch.setattr("apps.api.routers.visitors.run_osint_scan", fake_scan)
+        monkeypatch.setattr("apps.api.routers.visitors_helpers.run_osint_scan", fake_scan)
 
         resp = await test_client.post(
             f"/api/v1/visitors/{osint_setup['site_id']}/v-id/osint-scan",

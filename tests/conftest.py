@@ -113,16 +113,18 @@ async def test_client(test_engine) -> AsyncGenerator[AsyncClient, None]:
 
     import apps.api.routers.demo as demo_mod
     import apps.api.routers.events as events_mod
-    import apps.api.routers.visitors as visitors_mod
+    # The visitors background jobs (which use async_session directly) live in
+    # visitors_helpers since the Phase 15 split — patch there, not in visitors.
+    import apps.api.routers.visitors_helpers as visitors_helpers_mod
 
     orig = {
         "demo": demo_mod.async_session,
         "events": events_mod.async_session,
-        "visitors": visitors_mod.async_session,
+        "visitors_helpers": visitors_helpers_mod.async_session,
     }
     demo_mod.async_session = test_session_factory
     events_mod.async_session = test_session_factory
-    visitors_mod.async_session = test_session_factory
+    visitors_helpers_mod.async_session = test_session_factory
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -130,6 +132,6 @@ async def test_client(test_engine) -> AsyncGenerator[AsyncClient, None]:
 
     demo_mod.async_session = orig["demo"]
     events_mod.async_session = orig["events"]
-    visitors_mod.async_session = orig["visitors"]
+    visitors_helpers_mod.async_session = orig["visitors_helpers"]
     app.dependency_overrides.clear()
     limiter.enabled = True
