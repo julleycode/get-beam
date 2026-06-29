@@ -10,6 +10,7 @@ from apps.api.config import settings
 from apps.api.models.visitor import IdentifiedVisitor
 from apps.api.services.link_decorator import generate_unsubscribe_token
 from apps.api.services.pii import mask_email as _mask_email
+from apps.api.services.suppression import is_email_suppressed
 
 logger = structlog.get_logger()
 
@@ -18,7 +19,9 @@ SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send"
 
 class EmailSender:
     async def _is_suppressed(self, db: AsyncSession, to_email: str) -> bool:
-        """True if any identified visitor with this email is flagged do_not_email.
+        """True if this address must not be emailed — either an IdentifiedVisitor
+        row carries the do_not_email flag, OR the address is on the suppression
+        list (covers addresses opted out after they were first identified).
 
         Case-insensitive match: stored emails may be mixed case while input is
         typically lowercased, so compare lower() to lower().
@@ -31,7 +34,12 @@ class EmailSender:
             )
             .limit(1)
         )
-        return result.scalar_one_or_none() is not None
+        if result.scalar_one_or_none() is not None:
+            return True
+        # The suppression list catches an address opted out AFTER it was first
+        # identified — a row created later won't carry the flag. Blind-index
+        # hash match; the 'all' scope is covered too.
+        return await is_email_suppressed(db, to_email, "do_not_email")
 
     async def send(
         self,

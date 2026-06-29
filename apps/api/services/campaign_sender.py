@@ -21,6 +21,8 @@ from apps.api.models.segment import SegmentMember
 from apps.api.models.visitor import IdentifiedVisitor
 from apps.api.services.email_rate_limiter import check_and_reserve_email
 from apps.api.services.email_sender import EmailSender
+from apps.api.services.identity_classification import is_emailable_identity
+from apps.api.services.suppression import is_email_suppressed
 
 logger = structlog.get_logger()
 
@@ -65,6 +67,7 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
         "sent": 0,
         "skipped_no_email": 0,
         "skipped_suppressed": 0,
+        "skipped_company_level": 0,
         "skipped_already_sent": 0,
         "throttled": 0,
         "failed": 0,
@@ -86,6 +89,17 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
             summary["skipped_no_email"] += 1
             continue
         if iv.do_not_email:
+            summary["skipped_suppressed"] += 1
+            continue
+        # Never email a company-level guess (hunter/apollo map IP -> company and
+        # return a RANDOM employee, not the visitor) or an unclassified provider.
+        if not is_emailable_identity(iv.resolution_provider):
+            summary["skipped_company_level"] += 1
+            continue
+        # Suppression list catches addresses opted out AFTER identification (the
+        # do_not_email flag only covers rows that existed at opt-out time, and
+        # this path passes no db to EmailSender so _is_suppressed is bypassed).
+        if await is_email_suppressed(db, iv.email, "do_not_email"):
             summary["skipped_suppressed"] += 1
             continue
 

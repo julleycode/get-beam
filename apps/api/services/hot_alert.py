@@ -6,6 +6,8 @@ Gate: US traffic (beam only resolves US person-level) + intent_score >= HIGH_INT
 so a re-resolution never re-pings. Best-effort — never raises into the resolve path.
 """
 
+from html import escape
+
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +17,7 @@ from apps.api.models.site import Site
 from apps.api.models.user import User
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.services.email_sender import EmailSender
+from apps.api.services.identity_classification import is_emailable_identity
 from apps.api.services.redis_client import get_redis
 
 logger = structlog.get_logger()
@@ -76,19 +79,27 @@ async def maybe_send_hot_alert(
     if owner is None or not owner.email:
         return False
 
-    name = identified.full_name or identified.email or "A high-intent visitor"
+    # Only name/email the visitor when the identity is person-level. A company-
+    # level guess (hunter/apollo) is a RANDOM employee, not the visitor — alert
+    # that a high-intent visit happened without claiming/exposing a wrong person.
+    is_person = is_emailable_identity(identified.resolution_provider)
+    name = (
+        (identified.full_name or identified.email or "A high-intent visitor")
+        if is_person
+        else "A high-intent visitor"
+    )
     score = int(visitor.intent_score or 0)
     link = (
         f"{settings.frontend_url}/dashboard/visitors/{visitor.visitor_id}"
         f"?site={visitor.site_id}"
     )
     parts = [
-        f"<p><b>{name}</b> just visited <b>{site.name}</b> — "
+        f"<p><b>{escape(name)}</b> just visited <b>{escape(site.name or '')}</b> — "
         f"intent {score}/100, US traffic.</p>"
     ]
-    if identified.email:
-        parts.append(f"<p>Email: {identified.email}</p>")
-    parts.append(f'<p><a href="{link}">Open in beam &rarr;</a></p>')
+    if is_person and identified.email:
+        parts.append(f"<p>Email: {escape(identified.email)}</p>")
+    parts.append(f'<p><a href="{escape(link, quote=True)}">Open in beam &rarr;</a></p>')
 
     await EmailSender().send(
         to_email=owner.email,

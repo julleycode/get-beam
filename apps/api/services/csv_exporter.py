@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.segment import SegmentMember
 from apps.api.models.visitor import IdentifiedVisitor
+from apps.api.services.identity_classification import is_emailable_identity
 from apps.api.services.suppression import is_email_suppressed
 
 logger = structlog.get_logger()
@@ -41,6 +42,12 @@ async def _get_segment_visitors(
         )
         identified = id_result.scalar_one_or_none()
         if not identified or not identified.email:
+            continue
+
+        # Never export a company-level guess (hunter/apollo) — it's a random
+        # employee at the visitor's company, not the visitor; pushing it to ad
+        # audiences / CRM spams someone who never visited.
+        if not is_emailable_identity(identified.resolution_provider):
             continue
 
         # Compliance: never export contacts on the privacy suppression list

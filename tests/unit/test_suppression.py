@@ -80,8 +80,24 @@ class TestEmailSenderSuppression:
         client.post.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_send_skips_when_on_suppression_list(self):
+        # Flag query finds no row, but the suppression list does → must skip.
+        db = _make_db([_scalar_result(None), _scalar_result(uuid.uuid4())])
+        with patch("apps.api.services.email_sender.httpx.AsyncClient") as client_cls:
+            client = _mock_sendgrid(client_cls)
+            result = await EmailSender().send(
+                to_email="optout@example.com",
+                subject="hi",
+                body_html="<p>hi</p>",
+                unsubscribe_url="https://x.test/u?t=abc",
+                db=db,
+            )
+        assert result is None
+        client.post.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_send_proceeds_when_not_suppressed(self):
-        db = _make_db([_scalar_result(None)])  # no suppressed row
+        db = _make_db([_scalar_result(None), _scalar_result(None)])  # flag none; list none
 
         with patch("apps.api.services.email_sender.httpx.AsyncClient") as client_cls:
             client = _mock_sendgrid(client_cls)
@@ -114,7 +130,7 @@ class TestEmailSenderSuppression:
     @pytest.mark.asyncio
     async def test_suppression_lookup_is_case_insensitive(self):
         """Mixed-case recipient must match lower() on both sides."""
-        db = _make_db([_scalar_result(None)])
+        db = _make_db([_scalar_result(None), _scalar_result(None)])
         await EmailSender()._is_suppressed(db, "  MixedCase@Example.COM ")
 
         stmt = db.execute.call_args_list[0].args[0]
@@ -150,6 +166,7 @@ class TestCsvExportSuppression:
             city=None,
             region=None,
             country=None,
+            resolution_provider="leadpipe",  # person-level → exportable
         )
         db = _make_db([
             _scalars_all_result([member]),
@@ -164,3 +181,25 @@ class TestCsvExportSuppression:
         assert visitors[0]["email"] == "Lead@Example.com"
         assert visitors[0]["first_name"] == "Ann"
         assert visitors[0]["last_name"] == "Lee"
+
+    @pytest.mark.asyncio
+    async def test_export_excludes_company_level_identity(self):
+        # hunter/apollo return a random employee at the visitor's company — never
+        # export that to ad audiences / CRM.
+        member = SimpleNamespace(site_id="s1", visitor_id="v1")
+        identified = SimpleNamespace(
+            email="random.employee@acme.com",
+            full_name="Random Employee",
+            phone=None,
+            city=None,
+            region=None,
+            country=None,
+            resolution_provider="hunter",  # company-level guess
+        )
+        db = _make_db([
+            _scalars_all_result([member]),
+            _scalar_result(identified),
+        ])
+
+        visitors = await _get_segment_visitors(db, "seg-1")
+        assert visitors == []
