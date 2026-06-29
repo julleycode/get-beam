@@ -1,19 +1,17 @@
 """Twitter / X API v2 integration."""
 
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlencode
 
 import httpx
 import structlog
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
-
 from apps.api.config import settings
 from apps.api.services.platforms.base import (
     FeedPost,
     OAuthTokens,
     PlatformService,
+    post_retry,
 )
 from apps.api.services.platforms.pkce import (
     generate_code_verifier,
@@ -22,14 +20,6 @@ from apps.api.services.platforms.pkce import (
     get_code_verifier,
 )
 
-
-def _is_transient_error(exc: BaseException) -> bool:
-    """Return True for HTTP errors worth retrying (5xx, 429)."""
-    if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code in (429, 500, 502, 503, 504)
-    if isinstance(exc, (httpx.ConnectError, httpx.ReadTimeout)):
-        return True
-    return False
 
 logger = structlog.get_logger()
 
@@ -228,12 +218,7 @@ class TwitterService(PlatformService):
         return posts
 
     # ── Write ────────────────────────────────────────────
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception(_is_transient_error),
-        reraise=True,
-    )
+    @post_retry
     async def post_comment(
         self, access_token: str, platform_post_id: str, text: str
     ) -> str:
@@ -311,36 +296,6 @@ class TwitterService(PlatformService):
 
         return posts[:limit]
 
-    @staticmethod
-    def _mock_visitor_feed(handles: list[str], limit: int) -> list[FeedPost]:
-        """Mock tweets from identified visitors for dev/demo."""
-        import random
-        now = datetime.now(timezone.utc)
-        samples = [
-            "Just launched our new product! Check it out 🚀",
-            "Great insights from today's conference on AI and SaaS",
-            "Looking for feedback on our landing page redesign",
-            "Hiring a senior engineer — remote friendly! DM me",
-            "Our Q2 growth numbers are insane. Thread 🧵",
-            "Been exploring new marketing channels this week",
-            "Love what @competitor is doing but we're taking a different approach",
-            "Who else is building in public? Share your journey!",
-        ]
-        posts: list[FeedPost] = []
-        for i, handle in enumerate(handles[:limit]):
-            clean = handle.lstrip("@")
-            posts.append(
-                FeedPost(
-                    platform_post_id=f"visitor_tweet_{clean}_{i}",
-                    author_name=clean.replace("_", " ").title(),
-                    author_username=clean,
-                    content=random.choice(samples),
-                    post_url=f"https://x.com/{clean}/status/mock_visitor_{i}",
-                    posted_at=now - timedelta(hours=random.randint(1, 72)),
-                )
-            )
-        return posts
-
     # ── Helpers ──────────────────────────────────────────
     async def _get_me(self, access_token: str) -> dict:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -350,37 +305,3 @@ class TwitterService(PlatformService):
             )
             resp.raise_for_status()
             return resp.json()["data"]
-
-    @staticmethod
-    def _mock_tokens() -> OAuthTokens:
-        return OAuthTokens(
-            access_token=f"mock_twitter_token_{uuid.uuid4().hex[:8]}",
-            refresh_token=f"mock_twitter_refresh_{uuid.uuid4().hex[:8]}",
-            scopes=["tweet.read", "tweet.write", "users.read"],
-            platform_user_id="mock_12345",
-            username="mock_user",
-        )
-
-    @staticmethod
-    def _mock_feed(limit: int) -> list[FeedPost]:
-        now = datetime.now(timezone.utc)
-        posts: list[FeedPost] = []
-        samples = [
-            ("Just shipped a new feature!", "indiehacker"),
-            ("Working on my SaaS this weekend", "buildinpublic"),
-            ("Anyone else struggling with OAuth?", "devlife"),
-            ("Our MRR hit $10k!", "startupfounder"),
-            ("Hot take: REST > GraphQL for most apps", "techtwitter"),
-        ]
-        for i, (text, username) in enumerate(samples[:limit]):
-            posts.append(
-                FeedPost(
-                    platform_post_id=f"mock_tweet_{i}",
-                    author_name=username.title(),
-                    author_username=username,
-                    content=text,
-                    post_url=f"https://x.com/{username}/status/mock_{i}",
-                    posted_at=now,
-                )
-            )
-        return posts

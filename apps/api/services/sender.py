@@ -15,6 +15,16 @@ from apps.api.services.platforms import get_platform_service
 logger = structlog.get_logger()
 
 
+def _http_error_detail(exc: Exception) -> str:
+    """Best-effort HTTP error detail string from an exception."""
+    if hasattr(exc, "response"):
+        try:
+            return f"HTTP {exc.response.status_code}: {exc.response.text}"
+        except Exception:
+            pass
+    return str(exc)
+
+
 async def _refresh_if_expired(
     db: AsyncSession, account: SocialAccount
 ) -> str:
@@ -65,12 +75,7 @@ async def _refresh_if_expired(
         )
         return new_tokens.access_token
     except Exception as exc:
-        error_detail = str(exc)
-        if hasattr(exc, "response"):
-            try:
-                error_detail = f"HTTP {exc.response.status_code}: {exc.response.text}"
-            except Exception:
-                pass
+        error_detail = _http_error_detail(exc)
         logger.exception(
             "token_refresh_failed",
             account_id=str(account.id),
@@ -136,12 +141,7 @@ async def send_draft(db: AsyncSession, draft: Draft) -> bool:
             return True
         except Exception as exc:
             # Log as much detail as possible for debugging
-            error_detail = str(exc)
-            if hasattr(exc, "response"):
-                try:
-                    error_detail = f"HTTP {exc.response.status_code}: {exc.response.text}"
-                except Exception:
-                    pass
+            error_detail = _http_error_detail(exc)
             logger.exception(
                 "send_draft_failed",
                 draft_id=str(draft.id),

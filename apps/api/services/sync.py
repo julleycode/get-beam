@@ -79,22 +79,6 @@ async def _playwright_fetch_timeline(limit: int = 20):
         return []
 
 
-async def _playwright_fetch_user_tweets(username: str, limit: int = 20):
-    """Fallback: use Playwright to scrape a specific user's profile page."""
-    try:
-        from apps.api.services.platforms.twitter_browser import (
-            TwitterBrowserPoster,
-            TwitterBrowserError,
-        )
-        poster = TwitterBrowserPoster()
-        # Playwright fetches /home timeline, not a specific user.
-        # For user-specific, syndication is better. Only use Playwright
-        # as timeline fallback.
-        return []
-    except Exception:
-        return []
-
-
 # ── Visitor posts: tweets from enriched visitors ──────────
 
 async def sync_visitor_posts(
@@ -321,6 +305,25 @@ async def sync_account_feed(
     return total
 
 
+async def _sync_accounts(db: AsyncSession, accounts) -> dict[str, int]:
+    """Run the per-account feed sync loop, collecting {platform:username -> count}."""
+    counts: dict[str, int] = {}
+    for account in accounts:
+        try:
+            n = await sync_account_feed(db, account)
+            key = f"{account.platform.value}:{account.username}"
+            counts[key] = n
+        except Exception:
+            logger.exception(
+                "sync_account_error",
+                platform=account.platform.value,
+                account_id=str(account.id),
+            )
+            counts[f"{account.platform.value}:{account.username}"] = 0
+
+    return counts
+
+
 async def sync_user_accounts(
     db: AsyncSession, user_id: uuid.UUID
 ) -> dict[str, int]:
@@ -331,23 +334,7 @@ async def sync_user_accounts(
             SocialAccount.is_active.is_(True),
         )
     )
-    accounts = result.scalars().all()
-
-    counts: dict[str, int] = {}
-    for account in accounts:
-        try:
-            n = await sync_account_feed(db, account)
-            key = f"{account.platform.value}:{account.username}"
-            counts[key] = n
-        except Exception:
-            logger.exception(
-                "sync_account_error",
-                platform=account.platform.value,
-                account_id=str(account.id),
-            )
-            counts[f"{account.platform.value}:{account.username}"] = 0
-
-    return counts
+    return await _sync_accounts(db, result.scalars().all())
 
 
 async def sync_all_accounts(db: AsyncSession) -> dict[str, int]:
@@ -355,20 +342,4 @@ async def sync_all_accounts(db: AsyncSession) -> dict[str, int]:
     result = await db.execute(
         select(SocialAccount).where(SocialAccount.is_active.is_(True))
     )
-    accounts = result.scalars().all()
-
-    counts: dict[str, int] = {}
-    for account in accounts:
-        try:
-            n = await sync_account_feed(db, account)
-            key = f"{account.platform.value}:{account.username}"
-            counts[key] = n
-        except Exception:
-            logger.exception(
-                "sync_account_error",
-                platform=account.platform.value,
-                account_id=str(account.id),
-            )
-            counts[f"{account.platform.value}:{account.username}"] = 0
-
-    return counts
+    return await _sync_accounts(db, result.scalars().all())

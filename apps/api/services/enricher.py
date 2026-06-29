@@ -65,18 +65,26 @@ ENRICHMENT_FIELDS: list[str] = [
 ]
 
 
-def calculate_completeness(profile: dict) -> float:
-    """Calculate enrichment completeness as a fraction of all fields filled."""
-    filled = sum(1 for f in ENRICHMENT_FIELDS if profile.get(f))
-    return round(filled / len(ENRICHMENT_FIELDS), 2)
-
-
 # Business rule: cache enrichment API results for 7 days (cost control —
 # the same email re-identified under another visitor/site must not re-pay
 # PDL/Proxycurl/Twitter). Misses are negative-cached too: a known-missing
 # person costs as much to re-query as a hit.
 ENRICH_CACHE_TTL_SECONDS = 7 * 86400
 _CACHE_MISS_MARKER = "__no_match__"
+
+
+def _apply_proxycurl(profile, proxycurl_data: dict) -> None:
+    """Copy Proxycurl fields onto the profile (behavior preserved verbatim)."""
+    profile.linkedin_headline = proxycurl_data.get("linkedin_headline")
+    profile.linkedin_summary = proxycurl_data.get("linkedin_summary")
+    profile.linkedin_follower_count = proxycurl_data.get("linkedin_follower_count")
+
+
+def _apply_twitter(profile, twitter_data: dict) -> None:
+    """Copy Twitter fields onto the profile (behavior preserved verbatim)."""
+    profile.twitter_bio = twitter_data.get("twitter_bio")
+    profile.twitter_follower_count = twitter_data.get("twitter_follower_count")
+    profile.twitter_recent_topics = twitter_data.get("twitter_recent_topics", [])
 
 
 class Enricher:
@@ -159,9 +167,7 @@ class Enricher:
             if proxycurl_key:
                 proxycurl_data = await self._enrich_proxycurl(linkedin_url, api_key=proxycurl_key, visitor=visitor)
                 if proxycurl_data:
-                    profile.linkedin_headline = proxycurl_data.get("linkedin_headline")
-                    profile.linkedin_summary = proxycurl_data.get("linkedin_summary")
-                    profile.linkedin_follower_count = proxycurl_data.get("linkedin_follower_count")
+                    _apply_proxycurl(profile, proxycurl_data)
                     logger.info("cascade_proxycurl_ok", visitor_id=visitor.visitor_id[:8])
 
         # ── Step 3: Cascade — Twitter (handle → bio/followers) ──
@@ -171,9 +177,7 @@ class Enricher:
             if twitter_key:
                 twitter_data = await self._enrich_twitter(twitter_handle, api_key=twitter_key, visitor=visitor)
                 if twitter_data:
-                    profile.twitter_bio = twitter_data.get("twitter_bio")
-                    profile.twitter_follower_count = twitter_data.get("twitter_follower_count")
-                    profile.twitter_recent_topics = twitter_data.get("twitter_recent_topics", [])
+                    _apply_twitter(profile, twitter_data)
                     logger.info("cascade_twitter_ok", visitor_id=visitor.visitor_id[:8])
 
         # ── Final: recalculate completeness with all cascade data ──
@@ -222,9 +226,7 @@ class Enricher:
                 profile.linkedin_url, api_key=keys["proxycurl"], visitor=visitor
             )
             if proxycurl_data:
-                profile.linkedin_headline = proxycurl_data.get("linkedin_headline")
-                profile.linkedin_summary = proxycurl_data.get("linkedin_summary")
-                profile.linkedin_follower_count = proxycurl_data.get("linkedin_follower_count")
+                _apply_proxycurl(profile, proxycurl_data)
                 updated = True
 
         # Twitter (fill if cascade didn't run or returned nothing)
@@ -233,9 +235,7 @@ class Enricher:
                 profile.twitter_handle, api_key=keys["twitter"], visitor=visitor
             )
             if twitter_data:
-                profile.twitter_bio = twitter_data.get("twitter_bio")
-                profile.twitter_follower_count = twitter_data.get("twitter_follower_count")
-                profile.twitter_recent_topics = twitter_data.get("twitter_recent_topics", [])
+                _apply_twitter(profile, twitter_data)
                 updated = True
 
         if updated:

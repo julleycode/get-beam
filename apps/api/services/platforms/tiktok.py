@@ -5,13 +5,12 @@ from urllib.parse import urlencode
 
 import httpx
 import structlog
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
-
 from apps.api.config import settings
 from apps.api.services.platforms.base import (
     FeedPost,
     OAuthTokens,
     PlatformService,
+    post_retry,
 )
 from apps.api.services.platforms.pkce import (
     generate_code_verifier,
@@ -20,13 +19,6 @@ from apps.api.services.platforms.pkce import (
     get_code_verifier,
 )
 
-
-def _is_transient_error(exc: BaseException) -> bool:
-    if isinstance(exc, httpx.HTTPStatusError):
-        return exc.response.status_code in (429, 500, 502, 503, 504)
-    if isinstance(exc, (httpx.ConnectError, httpx.ReadTimeout)):
-        return True
-    return False
 
 logger = structlog.get_logger()
 
@@ -133,12 +125,7 @@ class TikTokService(PlatformService):
             )
         return posts
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception(_is_transient_error),
-        reraise=True,
-    )
+    @post_retry
     async def post_comment(
         self, access_token: str, platform_post_id: str, text: str
     ) -> str:

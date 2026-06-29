@@ -113,6 +113,18 @@ async def get_enrich_usage(db: AsyncSession, site_id: str) -> int:
     return result.scalar() or 0
 
 
+def _budget_result(used: int, limit: int | None, byok: bool) -> dict:
+    """Assemble the standard budget-meter response. BYOK users are uncapped."""
+    if byok:
+        return {"allowed": True, "used": used, "limit": None, "is_byok": True}
+    return {
+        "allowed": used < limit,
+        "used": used,
+        "limit": limit,
+        "is_byok": False,
+    }
+
+
 async def check_identify_budget(
     db: AsyncSession, site_id: str, user_id: uuid.UUID
 ) -> dict:
@@ -123,16 +135,7 @@ async def check_identify_budget(
     byok = await is_full_byok(db, user_id)
     used = await get_identify_usage(db, site_id)
     limit = await get_site_daily_budget(db, site_id)
-
-    if byok:
-        return {"allowed": True, "used": used, "limit": None, "is_byok": True}
-
-    return {
-        "allowed": used < limit,
-        "used": used,
-        "limit": limit,
-        "is_byok": False,
-    }
+    return _budget_result(used, limit, byok)
 
 
 async def check_enrich_budget(
@@ -145,16 +148,7 @@ async def check_enrich_budget(
     byok = await is_full_byok(db, user_id)
     used = await get_enrich_usage(db, site_id)
     limit = settings.default_daily_enrichment_budget
-
-    if byok:
-        return {"allowed": True, "used": used, "limit": None, "is_byok": True}
-
-    return {
-        "allowed": used < limit,
-        "used": used,
-        "limit": limit,
-        "is_byok": False,
-    }
+    return _budget_result(used, limit, byok)
 
 
 def missing_byok_providers(user_providers: set[str]) -> set[str]:
@@ -204,16 +198,7 @@ async def check_osint_budget(
     byok = await is_full_byok(db, user_id)
     used = await get_osint_usage(site_id)
     limit = settings.osint_scan_daily_budget
-
-    if byok:
-        return {"allowed": True, "used": used, "limit": None, "is_byok": True}
-
-    return {
-        "allowed": used < limit,
-        "used": used,
-        "limit": limit,
-        "is_byok": False,
-    }
+    return _budget_result(used, limit, byok)
 
 
 # ─────────────── Paid OSINT (OSINT Industries) daily credit guard ───────────────
