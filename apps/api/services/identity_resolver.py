@@ -695,35 +695,6 @@ class IdentityResolver:
 
     LEADPIPE_API_BASE = "https://api.aws53.cloud"
 
-    async def _try_leadpipe_identify(self, visitor: Visitor) -> IdentifiedVisitor | None:
-        """Leadpipe Identity Graph: pixel-based person identification.
-
-        Leadpipe's JS pixel (installed alongside Beam's pixel) captures
-        browser signals and matches them against a 280M+ person graph.
-        We poll their API for identified visitors matching this visitor's
-        page URL + timestamp window.
-        """
-        if not settings.leadpipe_api_key:
-            return None
-
-        start = time.monotonic()
-
-        data = await self._call_leadpipe_api(visitor)
-        success = data is not None
-
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        cost = 0.0  # Free trial (500 IDs)
-        await self._log_resolution(visitor, "leadpipe", success, cost, elapsed_ms)
-
-        if data:
-            logger.info(
-                "leadpipe_person_identified",
-                visitor_id=visitor.visitor_id[:8],
-                email=data.get("email", "")[:5] + "***" if data.get("email") else None,
-            )
-            return await self._save_identified(visitor, data, "leadpipe")
-        return None
-
     @_http_retry
     async def _call_leadpipe_api(self, visitor: Visitor) -> dict | None:
         """Query Leadpipe for identified visitors matching this visitor's session.
@@ -760,30 +731,6 @@ class IdentityResolver:
                 return None
 
             body = resp.json()
-
-            # TEMP shape probe — REMOVE once a real prod response confirms the
-            # schema. /v1/data's response is undocumented; the parser below
-            # assumes data[].{ip,email,...}. Log STRUCTURE ONLY (key names, never
-            # values → no PII) so we can verify the parser reads the right fields
-            # the next time Leadpipe runs on US traffic.
-            try:
-                if isinstance(body, dict):
-                    top_keys = sorted(body.keys())
-                    sample = body.get("data") or body.get("visitors") or body.get("results")
-                elif isinstance(body, list):
-                    top_keys, sample = "<list>", body
-                else:
-                    top_keys, sample = f"<{type(body).__name__}>", None
-                record_keys = (
-                    sorted(sample[0].keys())
-                    if isinstance(sample, list) and sample and isinstance(sample[0], dict)
-                    else None
-                )
-                logger.info(
-                    "leadpipe_response_shape", top_level=top_keys, record_keys=record_keys
-                )
-            except Exception:
-                pass
 
             visitors_data = body.get("data", []) if isinstance(body, dict) else []
 
@@ -847,33 +794,6 @@ class IdentityResolver:
     # ──────────────────── Provider: Capturify Identity Graph ────────────────────
 
     CAPTURIFY_API_BASE = "https://api.capturify.io"
-
-    async def _try_capturify_identify(self, visitor: Visitor) -> IdentifiedVisitor | None:
-        """Capturify Identity Graph: pixel-based person identification.
-
-        Capturify's JS pixel captures browser signals and matches against
-        their identity graph. Claims ~60% match rate. API key required.
-        """
-        if not settings.capturify_api_key:
-            return None
-
-        start = time.monotonic()
-
-        data = await self._call_capturify_api(visitor)
-        success = data is not None
-
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        cost = 0.0  # Free trial (500 leads)
-        await self._log_resolution(visitor, "capturify", success, cost, elapsed_ms)
-
-        if data:
-            logger.info(
-                "capturify_person_identified",
-                visitor_id=visitor.visitor_id[:8],
-                email=data.get("email", "")[:5] + "***" if data.get("email") else None,
-            )
-            return await self._save_identified(visitor, data, "capturify")
-        return None
 
     @_http_retry
     async def _call_capturify_api(self, visitor: Visitor) -> dict | None:
@@ -971,34 +891,6 @@ class IdentityResolver:
         }
 
     # ──────────────────── Provider: RB2B Identity Graph ────────────────────
-
-    async def _try_rb2b_identify(self, visitor: Visitor) -> IdentifiedVisitor | None:
-        """RB2B Identity Graph: IP → hashed email → person profile.
-
-        This is TRUE person-level identification via cookie/device graph.
-        Works even for residential IPs if the person is in RB2B's network.
-        US traffic only. Returns actual visitor's email, not a company employee.
-        """
-        if not settings.rb2b_api_key:
-            return None
-
-        start = time.monotonic()
-
-        data = await self._call_rb2b_api(visitor)
-        success = data is not None
-
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        cost = 0.09 if success else 0.0
-        await self._log_resolution(visitor, "rb2b_identity_graph", success, cost, elapsed_ms)
-
-        if data:
-            logger.info(
-                "rb2b_person_identified",
-                visitor_id=visitor.visitor_id[:8],
-                email=data.get("email", "")[:5] + "***" if data.get("email") else None,
-            )
-            return await self._save_identified(visitor, data, "rb2b")
-        return None
 
     @_http_retry
     async def _call_rb2b_api(self, visitor: Visitor) -> dict | None:
@@ -1100,25 +992,6 @@ class IdentityResolver:
 
     # ──────────────────── Provider: PDL IP Enrich ────────────────────
 
-    async def _try_pdl_ip_enrich(self, visitor: Visitor) -> str | None:
-        """PDL IP Enrichment: IP → company domain + location.
-
-        Returns company domain string (feeds into Hunter/Apollo), or None.
-        Also stores location data on visitor if available.
-        """
-        start = time.monotonic()
-
-        domain = await self._call_pdl_ip_enrich(visitor)
-        success = domain is not None
-
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        cost = 0.01 if success else 0.0
-        await self._log_resolution(visitor, "pdl_ip_enrich", success, cost, elapsed_ms)
-
-        if domain:
-            logger.info("pdl_ip_company_found", visitor_id=visitor.visitor_id[:8], domain=domain)
-        return domain
-
     @staticmethod
     def _raise_if_transient(resp: httpx.Response) -> None:
         """Raise HTTPStatusError for transient statuses so tenacity can retry them.
@@ -1182,20 +1055,6 @@ class IdentityResolver:
         return None
 
     # ──────────────────── Provider: IPinfo ────────────────────
-
-    async def _try_ipinfo_company(self, visitor: Visitor) -> str | None:
-        """Resolve IP → company domain via IPinfo. Returns domain or None."""
-        start = time.monotonic()
-
-        domain = await self._call_ipinfo_api(visitor)
-
-        elapsed_ms = int((time.monotonic() - start) * 1000)
-        cost = 0.0  # IPinfo free tier
-        await self._log_resolution(visitor, "ipinfo", domain is not None, cost, elapsed_ms)
-
-        if domain:
-            logger.info("ipinfo_company_found", visitor_id=visitor.visitor_id[:8], domain=domain)
-        return domain
 
     # Well-known org name → domain mapping for IPinfo free tier
     # (free tier returns org but not company.domain)

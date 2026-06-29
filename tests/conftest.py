@@ -133,22 +133,3 @@ async def test_client(test_engine) -> AsyncGenerator[AsyncClient, None]:
     visitors_mod.async_session = orig["visitors"]
     app.dependency_overrides.clear()
     limiter.enabled = True
-
-
-@pytest_asyncio.fixture
-async def auth_token(test_client: AsyncClient) -> str:
-    """Get a valid auth token for testing authenticated endpoints.
-
-    Creates a test user if needed and returns a JWT token.
-    """
-    from apps.api.config import settings
-    import jwt
-    from datetime import datetime, timedelta
-
-    # Create a simple JWT token for testing
-    payload = {
-        "sub": "test-user-id",
-        "exp": datetime.utcnow() + timedelta(hours=1),
-    }
-    token = jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
-    return token
