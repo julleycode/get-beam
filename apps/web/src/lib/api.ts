@@ -4,6 +4,10 @@ import type {
   BlogPostListResponse,
   BlogPostAdminListResponse,
   BlogPostInput,
+  ChangelogEntryAdmin,
+  ChangelogAdminListResponse,
+  ChangelogEntryInput,
+  ChangelogSyncResponse,
   Site,
   SiteUpdate,
   FeatureRequest,
@@ -988,6 +992,50 @@ class ApiClient {
     return this.request<void>(`/api/v1/blog/posts/${id}`, { method: "DELETE" });
   }
 
+  // ── Changelog ─────────────────────────────────────────
+  async getAdminChangelog(limit = 50, offset = 0) {
+    return this.request<ChangelogAdminListResponse>(
+      `/api/v1/changelog/admin/entries?limit=${limit}&offset=${offset}`
+    );
+  }
+
+  async createChangelog(data: ChangelogEntryInput) {
+    return this.request<ChangelogEntryAdmin>("/api/v1/changelog/entries", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateChangelog(id: string, data: ChangelogEntryInput) {
+    return this.request<ChangelogEntryAdmin>(`/api/v1/changelog/entries/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async publishChangelog(id: string) {
+    return this.request<ChangelogEntryAdmin>(`/api/v1/changelog/entries/${id}/publish`, {
+      method: "POST",
+    });
+  }
+
+  async unpublishChangelog(id: string) {
+    return this.request<ChangelogEntryAdmin>(`/api/v1/changelog/entries/${id}/unpublish`, {
+      method: "POST",
+    });
+  }
+
+  async deleteChangelog(id: string) {
+    return this.request<void>(`/api/v1/changelog/entries/${id}`, { method: "DELETE" });
+  }
+
+  async syncChangelog(limit = 30) {
+    return this.request<ChangelogSyncResponse>(
+      `/api/v1/changelog/sync?limit=${limit}`,
+      { method: "POST" }
+    );
+  }
+
   async uploadImage(file: File): Promise<{ url: string }> {
     // Multipart — must NOT set Content-Type (browser sets the boundary), so
     // this bypasses the JSON `request` helper.
@@ -1086,6 +1134,12 @@ export type {
   BlogPostListResponse,
   BlogPostAdminListResponse,
   BlogPostInput,
+  ChangelogEntry,
+  ChangelogEntryAdmin,
+  ChangelogCategory,
+  ChangelogAdminListResponse,
+  ChangelogEntryInput,
+  ChangelogSyncResponse,
   Site,
   SiteUpdate,
   FeatureRequest,

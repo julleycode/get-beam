@@ -16,6 +16,7 @@ from apps.api.services.resolution_runner import run_resolution_sweep
 from apps.api.services.retention import purge_events_older_than
 from apps.api.services.sync import sync_all_accounts
 from apps.api.services import blog_service
+from apps.api.services import changelog_generator
 
 logger = structlog.get_logger()
 
@@ -76,6 +77,19 @@ async def _publish_scheduled_blog_job() -> None:
         logger.exception("scheduled_blog_publish_crashed")
 
 
+async def _changelog_sync_job() -> None:
+    """Periodic job: turn newly merged PRs into published changelog entries."""
+    try:
+        async with async_session() as db:
+            result = await changelog_generator.sync_from_github(db)
+            if result.imported:
+                logger.info("changelog_auto_synced", imported=result.imported)
+    except changelog_generator.ChangelogSyncError as exc:
+        logger.warning("changelog_sync_unavailable", error=str(exc))
+    except Exception:
+        logger.exception("changelog_sync_crashed")
+
+
 def start_scheduler() -> None:
     """Start the background scheduler. Call once at app startup."""
     scheduler.add_job(
@@ -114,6 +128,15 @@ def start_scheduler() -> None:
         id="retention_purge",
         replace_existing=True,
     )
+    if settings.changelog_sync_enabled:
+        scheduler.add_job(
+            _changelog_sync_job,
+            "interval",
+            hours=settings.changelog_sync_interval_hours,
+            id="changelog_sync",
+            replace_existing=True,
+            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+        )
     scheduler.start()
     logger.info(
         "scheduler_started",

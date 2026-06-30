@@ -86,6 +86,15 @@
       <div class="nav-pills">
         <a href="#how">how it works</a>
         <a href="#faq">faq</a>
+        <div class="wn-wrap" hidden>
+          <button class="nav-whatsnew" id="whatsnew-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="wn-popover">
+            what's new <span class="wn-dot" id="wn-dot" hidden></span>
+          </button>
+          <div class="wn-popover" id="wn-popover" role="dialog" aria-label="What's new" hidden>
+            <div class="wn-head">what's new</div>
+            <div class="wn-list" id="wn-list"></div>
+          </div>
+        </div>
         <a href="/sign-in" class="login-link">log in</a>
       </div>
     </nav>
@@ -1129,6 +1138,107 @@ NNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN`;
     .catch(function() { /* keep the empty wall */ });
 })();
 
+</script>
+
+<script>
+/* what's new — changelog pill + popover. Fetches published entries from the
+   Beam API; hides the whole pill if the fetch fails or there's nothing to show. */
+(function () {
+  var wrap    = document.querySelector('.wn-wrap');
+  var btn     = document.getElementById('whatsnew-btn');
+  var pop     = document.getElementById('wn-popover');
+  var list    = document.getElementById('wn-list');
+  var dot     = document.getElementById('wn-dot');
+  if (!wrap || !btn || !pop || !list || !dot) return;
+
+  // API base: localhost in dev, the deployed Beam API in production.
+  var API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+    ? 'http://localhost:8000'
+    : 'https://api.getbeam.fyi';
+
+  var SEEN_KEY = 'beam_changelog_seen';
+  var CATS = { new: 'new', improved: 'improved', fixed: 'fixed' };
+  var open = false;
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  function fmtDate(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d)) return '';
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  function renderList(entries) {
+    if (!entries.length) {
+      list.innerHTML = '<div class="wn-empty">no updates yet</div>';
+      return;
+    }
+    list.innerHTML = entries.map(function (e) {
+      var cat = CATS[e.category] ? e.category : 'new';
+      var body = e.body ? '<div class="wn-body">' + esc(e.body) + '</div>' : '';
+      return '<div class="wn-item wn-item--' + cat + '">'
+        + '<div class="wn-meta">'
+        +   '<span class="wn-cat wn-cat--' + cat + '">' + esc(cat) + '</span>'
+        +   '<span>' + esc(fmtDate(e.published_at || e.created_at)) + '</span>'
+        + '</div>'
+        + '<div class="wn-title">' + esc(e.title) + '</div>'
+        + body
+        + '</div>';
+    }).join('');
+  }
+
+  function openPop() {
+    pop.hidden = false;
+    requestAnimationFrame(function () { pop.classList.add('wn-open'); });
+    btn.setAttribute('aria-expanded', 'true');
+    open = true;
+    // Mark newest as seen → hide the dot.
+    if (latestTs) { try { localStorage.setItem(SEEN_KEY, latestTs); } catch (e) {} }
+    dot.hidden = true;
+  }
+  function closePop() {
+    pop.classList.remove('wn-open');
+    btn.setAttribute('aria-expanded', 'false');
+    open = false;
+    setTimeout(function () { if (!open) pop.hidden = true; }, 240);
+  }
+
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    open ? closePop() : openPop();
+  });
+  document.addEventListener('click', function (e) {
+    if (open && !wrap.contains(e.target)) closePop();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && open) closePop();
+  });
+
+  var latestTs = null;
+
+  // Skeleton until the fetch resolves (only seen if the user opens fast).
+  list.innerHTML = '<div class="wn-skel"></div><div class="wn-skel"></div><div class="wn-skel"></div>';
+
+  fetch(API_BASE + '/api/v1/changelog/entries?limit=6')
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function (d) {
+      var entries = (d && d.entries) || [];
+      if (!entries.length) return; // nothing published → keep pill hidden
+      renderList(entries);
+      wrap.hidden = false; // reveal the pill
+      latestTs = entries[0].published_at || entries[0].created_at || null;
+      var seen = null;
+      try { seen = localStorage.getItem(SEEN_KEY); } catch (e) {}
+      if (latestTs && (!seen || new Date(latestTs) > new Date(seen))) {
+        dot.hidden = false;
+      }
+    })
+    .catch(function () { /* API unreachable → pill stays hidden, page intact */ });
+})();
 </script>
 
 <script src="https://retarget-agent-production.up.railway.app/pixel/tracker.js" data-site="beam_getbeam_fyi" data-api="https://retarget-agent-production.up.railway.app" defer></script>
