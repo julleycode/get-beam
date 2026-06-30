@@ -293,16 +293,22 @@ class IdentityResolver(
                     enriched = await self._enrich_email_pdl(visitor, captured_email)
                     if enriched:
                         return enriched
-                # Save the captured email as a basic (owned) identification.
+                # Free cross-customer enrichment: if this exact email was already
+                # identified WITH a name on any Beam site, inherit that name — a
+                # deterministic email match (owned data, no provider spend). This
+                # is what fills the name that P3 stopped paying PDL to fetch.
+                node = await self._graph_node_by_email(captured_email)
+                graph_name = node.full_name if node else None
                 return await self._save_identified(
                     visitor,
                     {
                         "email": captured_email,
-                        "full_name": None,
+                        "full_name": graph_name,
                         "city": None,
                         "region": None,
                         "country": None,
-                        "confidence_score": 0.80,
+                        # Slightly higher when corroborated by the cross-customer graph.
+                        "confidence_score": 0.85 if graph_name else 0.80,
                     },
                     "form_capture",
                 )
@@ -822,6 +828,36 @@ class IdentityResolver(
         except Exception as exc:
             await self.db.rollback()
             logger.debug("beam_identity_upsert_failed", error=str(exc))
+
+    async def _graph_node_by_email(self, email: str) -> BeamIdentityNode | None:
+        """Cross-customer graph lookup keyed on EMAIL (the email_bidx blind index).
+
+        DETERMINISTIC and owned: if this exact email was already identified WITH a
+        name on any Beam site, return that node so a freshly-captured email can
+        inherit the name for free — no provider spend, stronger than a fingerprint
+        guess. Reads the email_bidx column (`ix_beam_identity_graph_email_bidx`)
+        the graph already writes on every upsert but never read until now."""
+        if not email:
+            return None
+        try:
+            from apps.api.services.pii_crypto import email_hash
+
+            bidx = email_hash(email)
+            return (
+                await self.db.execute(
+                    select(BeamIdentityNode)
+                    .where(
+                        BeamIdentityNode.email_bidx == bidx,
+                        BeamIdentityNode.full_name.isnot(None),
+                        BeamIdentityNode.confidence_score >= 0.5,
+                    )
+                    .order_by(BeamIdentityNode.confidence_score.desc())
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        except Exception as exc:
+            logger.debug("graph_email_lookup_failed", error=str(exc))
+            return None
 
     async def _check_beam_identity_network(
         self, visitor: Visitor
