@@ -456,6 +456,12 @@ export interface CostDayRow {
   cost_usd: number;
 }
 
+export interface IdentityCoverage {
+  owned_calls: number; // free resolutions from Beam's own data
+  paid_calls: number; // resolutions from paid providers
+  coverage_rate: number; // owned / (owned + paid), 0..1
+}
+
 export interface CostSummary {
   site_id: string;
   days: number;
@@ -466,6 +472,7 @@ export interface CostSummary {
   by_provider: CostProviderRow[];
   by_category: CostCategoryRow[];
   by_day: CostDayRow[];
+  identity_coverage: IdentityCoverage;
 }
 
 export interface ApiKeyInfo {

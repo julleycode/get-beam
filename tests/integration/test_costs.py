@@ -71,6 +71,9 @@ async def cost_setup(test_client, test_db):
     test_db.add(_log(site_id, "pdl", "identity", True, 0.01, now))
     test_db.add(_log(site_id, "pdl", "identity", False, 0.0, now))  # failed, $0
     test_db.add(_log(site_id, "rb2b", "identity", True, 0.09, now))
+    # Owned (free) identity resolutions — $0, served from Beam's own data.
+    test_db.add(_log(site_id, "form_capture", "identity", True, 0.0, now))
+    test_db.add(_log(site_id, "svid_reconcile", "identity", True, 0.0, now))
     test_db.add(_log(site_id, "proxycurl", "enrichment", True, 0.01, now))
     test_db.add(_log(site_id, "osint-industries", "osint", True, 1.0, now, units=1))
     test_db.add(_log(site_id, "pdl", "identity", True, 0.01, old))  # excluded at days=30
@@ -87,11 +90,11 @@ class TestCostSummary:
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        # 6 in-window calls; the 40-day-old pdl row is excluded.
-        assert body["total_calls"] == 6
-        assert body["success_calls"] == 5
+        # 8 in-window calls (incl. 2 owned $0 identity); the 40-day-old pdl row is excluded.
+        assert body["total_calls"] == 8
+        assert body["success_calls"] == 7
         assert body["failed_calls"] == 1
-        assert body["total_usd"] == pytest.approx(1.12, abs=1e-6)
+        assert body["total_usd"] == pytest.approx(1.12, abs=1e-6)  # owned rows are $0
 
     @pytest.mark.asyncio
     async def test_by_provider_rollup(self, test_client, cost_setup):
@@ -115,7 +118,7 @@ class TestCostSummary:
         )
         body = resp.json()
         by_cat = {c["category"]: c for c in body["by_category"]}
-        assert by_cat["identity"]["calls"] == 4
+        assert by_cat["identity"]["calls"] == 6  # 4 paid + 2 owned ($0)
         assert by_cat["identity"]["cost_usd"] == pytest.approx(0.11, abs=1e-6)
         assert by_cat["enrichment"]["cost_usd"] == pytest.approx(0.01, abs=1e-6)
         assert by_cat["osint"]["cost_usd"] == pytest.approx(1.0, abs=1e-6)
@@ -137,8 +140,21 @@ class TestCostSummary:
             headers=_auth(cost_setup["token"]),
         )
         body = resp.json()
-        assert body["total_calls"] == 7  # the 40-day-old row is now in range
+        assert body["total_calls"] == 9  # the 40-day-old row is now in range
         assert body["total_usd"] == pytest.approx(1.13, abs=1e-6)
+
+    @pytest.mark.asyncio
+    async def test_identity_coverage(self, test_client, cost_setup):
+        # Owned-vs-paid scoreboard: 2 owned (form_capture + svid_reconcile) vs
+        # 3 paid identity SUCCESSES (pdl×2 + rb2b×1; the failed pdl doesn't count).
+        resp = await test_client.get(
+            f"/api/v1/costs/{cost_setup['site_id']}/summary?days=30",
+            headers=_auth(cost_setup["token"]),
+        )
+        cov = resp.json()["identity_coverage"]
+        assert cov["owned_calls"] == 2
+        assert cov["paid_calls"] == 3
+        assert cov["coverage_rate"] == pytest.approx(2 / 5, abs=1e-3)
 
     @pytest.mark.asyncio
     async def test_non_admin_blocked(self, test_client, cost_setup):

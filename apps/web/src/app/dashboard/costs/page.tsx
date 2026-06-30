@@ -61,6 +61,10 @@ export default function CostsPage() {
     data && data.total_calls > 0
       ? Math.round((data.success_calls / data.total_calls) * 100)
       : 0;
+  const coverage = data?.identity_coverage;
+  const coveragePct = coverage
+    ? Math.round(coverage.coverage_rate * 100)
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -101,11 +105,25 @@ export default function CostsPage() {
           onRetry={() => refetch()}
         />
       ) : isLoading || !data ? (
-        <StatGridSkeleton cols={3} />
+        <StatGridSkeleton cols={4} />
       ) : (
         <>
           {/* Summary cards */}
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardDescription>Owned coverage</CardDescription>
+                <CardTitle className="text-3xl text-success">
+                  {coveragePct}%
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-xs text-muted-foreground">
+                  {coverage?.owned_calls ?? 0} free from your data ·{" "}
+                  {coverage?.paid_calls ?? 0} paid
+                </p>
+              </CardContent>
+            </Card>
             <Card>
               <CardHeader className="pb-2">
                 <CardDescription>Total spend (est.)</CardDescription>
