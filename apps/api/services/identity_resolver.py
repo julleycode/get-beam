@@ -691,6 +691,7 @@ class IdentityResolver(
             if canonical:
                 visitor.identity_status = "merged"
                 visitor.canonical_visitor_id = canonical.visitor_id
+                await self._log_owned_resolution(visitor, provider)
                 try:
                     await self.db.commit()
                 except Exception:
@@ -719,6 +720,7 @@ class IdentityResolver(
         )
         self.db.add(identified)
         visitor.identity_status = "identified"
+        await self._log_owned_resolution(visitor, provider)
         try:
             await self.db.commit()
         except IntegrityError:
@@ -850,6 +852,33 @@ class IdentityResolver(
         except Exception as exc:
             logger.warning("beam_identity_check_failed", error=str(exc))
         return None
+
+    async def _log_owned_resolution(self, visitor: Visitor, provider: str) -> None:
+        """Write a cost=0 identity ledger row for an OWNED resolution.
+
+        Paid providers already record their attempts via `_log_resolution`, but
+        the free prior-signal paths (form_capture / fingerprint_match /
+        beam_identity_network / svid_reconcile) never touched the ledger — so the
+        owned-vs-paid coverage metric couldn't see them. This adds the row in the
+        SAME transaction as the identity save (the caller commits). Best-effort:
+        a logging hiccup must never break a successful identification."""
+        from apps.api.services.identity_classification import OWNED_FREE_PROVIDERS
+
+        if provider not in OWNED_FREE_PROVIDERS:
+            return
+        try:
+            await log_api_call(
+                db=self.db,
+                site_id=visitor.site_id,
+                visitor_id=visitor.visitor_id,
+                provider=provider,
+                category="identity",
+                success=True,
+                cost_usd=0.0,
+                response_time_ms=0,
+            )
+        except Exception as exc:
+            logger.debug("owned_resolution_log_failed", error=str(exc))
 
     async def _log_resolution(
         self, visitor: Visitor, provider: str, success: bool, cost: float, ms: int

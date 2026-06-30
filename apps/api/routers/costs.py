@@ -15,7 +15,9 @@ from apps.api.schemas.costs import (
     CostDayRow,
     CostProviderRow,
     CostSummaryResponse,
+    IdentityCoverage,
 )
+from apps.api.services.identity_classification import OWNED_FREE_PROVIDERS
 
 logger = structlog.get_logger()
 
@@ -81,6 +83,35 @@ async def get_cost_summary(
         )
     ).all()
 
+    # ── Owned-vs-paid coverage (identity only) ──────────────────────────────
+    # The wrapper→owned-asset scoreboard: of all SUCCESSFUL identity resolutions
+    # in the window, how many were served free from Beam's own data vs a paid
+    # provider. Scoped to identity successes for the whole site+window (NOT the
+    # optional category/provider filters above — coverage is its own lens).
+    owned_list = list(OWNED_FREE_PROVIDERS)
+    cov_scope = [
+        ApiUsageLog.site_id == site_id,
+        ApiUsageLog.created_at >= since,
+        ApiUsageLog.category == "identity",
+        ApiUsageLog.success.is_(True),
+    ]
+    owned_calls = (
+        await db.execute(
+            select(func.count()).where(*cov_scope, ApiUsageLog.provider.in_(owned_list))
+        )
+    ).scalar() or 0
+    paid_calls = (
+        await db.execute(
+            select(func.count()).where(*cov_scope, ApiUsageLog.provider.notin_(owned_list))
+        )
+    ).scalar() or 0
+    cov_total = int(owned_calls) + int(paid_calls)
+    coverage = IdentityCoverage(
+        owned_calls=int(owned_calls),
+        paid_calls=int(paid_calls),
+        coverage_rate=round(int(owned_calls) / cov_total, 4) if cov_total else 0.0,
+    )
+
     # func.date() returns a date on Postgres and a str on SQLite — str() both.
     day = func.date(ApiUsageLog.created_at)
     day_rows = (
@@ -124,4 +155,5 @@ async def get_cost_summary(
             )
             for d, calls, cost in day_rows
         ],
+        identity_coverage=coverage,
     )

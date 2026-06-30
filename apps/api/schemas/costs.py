@@ -26,6 +26,16 @@ class CostDayRow(BaseModel):
     cost_usd: float
 
 
+class IdentityCoverage(BaseModel):
+    """How much identity resolution Beam served from its OWN data (free) vs paid
+    APIs. The wrapper→owned-asset scoreboard: coverage_rate should trend up as the
+    cross-customer graph + deterministic capture grow."""
+
+    owned_calls: int      # successful resolutions from owned data (form/fingerprint/graph/svid)
+    paid_calls: int       # successful resolutions from paid providers
+    coverage_rate: float  # owned / (owned + paid), 0..1
+
+
 class CostSummaryResponse(BaseModel):
     """API-cost rollup for a site, read from the unified api_usage_logs ledger.
 
@@ -44,3 +54,4 @@ class CostSummaryResponse(BaseModel):
     by_provider: list[CostProviderRow]
     by_category: list[CostCategoryRow]
     by_day: list[CostDayRow]
+    identity_coverage: IdentityCoverage

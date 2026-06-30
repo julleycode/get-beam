@@ -24,6 +24,23 @@ PERSON_LEVEL_PROVIDERS = frozenset({
 # Providers that map IP -> company domain -> an arbitrary employee at that domain.
 COMPANY_LEVEL_PROVIDERS = frozenset({"hunter", "apollo"})
 
+# OWNED resolutions: served entirely from Beam's own first-party data, at $0 — no
+# external paid API. This is the asset the own-data program grows. Used both to
+# write a cost=0 ledger row at resolve time AND to compute the owned-vs-paid
+# coverage metric on the costs dashboard. (pdl_person_enrich is NOT here — it
+# spends a PDL credit even on a captured email.)
+OWNED_FREE_PROVIDERS = frozenset({
+    "form_capture",          # the visitor typed their email into a form
+    "fingerprint_match",     # same-device match against a prior identification
+    "beam_identity_network", # cross-customer person graph hit
+    "svid_reconcile",        # durable server-cookie match to this person's prior id
+})
+
+
+def is_owned_resolution(provider: str | None) -> bool:
+    """Whether a resolution was served free from Beam's own data (no paid API)."""
+    return provider in OWNED_FREE_PROVIDERS
+
 
 def identity_level(provider: str | None) -> str | None:
     """Return 'person', 'company', or None for an identity's resolution_provider."""
