@@ -298,17 +298,21 @@ async def _process_signal_events(
                 if not is_valid:
                     logger.info("form_email_rejected", reason=reason, email_domain=raw_email.split("@")[-1])
                     continue
+                # Where the pixel captured it (form/input/login/checkout/
+                # newsletter/identify). Sanitized + capped to the column width.
+                src = (event.source or "form").strip().lower()[:20] or "form"
                 emails_to_upsert.append({
                     "site_id": batch.site_id,
                     "visitor_id": batch.visitor_id,
                     "email": raw_email,
-                    "source": "form",
+                    "source": src,
                 })
                 logger.info(
                     "form_email_captured",
                     site_id=batch.site_id,
                     visitor_id=batch.visitor_id[:8],
                     email_domain=raw_email.split("@")[-1],
+                    source=src,
                 )
 
         elif event.type == "utm_identify" and event.bid:

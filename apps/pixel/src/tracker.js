@@ -20,8 +20,6 @@
   var COOKIE_NAME = "_rta_vid";
   var COOKIE_DAYS = 365;
 
-  // --- Utilities ---
-
   function uuid() {
     return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c) {
       var r = (Math.random() * 16) | 0;
@@ -144,8 +142,6 @@
     return "fp2_" + hash128(c.join("|"));
   }
 
-  // --- State ---
-
   var visitorId = getVisitorId();
   var fingerprint = getFingerprint();
   var QUEUE_KEY = "_rta_q";
@@ -154,26 +150,21 @@
   // Honor GPC (CCPA opt-out) + DNT → server marks visitor do_not_resolve.
   var OPTOUT = (function(){try{if(navigator.globalPrivacyControl===true)return true;var d=navigator.doNotTrack||window.doNotTrack||navigator.msDoNotTrack;return d==="1"||d==="yes"||d===true;}catch(e){return false;}})();
 
-  // Recover unflushed events from previous page load
   try {
     var saved = lsGet(QUEUE_KEY);
     if (saved) { queue = JSON.parse(saved); lsDel(QUEUE_KEY); }
   } catch(e) { queue = []; }
 
-  // --- Event Queueing ---
-
   function pushEvent(evt) {
     evt._fp = fingerprint;
     evt.optout = OPTOUT;
-    // Idempotency key: the server drops duplicate event_ids, so a re-sent
-    // batch (flush retry, beacon replay) can't double-count events.
+    // Idempotency key — server drops duplicate event_ids (retry/replay safe).
     evt.event_id = uuid();
     queue.push(evt);
     lsSet(QUEUE_KEY, JSON.stringify(queue));
   }
 
-  // Drop the first n queued events only AFTER the transport confirmed them.
-  // Events queued while a send was in flight survive for the next flush.
+  // Drop the first n events only after the transport confirmed them.
   function confirmSent(n) {
     queue = queue.slice(n);
     if (queue.length === 0) lsDel(QUEUE_KEY);
@@ -192,11 +183,8 @@
       events: batch
     });
 
-    // sendBeacon returns true only when the browser accepted the payload for
-    // delivery — that's the strongest confirmation it offers, so clear then.
-    // false (payload too large / too many in-flight beacons) falls through to
-    // XHR. The old code cleared queue + localStorage BEFORE sending, which
-    // silently and permanently lost events on any failure.
+    // sendBeacon returns true once the browser accepts the payload — confirm
+    // then; false (too large / too many beacons) falls through to XHR.
     if (navigator.sendBeacon &&
         navigator.sendBeacon(ENDPOINT, new Blob([payload], { type: "text/plain" }))) {
       confirmSent(batch.length);
@@ -217,8 +205,6 @@
     xhr.send(payload);
   }
 
-  // --- Pageview ---
-
   function trackPageview() {
     pushEvent({
       type: "pageview",
@@ -234,10 +220,8 @@
     });
   }
 
-  // --- UTM _bid identification ---
-  // If this page was visited via a Beam-decorated link (?_bid=...), send an
-  // utm_identify event so the backend can link the encrypted email to this
-  // visitor cookie.
+  // _bid: arrived via a Beam-decorated link (?_bid=...) → link the encrypted
+  // email to this visitor cookie.
   (function() {
     try {
       var bidParam = new URLSearchParams(window.location.search).get("_bid");
@@ -247,36 +231,53 @@
     } catch(e) {}
   })();
 
-  // Form email capture → links the email to this visitor cookie. Skipped on
-  // GPC/DNT opt-out (visitor asked not to be tracked — never transmit the PII).
-  document.addEventListener("submit", function(e) {
-    try {
-      if (OPTOUT) return;
-      var form = e.target;
-      if (!form || form.nodeName !== "FORM") return;
-      var emailInput = form.querySelector(
-        "input[type='email'], input[name*='email'], input[name*='Email']"
-      );
-      if (emailInput && emailInput.value) {
-        pushEvent({
-          type: "form_email_capture",
-          email: emailInput.value,
-          url: window.location.href,
-          ts: now()
-        });
-        // Flush immediately so we don't lose the email if the page navigates
-        flush();
-      }
-    } catch(e) {}
-  }, true); // capture phase to run before potential SPA navigation
+  // Deterministic email capture: form submit, email-field blur/change (SPA
+  // logins/checkouts that never submit a <form>), and window.beamIdentify().
+  // Every path is OPTOUT-gated and deduped (same email sent at most once).
+  var _sent = {};
+  function looksEmail(s){return typeof s==="string"&&s.length>=5&&/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);}
+  function captureEmail(raw, source){
+    try{
+      if(OPTOUT||typeof raw!=="string")return;
+      var email=raw.trim().toLowerCase();
+      if(!looksEmail(email)||_sent[email])return;
+      _sent[email]=1;
+      pushEvent({type:"form_email_capture",email:email,source:source||"form",url:window.location.href,ts:now()});
+      flush();
+    }catch(e){}
+  }
+  function emailSource(el){
+    try{
+      var f=el&&(el.form||(el.closest&&el.closest("form")));
+      var h=(f?f.id+" "+f.className+" "+(f.getAttribute("action")||""):"").toLowerCase();
+      if(/login|signin|sign-in|log-in/.test(h))return "login";
+      if(/checkout|payment|billing|order/.test(h))return "checkout";
+      if(/newsletter|subscribe|sign-?up/.test(h))return "newsletter";
+    }catch(e){}
+    return "input";
+  }
+  function isEmailField(el){
+    if(!el||el.nodeName!=="INPUT")return false;
+    var t=(el.type||"").toLowerCase();
+    return t==="email"||/email/i.test((el.name||"")+" "+(el.id||""));
+  }
+  document.addEventListener("submit",function(e){
+    try{
+      var f=e.target;
+      if(!f||f.nodeName!=="FORM")return;
+      var i=f.querySelector("input[type='email'], input[name*='email'], input[name*='Email']");
+      if(i&&i.value)captureEmail(i.value,emailSource(i));
+    }catch(e){}
+  },true);
+  function onFieldDone(e){try{var el=e.target;if(isEmailField(el)&&el.value)captureEmail(el.value,emailSource(el));}catch(e){}}
+  document.addEventListener("blur",onFieldDone,true);   // blur doesn't bubble → capture phase
+  document.addEventListener("change",onFieldDone,true);
+  try{window.beamIdentify=function(email){captureEmail(email,"identify");};}catch(e){}
 
-  // Track initial pageview
   trackPageview();
 
   // --- Engagement signals: scroll depth, time on page, clicks ---
-  // Intent scoring awards points for scroll>=75 and time>60s; without these
-  // emitters those columns stay 0 and single-session visitors can never
-  // reach the identity-resolution threshold.
+  // Feed intent scoring (scroll>=75, time>60s); without these those stay 0.
 
   var pageStart = Date.now();
   var maxDepth = 0;
@@ -314,9 +315,8 @@
     } catch (err) {}
   }, true);
 
-  // Emit accumulated scroll + time for the page being left (SPA nav, tab
-  // hide, unload). Counters reset after emit, so repeated hide/show cycles
-  // produce additive time chunks instead of double-counting.
+  // Emit accumulated scroll + time for the page being left (SPA nav / hide /
+  // unload). Counters reset after emit → additive chunks, no double-count.
   function emitPageSignals(url) {
     var secs = Math.round((Date.now() - pageStart) / 1000);
     if (secs > 0) {
@@ -332,8 +332,6 @@
     clickCount = 0;
   }
 
-  // --- SPA Navigation Tracking ---
-
   var lastUrl = window.location.href;
 
   function onNavigation() {
@@ -345,7 +343,6 @@
     }
   }
 
-  // Intercept History API for SPA frameworks
   var origPushState = history.pushState;
   if (origPushState) {
     history.pushState = function() {
@@ -364,8 +361,6 @@
 
   window.addEventListener("popstate", onNavigation);
 
-  // --- Flush on interval and unload ---
-
   setInterval(flush, BATCH_INTERVAL);
 
   function leavePage() {
@@ -380,10 +375,8 @@
   });
 
   // --- Identity-vendor pixel stacking (STRICTLY OPT-IN, default OFF) ---
-  // Loads a third-party identity script ONLY when the install snippet sets
-  // data-stack="1" AND supplies that vendor's id via data-stack-<vendor>,
-  // e.g. data-stack-leadpipe="<account-id>". Vendors without an id are
-  // skipped. No vendor account id ships in this file.
+  // Loads a vendor identity script only when data-stack="1" AND its id is given
+  // via data-stack-<vendor> (e.g. data-stack-leadpipe). No vendor id ships here.
   if (script.getAttribute("data-stack") === "1") {
     var vendorUrls = {
       "leadpipe": function(d) { return "https://leadpipe.aws53.cloud/p/" + d + ".js"; },

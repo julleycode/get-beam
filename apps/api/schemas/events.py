@@ -39,6 +39,9 @@ class Event(BaseModel):
     ts: datetime
     # Form email capture
     email: str | None = None
+    # Where the email was captured: form / input / login / checkout / newsletter
+    # / identify (window.beamIdentify). Free label, capped to the column width.
+    source: str | None = Field(None, max_length=20)
     # UTM link decoration
     bid: str | None = None
     # Browser fingerprint (sent on every event by the pixel as _fp field)
