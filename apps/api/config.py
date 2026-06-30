@@ -159,6 +159,10 @@ class Settings(BaseSettings):
     # default — syncing to a customer's CRM unattended is a strong side effect,
     # so operators opt in explicitly.
     crm_auto_push: bool = False
+    # Exclude contacts already in the site's known-contacts (CRM) list from CRM
+    # pushes — push only net-new leads. Default off: pushing a known contact just
+    # upserts (updates) their existing record, which some owners want.
+    crm_push_exclude_known: bool = False
 
     # Supabase Storage (blog image uploads). No service-role key → mock mode.
     supabase_url: str = ""

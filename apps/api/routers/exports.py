@@ -23,6 +23,11 @@ async def export_segment(
     site_id: str,
     segment_id: str,
     platform: str = Query(..., pattern="^(meta|google|linkedin)$"),
+    exclude_known: bool = Query(
+        False,
+        description="Drop contacts already in your known-contacts (CRM) list — "
+        "export only net-new leads.",
+    ),
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
@@ -35,7 +40,7 @@ async def export_segment(
         raise HTTPException(status_code=404, detail="Segment not found")
 
     exporter = PLATFORMS[platform]
-    csv_content = await exporter(db, segment_id)
+    csv_content = await exporter(db, segment_id, exclude_known)
 
     return StreamingResponse(
         iter([csv_content]),

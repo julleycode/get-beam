@@ -30,12 +30,27 @@ def _csv_safe(value) -> str:
 
 
 async def _get_segment_visitors(
-    db: AsyncSession, segment_id: str
+    db: AsyncSession, segment_id: str, exclude_known: bool = False
 ) -> list[dict]:
     members_result = await db.execute(
         select(SegmentMember).where(SegmentMember.segment_id == segment_id)
     )
     members = list(members_result.scalars().all())
+
+    # Net-new targeting: optionally drop contacts the owner already has in their
+    # CRM (the known-contacts list). Hash-vs-hash, one query for the whole site —
+    # matches the privacy pattern of the suppression check below.
+    known_hashes: set[str] = set()
+    if exclude_known and members:
+        from apps.api.models.known_contact import KnownContact
+        from apps.api.services.known_hash import email_hash as _known_email_hash
+
+        kc_rows = await db.execute(
+            select(KnownContact.email_hash).where(
+                KnownContact.site_id == members[0].site_id
+            )
+        )
+        known_hashes = {h for (h,) in kc_rows.all()}
 
     visitors: list[dict] = []
     for member in members:
@@ -52,6 +67,10 @@ async def _get_segment_visitors(
         )
         identified = id_result.scalar_one_or_none()
         if not identified or not identified.email:
+            continue
+
+        # Already in the owner's CRM → not a net-new lead; skip when requested.
+        if known_hashes and _known_email_hash(identified.email) in known_hashes:
             continue
 
         # Never export a company-level guess (hunter/apollo) — it's a random
@@ -92,8 +111,8 @@ async def _get_segment_visitors(
     return visitors
 
 
-async def export_meta_csv(db: AsyncSession, segment_id: str) -> str:
-    visitors = await _get_segment_visitors(db, segment_id)
+async def export_meta_csv(db: AsyncSession, segment_id: str, exclude_known: bool = False) -> str:
+    visitors = await _get_segment_visitors(db, segment_id, exclude_known)
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["email", "phone", "fn", "ln", "ct", "st", "country", "zip"])
@@ -114,8 +133,8 @@ async def export_meta_csv(db: AsyncSession, segment_id: str) -> str:
     return output.getvalue()
 
 
-async def export_google_csv(db: AsyncSession, segment_id: str) -> str:
-    visitors = await _get_segment_visitors(db, segment_id)
+async def export_google_csv(db: AsyncSession, segment_id: str, exclude_known: bool = False) -> str:
+    visitors = await _get_segment_visitors(db, segment_id, exclude_known)
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["Email", "Phone", "First Name", "Last Name", "Country", "Zip"])
@@ -130,8 +149,8 @@ async def export_google_csv(db: AsyncSession, segment_id: str) -> str:
     return output.getvalue()
 
 
-async def export_linkedin_csv(db: AsyncSession, segment_id: str) -> str:
-    visitors = await _get_segment_visitors(db, segment_id)
+async def export_linkedin_csv(db: AsyncSession, segment_id: str, exclude_known: bool = False) -> str:
+    visitors = await _get_segment_visitors(db, segment_id, exclude_known)
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["email", "companyName", "jobTitle", "firstName", "lastName"])

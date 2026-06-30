@@ -84,7 +84,12 @@ async def push_segment(
         .select_from(SegmentMember)
         .where(SegmentMember.segment_id == segment_id)
     )
-    rows = await _get_segment_visitors(db, segment_id)  # suppression-filtered
+    from apps.api.config import settings
+
+    # suppression-filtered; optionally also drop contacts already in the CRM.
+    rows = await _get_segment_visitors(
+        db, segment_id, exclude_known=settings.crm_push_exclude_known
+    )
     contacts = rows_to_contacts(rows, conn.field_mapping)
     skipped = max(0, (member_count or 0) - len(contacts))
 
