@@ -36,6 +36,12 @@ class Visitor(Base):
     company_domain: Mapped[str | None] = mapped_column(String(253))
     fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
     canonical_visitor_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Durable server-set identity (_rta_svid HttpOnly cookie). When a returning
+    # visitor's CLIENT id is wiped (Safari ITP caps client cookies/localStorage at
+    # 7 days), the server cookie still carries the ORIGINAL visitor_id. Stored
+    # write-once so the resolver can recover a prior identification for FREE
+    # instead of re-paying a provider to re-identify someone we already own.
+    server_visitor_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     intent_score: Mapped[float] = mapped_column(Float, default=0.0)
     identity_status: Mapped[str] = mapped_column(String(30), default="anonymous")
     enrichment_status: Mapped[str] = mapped_column(String(20), default="pending")

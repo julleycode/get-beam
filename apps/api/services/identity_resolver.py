@@ -158,12 +158,67 @@ class IdentityResolver(
             logger.warning("suppression_check_failed", error=str(exc))
         return False
 
+    async def _email_suppressed(self, email: str) -> bool:
+        """True if a specific email is on the do_not_process suppression list.
+        Used by the owned reconciliation paths to avoid re-copying an identity
+        that opted out AFTER the original was identified."""
+        from apps.api.services.suppression import is_email_suppressed
+
+        try:
+            return await is_email_suppressed(self.db, email, "do_not_process")
+        except Exception as exc:
+            logger.warning("suppression_email_check_failed", error=str(exc))
+            return False
+
+    async def _identified_for_origin(
+        self, site_id: str, origin_visitor_id: str
+    ) -> IdentifiedVisitor | None:
+        """Resolve an original (root) visitor_id to its IdentifiedVisitor row,
+        following one canonical-merge hop.
+
+        The durable _rta_svid points at the ROOT visitor_id. Usually that root
+        owns the IdentifiedVisitor row; but if the root was itself merged by
+        email-dedup (`_save_identified` sets canonical_visitor_id and writes NO
+        row for the merged visitor), follow that single hop so the chain doesn't
+        dead-end and fall back to a paid lookup."""
+        direct = (
+            await self.db.execute(
+                select(IdentifiedVisitor).where(
+                    IdentifiedVisitor.site_id == site_id,
+                    IdentifiedVisitor.visitor_id == origin_visitor_id,
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if direct:
+            return direct
+        canon = (
+            await self.db.execute(
+                select(Visitor.canonical_visitor_id).where(
+                    Visitor.site_id == site_id,
+                    Visitor.visitor_id == origin_visitor_id,
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        if canon and canon != origin_visitor_id:
+            return (
+                await self.db.execute(
+                    select(IdentifiedVisitor).where(
+                        IdentifiedVisitor.site_id == site_id,
+                        IdentifiedVisitor.visitor_id == canon,
+                    ).limit(1)
+                )
+            ).scalar_one_or_none()
+        return None
+
     # ──────────────────── Pre-waterfall: Prior Signal Check ────────────────────
 
     async def _check_prior_signals(self, visitor: Visitor) -> IdentifiedVisitor | None:
         """Check for existing identification signals BEFORE the IP waterfall.
 
-        Two checks (in order):
+        Checks (in order):
+        0. Server-cookie reconciliation — if this returning visitor's client id
+           was wiped but the _rta_svid server cookie pointed back to an original
+           visitor_id that was already identified, copy that identity for free.
         1. visitor_emails table — if this visitor_id has a captured email,
            use it to enrich directly via PDL (no IP credit needed).
         2. Fingerprint match — if another visitor with the same browser fingerprint
@@ -172,6 +227,45 @@ class IdentityResolver(
         Returns an IdentifiedVisitor if a signal produces a match, else None.
         """
         from apps.api.models.visitor_email import VisitorEmail
+
+        # ── Check 0: Durable server-cookie (_rta_svid) reconciliation ──
+        # DETERMINISTIC (not a fingerprint guess): the original visitor_id is
+        # known exactly. If that original was already identified on this site,
+        # this is the same person returning — copy the identity, no provider spend.
+        svid = getattr(visitor, "server_visitor_id", None)
+        if svid and svid != visitor.visitor_id:
+            try:
+                prior = await self._identified_for_origin(visitor.site_id, svid)
+                if prior and (prior.email or prior.full_name):
+                    # do_not_process: the ORIGINAL may have opted out AFTER being
+                    # identified. The new (wiped-client) visitor has no captured
+                    # email of its own, so the resolve() suppression gate can't see
+                    # it — re-check here before re-copying a suppressed identity.
+                    if prior.email and await self._email_suppressed(prior.email):
+                        logger.info(
+                            "svid_reconcile_skipped_suppressed",
+                            visitor_id=visitor.visitor_id[:8],
+                        )
+                    else:
+                        logger.info(
+                            "prior_signal_svid_reconcile",
+                            visitor_id=visitor.visitor_id[:8],
+                            canonical=svid[:8],
+                        )
+                        return await self._save_identified(
+                            visitor,
+                            {
+                                "email": prior.email,
+                                "full_name": prior.full_name,
+                                "city": prior.city,
+                                "region": prior.region,
+                                "country": prior.country,
+                                "confidence_score": 0.90,  # deterministic — above fingerprint (0.75)
+                            },
+                            "svid_reconcile",
+                        )
+            except Exception as exc:
+                logger.warning("prior_signal_svid_check_failed", error=str(exc))
 
         # ── Check 1: Captured email for this visitor ──
         try:
@@ -227,6 +321,15 @@ class IdentityResolver(
                     .limit(1)
                 )
                 matched = fp_result.scalar_one_or_none()
+
+                if matched and matched.email and await self._email_suppressed(matched.email):
+                    # Same do_not_process guard as Check 0: the matched person may
+                    # have opted out after being identified; don't re-copy them.
+                    logger.info(
+                        "fingerprint_match_skipped_suppressed",
+                        visitor_id=visitor.visitor_id[:8],
+                    )
+                    matched = None
 
                 if matched:
                     logger.info(

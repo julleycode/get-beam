@@ -18,6 +18,7 @@ PERSON_LEVEL_PROVIDERS = frozenset({
     "manual",                # operator typed it in
     "fingerprint_match",     # Beam graph match on THIS device's fingerprint
     "beam_identity_network", # cross-customer person identity graph
+    "svid_reconcile",        # durable server-cookie match to THIS person's prior id
 })
 
 # Providers that map IP -> company domain -> an arbitrary employee at that domain.

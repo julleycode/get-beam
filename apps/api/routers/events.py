@@ -158,8 +158,24 @@ async def ingest_events(
         count=len(batch.events),
     )
 
+    # Durable identity reconciliation: the HttpOnly _rta_svid cookie carries the
+    # ORIGINAL visitor_id even after the client id (_rta_vid) is wiped by Safari
+    # ITP. If it differs from this batch's (client) visitor_id, the resolver uses
+    # it to recover a prior identification for free. Only trust a Beam-shaped id.
+    #
+    # Named PER SITE (_rta_svid_<site>): the pixel posts to one shared API host,
+    # so a single cookie name would be clobbered across customers — site A's
+    # durable id overwritten by site B's. Per-site keeps each site's root id.
+    svid_cookie_name = "_rta_svid_" + "".join(
+        c for c in batch.site_id if c.isalnum() or c == "_"
+    )
+    existing_svid = request.cookies.get(svid_cookie_name)
+    svid = existing_svid
+    if not (svid and isinstance(svid, str) and 0 < len(svid) <= 100 and svid != batch.visitor_id):
+        svid = None
+
     # Process identification signal events (form email capture + UTM _bid)
-    await _process_signal_events(db, batch)
+    await _process_signal_events(db, batch, svid)
 
     # Run aggregation in background so we don't block the 204 response — but
     # coalesce per site so a burst of batches can't spawn an unbounded pile of
@@ -177,26 +193,36 @@ async def ingest_events(
         task.add_done_callback(_done)
 
     # Server-side Set-Cookie: first-party HttpOnly cookie survives Safari ITP.
-    # Named _rta_svid (server-side visitor ID) to coexist with client _rta_vid.
-    # On future requests, the ingest endpoint can reconcile both.
+    # Coexists with the client _rta_vid. Set ONCE and PRESERVED across visits:
+    # only write when the request didn't already carry a durable id, so the
+    # cookie keeps pointing at the ORIGINAL (root) visitor_id. Rewriting it to the
+    # current client id each visit would break the reconciliation chain after the
+    # first ITP wipe (the rewritten id may have been merged and have no identity row).
     response = Response(status_code=204)
-    response.set_cookie(
-        key="_rta_svid",
-        value=batch.visitor_id,
-        max_age=365 * 86400,
-        httponly=True,
-        secure=True,
-        samesite="none",
-        path="/",
-    )
+    if not existing_svid:
+        response.set_cookie(
+            key=svid_cookie_name,
+            value=batch.visitor_id,
+            max_age=365 * 86400,
+            httponly=True,
+            secure=True,
+            samesite="none",
+            path="/",
+        )
     return response
 
 
-async def _process_signal_events(db: AsyncSession, batch: EventBatch) -> None:
+async def _process_signal_events(
+    db: AsyncSession, batch: EventBatch, svid: str | None = None
+) -> None:
     """Extract email signals from form_email_capture and utm_identify events.
 
     Also stores the browser fingerprint on the visitor row so the identity
     resolver can match returning visitors across sessions.
+
+    `svid` is the value of the durable _rta_svid server cookie when it differs
+    from the client visitor_id — stored write-once on the visitor row so the
+    resolver can reconcile a wiped-client returning visitor to their original id.
 
     Upserts into visitor_emails so the identity resolver can use them in the
     pre-waterfall check instead of burning IP-resolution credits.
@@ -241,6 +267,24 @@ async def _process_signal_events(db: AsyncSession, batch: EventBatch) -> None:
             needs_commit = True
         except Exception as exc:
             logger.warning("fingerprint_store_failed", error=str(exc), visitor_id=batch.visitor_id[:8])
+
+    # Durable server-cookie reconciliation: stamp the original visitor_id (from
+    # _rta_svid) onto this returning-but-wiped visitor, write-once like the
+    # fingerprint. The resolver follows it to a prior identification for free.
+    if svid:
+        try:
+            await db.execute(
+                update(Visitor)
+                .where(
+                    Visitor.site_id == batch.site_id,
+                    Visitor.visitor_id == batch.visitor_id,
+                    Visitor.server_visitor_id.is_(None),
+                )
+                .values(server_visitor_id=svid)
+            )
+            needs_commit = True
+        except Exception as exc:
+            logger.warning("svid_store_failed", error=str(exc), visitor_id=batch.visitor_id[:8])
 
     emails_to_upsert: list[dict] = []
 
