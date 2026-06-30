@@ -221,6 +221,15 @@ def is_ip_suspicious(privacy: dict | None) -> bool:
 # Cloud COMPUTE providers — these host servers, not consumer eyeballs. CDN/relay
 # orgs (Cloudflare, Fastly, Akamai, Gcore) are deliberately EXCLUDED because they
 # front real human traffic via Apple Private Relay / Cloudflare WARP.
+#
+# Two match styles (substring against ipinfo's `org`, e.g. "AS3356 Level 3 Parent, LLC"):
+#  - bare org-name tokens for pure-hosting providers whose NAME never fronts eyeballs
+#  - "asNNNN " ASN-prefix tokens (note trailing space) for transit/infra ASNs where the
+#    company NAME is ambiguous with a residential brand. Matching the ASN with a trailing
+#    space pins it to exactly that AS (so "as3356 " ≠ "as33560 ...") and avoids dropping
+#    real residential customers of the same parent company.
+# Deliberately NOT blocked: residential ISPs that also run datacenters (e.g. Windstream
+# AS7029, Comcast, Cox) — name/ASN there carries real home visitors. Fail-open ethos.
 _DATACENTER_ORG_TOKENS = (
     "microsoft", "azure", "google", "amazon", "aws", "digitalocean", "ovh",
     "hetzner", "vultr", "choopa", "linode", "alibaba", "tencent", "oracle",
@@ -228,18 +237,84 @@ _DATACENTER_ORG_TOKENS = (
     "ibm", "rackspace", "softlayer", "hostinger", "godaddy", "ionos",
     "constant company", "quadranet", "psychz", "limestone", "cogent",
     "hosting", "datacenter", "data center", "colocation",
+    # 2026-06-30: confirmed bot/proxy sources missed by the list above.
+    "hostroyale", "as207990 ",        # HostRoyale — bulletproof/cheap hosting
+    "as3356 ",                          # Level 3 / Lumen transit core — proxy/SWG/scanner egress
+    "facebook", "as32934 ",            # Facebook AS — link-preview crawler, never an eyeball
 )
+
+# ── ASN-based classification (primary signal; the org-name tokens above are fallback) ──
+# Matched on the ASN NUMBER parsed from ipinfo's `org` ("AS20473 The Constant Company,
+# LLC" → 20473). ASN numbers are stable identifiers; company NAMES drift and collide with
+# residential brands, so the number is the robust primary signal.
+#
+# This block set was compiled + ADVERSARIALLY VETTED (2026-06-30): a reviewer removed
+# ASNs that also carry real human eyeballs — Microsoft corp AS8075/8069/8070/8071 (office
+# NAT egress), OVH AS16276 / Hetzner AS24940 (also sell consumer DSL), and Cogent AS174
+# (Tier-1 transit). Those host NAMES are still caught by the name-token net above (proven
+# status quo for this product), but are kept OUT of the ASN set so the precise ASN layer
+# never over-blocks a real corporate/residential visitor.
+_DATACENTER_ASNS: frozenset[int] = frozenset({
+    14618, 396982, 31898, 45102, 37963, 45090, 132203,    # AWS-AES, GCP, Oracle OCI, Alibaba x2, Tencent
+    36351, 14061, 63949, 20473, 12876, 202053, 51167,     # IBM/SoftLayer, DigitalOcean, Linode, Vultr, Scaleway, UpCloud, Contabo
+    16265, 30633, 9009, 60068, 212238,                    # Leaseweb x2, M247, Datacamp/CDN77 x2
+    207990, 8100, 40676, 46475, 53667, 36352, 63023, 54825,  # HostRoyale, QuadraNet, Psychz, Limestone, BuyVM, ColoCrossing, GTHost, Equinix Metal
+    136787,  # PacketHub S.A. — VPN/proxy egress (NordVPN family); caught leaking as "eyeball" 2026-06-30
+})
+
+# CDN / edge / privacy-relay ASNs. NOT dropped at ingest — they front REAL humans via
+# Apple Private Relay / Cloudflare WARP — but the resolver must NEVER turn them into a
+# company domain (that path fabricated "cdurham@fastly.com" from a Fastly edge IP).
+_CDN_RELAY_ASNS: frozenset[int] = frozenset({
+    714,                          # Apple (Private Relay ingress)
+    13335,                        # Cloudflare
+    54113,                        # Fastly
+    16625, 20940, 36183, 12222,   # Akamai
+    199524, 202422,               # Gcore
+})
+_CDN_RELAY_ORG_TOKENS = ("cloudflare", "fastly", "akamai", "gcore", "g-core")
+
+_ASN_RE = re.compile(r"\bAS(\d+)\b", re.IGNORECASE)
+
+
+def _parse_asn(org: str | None) -> int | None:
+    """Extract the ASN integer from an ipinfo `org` string ("AS3356 Level 3…" → 3356)."""
+    if not org:
+        return None
+    m = _ASN_RE.search(org)
+    return int(m.group(1)) if m else None
+
+
+def classify_org_kind(org: str | None) -> str:
+    """Classify an ipinfo `org` string → 'datacenter' | 'cdn' | 'eyeball'.
+
+    ASN number first (stable), then org-name token fallback. 'cdn' is a separate bucket
+    from 'datacenter' because CDN/relay nets carry real humans (Apple Private Relay) and
+    must be KEPT at ingest, yet must never be resolved to a fabricated company employee.
+    """
+    asn = _parse_asn(org)
+    low = (org or "").lower()
+    if asn in _CDN_RELAY_ASNS or any(t in low for t in _CDN_RELAY_ORG_TOKENS):
+        return "cdn"
+    if asn in _DATACENTER_ASNS or (low and any(t in low for t in _DATACENTER_ORG_TOKENS)):
+        return "datacenter"
+    return "eyeball"
+
+
 _DATACENTER_CACHE_PREFIX = "ip_datacenter:"
 _DATACENTER_CACHE_TTL = 30 * 24 * 3600  # 30 days
 
 
 async def is_datacenter_ip(ip: str) -> bool:
-    """True if `ip` belongs to a cloud-compute provider (server/bot traffic).
+    """True if `ip` belongs to a cloud-compute / hosting provider (server/bot traffic).
 
-    Uses IPinfo's standard endpoint `org` (ASN) field — available on the free
-    token (unlike the paid /privacy module). Cached in Redis 30 days. Fail-open:
-    returns False on private IP, missing token, or any error, so a real visitor's
-    events are NEVER dropped because of a lookup hiccup.
+    Classifies via `classify_org_kind` on IPinfo's standard endpoint `org` (ASN) field —
+    available on the free token (unlike the paid /privacy module). ASN-number match first,
+    org-name token fallback. CDN/relay orgs (Cloudflare/Fastly/Akamai) classify as 'cdn',
+    NOT 'datacenter', so they are NEVER dropped here — they front real humans behind Apple
+    Private Relay / Cloudflare WARP. Cached in Redis 30 days. Fail-open: returns False on
+    private IP, missing token, or any error, so a real visitor's events are never dropped
+    because of a lookup hiccup.
     """
     from apps.api.config import settings
 
@@ -271,7 +346,7 @@ async def is_datacenter_ip(ip: str) -> bool:
         logger.debug("datacenter_check_failed", ip=ip[:8] + "...", error=str(exc))
         return False  # fail-open
 
-    is_dc = bool(org) and any(tok in org.lower() for tok in _DATACENTER_ORG_TOKENS)
+    is_dc = classify_org_kind(org) == "datacenter"
     try:
         if redis is not None:
             await redis.setex(cache_key, _DATACENTER_CACHE_TTL, "1" if is_dc else "0")

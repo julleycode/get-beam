@@ -165,3 +165,64 @@ class TestIsDatacenterIp:
             raise RuntimeError("ipinfo down")
         monkeypatch.setattr(httpx, "AsyncClient", _boom)
         assert await is_datacenter_ip("135.232.20.19") is False
+
+
+class TestClassifyOrgKind:
+    """Unit coverage for classify_org_kind — the shared ASN/name classifier that
+    drives both the ingest datacenter drop and the resolver fabrication guard."""
+
+    @pytest.mark.parametrize("org", [
+        "AS207990 HostRoyale Technologies Pvt Ltd",  # ASN + name
+        "AS20473 The Constant Company, LLC",          # ASN (Vultr)
+        "AS54825 Packet Host, Inc.",                  # ASN-ONLY (name not tokened)
+        "AS53667 FranTech Solutions",                 # ASN-only
+        "AS3356 Level 3 Parent, LLC",                 # name-token "as3356 "
+        "AS32934 Facebook, Inc.",                     # crawler
+        "AS8075 Microsoft Corporation",               # via NAME token (ASN deliberately excluded)
+    ])
+    def test_datacenter(self, org):
+        assert company_resolver.classify_org_kind(org) == "datacenter"
+
+    @pytest.mark.parametrize("org", [
+        "AS54113 Fastly, Inc.",
+        "AS13335 Cloudflare, Inc.",
+        "AS714 Apple Inc.",
+        "AS20940 Akamai International B.V.",
+    ])
+    def test_cdn_relay(self, org):
+        # Kept at ingest (humans behind Private Relay/WARP) but blocked from fabrication.
+        assert company_resolver.classify_org_kind(org) == "cdn"
+
+    @pytest.mark.parametrize("org", [
+        "AS7029 Windstream Communications LLC",
+        "AS7922 Comcast Cable Communications, LLC",
+        "AS22773 Cox Communications Inc.",
+        "AS7018 AT&T Enterprises, LLC",
+        "AS45899 VNPT",
+        "AS33560 Some Random ISP",   # adjacency: must NOT match "as3356 "
+        "",
+        None,
+    ])
+    def test_eyeball(self, org):
+        assert company_resolver.classify_org_kind(org) == "eyeball"
+
+
+class TestIpinfoFabricationGuard:
+    """The ipinfo resolver must refuse to derive a company domain from a
+    datacenter OR cdn org — that path fabricated cdurham@fastly.com."""
+
+    def _mixin(self):
+        from apps.api.services.identity_providers.ipinfo import IPinfoMixin
+        return IPinfoMixin()
+
+    @pytest.mark.parametrize("org", [
+        "AS54113 Fastly, Inc.",                      # CDN — the real false-positive source
+        "AS207990 HostRoyale Technologies Pvt Ltd",  # hosting
+        "AS8075 Microsoft Corporation",              # cloud — no guessed employee
+    ])
+    def test_no_domain_from_infra_org(self, org):
+        assert self._mixin()._org_to_domain(org) is None
+
+    def test_real_corporate_office_still_resolves(self):
+        # A genuine (non-datacenter, non-cdn) corporate org still yields a domain.
+        assert self._mixin()._org_to_domain("AS400618 Prime Security Corp.") == "primesecurity.com"
