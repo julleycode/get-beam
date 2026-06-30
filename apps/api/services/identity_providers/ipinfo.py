@@ -70,6 +70,16 @@ class IPinfoMixin:
         if not org:
             return None
 
+        # Hard guard: never derive a company domain from a datacenter/cloud/hosting OR
+        # CDN/relay org. That path turned a Fastly edge IP into "fastly.com" and let
+        # Hunter/Apollo save a RANDOM Fastly employee as the visitor (fabrication). The
+        # same protects against AS-hosted Azure/AWS IPs → a guessed corp employee.
+        from apps.api.services.company_resolver import classify_org_kind
+
+        if classify_org_kind(org) in ("datacenter", "cdn"):
+            logger.debug("ipinfo_skip_datacenter_org", org=org)
+            return None
+
         # Strip ASN prefix: "AS8075 Microsoft Corporation" → "Microsoft Corporation"
         name = org
         if name.startswith("AS"):
