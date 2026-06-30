@@ -229,6 +229,15 @@ class Settings(BaseSettings):
     ls_variant_max_monthly: str = ""         # LS variant id — Max monthly
     ls_variant_max_yearly: str = ""          # LS variant id — Max yearly
 
+    # ─── Gumroad Billing (fallback MoR — Lemon Squeezy rejected Beam's category) ───
+    # Gumroad provides NO webhook HMAC signature, so the Ping is authenticated by
+    # a secret token appended to the endpoint URL plus an optional seller_id
+    # match. Configure at Gumroad → Settings → Advanced → "Ping endpoint":
+    #   https://<api-host>/api/v1/billing/gumroad/webhook?token=<gumroad_webhook_secret>
+    gumroad_webhook_secret: str = ""         # secret URL token authenticating the Ping
+    gumroad_seller_id: str = ""              # your Gumroad seller_id (optional defense-in-depth)
+    gumroad_product_permalink: str = ""      # product permalink, e.g. "rlkwnz" (optional sanity check)
+
     # ─── Feature flags ───
     sync_interval_minutes: int = 60
     resolution_sweep_interval_minutes: int = 30  # APScheduler identity-resolution sweep cadence
