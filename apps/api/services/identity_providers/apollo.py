@@ -37,7 +37,7 @@ class ApolloMixin:
 
         Retries up to 3× on transient errors (5xx, 429, timeouts).
         """
-        if not settings.apollo_api_key:
+        if not settings.apollo_api_key or not settings.apollo_enabled:
             return None
         # Apollo uses 1-based page numbers; offset 0→page 1, offset 1→page 2, etc.
         page = offset + 1
