@@ -71,6 +71,9 @@ async def push_setup(test_client, test_db, monkeypatch):
                 visitor_id=visitor_id,
                 email=vemail,
                 full_name="First Last",
+                # Must be a person-level provider or the emailable guard drops it
+                # (a company-level guess is never exported/pushed).
+                resolution_provider="form_capture",
                 do_not_email=dne,
             )
         )
