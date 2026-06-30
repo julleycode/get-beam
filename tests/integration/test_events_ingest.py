@@ -142,3 +142,68 @@ class TestEventIngestion:
             headers={"Content-Type": "text/plain"},
         )
         assert resp.status_code == 204
+
+
+class TestEmailCaptureSource:
+    """P4: a captured email is stored with the pixel-provided source label so we
+    can tell a newsletter signup from a checkout from a login."""
+
+    @staticmethod
+    def _patch_validate(monkeypatch):
+        async def _ok(_email):
+            return (True, "")
+        monkeypatch.setattr("apps.api.services.email_validator.validate_email", _ok)
+
+    @pytest.mark.asyncio
+    async def test_source_label_stored(self, test_client, test_site_id, test_db, monkeypatch):
+        from apps.api.models.visitor_email import VisitorEmail
+
+        self._patch_validate(monkeypatch)
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            json={
+                "site_id": test_site_id,
+                "visitor_id": "cap-src-001",
+                "events": [{
+                    "type": "form_email_capture",
+                    "email": "Buyer@Shop.com",
+                    "source": "newsletter",
+                    "ts": "2026-06-30T00:00:00",
+                }],
+            },
+            headers={"User-Agent": _BROWSER_UA},
+        )
+        assert resp.status_code == 204, resp.text
+        row = (
+            await test_db.execute(
+                select(VisitorEmail).where(VisitorEmail.visitor_id == "cap-src-001")
+            )
+        ).scalar_one()
+        assert row.email == "buyer@shop.com"  # normalized to lowercase
+        assert row.source == "newsletter"
+
+    @pytest.mark.asyncio
+    async def test_source_defaults_to_form(self, test_client, test_site_id, test_db, monkeypatch):
+        from apps.api.models.visitor_email import VisitorEmail
+
+        self._patch_validate(monkeypatch)
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            json={
+                "site_id": test_site_id,
+                "visitor_id": "cap-src-002",
+                "events": [{
+                    "type": "form_email_capture",
+                    "email": "x@shop.com",
+                    "ts": "2026-06-30T00:00:00",
+                }],
+            },
+            headers={"User-Agent": _BROWSER_UA},
+        )
+        assert resp.status_code == 204, resp.text
+        row = (
+            await test_db.execute(
+                select(VisitorEmail).where(VisitorEmail.visitor_id == "cap-src-002")
+            )
+        ).scalar_one()
+        assert row.source == "form"
