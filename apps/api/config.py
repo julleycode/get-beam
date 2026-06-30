@@ -110,6 +110,26 @@ class Settings(BaseSettings):
     hunter_api_key: str = ""        # Domain → employee emails (25 free/month)
     apollo_api_key: str = ""        # Contact database + email finder (10K credits free/month)
 
+    # ─── Provider on/off toggles (own-data P3) ───
+    # Disable a provider WITHOUT deleting its key. Default on = no behavior change;
+    # flip the env var to demote a provider as the owned graph grows. e.g. RB2B
+    # keeps charging $0.09/match while returning invalid emails — set
+    # RB2B_ENABLED=false to stop it. The resolver checks the flag alongside the key.
+    rb2b_enabled: bool = True
+    leadpipe_enabled: bool = True
+    capturify_enabled: bool = True
+    pdl_ip_enabled: bool = True
+    ipinfo_enabled: bool = True
+    hunter_enabled: bool = True
+    apollo_enabled: bool = True
+
+    # When false (default), a captured/owned email is saved as a $0 form_capture
+    # identification WITHOUT an extra pre-waterfall PDL person-enrich call — the
+    # email is already owned, and the post-resolution enricher (enrich_tier1) still
+    # fills job/company data. Set true to enrich captured emails inline at resolve
+    # time (spends a PDL credit on data you already have).
+    enrich_captured_email_pdl: bool = False
+
     # Shopify
     shopify_api_key: str = ""
     shopify_api_secret: str = ""

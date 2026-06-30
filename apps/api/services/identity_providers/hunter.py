@@ -37,7 +37,7 @@ class HunterMixin:
 
         Retries up to 3× on transient errors (5xx, 429, timeouts).
         """
-        if not settings.hunter_api_key:
+        if not settings.hunter_api_key or not settings.hunter_enabled:
             return None
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(

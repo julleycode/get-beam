@@ -286,11 +286,14 @@ class IdentityResolver(
                     visitor_id=visitor.visitor_id[:8],
                     email_domain=captured_email.split("@")[-1],
                 )
-                # Enrich the email directly with PDL
-                enriched = await self._enrich_email_pdl(visitor, captured_email)
-                if enriched:
-                    return enriched
-                # If PDL can't enrich it, still save the email as a basic identification
+                # The email is already OWNED ($0). Only spend a PDL credit to
+                # enrich it inline when explicitly enabled — otherwise save it as
+                # a form_capture and let the post-resolution enricher fill job data.
+                if settings.enrich_captured_email_pdl:
+                    enriched = await self._enrich_email_pdl(visitor, captured_email)
+                    if enriched:
+                        return enriched
+                # Save the captured email as a basic (owned) identification.
                 return await self._save_identified(
                     visitor,
                     {
@@ -505,10 +508,12 @@ class IdentityResolver(
     ) -> IdentifiedVisitor | None:
         """Run Leadpipe, Capturify, RB2B in parallel. Save first match."""
 
+        # A disabled provider passes a None key, so the existing `if not api_key`
+        # guard below skips it cleanly — same path as a missing key.
         providers = [
-            ("leadpipe", settings.leadpipe_api_key, self._call_leadpipe_api, 0.0),
-            ("capturify", settings.capturify_api_key, self._call_capturify_api, 0.0),
-            ("rb2b", settings.rb2b_api_key, self._call_rb2b_api, 0.09),
+            ("leadpipe", settings.leadpipe_api_key if settings.leadpipe_enabled else None, self._call_leadpipe_api, 0.0),
+            ("capturify", settings.capturify_api_key if settings.capturify_enabled else None, self._call_capturify_api, 0.0),
+            ("rb2b", settings.rb2b_api_key if settings.rb2b_enabled else None, self._call_rb2b_api, 0.09),
         ]
 
         async def _fetch(
@@ -582,6 +587,8 @@ class IdentityResolver(
         """Run PDL IP Enrich + IPinfo in parallel. Return first domain."""
 
         async def _fetch_pdl() -> tuple[str | None, int]:
+            if not settings.pdl_ip_enabled:
+                return (None, 0)
             start = time.monotonic()
             try:
                 domain = await asyncio.wait_for(
@@ -598,6 +605,8 @@ class IdentityResolver(
             return (domain, elapsed)
 
         async def _fetch_ipinfo() -> tuple[str | None, int]:
+            if not settings.ipinfo_enabled:
+                return (None, 0)
             start = time.monotonic()
             try:
                 domain = await asyncio.wait_for(
@@ -617,13 +626,17 @@ class IdentityResolver(
             _fetch_pdl(), _fetch_ipinfo()
         )
 
-        pdl_cost = 0.01 if pdl_domain else 0.0
-        await self._log_resolution(
-            visitor, "pdl_ip_enrich", pdl_domain is not None, pdl_cost, pdl_ms
-        )
-        await self._log_resolution(
-            visitor, "ipinfo", ipi_domain is not None, 0.0, ipi_ms
-        )
+        # Only log providers we actually ran — a disabled provider was never
+        # attempted, so it must not leave a "failed" row in the cost ledger.
+        if settings.pdl_ip_enabled:
+            pdl_cost = 0.01 if pdl_domain else 0.0
+            await self._log_resolution(
+                visitor, "pdl_ip_enrich", pdl_domain is not None, pdl_cost, pdl_ms
+            )
+        if settings.ipinfo_enabled:
+            await self._log_resolution(
+                visitor, "ipinfo", ipi_domain is not None, 0.0, ipi_ms
+            )
 
         domain = pdl_domain or ipi_domain
         if domain:
