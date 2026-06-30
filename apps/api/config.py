@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     sendgrid_api_key: str = ""
     sendgrid_webhook_secret: str = ""  # shared secret for the SendGrid event webhook URL
 
+    # ─── Changelog auto-generator (GitHub → Gemini → landing-page "what's new") ───
+    github_token: str = ""  # repo-scoped PAT; required for the changelog sync (repo is private)
+    github_repo: str = "julleycode/retarget-agent"  # owner/name to pull merged PRs from
+    changelog_sync_enabled: bool = False  # master switch for the daily auto-sync job
+    changelog_sync_interval_hours: int = 24  # how often the daily job pulls new merged PRs
+
     # ─── Identity Graph (person-level from IP) ───
     rb2b_api_key: str = ""          # RB2B API Suite — IP → hashed email → person (US traffic)
     leadpipe_api_key: str = ""      # Leadpipe — pixel-based identity graph (500 free IDs)

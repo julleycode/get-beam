@@ -1,4 +1,4 @@
-import { Receipt, BookOpen, ListChecks, Inbox } from "lucide-react";
+import { Receipt, BookOpen, ListChecks, Inbox, Sparkles } from "lucide-react";
 import type { ComponentType } from "react";
 
 export type AdminTool = {
@@ -23,6 +23,12 @@ export const ADMIN_TOOLS: AdminTool[] = [
     label: "Blog",
     description: "Write and publish blog posts.",
     icon: BookOpen,
+  },
+  {
+    href: "/dashboard/changelog",
+    label: "Changelog",
+    description: "Post product updates to the landing page.",
+    icon: Sparkles,
   },
   {
     href: "/dashboard/waitlist",

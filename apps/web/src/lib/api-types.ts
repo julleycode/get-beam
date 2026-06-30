@@ -66,6 +66,40 @@ export interface BlogPostInput {
   og_image_url?: string | null;
 }
 
+export type ChangelogCategory = "new" | "improved" | "fixed";
+
+export interface ChangelogEntry {
+  id: string;
+  title: string;
+  body: string;
+  category: string;
+  published_at: string | null;
+  created_at: string;
+}
+
+export interface ChangelogEntryAdmin extends ChangelogEntry {
+  status: string;
+  updated_at: string | null;
+}
+
+export interface ChangelogAdminListResponse {
+  entries: ChangelogEntryAdmin[];
+  total: number;
+}
+
+export interface ChangelogEntryInput {
+  title: string;
+  body?: string;
+  category?: ChangelogCategory;
+}
+
+export interface ChangelogSyncResponse {
+  scanned: number;
+  imported: number;
+  skipped_internal: number;
+  already_present: number;
+}
+
 // Types
 export interface Site {
   id: string;

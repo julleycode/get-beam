@@ -27,10 +27,11 @@ from apps.api.models.stripe_event import StripeEvent  # noqa: F401 — register 
 from apps.api.models.blog_post import BlogPost  # noqa: F401 — register for create_all
 from apps.api.models.api_usage import ApiUsageLog  # noqa: F401 — register for create_all
 from apps.api.models.crm_connection import CrmConnection  # noqa: F401 — register for create_all
+from apps.api.models.changelog_entry import ChangelogEntry  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
-from apps.api.routers import known_contacts, costs, ai, dashboard, crm
+from apps.api.routers import known_contacts, costs, ai, dashboard, crm, changelog
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
 from slowapi import _rate_limit_exceeded_handler
@@ -184,6 +185,7 @@ app.include_router(billing.router, prefix="/api/v1/billing", tags=["billing"])
 app.include_router(engagement.router, prefix="/api/v1/engagement", tags=["engagement"])
 app.include_router(waitlist.router, prefix="/api/v1/waitlist", tags=["waitlist"])
 app.include_router(blog.router, prefix="/api/v1/blog", tags=["blog"])
+app.include_router(changelog.router, prefix="/api/v1/changelog", tags=["changelog"])
 
 # ── Public unsubscribe (CAN-SPAM compliance, no auth) ──
 app.include_router(unsubscribe.router, tags=["unsubscribe"])
