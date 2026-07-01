@@ -35,15 +35,20 @@ _TEXT_FIELD_CAPS = {
     "city": 80,
     "country": 60,
     "email": 254,
+    "recent_content": 800,  # scraped YouTube/Reddit/social text — untrusted
 }
 
 _WS_RE = re.compile(r"\s+")
 
 
 def clean_text(value: Any, max_len: int) -> Any:
-    """Collapse whitespace/newlines and cap length for prompt insertion."""
+    """Collapse whitespace/newlines, neutralize the untrusted-data fence, and
+    cap length for prompt insertion."""
     if not isinstance(value, str):
         return value
+    # Drop angle brackets so a value can't forge the <untrusted_visitor_data>
+    # delimiter (prompt-injection breakout). They carry no segmentation signal.
+    value = value.replace("<", " ").replace(">", " ")
     return _WS_RE.sub(" ", value).strip()[:max_len]
 
 

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.agents.prompt_safety import extract_json, sanitize_profiles, wrap_untrusted
+from apps.api.services.content_reader import build_recent_content
 from apps.api.services.gemini_client import gemini_generate
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.segment import Segment, SegmentMember
@@ -108,6 +109,13 @@ async def build_visitor_profiles(
             profile["twitter_handle"] = enriched.twitter_handle
             profile["linkedin_headline"] = enriched.linkedin_headline
             profile["twitter_bio"] = enriched.twitter_bio
+
+            # Recent content (YouTube/Reddit/tweets/deep research) for
+            # personalization — empty string when there's nothing, so the
+            # prompt is unchanged for visitors without social context.
+            recent = build_recent_content(enriched.social_context)
+            if recent:
+                profile["recent_content"] = recent
 
         profiles.append(profile)
     return profiles

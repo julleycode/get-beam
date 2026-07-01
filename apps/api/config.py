@@ -278,6 +278,17 @@ class Settings(BaseSettings):
     osint_paid_min_profiles: int = 1            # run paid only if free+AI found fewer than this
     osint_paid_daily_budget: int = 10           # hard cap on paid lookups/day/site (credit guard)
 
+    # ─── Content reader (read public YouTube + Reddit content for persona /
+    # campaign personalization; behind a flag, default OFF) ───
+    enable_content_reader: bool = False          # master gate — off until explicitly enabled
+    content_reader_max_items: int = 5            # number of recent videos/posts to keep per source
+
+    # ─── Twitter/X enrichment fallback ───
+    # TwitterAPI.io — cheap third-party X data provider used as a FALLBACK when
+    # the official X API v2 call errors / returns non-200 / no bearer token.
+    # Gated: empty key = fallback disabled. See enricher._enrich_twitter.
+    twitterapi_io_api_key: str = ""
+
     # ─── Rate limits ───
     default_daily_resolution_budget: int = 50   # Free tier: 50 visitor identifications/day per site (BYOK = unlimited)
     default_daily_enrichment_budget: int = 3    # Free tier: 3 deep research/day (BYOK = unlimited)

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.campaign import Campaign
 from apps.api.models.database import get_db
+from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.segment import Segment, SegmentMember
 from apps.api.models.social_account import SocialAccount
 from apps.api.models.user import User
@@ -15,6 +16,7 @@ from apps.api.dependencies import get_current_user, verify_site_access
 from apps.api.schemas.campaigns import CampaignListResponse, CampaignOut, CampaignStatusUpdate
 from apps.api.agents.campaign_planner import plan_campaign
 from apps.api.services.campaign_sender import send_campaign_emails
+from apps.api.services.content_reader import build_recent_content
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -75,8 +77,18 @@ async def create_campaign_from_segment(
         visitors_result = await db.execute(
             select(Visitor).where(Visitor.visitor_id.in_(visitor_ids))
         )
+        # Batch-fetch enrichment profiles for recent-content personalization
+        # (social_context lives on EnrichmentProfile, not Visitor).
+        enrich_result = await db.execute(
+            select(EnrichmentProfile).where(
+                EnrichmentProfile.site_id == site_id,
+                EnrichmentProfile.visitor_id.in_(visitor_ids),
+            )
+        )
+        enrich_map = {ep.visitor_id: ep for ep in enrich_result.scalars().all()}
+
         for v in visitors_result.scalars().all():
-            profiles.append({
+            profile: dict = {
                 "visitor_id": v.visitor_id,
                 "email": v.email,
                 "full_name": v.full_name,
@@ -86,7 +98,13 @@ async def create_campaign_from_segment(
                 "linkedin_url": v.linkedin_url,
                 "twitter_handle": v.twitter_handle,
                 "intent_score": v.intent_score,
-            })
+            }
+            enriched = enrich_map.get(v.visitor_id)
+            if enriched:
+                recent = build_recent_content(enriched.social_context)
+                if recent:
+                    profile["recent_content"] = recent
+            profiles.append(profile)
 
     # Get connected social accounts for this user
     accts_result = await db.execute(
