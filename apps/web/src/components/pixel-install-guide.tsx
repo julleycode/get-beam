@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { api } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { api, ConsentMode } from "@/lib/api";
 import { getGuide } from "@/lib/platform-guides";
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +41,17 @@ export function PixelInstallGuide({
   const guide = getGuide(platform);
   const [copied, setCopied] = useState(false);
   const [promptCopied, setPromptCopied] = useState(false);
+  // Cookie consent is chosen here at install time; picking a mode re-fetches the
+  // snippet so the copied <script> carries the right data-consent immediately.
+  const [consentMode, setConsentMode] = useState<ConsentMode>(() => {
+    const m = /data-consent="(off|eu|all|cmp)"/.exec(snippet);
+    return (m?.[1] as ConsentMode) ?? "off";
+  });
+  const [consentBusy, setConsentBusy] = useState(false);
+  const [liveSnippet, setLiveSnippet] = useState(snippet);
+  useEffect(() => {
+    setLiveSnippet(snippet);
+  }, [snippet]);
   const [verifying, setVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<{
     status: string;
@@ -51,11 +62,25 @@ export function PixelInstallGuide({
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(snippet);
+      await navigator.clipboard.writeText(liveSnippet);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
       // clipboard unavailable (insecure origin / permission denied) — no-op
+    }
+  }
+
+  async function handleConsentChange(mode: ConsentMode) {
+    setConsentMode(mode);
+    setConsentBusy(true);
+    try {
+      await api.setConsentMode(siteId, mode);
+      const r = await api.getPixelSnippet(siteId);
+      setLiveSnippet(r.snippet);
+    } catch {
+      // keep the previous snippet on failure
+    } finally {
+      setConsentBusy(false);
     }
   }
 
@@ -71,7 +96,7 @@ export function PixelInstallGuide({
       `Install the Beam tracking pixel on my ${platformLabel}.`,
       ``,
       `Add this snippet right before the closing </head> tag:`,
-      snippet,
+      liveSnippet,
       ``,
       `Install steps:`,
       steps,
@@ -221,9 +246,31 @@ export function PixelInstallGuide({
             <CardTitle className="text-sm">Code Snippet</CardTitle>
           </CardHeader>
           <CardContent>
+            {/* Cookie consent — chosen at install time; updates the snippet below. */}
+            <div className="mb-3 flex flex-col gap-1.5">
+              <label htmlFor="install-consent" className="text-xs text-muted-foreground">
+                Do you sell to EU/UK customers? Beam can show a cookie banner for you.
+              </label>
+              <select
+                id="install-consent"
+                className="rounded-md border bg-muted px-3 py-2 text-sm"
+                value={consentMode}
+                disabled={consentBusy}
+                onChange={(e) => handleConsentChange(e.target.value as ConsentMode)}
+              >
+                <option value="off">No banner (default)</option>
+                <option value="eu">Yes — EU/EEA visitors only (recommended)</option>
+                <option value="all">Show a banner to everyone</option>
+                <option value="cmp">I use my own consent tool (CMP)</option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Beam builds the banner — no popup to code. You&apos;re still
+                responsible for your privacy policy; this isn&apos;t legal advice.
+              </p>
+            </div>
             <div className="relative">
               <pre className="rounded-md bg-muted p-4 text-xs overflow-x-auto whitespace-pre-wrap break-all">
-                {snippet}
+                {liveSnippet}
               </pre>
               <Button
                 variant="outline"

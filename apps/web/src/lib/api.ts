@@ -10,6 +10,7 @@ import type {
   ChangelogSyncResponse,
   Site,
   SiteUpdate,
+  ConsentMode,
   FeatureRequest,
   FeatureBoardItem,
   FeatureBoardResponse,
@@ -318,6 +319,14 @@ class ApiClient {
     return this.request<Site>(`/api/v1/sites/${siteId}`, {
       method: "PATCH",
       body: JSON.stringify({ hot_alert_enabled: enabled }),
+    });
+  }
+
+  // Set the per-site cookie-consent mode (off | eu | all | cmp).
+  async setConsentMode(siteId: string, mode: ConsentMode) {
+    return this.request<Site>(`/api/v1/sites/${siteId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ consent_mode: mode }),
     });
   }
 
@@ -1157,6 +1166,7 @@ export type {
   ChangelogSyncResponse,
   Site,
   SiteUpdate,
+  ConsentMode,
   FeatureRequest,
   FeatureBoardItem,
   FeatureBoardResponse,

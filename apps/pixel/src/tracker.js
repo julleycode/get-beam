@@ -174,6 +174,7 @@
   var xhrInFlight = false;
 
   function flush() {
+    if (consentBlocked()) return; // EU: hold events until visitor decides
     if (queue.length === 0) return;
 
     var batch = queue.slice(0);
@@ -224,6 +225,7 @@
   // email to this visitor cookie.
   (function() {
     try {
+      if (OPTOUT) return;
       var bidParam = new URLSearchParams(window.location.search).get("_bid");
       if (bidParam) {
         pushEvent({type: "utm_identify", bid: bidParam, url: window.location.href, ts: now()});
@@ -273,6 +275,78 @@
   document.addEventListener("blur",onFieldDone,true);   // blur doesn't bubble → capture phase
   document.addEventListener("change",onFieldDone,true);
   try{window.beamIdentify=function(email){captureEmail(email,"identify");};}catch(e){}
+
+  // --- Cookie consent (EU-gated, opt-in). data-consent: off|eu|all|cmp ---
+  // "off" (default) = today's behavior. "eu" = banner + hold events only for
+  // EU/EEA visitors (timezone heuristic); non-EU keep firing immediately +
+  // GPC/DNT opt-out. "all" = banner for everyone. "cmp" = no Beam banner, the
+  // site's own consent tool calls window.beamConsent(granted). A declined
+  // visitor reuses the existing OPTOUT path → backend sets do_not_resolve.
+  var CONSENT_MODE = script.getAttribute("data-consent") || "off";
+  var CONSENT_KEY = "_rta_c";
+
+  function isEU() {
+    try {
+      var tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "";
+      if (tz.indexOf("Europe/") === 0) return true;
+      return /^(Atlantic\/(Canary|Azores|Madeira|Faroe|Reykjavik)|Asia\/(Nicosia|Famagusta))$/.test(tz);
+    } catch (e) { return false; }
+  }
+
+  var GATED = CONSENT_MODE === "all" || CONSENT_MODE === "cmp" ||
+              (CONSENT_MODE === "eu" && isEU());
+  var consentDecision = GATED ? (getCookie(CONSENT_KEY) || lsGet(CONSENT_KEY)) : "g";
+  if (GATED && consentDecision === "d") OPTOUT = true; // persisted decline
+
+  // Referenced by flush() (hoisted). Blocks sending while a gated visitor has
+  // not decided yet — the pageview still queues in _rta_q, just isn't flushed.
+  function consentBlocked() { return GATED && consentDecision == null; }
+
+  function decideConsent(v) {
+    setCookie(CONSENT_KEY, v, COOKIE_DAYS);
+    lsSet(CONSENT_KEY, v);
+    consentDecision = v;
+    if (v === "g") { flush(); }           // accept → send everything queued
+    else { OPTOUT = true; lsDel(QUEUE_KEY); queue = []; } // decline → drop, send nothing
+  }
+
+  // CMP hook (mirrors window.beamIdentify): customer's consent tool calls this.
+  try {
+    window.beamConsent = function(granted) {
+      if (consentDecision != null) return;
+      decideConsent(granted ? "g" : "d");
+      var el = document.getElementById("_rtaC");
+      if (el && el.parentNode) el.parentNode.removeChild(el);
+    };
+  } catch (e) {}
+
+  function showConsentBanner() {
+    if (CONSENT_MODE === "cmp" || !consentBlocked()) return;
+    if (document.getElementById("_rtaC")) return;
+    var host = document.body || document.documentElement;
+    if (!host) return;
+    var b = document.createElement("div");
+    b.id = "_rtaC";
+    b.setAttribute("role", "dialog");
+    b.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:2147483647;background:#111;color:#fff;font:14px/1.4 system-ui,sans-serif;padding:14px 16px;display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;box-shadow:0 -1px 8px rgba(0,0,0,.3)";
+    var pol = script.getAttribute("data-consent-policy");
+    b.innerHTML = '<span style="max-width:640px">We use cookies to understand site traffic.' +
+      (pol ? ' <a href="' + pol + '" style="color:#8ab4ff">Learn more</a>.' : '') + '</span>';
+    function mk(t, bg) {
+      var e = document.createElement("button");
+      e.textContent = t;
+      e.style.cssText = "border:0;border-radius:6px;padding:8px 16px;cursor:pointer;font:inherit;font-weight:600;background:" + bg + ";color:" + (bg === "#fff" ? "#111" : "#fff");
+      return e;
+    }
+    var no = mk("Decline", "#333"), yes = mk("Accept", "#fff");
+    yes.onclick = function() { decideConsent("g"); if (b.parentNode) b.parentNode.removeChild(b); };
+    no.onclick = function() { decideConsent("d"); if (b.parentNode) b.parentNode.removeChild(b); };
+    b.appendChild(no);
+    b.appendChild(yes);
+    host.appendChild(b);
+  }
+
+  if (consentBlocked()) showConsentBanner();
 
   trackPageview();
 

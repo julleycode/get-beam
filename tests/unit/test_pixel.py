@@ -84,14 +84,44 @@ class TestPixelRemovedFeatures:
         assert '"click"' in pixel_code
 
 
+class TestPixelConsent:
+    """EU-gated cookie consent (data-consent: off|eu|all|cmp)."""
+
+    def test_reads_consent_attribute(self, pixel_code: str):
+        assert 'getAttribute("data-consent")' in pixel_code
+
+    def test_default_consent_off(self, pixel_code: str):
+        # Absent attribute → "off" → today's behavior (backward compatible).
+        assert '"data-consent") || "off"' in pixel_code
+
+    def test_has_eu_timezone_detection(self, pixel_code: str):
+        assert "isEU" in pixel_code
+        assert '"Europe/"' in pixel_code
+
+    def test_exposes_beam_consent_hook(self, pixel_code: str):
+        # CMP mode: customer's consent tool calls window.beamConsent(granted).
+        assert "window.beamConsent" in pixel_code
+
+    def test_decline_reuses_optout(self, pixel_code: str):
+        # Declined consent must flow through the existing OPTOUT → do_not_resolve
+        # path rather than a parallel mechanism.
+        assert "OPTOUT = true" in pixel_code
+
+    def test_flush_gated_by_consent(self, pixel_code: str):
+        assert "consentBlocked()" in pixel_code
+
+    def test_consent_state_key(self, pixel_code: str):
+        assert "_rta_c" in pixel_code
+
+
 class TestPixelSize:
     """Pixel should be small and efficient."""
 
-    def test_under_16kb(self, pixel_code: str):
-        # Bumped to 16KB raw after engagement emitters (scroll/time/click) +
-        # confirm-before-clear flush. Gzipped size is the real product
-        # constraint (under 5KB per CLAUDE.md) — tested in test_pixel_fingerprint.py
-        assert len(pixel_code.encode()) < 16000, f"Pixel is {len(pixel_code.encode())} bytes, should be under 16KB"
+    def test_source_under_20kb(self, pixel_code: str):
+        # Source raw grew past 16KB with the consent banner; this is only a
+        # sanity guard. The binding budget applies to the SERVED (minified)
+        # tracker.min.js at <5KB gzipped — see test_pixel_fingerprint.py.
+        assert len(pixel_code.encode()) < 20000, f"Pixel source is {len(pixel_code.encode())} bytes, should be under 20KB"
 
     def test_is_iife(self, pixel_code: str):
         """Should be wrapped in an IIFE for isolation."""

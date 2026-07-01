@@ -17,7 +17,6 @@ import {
   Lightbulb,
   CreditCard,
   Shield,
-  Settings,
   Menu,
   HelpCircle,
 } from "lucide-react";
@@ -71,13 +70,6 @@ const ADMIN_ITEM: NavItem = {
   label: "Admin",
   icon: Shield,
   adminOnly: true,
-};
-
-const SETTINGS_ITEM: NavItem = {
-  href: "/dashboard/settings",
-  label: "Settings",
-  icon: Settings,
-  tour: "settings",
 };
 
 // Set by the sign-up page so the invite token survives Clerk's multi-step
@@ -339,15 +331,6 @@ function SidebarBody({
         )}
 
         <div className="flex-1" />
-
-        <NavLink
-          href={SETTINGS_ITEM.href}
-          label={SETTINGS_ITEM.label}
-          icon={SETTINGS_ITEM.icon}
-          pathname={pathname}
-          onNavigate={onNavigate}
-          tour={SETTINGS_ITEM.tour}
-        />
       </nav>
       <Separator className="my-2" />
       {onReplayTour && (

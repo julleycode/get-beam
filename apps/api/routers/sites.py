@@ -128,6 +128,8 @@ async def update_site(
         site.hot_alert_enabled = body.hot_alert_enabled
     if body.tracking_enabled is not None:
         site.tracking_enabled = body.tracking_enabled
+    if body.consent_mode is not None:
+        site.consent_mode = body.consent_mode
 
     await db.commit()
     await db.refresh(site)
@@ -167,10 +169,17 @@ async def get_pixel_snippet(
         providers_json = json.dumps(providers, separators=(",", ":"))
         providers_attr = f" data-identity-providers='{providers_json}'"
 
+    # Only emit data-consent when consent gating is enabled, so "off" sites keep
+    # the exact snippet they had before this feature (zero churn for existing users).
+    consent_attr = ""
+    consent_mode = getattr(site, "consent_mode", "off") or "off"
+    if consent_mode != "off":
+        consent_attr = f' data-consent="{consent_mode}"'
+
     snippet = (
         f'<script src="{settings.api_base_url}/pixel/tracker.js" '
         f'data-site="{site.site_id}" data-api="{settings.api_base_url}"'
-        f'{providers_attr} defer></script>'
+        f'{providers_attr}{consent_attr} defer></script>'
     )
     return SitePixelSnippet(site_id=site.site_id, snippet=snippet)
 

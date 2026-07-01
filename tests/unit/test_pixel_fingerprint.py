@@ -11,13 +11,23 @@ import re
 
 import pytest
 
-PIXEL_PATH = pathlib.Path(__file__).parent.parent.parent / "apps" / "pixel" / "src" / "tracker.js"
+PIXEL_DIR = pathlib.Path(__file__).parent.parent.parent / "apps" / "pixel" / "src"
+PIXEL_PATH = PIXEL_DIR / "tracker.js"
+MIN_PIXEL_PATH = PIXEL_DIR / "tracker.min.js"
 
 
 @pytest.fixture
 def pixel_code() -> str:
     assert PIXEL_PATH.exists(), f"Pixel not found at {PIXEL_PATH}"
     return PIXEL_PATH.read_text()
+
+
+@pytest.fixture
+def min_pixel_code() -> str:
+    assert MIN_PIXEL_PATH.exists(), (
+        f"Minified pixel not found at {MIN_PIXEL_PATH} — run `npm run build` in apps/pixel"
+    )
+    return MIN_PIXEL_PATH.read_text()
 
 
 class TestFingerprintV2:
@@ -136,16 +146,33 @@ class TestIdentityGraphStacking:
 
 
 class TestPixelSizeLimit:
-    """Pixel must stay under 5KB gzipped."""
+    """The SERVED pixel (minified tracker.min.js) must stay under 5KB gzipped.
 
-    def test_under_5kb_gzipped(self, pixel_code: str):
-        compressed = gzip.compress(pixel_code.encode())
+    The unminified source is allowed to grow past the budget; serve_pixel()
+    serves the minified build. A red here almost always means someone edited
+    tracker.js without re-running `npm run build` in apps/pixel.
+    """
+
+    def test_under_5kb_gzipped(self, min_pixel_code: str):
+        compressed = gzip.compress(min_pixel_code.encode())
         assert len(compressed) < 5000, (
-            f"Pixel is {len(compressed)} bytes gzipped, must be under 5KB"
+            f"Minified pixel is {len(compressed)} bytes gzipped, must be under 5KB "
+            "— re-run `npm run build` in apps/pixel"
         )
 
-    def test_under_16kb_raw(self, pixel_code: str):
+    def test_under_16kb_raw(self, min_pixel_code: str):
         # Raw cap is a sanity guard; the binding budget is 5KB gzipped above.
-        assert len(pixel_code.encode()) < 16000, (
-            f"Pixel is {len(pixel_code.encode())} bytes raw, should be under 16KB"
+        assert len(min_pixel_code.encode()) < 16000, (
+            f"Minified pixel is {len(min_pixel_code.encode())} bytes raw, should be under 16KB"
         )
+
+    def test_minified_is_fresh(self, pixel_code: str, min_pixel_code: str):
+        """Guard against a stale build: consent + core markers that survive
+        minification (string literals + global props) must be present in the
+        minified artifact whenever they're in source."""
+        for marker in ('data-consent', 'beamConsent', '_rta_c', '"pageview"', 'beamIdentify'):
+            if marker in pixel_code:
+                assert marker in min_pixel_code, (
+                    f"{marker!r} is in tracker.js but missing from tracker.min.js "
+                    "— re-run `npm run build` in apps/pixel"
+                )

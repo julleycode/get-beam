@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, Site } from "@/lib/api";
 import { SelectSkeleton } from "@/components/skeletons";
+import { SiteSettingsDialog } from "@/components/site-settings-dialog";
 import {
   Select,
   SelectContent,
@@ -48,17 +49,20 @@ export function SiteSelector({ value, onChange }: SiteSelectorProps) {
   if (sites.length === 0) return null;
 
   return (
-    <Select value={value} onValueChange={selectSite}>
-      <SelectTrigger className="w-[200px]">
-        <SelectValue placeholder="Select site" />
-      </SelectTrigger>
-      <SelectContent>
-        {sites.map((site) => (
-          <SelectItem key={site.site_id} value={site.site_id}>
-            {site.name}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <div className="flex items-center gap-2">
+      <Select value={value} onValueChange={selectSite}>
+        <SelectTrigger className="w-[200px]">
+          <SelectValue placeholder="Select site" />
+        </SelectTrigger>
+        <SelectContent>
+          {sites.map((site) => (
+            <SelectItem key={site.site_id} value={site.site_id}>
+              {site.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <SiteSettingsDialog siteId={value} />
+    </div>
   );
 }
