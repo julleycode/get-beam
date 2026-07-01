@@ -308,19 +308,19 @@ _DATACENTER_CACHE_TTL = 30 * 24 * 3600  # 30 days
 async def is_datacenter_ip(ip: str) -> bool:
     """True if `ip` belongs to a cloud-compute / hosting provider (server/bot traffic).
 
-    Classifies via `classify_org_kind` on IPinfo's standard endpoint `org` (ASN) field —
-    available on the free token (unlike the paid /privacy module). ASN-number match first,
-    org-name token fallback. CDN/relay orgs (Cloudflare/Fastly/Akamai) classify as 'cdn',
-    NOT 'datacenter', so they are NEVER dropped here — they front real humans behind Apple
-    Private Relay / Cloudflare WARP. Cached in Redis 30 days. Fail-open: returns False on
-    private IP, missing token, or any error, so a real visitor's events are never dropped
-    because of a lookup hiccup.
+    Resolves the IP's ASN + org, then classifies via `classify_org_kind` (ASN-number
+    match first, org-name token fallback). CDN/relay orgs (Cloudflare/Fastly/Akamai)
+    classify as 'cdn', NOT 'datacenter', so they are NEVER dropped here — they front
+    real humans behind Apple Private Relay / Cloudflare WARP.
+
+    ASN source, in order: (1) a local MaxMind GeoLite2-ASN DB when configured —
+    free, unlimited, sub-ms, no network; (2) the IPinfo API otherwise. Cached in
+    Redis 30 days. Fail-open: returns False on a private IP, no ASN source, or any
+    error, so a real visitor's events are never dropped because of a lookup hiccup.
     """
     from apps.api.config import settings
 
     if not ip or _PRIVATE_RE.match(ip):
-        return False
-    if not settings.ipinfo_token:
         return False
 
     cache_key = f"{_DATACENTER_CACHE_PREFIX}{ip}"
@@ -334,17 +334,30 @@ async def is_datacenter_ip(ip: str) -> bool:
         redis = None
 
     org: str | None = None
-    try:
-        import httpx
-        async with httpx.AsyncClient(timeout=4.0) as client:
-            resp = await client.get(
-                f"https://ipinfo.io/{ip}", params={"token": settings.ipinfo_token}
-            )
-            if resp.status_code == 200:
-                org = resp.json().get("org")
-    except Exception as exc:
-        logger.debug("datacenter_check_failed", ip=ip[:8] + "...", error=str(exc))
-        return False  # fail-open
+
+    # (1) Local MaxMind GeoLite2-ASN — preferred: free, unlimited, no network.
+    from apps.api.services.asn_lookup import lookup_asn
+    asn, asn_org = lookup_asn(ip)
+    if asn is not None:
+        # Rebuild the "AS<num> <Org>" shape classify_org_kind parses, so the same
+        # ASN set + org tokens drive both the MaxMind and IPinfo paths.
+        org = f"AS{asn} {asn_org or ''}".strip()
+
+    # (2) Fallback: IPinfo API (needs a token). Skipped entirely when MaxMind answered.
+    if org is None:
+        if not settings.ipinfo_token:
+            return False  # no local DB and no token → fail-open
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=4.0) as client:
+                resp = await client.get(
+                    f"https://ipinfo.io/{ip}", params={"token": settings.ipinfo_token}
+                )
+                if resp.status_code == 200:
+                    org = resp.json().get("org")
+        except Exception as exc:
+            logger.debug("datacenter_check_failed", ip=ip[:8] + "...", error=str(exc))
+            return False  # fail-open
 
     is_dc = classify_org_kind(org) == "datacenter"
     try:

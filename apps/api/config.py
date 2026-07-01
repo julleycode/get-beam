@@ -105,6 +105,14 @@ class Settings(BaseSettings):
     # Cached + fail-open: an IPinfo error never blocks a real visitor's events.
     block_datacenter_traffic: bool = True
 
+    # MaxMind GeoLite2-ASN: a FREE, unlimited, offline IP→ASN database. When
+    # maxmind_asn_db_path points at a GeoLite2-ASN.mmdb, datacenter detection uses
+    # it (sub-ms local lookup, no per-IP IPinfo call) and only falls back to IPinfo
+    # when the DB is absent. Download with scripts/download_geolite2_asn.py using a
+    # free MaxMind license key (maxmind_license_key / MAXMIND_LICENSE_KEY).
+    maxmind_asn_db_path: str = ""
+    maxmind_license_key: str = ""
+
     # ─── Waterfall enrichment providers ───
     ipinfo_token: str = ""          # IP → company/geolocation (50K free/month)
     hunter_api_key: str = ""        # Domain → employee emails (25 free/month)
