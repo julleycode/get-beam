@@ -191,6 +191,7 @@ class TestExportExcludesSuppressed:
                            (f"v_drop_{uuidlib.uuid4().hex[:6]}", drop_email)):
             test_db.add(IdentifiedVisitor(
                 site_id=site_id, visitor_id=vid, email=email, do_not_email=False,
+                resolution_provider="form_capture",
             ))
             test_db.add(SegmentMember(segment_id=seg.id, site_id=site_id, visitor_id=vid))
         await test_db.commit()
