@@ -430,10 +430,6 @@ _GUMROAD_PERIOD_DAYS = {
     "every_two_years": 731,
 }
 
-# Gumroad Ping fields whose truthiness REVOKES entitlement (drop back to free).
-_GUMROAD_REVOKE_FIELDS = ("refunded", "disputed", "chargedback", "cancelled")
-
-
 def _gumroad_tier_to_plan(tier_name: str, price_cents: int) -> str:
     """Map a Gumroad membership tier (variant) to an internal plan name.
 
@@ -504,6 +500,13 @@ async def gumroad_webhook(
     seller_id. A sale for an email with no account yet creates a minimal user
     row; when that buyer later signs in with the same email, Clerk links to this
     row (see dependencies.get_current_user) so the plan is preserved.
+
+    Events: the plain Settings Ping fires on the `sale` resource only (initial +
+    recurring charges) — those ACTIVATE. refund / dispute / cancellation /
+    subscription_ended reach this endpoint only when registered as Gumroad
+    resource_subscriptions (PUT /v2/resource_subscriptions) pointing at this same
+    URL with the ?token= query preserved; those REVOKE (hard) or mark cancelled
+    (soft, keep access until the period ends).
     """
     if not settings.gumroad_webhook_secret:
         raise HTTPException(status_code=503, detail="Gumroad webhook not configured")
@@ -520,33 +523,48 @@ async def gumroad_webhook(
         logger.warning("gumroad_webhook_seller_mismatch")
         raise HTTPException(status_code=400, detail="Unexpected seller")
 
-    email = str(form.get("email") or "").strip().lower()
+    # Gumroad uses `email` on purchase pings (sale/refund/dispute) but
+    # `user_email` on subscription-lifecycle pings (cancellation/subscription_ended)
+    # — read both. subscription_id is the stable key across every event.
+    email = str(form.get("email") or form.get("user_email") or "").strip().lower()
     subscription_id = str(form.get("subscription_id") or "")
-    revoke = (
-        any(str(form.get(f) or "").lower() == "true" for f in _GUMROAD_REVOKE_FIELDS)
-        or bool(form.get("subscription_ended_at"))
-        or bool(form.get("ended_reason"))
-    )
+
+    # A test ping (or a Gumroad test-mode purchase) must never mutate a real
+    # account. Live sales omit `test` or send it false.
+    if str(form.get("test") or "").lower() == "true":
+        logger.info("gumroad_webhook_test_ping_ignored", subscription_id=subscription_id)
+        return {"received": True}
+
+    refunded = str(form.get("refunded") or "").lower() == "true"
+    disputed = str(form.get("disputed") or "").lower() == "true"
+    dispute_won = str(form.get("dispute_won") or "").lower() == "true"
+    cancelled = str(form.get("cancelled") or "").lower() == "true"
+    ended = bool(form.get("ended_reason")) or bool(form.get("ended_at"))
+
+    # HARD revoke → access ends NOW: money returned (refund), a live chargeback
+    # (dispute that was NOT won/reversed), or the subscription actually ended.
+    hard_revoke = refunded or (disputed and not dispute_won) or ended
+    # SOFT cancel → the buyer cancelled but keeps access until the paid period
+    # ends (mirrors Lemon Squeezy: "cancelled" stays entitled until renews_at).
+    soft_cancel = cancelled and not hard_revoke
+
     logger.info(
         "gumroad_webhook_received",
         has_email=bool(email),
         subscription_id=subscription_id,
-        revoke=revoke,
+        hard_revoke=hard_revoke,
+        soft_cancel=soft_cancel,
     )
 
-    # ── Revocation: refund / dispute / cancellation / subscription end ──
-    if revoke:
+    # ── Hard revoke: refund / live dispute / subscription ended → drop to free ──
+    if hard_revoke:
         user = await _gumroad_find_user(email, subscription_id, db)
         if user is None:
             logger.warning(
                 "gumroad_revoke_user_not_found", subscription_id=subscription_id
             )
             return {"received": True}
-        status = (
-            "refunded"
-            if str(form.get("refunded") or "").lower() == "true"
-            else "cancelled"
-        )
+        status = "refunded" if refunded else ("disputed" if disputed else "ended")
         await db.execute(
             update(User)
             .where(User.id == user.id)
@@ -554,6 +572,23 @@ async def gumroad_webhook(
         )
         await db.commit()
         logger.info("gumroad_subscription_revoked", user_id=str(user.id), status=status)
+        return {"received": True}
+
+    # ── Soft cancel: keep the plan until the paid period ends ──
+    if soft_cancel:
+        user = await _gumroad_find_user(email, subscription_id, db)
+        if user is None:
+            logger.warning(
+                "gumroad_cancel_user_not_found", subscription_id=subscription_id
+            )
+            return {"received": True}
+        values: dict = {"subscription_status": "cancelled"}
+        period_end = _parse_dt(form.get("cancelled_at"))
+        if period_end is not None:
+            values["current_period_end"] = period_end
+        await db.execute(update(User).where(User.id == user.id).values(**values))
+        await db.commit()
+        logger.info("gumroad_subscription_cancelled_pending_end", user_id=str(user.id))
         return {"received": True}
 
     # ── Activation: a sale or recurring charge ──

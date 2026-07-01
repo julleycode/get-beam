@@ -164,3 +164,125 @@ class TestGumroadWebhook:
 
         result = await test_db.execute(select(User).where(User.email == email))
         assert result.scalar_one_or_none() is None  # no user created for an unknown tier
+
+    @pytest.mark.asyncio
+    async def test_cancellation_keeps_plan_until_period_end(
+        self, test_client, test_db, monkeypatch
+    ):
+        """cancellation event → mark cancelled but KEEP access until period end."""
+        from apps.api.config import settings
+        from apps.api.models.user import User
+
+        monkeypatch.setattr(settings, "gumroad_webhook_secret", "sekret")
+        email = _email()
+        paid = User(
+            email=email,
+            plan="pro",
+            subscription_status="active",
+            stripe_subscription_id="gum_sub_c1",
+        )
+        test_db.add(paid)
+        await test_db.commit()
+
+        # Subscription events use `user_email` (not `email`) + `cancelled`/`cancelled_at`.
+        resp = await test_client.post(
+            f"{_URL}?token=sekret",
+            data={
+                "subscription_id": "gum_sub_c1",
+                "user_email": email,
+                "cancelled": "true",
+                "cancelled_at": "2099-06-01T00:00:00Z",
+            },
+        )
+        assert resp.status_code == 200
+
+        await test_db.refresh(paid)
+        assert paid.plan == "pro"  # still entitled until the period ends
+        assert paid.subscription_status == "cancelled"
+        assert paid.current_period_end is not None
+        assert paid.current_period_end.year == 2099
+
+    @pytest.mark.asyncio
+    async def test_subscription_ended_revokes(self, test_client, test_db, monkeypatch):
+        """subscription_ended (real fields user_email + ended_reason/ended_at) → free."""
+        from apps.api.config import settings
+        from apps.api.models.user import User
+
+        monkeypatch.setattr(settings, "gumroad_webhook_secret", "sekret")
+        email = _email()
+        paid = User(
+            email=email,
+            plan="max",
+            subscription_status="cancelled",
+            stripe_subscription_id="gum_sub_e1",
+        )
+        test_db.add(paid)
+        await test_db.commit()
+
+        resp = await test_client.post(
+            f"{_URL}?token=sekret",
+            data={
+                "subscription_id": "gum_sub_e1",
+                "user_email": email,
+                "ended_reason": "cancelled",
+                "ended_at": "2099-01-01T00:00:00Z",
+            },
+        )
+        assert resp.status_code == 200
+
+        await test_db.refresh(paid)
+        assert paid.plan == "free"
+        assert paid.subscription_status == "ended"
+
+    @pytest.mark.asyncio
+    async def test_dispute_won_does_not_revoke(self, test_client, test_db, monkeypatch):
+        """A reversed chargeback (dispute_won=true) must NOT strip a paying user."""
+        from apps.api.config import settings
+        from apps.api.models.user import User
+
+        monkeypatch.setattr(settings, "gumroad_webhook_secret", "sekret")
+        email = _email()
+        paid = User(
+            email=email,
+            plan="pro",
+            subscription_status="active",
+            stripe_subscription_id="gum_sub_d1",
+        )
+        test_db.add(paid)
+        await test_db.commit()
+
+        resp = await test_client.post(
+            f"{_URL}?token=sekret",
+            data={
+                "subscription_id": "gum_sub_d1",
+                "email": email,
+                "disputed": "true",
+                "dispute_won": "true",
+            },
+        )
+        assert resp.status_code == 200
+
+        await test_db.refresh(paid)
+        assert paid.plan == "pro"  # NOT revoked — the seller won the dispute
+
+    @pytest.mark.asyncio
+    async def test_test_ping_does_not_mutate(self, test_client, test_db, monkeypatch):
+        """A Gumroad test ping (test=true) must never touch a real account."""
+        from apps.api.config import settings
+        from apps.api.models.user import User
+
+        monkeypatch.setattr(settings, "gumroad_webhook_secret", "sekret")
+        email = _email()
+        resp = await test_client.post(
+            f"{_URL}?token=sekret",
+            data={
+                "email": email,
+                "variants[Tier]": "Pro",
+                "price": "1900",
+                "test": "true",
+            },
+        )
+        assert resp.status_code == 200
+
+        result = await test_db.execute(select(User).where(User.email == email))
+        assert result.scalar_one_or_none() is None  # test ping created no user
