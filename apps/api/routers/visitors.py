@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.config import settings
 from apps.api.models.database import get_db
 from apps.api.models.enrichment import EnrichmentProfile
-from apps.api.models.known_contact import KnownContact
 from apps.api.models.user import User
 from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog, Visitor
 from apps.api.dependencies import get_current_user, verify_site_access as _verify_site_access
@@ -168,13 +167,9 @@ async def list_visitors(
         # One query for the page: hash this page's emails, look them up by hash.
         page_hashes = {vid: email_hash(em) for vid, (em, _fn, _prov) in id_map.items() if em}
         if page_hashes:
-            known_rows = await db.execute(
-                select(KnownContact.email_hash, KnownContact.source).where(
-                    KnownContact.site_id == site_id,
-                    KnownContact.email_hash.in_(list(set(page_hashes.values()))),
-                )
-            )
-            known_src = {h: src for h, src in known_rows}
+            from apps.api.services.known_contacts_match import known_source_map
+
+            known_src = await known_source_map(db, site_id, set(page_hashes.values()))
             for v in visitors:
                 h = page_hashes.get(v.visitor_id)
                 if h and h in known_src:
