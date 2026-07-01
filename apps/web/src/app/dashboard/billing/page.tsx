@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { useAuth } from "@clerk/nextjs";
+import { useAuthSafe as useAuth } from "@/lib/use-auth-safe";
 import { Check } from "lucide-react";
 import { api, BillingStatus, BillingInterval } from "@/lib/api";
 import { CardGridSkeleton, PageHeaderSkeleton } from "@/components/skeletons";
