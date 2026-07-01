@@ -149,6 +149,24 @@ class Enricher:
             logger.info("enrichment_skipped_no_email", visitor_id=visitor.visitor_id[:8])
             return None
 
+        # Known-contact routing: if this email is already in the customer's CRM
+        # list, they own its data — skip the paid enrichment waterfall entirely.
+        if settings.skip_enrich_known:
+            from apps.api.services.known_contacts_match import is_known_contact
+
+            known, source = await is_known_contact(
+                self.db, visitor.site_id, identified.email
+            )
+            if known:
+                logger.info(
+                    "enrichment_skipped_known_contact",
+                    visitor_id=visitor.visitor_id[:8],
+                    source=source,
+                )
+                visitor.enrichment_status = "skipped_known"
+                await self.db.commit()
+                return None
+
         # Missing PDL key: leave the visitor's enrichment status untouched so
         # the visitor stays retryable once the key is configured. Calling the
         # API with an empty key 401s and used to mark everyone permanently

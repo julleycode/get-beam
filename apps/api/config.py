@@ -123,6 +123,12 @@ class Settings(BaseSettings):
     hunter_enabled: bool = True
     apollo_enabled: bool = True
 
+    # Skip PAID enrichment (PDL/Proxycurl/Twitter) for a resolved visitor whose
+    # email is already in the customer's uploaded CRM list (known_contacts) — they
+    # own that person's data, so enriching them again just burns provider credits.
+    # Default on (cost saving); set false to always enrich.
+    skip_enrich_known: bool = True
+
     # When false (default), a captured/owned email is saved as a $0 form_capture
     # identification WITHOUT an extra pre-waterfall PDL person-enrich call — the
     # email is already owned, and the post-resolution enricher (enrich_tier1) still
