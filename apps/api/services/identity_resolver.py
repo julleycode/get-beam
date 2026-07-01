@@ -268,12 +268,20 @@ class IdentityResolver(
                 logger.warning("prior_signal_svid_check_failed", error=str(exc))
 
         # ── Check 1: Captured email for this visitor ──
+        # Match this visitor_id OR the durable server_visitor_id (_rta_svid). An
+        # email captured by an email-CLICK redirect binds to the svid before the
+        # person's first pixel visit; without following svid here that click would
+        # be missed when they later land on the site under a fresh client id.
         try:
+            vid_candidates = [visitor.visitor_id]
+            svid_c = getattr(visitor, "server_visitor_id", None)
+            if svid_c and svid_c != visitor.visitor_id:
+                vid_candidates.append(svid_c)
             email_result = await self.db.execute(
                 select(VisitorEmail.email)
                 .where(
                     VisitorEmail.site_id == visitor.site_id,
-                    VisitorEmail.visitor_id == visitor.visitor_id,
+                    VisitorEmail.visitor_id.in_(vid_candidates),
                 )
                 .order_by(VisitorEmail.created_at.desc())
                 .limit(1)
