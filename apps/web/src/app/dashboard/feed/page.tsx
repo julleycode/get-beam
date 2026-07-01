@@ -89,7 +89,11 @@ export default function FeedPage() {
     },
     onError: (error: Error) => {
       setGeneratingFor(null);
-      setToast({ message: error.message || "Failed to generate draft.", type: "error" });
+      const message =
+        error.name === "AbortError"
+          ? "Reply generation took too long. The AI provider may be slow — please try again."
+          : error.message || "Failed to generate draft.";
+      setToast({ message, type: "error" });
     },
   });
 
@@ -111,10 +115,34 @@ export default function FeedPage() {
       queryClient.invalidateQueries({ queryKey: ["drafts"] });
       setToast({ message: "Reply sent!", type: "success" });
     } catch (error) {
-      setToast({
-        message: error instanceof Error ? error.message : "Failed to send reply",
-        type: "error",
-      });
+      const rawMsg =
+        error instanceof Error ? error.message : "Failed to send reply";
+      // A draft that is no longer "pending" can never be approved from here
+      // again — this happens when it was already used, when its siblings were
+      // auto-rejected after picking another reply, or when it was approved but
+      // sending to the platform failed (status becomes "failed"). In all these
+      // cases the cached draft snapshot is stale, so drop the whole post's
+      // drafts to remove the dead "Approve & Send" button instead of letting
+      // the user re-click it into the confusing "Can only approve pending
+      // drafts" error.
+      const noLongerPending = /can only approve pending drafts/i.test(rawMsg);
+      const sendFailed =
+        /couldn't be sent to|sending to .* failed/i.test(rawMsg);
+      if (noLongerPending || sendFailed) {
+        setDraftData((prev) => {
+          const next = { ...prev };
+          delete next[postId];
+          return next;
+        });
+        queryClient.invalidateQueries({ queryKey: ["feed"] });
+        queryClient.invalidateQueries({ queryKey: ["drafts"] });
+      }
+      const message = noLongerPending
+        ? "This draft is no longer available (already used, replaced, or expired). Generate a new reply to try again."
+        : sendFailed
+          ? "Reply approved but couldn't be sent — reconnect your account in Social Accounts and try again."
+          : rawMsg;
+      setToast({ message, type: "error" });
     } finally {
       setApprovingDraft(null);
     }
