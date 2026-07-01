@@ -9,14 +9,14 @@ Lemon Squeezy customer id / subscription id — no DB migration required.
 import hashlib
 import hmac
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
@@ -412,3 +412,187 @@ async def _handle_payment_failed(data: dict, meta: dict, db: AsyncSession) -> No
     )
     await db.commit()
     logger.warning("lemonsqueezy_payment_failed", user_id=str(user.id))
+
+
+# ── Gumroad webhook (fallback Merchant of Record) ───────────────────────────────
+# Lemon Squeezy rejected Beam's product category, so Gumroad is the live MoR.
+# Gumroad gives NO HMAC signature: the Ping is form-encoded and authenticated by
+# a secret token in the URL (?token=...) plus an optional seller_id check. State
+# is set absolutely, so redelivery and recurring-charge Pings are idempotent.
+
+# Gumroad recurrence -> entitlement window (days). One day of slack so access
+# never lapses before the next recurring-charge Ping refreshes the period.
+_GUMROAD_PERIOD_DAYS = {
+    "monthly": 31,
+    "quarterly": 93,
+    "biannually": 186,
+    "yearly": 366,
+    "every_two_years": 731,
+}
+
+# Gumroad Ping fields whose truthiness REVOKES entitlement (drop back to free).
+_GUMROAD_REVOKE_FIELDS = ("refunded", "disputed", "chargedback", "cancelled")
+
+
+def _gumroad_tier_to_plan(tier_name: str, price_cents: int) -> str:
+    """Map a Gumroad membership tier (variant) to an internal plan name.
+
+    Prefer the tier name ("Pro"/"Max"); fall back to the amount paid so a renamed
+    tier still resolves. Unknown -> "free" (grant nothing)."""
+    name = (tier_name or "").strip().lower()
+    if "max" in name:
+        return "max"
+    if "pro" in name:
+        return "pro"
+    if price_cents in (4900, 46800):   # Max monthly / yearly
+        return "max"
+    if price_cents in (1900, 18000):   # Pro monthly / yearly
+        return "pro"
+    return "free"
+
+
+def _gumroad_extract_tier(form) -> str:
+    """Read the tier/variant name from a Gumroad Ping. Tiered memberships send it
+    as a bracketed key, e.g. ``variants[Tier]=Pro``."""
+    for key, value in form.items():
+        if key.startswith("variants[") or key == "tier_name":
+            return str(value)
+    return ""
+
+
+def _gumroad_period_end(start: datetime, recurrence: str) -> datetime:
+    days = _GUMROAD_PERIOD_DAYS.get((recurrence or "").strip().lower(), 31)
+    return start + timedelta(days=days)
+
+
+def _to_cents(value: Optional[str]) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0
+
+
+async def _gumroad_find_user(
+    email: str, subscription_id: str, db: AsyncSession
+) -> Optional[User]:
+    """Find the user by Gumroad subscription id (set on a prior Ping) or by email
+    (case-insensitive)."""
+    if subscription_id:
+        result = await db.execute(
+            select(User).where(User.stripe_subscription_id == subscription_id)
+        )
+        user = result.scalar_one_or_none()
+        if user is not None:
+            return user
+    if email:
+        result = await db.execute(
+            select(User).where(func.lower(User.email) == email)
+        )
+        return result.scalar_one_or_none()
+    return None
+
+
+@router.post("/gumroad/webhook")
+async def gumroad_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Gumroad Ping — auto-provisions a Beam plan on subscription sales.
+
+    Auth: Gumroad has no signature, so we require a secret token in the URL
+    (``?token=<gumroad_webhook_secret>``) and, when configured, a matching
+    seller_id. A sale for an email with no account yet creates a minimal user
+    row; when that buyer later signs in with the same email, Clerk links to this
+    row (see dependencies.get_current_user) so the plan is preserved.
+    """
+    if not settings.gumroad_webhook_secret:
+        raise HTTPException(status_code=503, detail="Gumroad webhook not configured")
+
+    form = await request.form()
+    token = request.query_params.get("token") or str(form.get("token") or "")
+    if not hmac.compare_digest(token, settings.gumroad_webhook_secret):
+        logger.warning("gumroad_webhook_invalid_token")
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if settings.gumroad_seller_id and str(form.get("seller_id") or "") != str(
+        settings.gumroad_seller_id
+    ):
+        logger.warning("gumroad_webhook_seller_mismatch")
+        raise HTTPException(status_code=400, detail="Unexpected seller")
+
+    email = str(form.get("email") or "").strip().lower()
+    subscription_id = str(form.get("subscription_id") or "")
+    revoke = (
+        any(str(form.get(f) or "").lower() == "true" for f in _GUMROAD_REVOKE_FIELDS)
+        or bool(form.get("subscription_ended_at"))
+        or bool(form.get("ended_reason"))
+    )
+    logger.info(
+        "gumroad_webhook_received",
+        has_email=bool(email),
+        subscription_id=subscription_id,
+        revoke=revoke,
+    )
+
+    # ── Revocation: refund / dispute / cancellation / subscription end ──
+    if revoke:
+        user = await _gumroad_find_user(email, subscription_id, db)
+        if user is None:
+            logger.warning(
+                "gumroad_revoke_user_not_found", subscription_id=subscription_id
+            )
+            return {"received": True}
+        status = (
+            "refunded"
+            if str(form.get("refunded") or "").lower() == "true"
+            else "cancelled"
+        )
+        await db.execute(
+            update(User)
+            .where(User.id == user.id)
+            .values(plan="free", subscription_status=status)
+        )
+        await db.commit()
+        logger.info("gumroad_subscription_revoked", user_id=str(user.id), status=status)
+        return {"received": True}
+
+    # ── Activation: a sale or recurring charge ──
+    if not email:
+        logger.warning("gumroad_webhook_no_email")
+        return {"received": True}
+
+    plan = _gumroad_tier_to_plan(_gumroad_extract_tier(form), _to_cents(form.get("price")))
+    if plan == "free":
+        logger.warning("gumroad_webhook_unmapped_tier", subscription_id=subscription_id)
+        return {"received": True}
+
+    start = _parse_dt(form.get("sale_timestamp")) or datetime.now(timezone.utc)
+    period_end = _gumroad_period_end(start, str(form.get("recurrence") or ""))
+
+    user = await _gumroad_find_user(email, subscription_id, db)
+    if user is None:
+        user = User(
+            email=email,
+            plan=plan,
+            subscription_status="active",
+            current_period_end=period_end,
+            stripe_subscription_id=subscription_id or None,
+        )
+        db.add(user)
+        await db.commit()
+        logger.info(
+            "gumroad_subscription_provisioned", user_id=str(user.id), plan=plan, new_user=True
+        )
+        return {"received": True}
+
+    values: dict = {
+        "plan": plan,
+        "subscription_status": "active",
+        "current_period_end": period_end,
+    }
+    if subscription_id:
+        values["stripe_subscription_id"] = subscription_id
+    await db.execute(update(User).where(User.id == user.id).values(**values))
+    await db.commit()
+    logger.info("gumroad_subscription_synced", user_id=str(user.id), plan=plan)
+    return {"received": True}
