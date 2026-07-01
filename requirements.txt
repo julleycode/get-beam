@@ -57,3 +57,8 @@ maigret==0.6.1         # username → 3000+ sites profile URLs (HEAVY: pulls Fla
 
 # DNS — real MX lookup in email_validator (replaced a fake getaddrinfo:25 check)
 dnspython==2.8.0
+
+# MaxMind GeoLite2-ASN — free/offline IP→ASN for datacenter/bot detection
+# (services/asn_lookup.py; replaces per-IP IPinfo calls in is_datacenter_ip)
+geoip2==4.8.1
+maxminddb==2.6.2

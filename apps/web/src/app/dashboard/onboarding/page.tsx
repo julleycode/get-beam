@@ -441,9 +441,16 @@ function OnboardingFlow() {
           </Card>
 
           {!detectionLoading && (
-            <Button className="w-full" size="lg" onClick={() => setStep("plan")}>
-              Continue to Plans
-            </Button>
+            <>
+              <p className="text-xs text-center text-muted-foreground">
+                Selling to EU customers? Choose a cookie-consent option in the
+                snippet step above — or change it anytime from the gear (Site
+                settings) next to the site picker. Beam builds the banner for you.
+              </p>
+              <Button className="w-full" size="lg" onClick={() => setStep("plan")}>
+                Continue to Plans
+              </Button>
+            </>
           )}
         </div>
       )}

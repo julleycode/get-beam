@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Separator } from "@/components/ui/separator";
+import { ApiKeysCard } from "@/components/api-keys-card";
 import {
   Dialog,
   DialogContent,
@@ -316,6 +317,9 @@ function BillingContent() {
           )}
         </CardContent>
       </Card>
+
+      {/* Account API keys (BYOK) — moved here from the removed Settings tab */}
+      <ApiKeysCard />
 
       <Separator />
 

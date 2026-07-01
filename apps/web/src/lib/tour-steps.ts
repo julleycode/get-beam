@@ -58,10 +58,4 @@ export const TOUR_STEPS: TourStep[] = [
     title: "EasyEngage — social content",
     body: "Feed, Drafts, and Social Accounts: draft, review, and publish social posts in one place.",
   },
-  {
-    id: "settings",
-    target: "settings",
-    title: "Settings — set up & tweak",
-    body: "Manage your site, pixel, known contacts, billing, and team here.",
-  },
 ];

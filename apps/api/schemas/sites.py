@@ -1,7 +1,9 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+CONSENT_MODES = {"off", "eu", "all", "cmp"}
 
 
 class SiteCreate(BaseModel):
@@ -24,6 +26,7 @@ class SiteOut(BaseModel):
     auto_identify_enabled: bool
     hot_alert_enabled: bool
     tracking_enabled: bool
+    consent_mode: str
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -35,6 +38,14 @@ class SiteUpdate(BaseModel):
     auto_identify_enabled: bool | None = None
     hot_alert_enabled: bool | None = None
     tracking_enabled: bool | None = None
+    consent_mode: str | None = None
+
+    @field_validator("consent_mode")
+    @classmethod
+    def _valid_consent_mode(cls, v: str | None) -> str | None:
+        if v is not None and v not in CONSENT_MODES:
+            raise ValueError(f"consent_mode must be one of {sorted(CONSENT_MODES)}")
+        return v
 
 
 class SitePixelSnippet(BaseModel):

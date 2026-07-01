@@ -311,11 +311,14 @@ test.describe("Onboarding — Verify Flow", () => {
   });
 });
 
-test.describe("Settings Page — Pixel Management", () => {
+test.describe("Per-site management — Site settings dialog + Settings redirect", () => {
+  // The Settings tab was dissolved. Per-site pixel/consent management moved into
+  // the "Site settings" dialog (gear next to the site picker); the old
+  // /dashboard/settings route now redirects to Billing.
   let testSiteId: string;
 
   test.beforeAll(async ({ browser }) => {
-    // Create a test site via API so settings page has data to show
+    // Create a test site via API so the site picker + dialog have data to show.
     const context = await browser.newContext({
       storageState: "e2e/.auth/user.json",
     });
@@ -339,38 +342,28 @@ test.describe("Settings Page — Pixel Management", () => {
     await context.close();
   });
 
-  test("Shows site details and pixel snippet", async ({ page }) => {
-    test.skip(!testSiteId, "Could not create test site");
-
-    await page.goto(`/dashboard/settings?site=${testSiteId}`);
-
-    // Use Playwright auto-waiting (NOT waitForTimeout + isVisible).
-    // expect().toBeVisible() retries until timeout — robust against slow renders.
-    // The "Settings" h1 (PageHeader) renders immediately. Scope to it — the
-    // dashboard shell also has a brand <h1>, so a bare h1 is a strict-mode match.
-    await expect(page.locator("h1:has-text('Settings')")).toBeVisible({
-      timeout: 15_000,
-    });
-
-    // "Site Details" card appears once api.getSite() resolves.
-    // This proves the site was created in beforeAll AND the API works.
-    await expect(page.locator("text=Site Details")).toBeVisible({
-      timeout: 15_000,
-    });
+  test("Old /dashboard/settings redirects to Billing", async ({ page }) => {
+    await page.goto("/dashboard/settings");
+    await expect(page).toHaveURL(/\/dashboard\/billing/, { timeout: 15_000 });
   });
 
-  test("Verify button on settings page", async ({ page }) => {
+  test("Site settings dialog shows pixel snippet + cookie consent", async ({ page }) => {
     test.skip(!testSiteId, "Could not create test site");
 
-    await page.goto(`/dashboard/settings?site=${testSiteId}`);
+    // The gear lives next to the SiteSelector on any site-scoped page.
+    await page.goto("/dashboard/visitors");
+    // Auto-waits until the picker has selected a site and the gear renders.
+    await page.getByRole("button", { name: "Site settings" }).click();
 
-    // Wait for site data to load — "Verify Now" or "Verified" appears in Site Details.
-    // Use .first() because .or() can match multiple elements (strict mode violation).
-    await expect(
-      page.locator('button:has-text("Verify Now")').or(
-        page.locator("text=Verified")
-      ).first()
-    ).toBeVisible({ timeout: 15_000 });
+    // Dialog opened — the per-site sections render.
+    await expect(page.locator("text=Pixel snippet")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator("text=Cookie consent")).toBeVisible();
+    await expect(page.locator('button:has-text("Verify now")')).toBeVisible();
+  });
+
+  test("BYOK API keys live on Billing", async ({ page }) => {
+    await page.goto("/dashboard/billing");
+    await expect(page.locator("text=API Keys (BYOK)")).toBeVisible({ timeout: 15_000 });
   });
 
   test.afterAll(async ({ browser }) => {

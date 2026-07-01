@@ -221,7 +221,11 @@ async def serve_pixel() -> Response:
     global _pixel_js_cache
     if _pixel_js_cache is None:
         import pathlib
-        pixel_path = pathlib.Path(__file__).parent.parent / "pixel" / "src" / "tracker.js"
+        pixel_dir = pathlib.Path(__file__).parent.parent / "pixel" / "src"
+        # Serve the minified build (kept <5KB gzipped); fall back to source.
+        minified = pixel_dir / "tracker.min.js"
+        source = pixel_dir / "tracker.js"
+        pixel_path = minified if minified.exists() else source
         _pixel_js_cache = pixel_path.read_text() if pixel_path.exists() else "// pixel not found"
     return Response(
         content=_pixel_js_cache,

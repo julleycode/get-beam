@@ -39,5 +39,13 @@ class Site(Base):
     tracking_enabled: Mapped[bool] = mapped_column(
         default=True, nullable=False, server_default="true"
     )
+    # Cookie-consent mode emitted into the pixel snippet as data-consent.
+    #   "off" (default) — no banner; today's behavior (GPC/DNT opt-out still honored).
+    #   "eu"  — Beam shows an opt-in banner + holds events for EU/EEA visitors only.
+    #   "all" — banner for every visitor.
+    #   "cmp" — no Beam banner; the site's own consent tool calls window.beamConsent().
+    consent_mode: Mapped[str] = mapped_column(
+        String(10), default="off", nullable=False, server_default="off"
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

@@ -113,16 +113,21 @@ export interface Site {
   auto_identify_enabled: boolean;
   hot_alert_enabled: boolean;
   tracking_enabled: boolean;
+  /** Cookie-consent mode emitted into the pixel snippet: off | eu | all | cmp. */
+  consent_mode: ConsentMode;
   /** Optional — backend SiteOut may not return it; callers fall back to "unknown". */
   detected_platform?: string | null;
   created_at: string;
 }
+
+export type ConsentMode = "off" | "eu" | "all" | "cmp";
 
 // Partial site update payload — mirrors the backend SiteUpdate schema.
 export interface SiteUpdate {
   auto_identify_enabled: boolean;
   hot_alert_enabled: boolean;
   tracking_enabled: boolean;
+  consent_mode: ConsentMode;
 }
 
 export interface FeatureRequest {
