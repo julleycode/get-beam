@@ -36,6 +36,11 @@ apscheduler==3.10.4
 tenacity==9.1.2
 resend>=2.0.0
 
+# Content reader — read public YouTube channel/video metadata (headless, no
+# video download). Reddit uses public .json endpoints via httpx (no praw).
+# Behind ENABLE_CONTENT_READER (default off). See services/content_reader.py.
+yt-dlp==2024.12.13
+
 # Payments
 stripe>=8.0.0
 

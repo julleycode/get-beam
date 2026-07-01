@@ -208,14 +208,20 @@ class Enricher:
                     logger.info("cascade_proxycurl_ok", visitor_id=visitor.visitor_id[:8])
 
         # ── Step 3: Cascade — Twitter (handle → bio/followers) ──
+        # Runs when EITHER the official X bearer token OR the TwitterAPI.io
+        # fallback key is configured — _enrich_twitter picks the provider.
         twitter_handle = pdl_data.get("twitter_handle") or (profile.twitter_handle if profile else None)
         if twitter_handle:
             twitter_key = self._get_system_twitter_key()
-            if twitter_key:
+            if twitter_key or settings.twitterapi_io_api_key:
                 twitter_data = await self._enrich_twitter(twitter_handle, api_key=twitter_key, visitor=visitor)
                 if twitter_data:
                     _apply_twitter(profile, twitter_data)
                     logger.info("cascade_twitter_ok", visitor_id=visitor.visitor_id[:8])
+
+        # ── Step 4 (opt-in): read known YouTube/Reddit content into persona ──
+        # Non-fatal, flag-gated, high-intent only. Writes to social_context.
+        await self._fetch_and_store_content(visitor, profile, pdl_data)
 
         # ── Final: recalculate completeness with all cascade data ──
         completeness = self._profile_completeness(profile)
@@ -468,34 +474,155 @@ class Enricher:
         return {}
 
     async def _enrich_twitter(
-        self, handle: str, *, api_key: str, visitor: Visitor | None = None
+        self, handle: str, *, api_key: str | None = None, visitor: Visitor | None = None
     ) -> dict:
+        """Fetch a Twitter/X user's bio + follower count.
+
+        PRIMARY: official X API v2 (when ``api_key`` bearer token is present).
+        FALLBACK: TwitterAPI.io (~50× cheaper) when the official call errors,
+        returns a non-200 other than a definitive 404, or no bearer token is
+        configured. Gated on ``settings.twitterapi_io_api_key`` (skip if empty).
+        Cached (positive + definitive-miss); honors ``mock_external_apis``.
+        """
         cache_key = f"enrich:twitter:{handle.strip().lower().lstrip('@')}"
         hit, cached = await self._cache_get(cache_key)
         if hit:
             return cached or {}
+
+        if settings.mock_external_apis:
+            data = {"twitter_bio": f"Mock bio for @{handle.lstrip('@')}", "twitter_follower_count": 1234}
+            await self._cache_set(cache_key, data)
+            return data
+
+        handle_clean = handle.strip().lstrip("@")
+
+        # ── PRIMARY: official X API v2 ──
+        if api_key:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                try:
+                    resp = await client.get(
+                        f"https://api.twitter.com/2/users/by/username/{handle_clean}",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                        params={"user.fields": "description,public_metrics"},
+                    )
+                    if resp.status_code == 200:
+                        u = resp.json().get("data", {})
+                        data = {
+                            "twitter_bio": u.get("description"),
+                            "twitter_follower_count": u.get("public_metrics", {}).get("followers_count"),
+                        }
+                        await self._cache_set(cache_key, data)
+                        await self._log_enrich(visitor, "twitter", "user_lookup", True)
+                        return data
+                    if resp.status_code == 404:
+                        # Definitive no-match — the handle doesn't exist. Don't
+                        # waste a fallback call; negative-cache and return.
+                        await self._cache_set(cache_key, None)
+                        await self._log_enrich(visitor, "twitter", "user_lookup", False)
+                        return {}
+                    # Any other non-200 (401 bad/expired token, 403, 429, 5xx):
+                    # fall through to the TwitterAPI.io fallback below.
+                    logger.warning("twitter_official_non200", status=resp.status_code)
+                except httpx.HTTPError as e:
+                    logger.warning("twitter_official_error", error=str(e))
+
+        # ── FALLBACK: TwitterAPI.io ──
+        if not settings.twitterapi_io_api_key:
+            return {}
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
                 resp = await client.get(
-                    f"https://api.twitter.com/2/users/by/username/{handle}",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    params={"user.fields": "description,public_metrics"},
+                    "https://api.twitterapi.io/twitter/user/info",
+                    headers={"X-API-Key": settings.twitterapi_io_api_key},
+                    params={"userName": handle_clean},
                 )
                 if resp.status_code == 200:
-                    u = resp.json().get("data", {})
+                    payload = resp.json()
+                    u = payload.get("data") or {}
+                    if payload.get("status") == "error" or not u:
+                        # user-not-found / unavailable — definitive miss.
+                        await self._cache_set(cache_key, None)
+                        await self._log_enrich(visitor, "twitterapi_io", "user_lookup", False)
+                        return {}
                     data = {
                         "twitter_bio": u.get("description"),
-                        "twitter_follower_count": u.get("public_metrics", {}).get("followers_count"),
+                        "twitter_follower_count": u.get("followers"),
                     }
                     await self._cache_set(cache_key, data)
-                    await self._log_enrich(visitor, "twitter", "user_lookup", True)
+                    await self._log_enrich(visitor, "twitterapi_io", "user_lookup", True)
                     return data
                 if resp.status_code == 404:
                     await self._cache_set(cache_key, None)
-                await self._log_enrich(visitor, "twitter", "user_lookup", resp.status_code == 200)
+                await self._log_enrich(visitor, "twitterapi_io", "user_lookup", False)
             except httpx.HTTPError as e:
-                logger.error("twitter_error", error=str(e))
+                logger.warning("twitterapi_io_error", error=str(e))
         return {}
+
+    # ──────────────── Content reader (YouTube/Reddit → persona) ───────────
+
+    async def _fetch_and_store_content(
+        self, visitor: Visitor, profile: EnrichmentProfile, pdl_data: dict
+    ) -> None:
+        """Read known YouTube/Reddit content into ``profile.social_context``.
+
+        Flag-gated (``enable_content_reader``), high-intent only (>= 60, matching
+        social_intelligence). Runs only when a handle is already known — never
+        guesses. Non-fatal: any error is logged and swallowed so a content
+        hiccup can't break the enrichment cascade.
+        """
+        if not settings.enable_content_reader:
+            return
+        # Match the social-intelligence intent gate (SOCIAL_CONTEXT_MIN_INTENT).
+        if (visitor.intent_score or 0) < 60:
+            return
+
+        try:
+            from apps.api.services.content_reader import (
+                extract_content_handles,
+                fetch_content_for_handles,
+                find_company_channels,
+            )
+
+            handles = extract_content_handles(pdl_data, profile.social_context)
+            fetched: dict = {}
+            if handles:
+                fetched = await fetch_content_for_handles(handles)
+
+            # P4 fallback: no PERSONAL handle → try the company's own channels
+            # (subreddit / YouTube), confidence-gated on domain. Stored under
+            # `company_content` so it's distinguishable from a personal handle.
+            if not fetched:
+                company_name = pdl_data.get("company_name")
+                company_domain = pdl_data.get("company_domain")
+                if company_name and company_domain:
+                    company_handles = await find_company_channels(company_name, company_domain)
+                    if company_handles:
+                        company_content = await fetch_content_for_handles(company_handles)
+                        if company_content:
+                            fetched = {"company_content": company_content}
+
+            if not fetched:
+                return
+
+            now = datetime.now(timezone.utc)
+            # Read-modify-write: preserve osint_scan / social_resolution /
+            # deep_research sub-keys already on social_context.
+            merged = dict(profile.social_context or {})
+            merged.update(fetched)
+            profile.social_context = merged
+            profile.social_context_updated_at = now
+
+            logger.info(
+                "content_reader_stored",
+                visitor_id=visitor.visitor_id[:8],
+                sources=list(fetched.keys()),
+            )
+        except Exception as exc:
+            logger.warning(
+                "content_reader_enrich_failed",
+                visitor_id=visitor.visitor_id[:8],
+                error=str(exc)[:200],
+            )
 
     # ──────────────── Deep Research (Claude API + web search) ─────────────
 

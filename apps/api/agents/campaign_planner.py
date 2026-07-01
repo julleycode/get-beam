@@ -43,6 +43,16 @@ social account on that platform, prefer organic social outreach (reply or DM)
 over cold email — it feels more personal and gets higher response rates.
 Use the GBrain AI to generate personalized replies in the user's voice.
 
+## Personalization From Recent Content
+Some visitor profiles include a `recent_content` field summarizing what that
+person (or their company) recently posted on YouTube, Reddit, or X, or a short
+research summary. When present, weave it into the copy NATURALLY — reference a
+specific recent video/post/topic to show genuine attention. Rules:
+- Only use `recent_content` that is actually present in the profile. NEVER
+  invent, assume, or fabricate posts, videos, or topics.
+- Keep it subtle and human — a passing, specific reference, not a summary dump.
+- If a profile has no `recent_content`, write normal copy for that visitor.
+
 ## Your Task
 Create a campaign plan with:
 1. Channel priority order (which to use first, second, etc.)
