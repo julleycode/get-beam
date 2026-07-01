@@ -1,5 +1,6 @@
 """Drafts router: generate AI drafts, approve/edit/reject, send."""
 
+import asyncio
 import uuid
 from typing import Optional
 
@@ -152,15 +153,36 @@ async def generate_new_draft(
         platform=post.platform.value,
     )
 
-    # Generate drafts
-    draft_results = await generate_multi_drafts(
-        platform=post.platform,
-        original_content=post.content or "",
-        original_author=post.author_username,
-        strategies=strategies,
-        db=db,
-        user_id=current_user.id,
-    )
+    # Generate drafts. The AI provider (OpenRouter) can be slow or stall: each
+    # strategy walks a multi-model fallback chain with a 60s per-model HTTP
+    # timeout, so without an outer bound a single request could hang for many
+    # minutes and leave the dashboard's "Generating..." button stuck forever.
+    # Cap the whole generation so we always return a response the client can
+    # react to.
+    try:
+        draft_results = await asyncio.wait_for(
+            generate_multi_drafts(
+                platform=post.platform,
+                original_content=post.content or "",
+                original_author=post.author_username,
+                strategies=strategies,
+                db=db,
+                user_id=current_user.id,
+            ),
+            timeout=90,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "draft_generation_timeout",
+            post_id=str(post.id),
+            platform=post.platform.value,
+            strategies=strategies,
+        )
+        raise HTTPException(
+            status_code=504,
+            detail="Reply generation timed out — the AI provider is slow or "
+            "unavailable right now. Please try again in a moment.",
+        )
 
     if not draft_results:
         raise HTTPException(status_code=500, detail="Failed to generate any drafts")
@@ -263,8 +285,9 @@ async def approve_draft(
     else:
         raise HTTPException(
             status_code=502,
-            detail=f"Draft approved but sending to {draft.platform.value} failed. "
-            f"Check your API credentials and billing. Status: {draft.status.value}",
+            detail=f"Draft approved but couldn't be sent to {draft.platform.value}. "
+            f"Reconnect your {draft.platform.value} account in Social Accounts and "
+            f"try again. Status: {draft.status.value}",
         )
 
 

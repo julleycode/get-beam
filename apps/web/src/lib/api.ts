@@ -784,10 +784,25 @@ class ApiClient {
   }
 
   async generateDraft(postId: string) {
-    return this.request<GenerateMultiDraftResponse>("/api/v1/drafts/generate", {
-      method: "POST",
-      body: JSON.stringify({ post_id: postId }),
-    });
+    // Generation can take a while on the backend (AI provider + model
+    // fallbacks). The backend caps itself at ~90s, so abort slightly after
+    // that as a safety net — otherwise a network-level stall would leave the
+    // "Generating..." button spinning forever (no per-attempt timeout applies
+    // to POSTs in fetchWithRetry).
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 100_000);
+    try {
+      return await this.request<GenerateMultiDraftResponse>(
+        "/api/v1/drafts/generate",
+        {
+          method: "POST",
+          body: JSON.stringify({ post_id: postId }),
+          signal: controller.signal,
+        }
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
   }
 
   async approveDraft(draftId: string) {
