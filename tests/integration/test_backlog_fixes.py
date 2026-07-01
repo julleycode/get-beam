@@ -207,14 +207,14 @@ class TestCampaignSendGuardrails:
                     site_id=site_id,
                     email=f"ok-{suffix}@test.com",
                     full_name="Okay Person",
-                    resolution_provider="test",
+                    resolution_provider="form_capture",
                 ),
                 IdentifiedVisitor(
                     visitor_id=suppressed_vid,
                     site_id=site_id,
                     email=f"no-{suffix}@test.com",
                     do_not_email=True,
-                    resolution_provider="test",
+                    resolution_provider="form_capture",
                 ),
             ]
         )
