@@ -77,6 +77,19 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
 
     sender = EmailSender()
 
+    # Site host for link decoration: every campaign link pointing at the customer's
+    # own (Beam-pixel'd) site is stamped with the recipient's encrypted email
+    # (_bid), so a click resolves that visitor deterministically on arrival. Only
+    # the site's own host is decorated (the token never leaks to third parties).
+    from urllib.parse import urlsplit
+    from apps.api.models.site import Site
+    from apps.api.services.link_decorator import decorate_links
+
+    site_url = (
+        await db.execute(select(Site.url).where(Site.site_id == campaign.site_id))
+    ).scalar_one_or_none()
+    site_host = urlsplit(site_url or "").netloc or None
+
     for vid in visitor_ids:
         iv_row = await db.execute(
             select(IdentifiedVisitor).where(
@@ -124,6 +137,9 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
 
         subject = _personalize(subject_tpl, iv.full_name)
         body_html = _personalize(body_tpl, iv.full_name).replace("\n", "<br/>")
+        # Deterministic click→identity: stamp the recipient's _bid on links to
+        # their own site so the click resolves them for free (own-data, no provider).
+        body_html = decorate_links(body_html, iv.email, site_host)
         try:
             await sender.send(to_email=iv.email, subject=subject, body_html=body_html)
         except Exception as exc:
