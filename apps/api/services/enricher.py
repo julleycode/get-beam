@@ -623,7 +623,11 @@ CRITICAL RULES:
 - If you cannot find social profiles, say so clearly.
 - Distinguish between verified facts and reasonable inferences.
 
-Write a comprehensive but honest profile analysis. Use a direct, conversational tone — not corporate."""
+OUTPUT FORMAT — keep it SHORT (max ~200 words total):
+- Use tight bullet points, not paragraphs.
+- No preamble, no filler, no wrap-up section.
+- Cover only: main profiles (with handles/links), where they are MOST active, what they post about, one line on professional background, and a 1-2 sentence honest read.
+- Direct, conversational tone — not corporate. Write in English."""
 
         if not settings.gemini_api_key:
             logger.warning("deep_research_skipped_no_api_key")
@@ -634,7 +638,7 @@ Write a comprehensive but honest profile analysis. Use a direct, conversational 
 
         try:
             research_text = await gemini_generate(
-                prompt, grounding=True, max_output_tokens=16384
+                prompt, grounding=True, max_output_tokens=2048
             )
         except GeminiError as e:
             logger.error("deep_research_api_error", error=str(e), visitor_id=visitor.visitor_id[:8])
