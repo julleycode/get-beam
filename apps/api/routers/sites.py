@@ -432,3 +432,34 @@ async def shopify_callback(
     return RedirectResponse(
         url=f"{settings.frontend_url}/dashboard?shopify=connected&site={site_id}"
     )
+
+
+from pydantic import BaseModel  # noqa: E402
+
+
+class TrackedLinkRequest(BaseModel):
+    url: str
+    emails: list[str]
+
+
+@router.post("/{site_id}/tracked-links")
+async def build_tracked_links(
+    site_id: str,
+    body: TrackedLinkRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Build Beam click-tracking links for a recipient list, to paste into the
+    customer's OWN ESP (Klaviyo/Mailchimp). Each recipient's email rides as an
+    opaque token (never plaintext); a click resolves them deterministically. Only
+    links to the site's own host are built (matches the click redirect's guard)."""
+    site = await verify_site_access(db, site_id, user)
+    from apps.api.routers.click import build_click_url, safe_dest
+
+    dest = safe_dest(body.url, site.url or "")
+    links = [
+        {"email": e, "link": build_click_url(settings.api_base_url, site_id, dest, e)}
+        for e in body.emails[:5000]
+        if e and "@" in e
+    ]
+    return {"dest": dest, "count": len(links), "links": links}
