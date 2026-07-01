@@ -528,6 +528,11 @@ class Enricher:
 
         # ── FALLBACK: TwitterAPI.io ──
         if not settings.twitterapi_io_api_key:
+            # Official path was tried and failed (non-200/error) with no fallback
+            # configured — record the failed lookup in the cost ledger for parity
+            # with pre-rewrite behavior (observability, not functional).
+            if api_key:
+                await self._log_enrich(visitor, "twitter", "user_lookup", False)
             return {}
         async with httpx.AsyncClient(timeout=10.0) as client:
             try:
