@@ -87,6 +87,7 @@ class TestCapturedEmailPdlGate:
         # Check 1's VisitorEmail lookup returns a captured email.
         resolver.db.execute = AsyncMock(return_value=_result_returning("owner@acme.com"))
         resolver._enrich_email_pdl = AsyncMock(return_value="ENRICHED")
+        resolver._graph_node_by_email = AsyncMock(return_value=None)  # P6 dep
         resolver._save_identified = AsyncMock(return_value="FORM_CAPTURE")
         with patch("apps.api.services.identity_resolver.settings") as s:
             s.enrich_captured_email_pdl = enrich_flag
