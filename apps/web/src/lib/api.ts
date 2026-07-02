@@ -481,6 +481,12 @@ class ApiClient {
     });
   }
 
+  async deleteSegment(siteId: string, segmentId: string) {
+    return this.request<void>(`/api/v1/segments/${siteId}/${segmentId}`, {
+      method: "DELETE",
+    });
+  }
+
   // Campaigns
   async listCampaigns(siteId: string) {
     return this.request<CampaignListResponse>(`/api/v1/campaigns/${siteId}`);

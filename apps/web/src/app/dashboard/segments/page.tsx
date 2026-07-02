@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Layers, Sparkles } from "lucide-react";
+import { Layers, Sparkles, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { CardGridSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
@@ -28,6 +28,7 @@ export default function SegmentsPage() {
   const [triggering, setTriggering] = useState(false);
   const [triggerError, setTriggerError] = useState<string | null>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -52,6 +53,20 @@ export default function SegmentsPage() {
       setTriggerError(e instanceof Error ? e.message : "Couldn't start segmentation");
     } finally {
       setTriggering(false);
+    }
+  }
+
+  async function handleDelete(segmentId: string, name: string) {
+    if (!window.confirm(`Delete segment "${name}"? Campaigns generated from it are kept.`)) return;
+    setDeletingId(segmentId);
+    setTriggerError(null);
+    try {
+      await api.deleteSegment(siteId, segmentId);
+      queryClient.invalidateQueries({ queryKey: ["segments", siteId] });
+    } catch (e) {
+      setTriggerError(e instanceof Error ? e.message : "Couldn't delete the segment");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -117,7 +132,19 @@ export default function SegmentsPage() {
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base">{seg.name}</CardTitle>
-                  <Badge variant={priorityColor(seg.priority)}>{seg.priority}</Badge>
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant={priorityColor(seg.priority)}>{seg.priority}</Badge>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                      onClick={() => handleDelete(seg.id, seg.name)}
+                      disabled={deletingId !== null}
+                      aria-label={`Delete segment ${seg.name}`}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
                 <CardDescription>{seg.description}</CardDescription>
               </CardHeader>

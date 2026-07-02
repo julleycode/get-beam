@@ -1,9 +1,12 @@
+import uuid
+
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.database import get_db
+from apps.api.models.campaign import Campaign
 from apps.api.models.segment import Segment
 from apps.api.models.user import User
 from apps.api.models.visitor import Visitor
@@ -29,6 +32,34 @@ async def list_segments(
     segments = [SegmentOut.model_validate(s) for s in result.scalars().all()]
 
     return SegmentListResponse(segments=segments, total=len(segments))
+
+
+@router.delete("/{site_id}/{segment_id}", status_code=204)
+async def delete_segment(
+    site_id: str,
+    segment_id: uuid.UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete a segment. Members are removed via FK cascade; campaigns that
+    were generated from it are kept but unlinked (segment_id -> NULL)."""
+    await verify_site_access(db, site_id, user)
+
+    result = await db.execute(
+        select(Segment).where(Segment.id == segment_id, Segment.site_id == site_id)
+    )
+    segment = result.scalar_one_or_none()
+    if segment is None:
+        raise HTTPException(status_code=404, detail="Segment not found")
+
+    await db.execute(
+        update(Campaign)
+        .where(Campaign.segment_id == segment_id)
+        .values(segment_id=None)
+    )
+    await db.delete(segment)
+    await db.commit()
+    logger.info("segment_deleted", site_id=site_id, segment_id=str(segment_id))
 
 
 @router.post("/{site_id}/run")
