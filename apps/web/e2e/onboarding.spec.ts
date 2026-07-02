@@ -106,10 +106,9 @@ test.describe("Onboarding — Platform Detection", () => {
     await expect(page.locator('button[type="submit"]')).toHaveText("Continue");
   });
 
-  test("Step 1: Progress bar shows 3 steps", async ({ page }) => {
+  test("Step 1: Progress bar shows 2 steps", async ({ page }) => {
     await expect(page.locator("text=Add Site")).toBeVisible();
     await expect(page.locator("text=Install Pixel")).toBeVisible();
-    await expect(page.locator("text=Verified")).toBeVisible();
   });
 
   test("Shopify detection — shows Connect Shopify Store", async ({ page }) => {
