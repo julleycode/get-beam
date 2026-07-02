@@ -528,6 +528,7 @@ async def get_visitor_detail(
             "twitter_handle": enriched.twitter_handle,
             "linkedin_headline": enriched.linkedin_headline,
             "twitter_bio": enriched.twitter_bio,
+            "avatar_url": enriched.avatar_url,
             "enrichment_completeness": enriched.enrichment_completeness,
             "social_context": enriched.social_context,
         })

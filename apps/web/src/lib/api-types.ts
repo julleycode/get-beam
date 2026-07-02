@@ -214,6 +214,7 @@ export interface VisitorDetail extends Visitor {
   twitter_handle?: string | null;
   linkedin_headline?: string | null;
   twitter_bio?: string | null;
+  avatar_url?: string | null;
   enrichment_completeness?: number | null;
   social_context?: {
     deep_research?: string;

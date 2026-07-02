@@ -98,6 +98,35 @@ def _apply_twitter(profile, twitter_data: dict) -> None:
         profile.twitter_follower_count = v
     if topics := twitter_data.get("twitter_recent_topics"):
         profile.twitter_recent_topics = topics
+    if (v := twitter_data.get("avatar_url")) is not None:
+        profile.avatar_url = v
+
+
+def _upgrade_twitter_avatar(url: str | None) -> str | None:
+    """Twitter/X returns a 48px avatar (``_normal.`` suffix); upgrade to 400px.
+    Safe no-op for URLs without the marker (e.g. OSINT images)."""
+    if not url:
+        return None
+    return url.replace("_normal.", "_400x400.")
+
+
+def _avatar_from_social_context(social_context: dict | None) -> str | None:
+    """Return the first usable avatar URL from OSINT profiles in social_context.
+    Secondary source only (Twitter/X is primary). None when nothing is found."""
+    if not isinstance(social_context, dict):
+        return None
+    res = social_context.get("social_resolution")
+    if not isinstance(res, dict):
+        return None
+    for account in (res.get("profiles") or []):
+        extra = account.get("extra") if isinstance(account, dict) else None
+        if not isinstance(extra, dict):
+            continue
+        for key in ("avatar", "profile_pic", "picture"):
+            val = extra.get(key)
+            if isinstance(val, str) and val.startswith("http"):
+                return val
+    return None
 
 
 class Enricher:
@@ -222,6 +251,13 @@ class Enricher:
         # ── Step 4 (opt-in): read known YouTube/Reddit content into persona ──
         # Non-fatal, flag-gated, high-intent only. Writes to social_context.
         await self._fetch_and_store_content(visitor, profile, pdl_data)
+
+        # ── Avatar (secondary): if Twitter gave no image, try OSINT profiles.
+        # Read after Step 4 so any freshly-written social_context is included.
+        if not profile.avatar_url:
+            osint_avatar = _avatar_from_social_context(profile.social_context)
+            if osint_avatar:
+                profile.avatar_url = osint_avatar
 
         # ── Final: recalculate completeness with all cascade data ──
         completeness = self._profile_completeness(profile)
@@ -490,7 +526,11 @@ class Enricher:
             return cached or {}
 
         if settings.mock_external_apis:
-            data = {"twitter_bio": f"Mock bio for @{handle.lstrip('@')}", "twitter_follower_count": 1234}
+            data = {
+                "twitter_bio": f"Mock bio for @{handle.lstrip('@')}",
+                "twitter_follower_count": 1234,
+                "avatar_url": "https://pbs.twimg.com/profile_images/000/mock_400x400.jpg",
+            }
             await self._cache_set(cache_key, data)
             return data
 
@@ -503,13 +543,14 @@ class Enricher:
                     resp = await client.get(
                         f"https://api.twitter.com/2/users/by/username/{handle_clean}",
                         headers={"Authorization": f"Bearer {api_key}"},
-                        params={"user.fields": "description,public_metrics"},
+                        params={"user.fields": "description,public_metrics,profile_image_url"},
                     )
                     if resp.status_code == 200:
                         u = resp.json().get("data", {})
                         data = {
                             "twitter_bio": u.get("description"),
                             "twitter_follower_count": u.get("public_metrics", {}).get("followers_count"),
+                            "avatar_url": _upgrade_twitter_avatar(u.get("profile_image_url")),
                         }
                         await self._cache_set(cache_key, data)
                         await self._log_enrich(visitor, "twitter", "user_lookup", True)
@@ -552,6 +593,9 @@ class Enricher:
                     data = {
                         "twitter_bio": u.get("description"),
                         "twitter_follower_count": u.get("followers"),
+                        "avatar_url": _upgrade_twitter_avatar(
+                            u.get("profilePicture") or u.get("profile_image_url")
+                        ),
                     }
                     await self._cache_set(cache_key, data)
                     await self._log_enrich(visitor, "twitterapi_io", "user_lookup", True)

@@ -137,3 +137,84 @@ class TestMockMode:
         out = await enricher._enrich_twitter("@someone", api_key="bearer")
         assert out["twitter_bio"]
         assert out["twitter_follower_count"] == 1234
+
+
+# ── avatar_url capture (social profile picture) ───────────────────────────
+
+OFFICIAL_OK_AVATAR = {"data": {
+    "description": "official bio",
+    "public_metrics": {"followers_count": 5},
+    "profile_image_url": "https://pbs.twimg.com/profile_images/1/abc_normal.jpg",
+}}
+FALLBACK_OK_AVATAR = {"status": "success", "data": {
+    "description": "fallback bio",
+    "followers": 9,
+    "profilePicture": "https://pbs.twimg.com/profile_images/2/xyz_normal.jpg",
+}}
+
+
+class TestAvatarCapture:
+    async def test_official_avatar_upgraded_to_400(self, enricher, seq, cfg):
+        _SeqClient._queue = [_resp(200, OFFICIAL_OK_AVATAR)]
+        out = await enricher._enrich_twitter("jack", api_key="bearer")
+        assert out["avatar_url"] == "https://pbs.twimg.com/profile_images/1/abc_400x400.jpg"
+
+    async def test_fallback_avatar_upgraded(self, enricher, seq, cfg):
+        _SeqClient._queue = [_resp(200, FALLBACK_OK_AVATAR)]
+        out = await enricher._enrich_twitter("jack", api_key=None)
+        assert out["avatar_url"] == "https://pbs.twimg.com/profile_images/2/xyz_400x400.jpg"
+
+    async def test_mock_mode_has_avatar(self, enricher, monkeypatch):
+        monkeypatch.setattr("apps.api.services.enricher.settings.mock_external_apis", True)
+        out = await enricher._enrich_twitter("@someone", api_key="bearer")
+        assert out["avatar_url"].endswith("_400x400.jpg")
+
+
+def test_upgrade_twitter_avatar():
+    from apps.api.services.enricher import _upgrade_twitter_avatar
+
+    assert _upgrade_twitter_avatar("https://x/abc_normal.jpg") == "https://x/abc_400x400.jpg"
+    assert _upgrade_twitter_avatar(None) is None
+    assert _upgrade_twitter_avatar("https://x/nochange.jpg") == "https://x/nochange.jpg"
+
+
+def test_apply_twitter_avatar_set_and_no_null_clobber():
+    from apps.api.services.enricher import _apply_twitter
+
+    class _P:
+        avatar_url = None
+        twitter_bio = None
+        twitter_follower_count = None
+        twitter_recent_topics: list = []
+
+    p = _P()
+    _apply_twitter(p, {"avatar_url": "https://x/a_400x400.jpg"})
+    assert p.avatar_url == "https://x/a_400x400.jpg"
+    _apply_twitter(p, {})  # no avatar_url key → keep existing (no null clobber)
+    assert p.avatar_url == "https://x/a_400x400.jpg"
+
+
+def test_avatar_from_social_context():
+    from apps.api.services.enricher import _avatar_from_social_context
+
+    sc = {"social_resolution": {"profiles": [
+        {"extra": {"username": "x"}},                 # no image
+        {"extra": {"avatar": "https://cdn/p.png"}},   # first image → returned
+    ]}}
+    assert _avatar_from_social_context(sc) == "https://cdn/p.png"
+    assert _avatar_from_social_context(None) is None
+    assert _avatar_from_social_context({}) is None
+    # profile_pic / picture keys also honored
+    assert _avatar_from_social_context(
+        {"social_resolution": {"profiles": [{"extra": {"profile_pic": "https://cdn/q.jpg"}}]}}
+    ) == "https://cdn/q.jpg"
+    # non-http junk ignored
+    assert _avatar_from_social_context(
+        {"social_resolution": {"profiles": [{"extra": {"avatar": "data:image/png;base64,xx"}}]}}
+    ) is None
+
+
+def test_detail_schema_has_avatar_url():
+    from apps.api.schemas.visitors import VisitorDetailOut
+
+    assert "avatar_url" in VisitorDetailOut.model_fields

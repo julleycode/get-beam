@@ -75,11 +75,14 @@ function Avatar({
   name,
   email,
   variant,
+  src,
 }: {
   name?: string | null;
   email?: string | null;
   variant: "person" | "company" | "anonymous";
+  src?: string | null;
 }) {
+  const [imgFailed, setImgFailed] = useState(false);
   const label = initials(name, email);
   const tone =
     variant === "company"
@@ -88,6 +91,23 @@ function Avatar({
         ? "bg-muted text-muted-foreground"
         : "bg-primary/10 text-primary";
   const Icon = variant === "company" ? Building2 : UserRound;
+
+  // Show the real social photo only when we have one, it hasn't failed to
+  // load, and this isn't an anonymous visitor. onError falls back to initials.
+  if (src && !imgFailed && variant !== "anonymous") {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- external CDN (pbs.twimg.com); next/image has no host allowlist here
+      <img
+        src={src}
+        alt={name || "avatar"}
+        referrerPolicy="no-referrer"
+        loading="lazy"
+        onError={() => setImgFailed(true)}
+        className="h-16 w-16 shrink-0 rounded-2xl object-cover"
+      />
+    );
+  }
+
   return (
     <div
       className={cn(
@@ -480,6 +500,7 @@ export default function VisitorDetailPage() {
             name={visitor.full_name}
             email={visitor.email}
             variant={!identified ? "anonymous" : isCompanyLevel ? "company" : "person"}
+            src={visitor.avatar_url}
           />
 
           <div className="min-w-0 flex-1 space-y-2">

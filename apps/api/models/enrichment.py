@@ -51,6 +51,10 @@ class EnrichmentProfile(Base):
     twitter_follower_count: Mapped[int | None] = mapped_column(Integer)
     twitter_recent_topics: Mapped[list[str]] = mapped_column(JSONB, default=list)
 
+    # Social avatar (Twitter/X primary, OSINT secondary). Display-only:
+    # NOT a lookup key and NOT counted toward completeness.
+    avatar_url: Mapped[str | None] = mapped_column(String(500))
+
     # Social context (fetched for high-intent visitors after enrichment)
     social_context: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     social_context_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

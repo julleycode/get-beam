@@ -56,6 +56,7 @@ class VisitorDetailOut(VisitorOut):
     twitter_handle: str | None = None
     linkedin_headline: str | None = None
     twitter_bio: str | None = None
+    avatar_url: str | None = None
     enrichment_completeness: float | None = None
     resolution_provider: str | None = None
     confidence_score: float | None = None
