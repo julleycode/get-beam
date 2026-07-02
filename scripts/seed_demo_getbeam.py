@@ -426,12 +426,35 @@ async def _print_sites(db) -> None:
         print(f"  site_id={s.site_id!r}  url={s.url!r}  name={s.name!r}")
 
 
-async def wipe(db, site_id: str) -> dict:
-    """Remove all demo rows for this site. Order respects FKs."""
+async def _wipe_segments_campaigns(db, site_id: str) -> dict:
+    """Delete demo-era segments + campaigns for this site.
+
+    Catches BOTH the tagged pre-built rows (characteristics/plan._demo_seed) AND
+    rows the live AI buttons created during rehearsal/demo takes (untagged —
+    identified by having a seeded demo visitor among their members/recipients).
+    """
     counts = {}
-    # Campaigns (+ touchpoints cascade) tagged in plan._demo_seed
+    vids = set(_demo_vid(l["slug"]) for l in LEADS)
+
+    segs = (await db.execute(select(Segment).where(Segment.site_id == site_id))).scalars().all()
+    demo_seg_ids = set()
+    for s in segs:
+        if isinstance(s.characteristics, dict) and s.characteristics.get("_demo_seed"):
+            demo_seg_ids.add(s.id)
+            continue
+        member_ids = {
+            m.visitor_id for m in (await db.execute(
+                select(SegmentMember).where(SegmentMember.segment_id == s.id)
+            )).scalars().all()
+        }
+        if member_ids & vids:
+            demo_seg_ids.add(s.id)
+
     camps = (await db.execute(select(Campaign).where(Campaign.site_id == site_id))).scalars().all()
-    demo_camps = [c for c in camps if isinstance(c.plan, dict) and c.plan.get("_demo_seed")]
+    demo_camps = [
+        c for c in camps
+        if (isinstance(c.plan, dict) and c.plan.get("_demo_seed")) or c.segment_id in demo_seg_ids
+    ]
     for c in demo_camps:
         for tp in (await db.execute(
             select(CampaignTouchpoint).where(CampaignTouchpoint.campaign_id == c.id)
@@ -440,16 +463,19 @@ async def wipe(db, site_id: str) -> dict:
         await db.delete(c)
     counts["campaigns"] = len(demo_camps)
 
-    # Segments (+ members cascade) tagged in characteristics._demo_seed
-    segs = (await db.execute(select(Segment).where(Segment.site_id == site_id))).scalars().all()
-    demo_segs = [s for s in segs if isinstance(s.characteristics, dict) and s.characteristics.get("_demo_seed")]
-    for s in demo_segs:
+    for s in [s for s in segs if s.id in demo_seg_ids]:
         for m in (await db.execute(
             select(SegmentMember).where(SegmentMember.segment_id == s.id)
         )).scalars().all():
             await db.delete(m)
         await db.delete(s)
-    counts["segments"] = len(demo_segs)
+    counts["segments"] = len(demo_seg_ids)
+    return counts
+
+
+async def wipe(db, site_id: str) -> dict:
+    """Remove all demo rows for this site. Order respects FKs."""
+    counts = await _wipe_segments_campaigns(db, site_id)
 
     # Visitor-scoped rows. Match on: current slug ids + any enrichment row tagged
     # social_context._demo_seed (catches visitors from a PRIOR roster whose slugs
@@ -495,6 +521,58 @@ async def wipe(db, site_id: str) -> dict:
 
     await db.commit()
     return counts
+
+
+async def stage_live(db, site: Site) -> None:
+    """Prep a LIVE-button demo: wipe the pre-built segment/campaign displays and
+    hide the social feed, but keep the 11 identified+enriched visitors.
+
+    On camera the owner then presses the real buttons:
+      - Segments  -> "Re-run segmentation"  (real Gemini run over all enriched)
+      - Segment card -> "Generate campaign" (real Gemini campaign plan)
+
+    Auto-segmentation stays dormant BY DESIGN: the auto trigger only counts
+    enriched visitors with segmented=False (needs 10+), and we keep the seeded
+    11 at segmented=True. The manual /run endpoint doesn't filter on segmented,
+    so the button still picks all of them. No env/product change needed.
+
+    Safety: live-created campaigns have no pre-sent touchpoints, so this sets
+    do_not_email=True on all seeded identities — if "Send emails" is ever
+    pressed, every recipient is skipped (0 real emails).
+    """
+    site_id = site.site_id
+
+    # 1) Remove segment + campaign displays (pre-built AND button-created).
+    counts = await _wipe_segments_campaigns(db, site_id)
+    print(f"  cleared displays: {counts}")
+
+    # 2) Keep seeded visitors segmented=True (auto trigger dormant) + block sends.
+    from sqlalchemy import update
+    vids = [_demo_vid(l["slug"]) for l in LEADS]
+    await db.execute(
+        update(Visitor).where(Visitor.site_id == site_id, Visitor.visitor_id.in_(vids))
+        .values(segmented=True)
+    )
+    await db.execute(
+        update(IdentifiedVisitor)
+        .where(IdentifiedVisitor.site_id == site_id, IdentifiedVisitor.visitor_id.in_(vids))
+        .values(do_not_email=True)
+    )
+
+    # 3) Hide the social feed (posts + sync both keyed on is_active).
+    await _set_posts_active(db, site, False)
+    await db.commit()
+
+
+async def _set_posts_active(db, site: Site, active: bool) -> None:
+    acct = (await db.execute(
+        select(SocialAccount).where(
+            SocialAccount.user_id == site.user_id,
+            SocialAccount.platform_user_id == _FEED_ACCT_MARKER,
+        )
+    )).scalar_one_or_none()
+    if acct is not None:
+        acct.is_active = active
 
 
 async def seed(db, site: Site) -> None:
@@ -749,6 +827,10 @@ async def main() -> None:
     ap.add_argument("--site-id", default=None, help="Target site_id (default: auto-detect getbeam.fyi)")
     ap.add_argument("--dry-run", action="store_true", help="Detect site + print plan, no writes")
     ap.add_argument("--unseed", action="store_true", help="Remove all demo rows and exit")
+    ap.add_argument("--stage-live", action="store_true",
+                    help="Live-demo prep: wipe segment/campaign displays + hide posts; keep visitors")
+    ap.add_argument("--posts", choices=["on", "off"], default=None,
+                    help="Show/hide the seeded social posts (flips the demo feed account)")
     args = ap.parse_args()
 
     host = engine.url.host or "?"
@@ -763,6 +845,23 @@ async def main() -> None:
         if args.unseed:
             counts = await wipe(db, site.site_id)
             print(f"Unseeded: {counts}")
+            return
+
+        if args.posts is not None:
+            await _set_posts_active(db, site, args.posts == "on")
+            await db.commit()
+            print(f"Posts {'visible' if args.posts == 'on' else 'hidden'} (feed account is_active={args.posts == 'on'}).")
+            return
+
+        if args.stage_live:
+            await stage_live(db, site)
+            print("\n🎬 LIVE-DEMO STAGE READY:")
+            print("   - Segments + campaigns pages: EMPTY (press 'Re-run segmentation' on camera)")
+            print("   - Social posts: HIDDEN (flip back:  --posts on)")
+            print("   - Visitors: 11 identified+enriched, untouched")
+            print("   - Auto segmentation: dormant (unsegmented count stays under threshold)")
+            print("   - Sends blocked: do_not_email=True on all seeded identities")
+            print("   Restore full pre-built state:  python -m scripts.seed_demo_getbeam --site-id " + site.site_id)
             return
 
         by_seg = {k: sum(1 for l in LEADS if l['seg'] == k) for k in SEGMENTS}

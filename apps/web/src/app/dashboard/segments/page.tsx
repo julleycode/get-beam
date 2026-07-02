@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Layers } from "lucide-react";
+import { Layers, Sparkles } from "lucide-react";
 import { api } from "@/lib/api";
 import { CardGridSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
@@ -27,7 +27,9 @@ export default function SegmentsPage() {
   const [siteId, setSiteId] = useState(searchParams.get("site") || "");
   const [triggering, setTriggering] = useState(false);
   const [triggerError, setTriggerError] = useState<string | null>(null);
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const router = useRouter();
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["segments", siteId],
@@ -50,6 +52,19 @@ export default function SegmentsPage() {
       setTriggerError(e instanceof Error ? e.message : "Couldn't start segmentation");
     } finally {
       setTriggering(false);
+    }
+  }
+
+  async function handleGenerateCampaign(segmentId: string) {
+    setGeneratingId(segmentId);
+    setTriggerError(null);
+    try {
+      await api.createCampaignFromSegment(siteId, segmentId);
+      router.push(`/dashboard/campaigns?site=${siteId}`);
+    } catch (e) {
+      setTriggerError(e instanceof Error ? e.message : "Couldn't generate a campaign");
+    } finally {
+      setGeneratingId(null);
     }
   }
 
@@ -127,6 +142,15 @@ export default function SegmentsPage() {
                     <p className="mt-1">{seg.messaging_angle}</p>
                   </div>
                 )}
+                <Button
+                  size="sm"
+                  className="w-full"
+                  onClick={() => handleGenerateCampaign(seg.id)}
+                  disabled={generatingId !== null}
+                >
+                  <Sparkles className="mr-1.5 h-3.5 w-3.5" />
+                  {generatingId === seg.id ? "Generating campaign..." : "Generate campaign"}
+                </Button>
               </CardContent>
             </Card>
           ))}
