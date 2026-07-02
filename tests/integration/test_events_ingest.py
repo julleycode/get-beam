@@ -113,6 +113,36 @@ class TestEventIngestion:
         assert resp.status_code == 403
 
     @pytest.mark.asyncio
+    async def test_deleted_site_403_expires_svid_cookie(self, test_client, test_site_id):
+        """A deleted/unknown site returns 403 AND expires the durable HttpOnly
+        _rta_svid_<site> cookie (only the server can clear an HttpOnly cookie),
+        so a returning visitor's browser drops it. The pixel clears its own
+        client cookies when it reads the 403."""
+        site_id = "nonexistent_site_99999"
+        payload = {
+            "site_id": site_id,
+            "visitor_id": "test-visitor",
+            "events": [
+                {
+                    "type": "pageview",
+                    "url": "https://example.com/",
+                    "ts": "2026-05-27T00:00:00",
+                }
+            ],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={"Content-Type": "text/plain", "User-Agent": _BROWSER_UA},
+        )
+        assert resp.status_code == 403
+        set_cookies = resp.headers.get_list("set-cookie")
+        svid = [c for c in set_cookies if "_rta_svid_nonexistent_site_99999" in c]
+        assert svid, f"expected svid expiry Set-Cookie, got {set_cookies}"
+        # Expired: Starlette delete_cookie emits Max-Age=0 + the 1970 epoch expiry.
+        assert "Max-Age=0" in svid[0] or "01 Jan 1970" in svid[0], svid[0]
+
+    @pytest.mark.asyncio
     async def test_malformed_json_returns_400(self, test_client, test_site_id):
         """Malformed JSON should return 400."""
         resp = await test_client.post(

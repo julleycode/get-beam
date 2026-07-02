@@ -38,6 +38,10 @@
     document.cookie = name + "=" + value + ";path=/;expires=" + d.toUTCString() + ";SameSite=Lax";
   }
 
+  function delCookie(name) {
+    document.cookie = name + "=;path=/;expires=Thu, 01 Jan 1970 00:00:00 GMT;SameSite=Lax";
+  }
+
   function lsGet(k) { try { return localStorage.getItem(k); } catch(e) { return null; } }
   function lsSet(k, v) { try { localStorage.setItem(k, v); } catch(e) {} }
   function lsDel(k) { try { localStorage.removeItem(k); } catch(e) {} }
@@ -156,6 +160,7 @@
   } catch(e) { queue = []; }
 
   function pushEvent(evt) {
+    if (DEAD) return; // site deleted — stop collecting
     evt._fp = fingerprint;
     evt.optout = OPTOUT;
     // Idempotency key — server drops duplicate event_ids (retry/replay safe).
@@ -172,8 +177,27 @@
   }
 
   var xhrInFlight = false;
+  // Site-deleted self-destruct. The ingest endpoint returns 403 (site gone) /
+  // 410 for a deleted site; when the readable XHR flush sees that, we wipe every
+  // cookie/localStorage key this pixel owns and stop tracking. (A PAUSED site
+  // returns 204, so it never trips this.) flushTimer is cleared so the interval
+  // stops; DEAD short-circuits pushEvent/flush against any late listeners.
+  var DEAD = false;
+  var flushTimer = null;
+  var firstFlush = true; // first flush goes via readable XHR to catch 403/410
 
-  function flush() {
+  function selfDestruct() {
+    DEAD = true;
+    try { delCookie(COOKIE_NAME); delCookie(CONSENT_KEY); } catch (e) {}
+    lsDel(COOKIE_NAME);
+    lsDel(QUEUE_KEY);
+    lsDel(CONSENT_KEY);
+    queue = [];
+    if (flushTimer) { clearInterval(flushTimer); flushTimer = null; }
+  }
+
+  function flush(onUnload) {
+    if (DEAD) return; // site deleted — stop sending
     if (consentBlocked()) return; // EU: hold events until visitor decides
     if (queue.length === 0) return;
 
@@ -184,9 +208,12 @@
       events: batch
     });
 
-    // sendBeacon returns true once the browser accepts the payload — confirm
-    // then; false (too large / too many beacons) falls through to XHR.
-    if (navigator.sendBeacon &&
+    // Prefer sendBeacon (survives unload) EXCEPT the first flush of the session,
+    // which goes via readable XHR so a deleted-site 403/410 is visible and can
+    // trigger selfDestruct(). On unload always beacon. sendBeacon returns true
+    // once the browser accepts the payload; false (too large / too many beacons)
+    // falls through to XHR.
+    if ((onUnload || !firstFlush) && navigator.sendBeacon &&
         navigator.sendBeacon(ENDPOINT, new Blob([payload], { type: "text/plain" }))) {
       confirmSent(batch.length);
       return;
@@ -196,11 +223,16 @@
     xhrInFlight = true;
     var xhr = new XMLHttpRequest();
     xhr.open("POST", ENDPOINT, true);
-    xhr.setRequestHeader("Content-Type", "application/json");
+    // text/plain is CORS-safelisted → no preflight (matches the beacon); the
+    // server parses text/plain the same as JSON.
+    xhr.setRequestHeader("Content-Type", "text/plain");
     xhr.onload = function() {
       xhrInFlight = false;
+      firstFlush = false;
+      // Site deleted → server answers 403 (gone) / 410. Wipe our cookies + stop.
+      if (xhr.status === 403 || xhr.status === 410) { selfDestruct(); return; }
       if (xhr.status >= 200 && xhr.status < 300) confirmSent(batch.length);
-      // non-2xx: keep queue + localStorage and retry on the next interval
+      // other non-2xx: keep queue + localStorage and retry on the next interval
     };
     xhr.onerror = xhr.ontimeout = function() { xhrInFlight = false; };
     xhr.send(payload);
@@ -435,11 +467,11 @@
 
   window.addEventListener("popstate", onNavigation);
 
-  setInterval(flush, BATCH_INTERVAL);
+  flushTimer = setInterval(function () { flush(false); }, BATCH_INTERVAL);
 
   function leavePage() {
     emitPageSignals(window.location.href);
-    flush();
+    flush(true); // unload → beacon (survives), never the readable XHR path
   }
 
   window.addEventListener("beforeunload", leavePage);

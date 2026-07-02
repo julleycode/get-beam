@@ -1,11 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
+import { useQuery } from "@tanstack/react-query";
 import { api, Campaign } from "@/lib/api";
 import { ListCardSkeleton, PageHeaderSkeleton, StatGridSkeleton } from "@/components/skeletons";
+import { StatTile } from "@/components/stat-tile";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 interface Touchpoint {
   order: number;
@@ -37,6 +49,13 @@ export default function CampaignDetailPage() {
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [siteId, campaignId]);
+
+  const isEmail = campaign?.campaign_type === "email";
+  const { data: stats } = useQuery({
+    queryKey: ["campaign-stats", siteId, campaignId],
+    queryFn: () => api.getCampaignStats(siteId, campaignId),
+    enabled: !!siteId && !!campaignId && isEmail,
+  });
 
   if (loading)
     return (
@@ -75,6 +94,90 @@ export default function CampaignDetailPage() {
           </div>
         )}
       </div>
+
+      {isEmail && stats && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+            <StatTile label="Sent" value={stats.sent} />
+            <StatTile label="Opened" value={stats.opened} tone="info" />
+            <StatTile label="Clicked" value={stats.clicked} tone="success" />
+            <StatTile
+              label="Open rate"
+              value={
+                <span className="inline-flex items-center gap-1.5">
+                  {stats.sent ? `${Math.round(stats.open_rate * 100)}%` : "—"}
+                  <InfoTooltip label="About open rate">
+                    Opens can be overcounted: Apple Mail auto-loads images even
+                    when the email isn&apos;t read. Clicks and return visits are
+                    the reliable signals.
+                  </InfoTooltip>
+                </span>
+              }
+              tone="info"
+            />
+            <StatTile
+              label="Click rate"
+              value={stats.sent ? `${Math.round(stats.click_rate * 100)}%` : "—"}
+              tone="success"
+            />
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm">
+                Came back after email ({stats.returned_visitors.length})
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {stats.returned_visitors.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  No one has returned to your site after this email yet. Return
+                  visits show up here as soon as a recipient lands on your site
+                  again.
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Visitor</TableHead>
+                      <TableHead>Opened</TableHead>
+                      <TableHead>Clicked</TableHead>
+                      <TableHead>Last visit</TableHead>
+                      <TableHead>Pageviews after</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {stats.returned_visitors.map((rv) => (
+                      <TableRow key={rv.visitor_id}>
+                        <TableCell>
+                          <Link
+                            href={`/dashboard/visitors/${rv.visitor_id}?site=${siteId}`}
+                            className="hover:underline font-medium"
+                          >
+                            {rv.full_name || rv.email_masked || rv.visitor_id.slice(0, 10)}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {rv.opened_at ? new Date(rv.opened_at).toLocaleString() : "—"}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {rv.clicked_at ? new Date(rv.clicked_at).toLocaleString() : "—"}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {rv.last_visit_at
+                            ? new Date(rv.last_visit_at).toLocaleString()
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-sm">{rv.pageviews_after}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <h3 className="text-lg font-semibold">
         Touchpoints ({touchpoints.length})

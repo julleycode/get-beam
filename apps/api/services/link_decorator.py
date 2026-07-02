@@ -85,12 +85,18 @@ def _bare_host(netloc: str) -> str:
     return h[4:] if h.startswith("www.") else h
 
 
-def decorate_links(html: str, email: str, site_host: str | None) -> str:
+def decorate_links(
+    html: str, email: str, site_host: str | None, touchpoint_id: str | None = None
+) -> str:
     """Append ?_bid=<token> to every link in `html` that points to `site_host`.
 
     A click then lands on the customer's Beam-pixel'd site with the encrypted
     email, resolving the visitor DETERMINISTICALLY — the residential-safe, MPP-
     proof identity signal (clicks fire from the real device, unlike opens).
+
+    When `touchpoint_id` is given (campaign sends), `_tp=<id>` rides along so the
+    pixel's utm_identify event lets the backend stamp clicked_at on that
+    CampaignTouchpoint. The id is a random UUID — no PII.
 
     ONLY the customer's own host (and its subdomains) is decorated: the encrypted
     _bid token is never leaked to third-party domains. No-op when the key/host is
@@ -124,6 +130,8 @@ def decorate_links(html: str, email: str, site_host: str | None) -> str:
         # unencoded means the browser hands it straight to decode_bid (URLSearchParams
         # returns it as-is). Existing query params are preserved untouched.
         new_query = (parts.query + "&" if parts.query else "") + "_bid=" + token
+        if touchpoint_id:
+            new_query += "&_tp=" + touchpoint_id
         rebuilt = urlunsplit(
             (parts.scheme, parts.netloc, parts.path, new_query, parts.fragment)
         )

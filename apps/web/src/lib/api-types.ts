@@ -346,6 +346,25 @@ export interface CampaignSendResponse {
   summary: CampaignSendSummary;
 }
 
+export interface ReturnedVisitor {
+  visitor_id: string;
+  full_name: string | null;
+  email_masked: string | null;
+  opened_at: string | null;
+  clicked_at: string | null;
+  last_visit_at: string | null;
+  pageviews_after: number;
+}
+
+export interface CampaignStats {
+  sent: number;
+  opened: number;
+  clicked: number;
+  open_rate: number;
+  click_rate: number;
+  returned_visitors: ReturnedVisitor[];
+}
+
 export interface BrowserRow {
   browser: string;
   captured: number;

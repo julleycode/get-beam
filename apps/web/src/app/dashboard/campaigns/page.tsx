@@ -9,6 +9,7 @@ import { TableSkeleton } from "@/components/skeletons";
 import { SiteSelector } from "@/components/site-selector";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
   Dialog,
@@ -33,7 +34,14 @@ export default function CampaignsPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [sendResult, setSendResult] = useState<string | null>(null);
-  const [confirmCampaign, setConfirmCampaign] = useState<{ id: string; name: string } | null>(null);
+  const [confirmCampaign, setConfirmCampaign] = useState<{
+    id: string;
+    name: string;
+    isEmail: boolean;
+  } | null>(null);
+  const [testCampaign, setTestCampaign] = useState<{ id: string; name: string } | null>(null);
+  const [testEmail, setTestEmail] = useState("");
+  const [testSending, setTestSending] = useState(false);
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
@@ -57,25 +65,52 @@ export default function CampaignsPage() {
     }
   }
 
-  async function handleSend(campaignId: string, campaignName: string) {
+  async function handleStart(campaignId: string, campaignName: string, isEmail: boolean) {
     setActionError(null);
     setSendResult(null);
     setSendingId(campaignId);
     try {
-      const { summary: s } = await api.sendCampaign(siteId, campaignId);
-      const parts = [`${s.sent} sent`];
-      if (s.skipped_suppressed) parts.push(`${s.skipped_suppressed} unsubscribed/bounced skipped`);
-      if (s.skipped_already_sent) parts.push(`${s.skipped_already_sent} already sent`);
-      if (s.skipped_no_email) parts.push(`${s.skipped_no_email} without email`);
-      if (s.throttled) parts.push(`${s.throttled} deferred by hourly cap — send again later`);
-      if (s.failed) parts.push(`${s.failed} failed`);
-      setSendResult(`"${campaignName}": ${parts.join(", ")} (audience ${s.total_audience}).`);
+      const { summary: s } = await api.startCampaign(siteId, campaignId);
+      if (isEmail) {
+        const parts = [`${s.sent} sent`];
+        if (s.skipped_suppressed) parts.push(`${s.skipped_suppressed} unsubscribed/bounced skipped`);
+        if (s.skipped_already_sent) parts.push(`${s.skipped_already_sent} already sent`);
+        if (s.skipped_no_email) parts.push(`${s.skipped_no_email} without email`);
+        if (s.throttled) parts.push(`${s.throttled} deferred by hourly cap — send again later`);
+        if (s.failed) parts.push(`${s.failed} failed`);
+        setSendResult(`"${campaignName}": ${parts.join(", ")} (audience ${s.total_audience}).`);
+      } else {
+        setSendResult(`"${campaignName}" is now active.`);
+      }
       reload();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "Send failed");
+      setActionError(err instanceof Error ? err.message : "Start failed");
     } finally {
       setSendingId(null);
       setConfirmCampaign(null);
+    }
+  }
+
+  function openTestDialog(campaignId: string, campaignName: string) {
+    setActionError(null);
+    setSendResult(null);
+    setTestEmail(localStorage.getItem("beam_test_email") ?? "");
+    setTestCampaign({ id: campaignId, name: campaignName });
+  }
+
+  async function handleTestSend() {
+    if (!testCampaign) return;
+    setActionError(null);
+    setTestSending(true);
+    try {
+      const res = await api.testSendCampaign(siteId, testCampaign.id, testEmail.trim());
+      localStorage.setItem("beam_test_email", testEmail.trim());
+      setSendResult(`Test email for "${testCampaign.name}" sent to ${res.to}.`);
+      setTestCampaign(null);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Test send failed");
+    } finally {
+      setTestSending(false);
     }
   }
 
@@ -130,48 +165,43 @@ export default function CampaignsPage() {
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-2">
-                    {c.status === "draft" && (
+                    {c.status !== "completed" && (
                       <Button
                         size="sm"
-                        variant="outline"
-                        onClick={() => handleStatusChange(c.id, "approved")}
+                        disabled={sendingId !== null}
+                        onClick={() =>
+                          setConfirmCampaign({
+                            id: c.id,
+                            name: c.name,
+                            isEmail: c.campaign_type === "email",
+                          })
+                        }
                       >
-                        Approve
-                      </Button>
-                    )}
-                    {c.status === "approved" && (
-                      <Button
-                        size="sm"
-                        onClick={() => handleStatusChange(c.id, "active")}
-                      >
-                        Start
+                        {sendingId === c.id
+                          ? "Starting..."
+                          : c.status === "active"
+                            ? "Send new"
+                            : "Start beam"}
                       </Button>
                     )}
                     {c.status === "active" && (
-                      <>
-                        <Button
-                          size="sm"
-                          disabled={sendingId !== null}
-                          onClick={() => setConfirmCampaign({ id: c.id, name: c.name })}
-                        >
-                          {sendingId === c.id ? "Sending..." : "Send emails"}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={sendingId === c.id}
-                          onClick={() => handleStatusChange(c.id, "paused")}
-                        >
-                          Pause
-                        </Button>
-                      </>
-                    )}
-                    {c.status === "paused" && (
                       <Button
                         size="sm"
-                        onClick={() => handleStatusChange(c.id, "active")}
+                        variant="outline"
+                        disabled={sendingId === c.id}
+                        onClick={() => handleStatusChange(c.id, "paused")}
                       >
-                        Resume
+                        Pause
+                      </Button>
+                    )}
+                    {c.campaign_type === "email" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={sendingId !== null}
+                        onClick={() => openTestDialog(c.id, c.name)}
+                      >
+                        Send test
                       </Button>
                     )}
                   </div>
@@ -190,10 +220,11 @@ export default function CampaignsPage() {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Send &ldquo;{confirmCampaign?.name}&rdquo; now?</DialogTitle>
+            <DialogTitle>Start &ldquo;{confirmCampaign?.name}&rdquo;?</DialogTitle>
             <DialogDescription>
-              Real emails go out to this campaign&apos;s audience. Unsubscribed
-              and bounced contacts are skipped automatically.
+              {confirmCampaign?.isEmail
+                ? "This approves the campaign and sends real emails to its audience now. Unsubscribed and bounced contacts are skipped automatically."
+                : "This approves and activates the campaign."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -208,13 +239,63 @@ export default function CampaignsPage() {
               variant="destructive"
               onClick={() =>
                 confirmCampaign &&
-                handleSend(confirmCampaign.id, confirmCampaign.name)
+                handleStart(
+                  confirmCampaign.id,
+                  confirmCampaign.name,
+                  confirmCampaign.isEmail
+                )
               }
               disabled={sendingId !== null}
             >
-              {sendingId !== null ? "Sending..." : "Send emails"}
+              {sendingId !== null ? "Starting..." : "Start beam"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!testCampaign}
+        onOpenChange={(o) => {
+          if (!o && !testSending) setTestCampaign(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send a test email</DialogTitle>
+            <DialogDescription>
+              Sends a preview of &ldquo;{testCampaign?.name}&rdquo; with a{" "}
+              <span className="font-mono">[TEST]</span> subject prefix. Nothing
+              is sent to the campaign audience.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (testEmail.trim() && !testSending) handleTestSend();
+            }}
+          >
+            <Input
+              type="email"
+              required
+              placeholder="you@company.com"
+              value={testEmail}
+              onChange={(e) => setTestEmail(e.target.value)}
+              autoFocus
+            />
+            <DialogFooter className="mt-4">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setTestCampaign(null)}
+                disabled={testSending}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={testSending || !testEmail.trim()}>
+                {testSending ? "Sending..." : "Send test"}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

@@ -23,6 +23,7 @@ import type {
   Campaign,
   CampaignListResponse,
   CampaignSendResponse,
+  CampaignStats,
   BrowserBreakdown,
   TrafficFit,
   SiteKpis,
@@ -509,6 +510,33 @@ class ApiClient {
     return this.request<CampaignSendResponse>(
       `/api/v1/campaigns/${siteId}/${campaignId}/send`,
       { method: "POST" }
+    );
+  }
+
+  /**
+   * One-click launch ("Start beam"): approve + activate + send in one action.
+   * The confirm dialog before calling this is the human-approval gate.
+   * Idempotent per recipient — calling again only reaches new segment members.
+   */
+  async startCampaign(siteId: string, campaignId: string) {
+    return this.request<CampaignSendResponse>(
+      `/api/v1/campaigns/${siteId}/${campaignId}/start`,
+      { method: "POST" }
+    );
+  }
+
+  /** Send a [TEST]-prefixed preview of the campaign email to an admin address. */
+  async testSendCampaign(siteId: string, campaignId: string, email: string) {
+    return this.request<{ sent: boolean; to: string }>(
+      `/api/v1/campaigns/${siteId}/${campaignId}/test-send`,
+      { method: "POST", body: JSON.stringify({ email }) }
+    );
+  }
+
+  /** Email engagement stats (sent/opened/clicked) + recipients who returned. */
+  async getCampaignStats(siteId: string, campaignId: string) {
+    return this.request<CampaignStats>(
+      `/api/v1/campaigns/${siteId}/${campaignId}/stats`
     );
   }
 
@@ -1190,6 +1218,8 @@ export type {
   CampaignListResponse,
   CampaignSendSummary,
   CampaignSendResponse,
+  CampaignStats,
+  ReturnedVisitor,
   BrowserRow,
   SafariCoverage,
   BrowserMetrics,

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 
 class CampaignOut(BaseModel):
@@ -27,3 +27,26 @@ class CampaignListResponse(BaseModel):
 
 class CampaignStatusUpdate(BaseModel):
     status: str
+
+
+class CampaignTestSendRequest(BaseModel):
+    email: EmailStr
+
+
+class ReturnedVisitor(BaseModel):
+    visitor_id: str
+    full_name: str | None
+    email_masked: str | None
+    opened_at: datetime | None
+    clicked_at: datetime | None
+    last_visit_at: datetime | None
+    pageviews_after: int
+
+
+class CampaignStatsResponse(BaseModel):
+    sent: int
+    opened: int
+    clicked: int
+    open_rate: float
+    click_rate: float
+    returned_visitors: list[ReturnedVisitor]

@@ -204,6 +204,20 @@ LEADS = [
         "notes": "Digital/growth marketing coordinator at a luxury retailer — runs the campaigns a tool like Beam feeds.",
         "intent": 63, "pages": ["/", "/pricing", "/features", "/case-studies"],
     },
+    # --- Owner (real send target on camera: only lead with do_not_email=False
+    # in live mode — pressing "Send emails" delivers ONLY to this inbox) -------
+    {
+        "slug": "thai_tran", "first": "Thai", "full": "Thai Tran", "seg": "GM",
+        "email": "tranthai.work@gmail.com", "title": "Founder", "company": "Julley",
+        "domain": "julley.co", "industry": "SaaS / Growth", "size": "1-10",
+        "city": "Ho Chi Minh City", "region": "Ho Chi Minh", "country": "VN",
+        "li": "https://www.linkedin.com/in/julleycode/", "li_vanity": "julleycode",
+        "tw": None, "li_followers": None, "tw_followers": None, "tw_bio": None, "tw_topics": [],
+        "seniority": "executive", "completeness": 0.72,
+        "summary": "Indie SaaS founder focused on growth tooling and go-to-market experiments.",
+        "notes": "Hands-on founder-marketer evaluating growth tooling — visited pricing repeatedly across sessions.",
+        "intent": 87, "pages": ["/", "/pricing", "/features", "/integrations"],
+    },
     {
         "slug": "mae_jauch", "first": "Mae", "full": "Mae Jauch", "seg": "GM",
         "email": "mae@mindgrasp.ai", "title": "Marketing Growth Specialist I", "company": "Mindgrasp",
@@ -553,10 +567,21 @@ async def stage_live(db, site: Site) -> None:
         update(Visitor).where(Visitor.site_id == site_id, Visitor.visitor_id.in_(vids))
         .values(segmented=True)
     )
+    # Everyone EXCEPT the owner: the owner's row keeps do_not_email=False so an
+    # on-camera "Send emails" delivers exactly one real email — to his own inbox.
+    owner_vid = _demo_vid("thai_tran")
     await db.execute(
         update(IdentifiedVisitor)
-        .where(IdentifiedVisitor.site_id == site_id, IdentifiedVisitor.visitor_id.in_(vids))
+        .where(
+            IdentifiedVisitor.site_id == site_id,
+            IdentifiedVisitor.visitor_id.in_([v for v in vids if v != owner_vid]),
+        )
         .values(do_not_email=True)
+    )
+    await db.execute(
+        update(IdentifiedVisitor)
+        .where(IdentifiedVisitor.site_id == site_id, IdentifiedVisitor.visitor_id == owner_vid)
+        .values(do_not_email=False)
     )
 
     # 3) Hide the social feed (posts + sync both keyed on is_active).
@@ -858,9 +883,9 @@ async def main() -> None:
             print("\n🎬 LIVE-DEMO STAGE READY:")
             print("   - Segments + campaigns pages: EMPTY (press 'Re-run segmentation' on camera)")
             print("   - Social posts: HIDDEN (flip back:  --posts on)")
-            print("   - Visitors: 11 identified+enriched, untouched")
+            print(f"   - Visitors: {len(LEADS)} identified+enriched, untouched")
             print("   - Auto segmentation: dormant (unsegmented count stays under threshold)")
-            print("   - Sends blocked: do_not_email=True on all seeded identities")
+            print("   - Sends blocked for everyone EXCEPT thai_tran (owner inbox = live send target)")
             print("   Restore full pre-built state:  python -m scripts.seed_demo_getbeam --site-id " + site.site_id)
             return
 

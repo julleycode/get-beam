@@ -31,7 +31,7 @@ from apps.api.models.changelog_entry import ChangelogEntry  # noqa: F401 — reg
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
-from apps.api.routers import known_contacts, costs, ai, dashboard, crm, changelog, click
+from apps.api.routers import known_contacts, costs, ai, dashboard, crm, changelog, click, open_pixel
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
 from slowapi import _rate_limit_exceeded_handler
@@ -188,6 +188,8 @@ app.include_router(blog.router, prefix="/api/v1/blog", tags=["blog"])
 app.include_router(changelog.router, prefix="/api/v1/changelog", tags=["changelog"])
 # Email click-tracking redirect (short public path — recipients click it directly).
 app.include_router(click.router, prefix="/c", tags=["click"])
+# Email open-tracking pixel (short public path — mail clients load it as an image).
+app.include_router(open_pixel.router, prefix="/o", tags=["open-pixel"])
 
 # ── Public unsubscribe (CAN-SPAM compliance, no auth) ──
 app.include_router(unsubscribe.router, tags=["unsubscribe"])

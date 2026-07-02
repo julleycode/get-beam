@@ -1,5 +1,8 @@
 import asyncio
 import json
+from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlsplit
+from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, Request, Response
@@ -22,6 +25,21 @@ _background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
 # batches for one site spawns at most one aggregation at a time (the in-flight
 # run reads current state, so it covers the newly-arrived events).
 _aggregating: set[str] = set()
+
+
+def _tp_from_url(url: str | None) -> UUID | None:
+    """Extract a valid _tp campaign-touchpoint UUID from a landing URL, or None.
+
+    Campaign-decorated links carry ``_tp=<touchpoint uuid>`` next to ``_bid`` so
+    a click can be attributed to the exact sent email.
+    """
+    if not url or "_tp=" not in url:
+        return None
+    try:
+        vals = parse_qs(urlsplit(url).query).get("_tp")
+        return UUID(vals[0]) if vals else None
+    except Exception:
+        return None
 
 
 def _extract_ip(request: Request) -> str:
@@ -73,8 +91,26 @@ async def ingest_events(
     )
     tracking_enabled = site_check.scalar_one_or_none()
     if tracking_enabled is None:
-        # Site does not exist — reject to prevent arbitrary data injection.
-        return Response(status_code=403)
+        # Site does not exist (never created, or DELETED). Reject to prevent
+        # arbitrary data injection — and purge the durable HttpOnly _rta_svid
+        # cookie for this site, since JS can't clear an HttpOnly cookie (only the
+        # server can). The pixel clears its own client cookies when it reads this
+        # 403. Best-effort: under wildcard-CORS cross-origin the browser may not
+        # apply the Set-Cookie, but it works for first-party / same-site installs
+        # and is harmless otherwise. Attrs must match the original Set-Cookie
+        # (see below) or the browser won't overwrite the cookie.
+        gone = Response(status_code=403)
+        svid_cookie_name = "_rta_svid_" + "".join(
+            c for c in batch.site_id if c.isalnum() or c == "_"
+        )
+        gone.delete_cookie(
+            key=svid_cookie_name,
+            path="/",
+            secure=True,
+            httponly=True,
+            samesite="none",
+        )
+        return gone
     if tracking_enabled is False:
         # Tracking paused for this site — silently drop the events (same pattern
         # as the bot filter above). Pixel stays installed; no error surfaced.
@@ -227,7 +263,7 @@ async def _process_signal_events(
     Upserts into visitor_emails so the identity resolver can use them in the
     pre-waterfall check instead of burning IP-resolution credits.
     """
-    from sqlalchemy import update
+    from sqlalchemy import select, update
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from apps.api.models.visitor import Visitor
     from apps.api.models.visitor_email import VisitorEmail
@@ -336,6 +372,46 @@ async def _process_signal_events(
                         visitor_id=batch.visitor_id[:8],
                         email_domain=decoded_email.split("@")[-1],
                     )
+
+    # Campaign click attribution: campaign links carry _tp=<touchpoint uuid>
+    # next to _bid. Stamp clicked_at (and opened_at — a click proves an open) on
+    # those touchpoints, scoped to this site's campaigns so a forged or foreign
+    # _tp is a no-op. Collected across ALL events (utm_identify + pageview carry
+    # the landing URL), independent of email validity.
+    tp_ids = {tid for tid in (_tp_from_url(e.url) for e in batch.events) if tid}
+    if tp_ids:
+        from apps.api.models.campaign import Campaign, CampaignTouchpoint
+
+        try:
+            now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+            site_campaign_ids = select(Campaign.id).where(Campaign.site_id == batch.site_id)
+            clicked = await db.execute(
+                update(CampaignTouchpoint)
+                .where(
+                    CampaignTouchpoint.id.in_(tp_ids),
+                    CampaignTouchpoint.campaign_id.in_(site_campaign_ids),
+                    CampaignTouchpoint.clicked_at.is_(None),
+                )
+                .values(clicked_at=now_naive)
+            )
+            await db.execute(
+                update(CampaignTouchpoint)
+                .where(
+                    CampaignTouchpoint.id.in_(tp_ids),
+                    CampaignTouchpoint.campaign_id.in_(site_campaign_ids),
+                    CampaignTouchpoint.opened_at.is_(None),
+                )
+                .values(opened_at=now_naive)
+            )
+            if clicked.rowcount:
+                logger.info(
+                    "campaign_click_tracked",
+                    site_id=batch.site_id,
+                    touchpoints=clicked.rowcount,
+                )
+            needs_commit = True
+        except Exception as exc:
+            logger.warning("campaign_click_track_failed", error=str(exc))
 
     if not emails_to_upsert:
         if needs_commit:

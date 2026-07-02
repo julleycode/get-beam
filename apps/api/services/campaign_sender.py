@@ -16,6 +16,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.config import settings
 from apps.api.models.campaign import Campaign, CampaignTouchpoint
 from apps.api.models.segment import SegmentMember
 from apps.api.models.visitor import IdentifiedVisitor
@@ -137,28 +138,46 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
 
         subject = _personalize(subject_tpl, iv.full_name)
         body_html = _personalize(body_tpl, iv.full_name).replace("\n", "<br/>")
+
+        # Create the touchpoint BEFORE sending so its id can ride in the email:
+        # the open pixel (/o/{id}) stamps opened_at, and _tp on decorated links
+        # lets the site pixel stamp clicked_at. Flush assigns the UUID client-side.
+        tp_row = CampaignTouchpoint(
+            campaign_id=campaign.id,
+            visitor_id=vid,
+            channel="email",
+            touchpoint_order=order,
+            status="pending",
+            content={"subject": subject},
+        )
+        db.add(tp_row)
+        await db.flush()
+
         # Deterministic click→identity: stamp the recipient's _bid on links to
         # their own site so the click resolves them for free (own-data, no provider).
-        body_html = decorate_links(body_html, iv.email, site_host)
+        body_html = decorate_links(body_html, iv.email, site_host, touchpoint_id=str(tp_row.id))
+        # Open-tracking pixel (overcounts under Apple MPP; clicks are the honest signal).
+        body_html += (
+            f'<img src="{settings.api_base_url}/o/{tp_row.id}"'
+            ' width="1" height="1" alt="" style="display:none;max-height:1px;">'
+        )
         try:
             await sender.send(to_email=iv.email, subject=subject, body_html=body_html)
         except Exception as exc:
             logger.warning("campaign_email_failed", visitor_id=vid[:8], error=str(exc))
+            # Discard the pending touchpoint — per-iteration commits mean the
+            # rollback can only drop this row. rollback() expires ALL attached
+            # objects (even with expire_on_commit=False), so refresh campaign or
+            # the next loop iteration's campaign.site_id access would raise
+            # MissingGreenlet (sync IO on an expired async object).
+            await db.rollback()
+            await db.refresh(campaign)
             summary["failed"] += 1
             continue
 
-        db.add(
-            CampaignTouchpoint(
-                campaign_id=campaign.id,
-                visitor_id=vid,
-                channel="email",
-                touchpoint_order=order,
-                status="sent",
-                content={"subject": subject},
-                # Naive UTC — CampaignTouchpoint.sent_at is a naive column.
-                sent_at=datetime.now(timezone.utc).replace(tzinfo=None),
-            )
-        )
+        tp_row.status = "sent"
+        # Naive UTC — CampaignTouchpoint.sent_at is a naive column.
+        tp_row.sent_at = datetime.now(timezone.utc).replace(tzinfo=None)
         await db.commit()
         summary["sent"] += 1
 
