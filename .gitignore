@@ -32,6 +32,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Redis dump (local dev)
+dump.rdb
+
 # GeoIP
 *.mmdb
 
