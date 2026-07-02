@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.campaign import Campaign, CampaignTouchpoint
 from apps.api.models.database import get_db
-from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.event import Event
 from apps.api.models.segment import Segment, SegmentMember
 from apps.api.models.social_account import SocialAccount
@@ -23,12 +22,12 @@ from apps.api.schemas.campaigns import (
     ReturnedVisitor,
 )
 from apps.api.agents.campaign_planner import plan_campaign
+from apps.api.agents.segmenter import build_visitor_profiles
 from apps.api.services.campaign_sender import (
     _first_email_touchpoint,
     _personalize,
     send_campaign_emails,
 )
-from apps.api.services.content_reader import build_recent_content
 from apps.api.services.email_rate_limiter import check_and_reserve_email
 from apps.api.services.email_sender import EmailSender
 from apps.api.services.pii import mask_email
@@ -90,36 +89,18 @@ async def create_campaign_from_segment(
     profiles: list[dict] = []
     if visitor_ids:
         visitors_result = await db.execute(
-            select(Visitor).where(Visitor.visitor_id.in_(visitor_ids))
-        )
-        # Batch-fetch enrichment profiles for recent-content personalization
-        # (social_context lives on EnrichmentProfile, not Visitor).
-        enrich_result = await db.execute(
-            select(EnrichmentProfile).where(
-                EnrichmentProfile.site_id == site_id,
-                EnrichmentProfile.visitor_id.in_(visitor_ids),
+            select(Visitor).where(
+                Visitor.site_id == site_id,
+                Visitor.visitor_id.in_(visitor_ids),
             )
         )
-        enrich_map = {ep.visitor_id: ep for ep in enrich_result.scalars().all()}
-
-        for v in visitors_result.scalars().all():
-            profile: dict = {
-                "visitor_id": v.visitor_id,
-                "email": v.email,
-                "full_name": v.full_name,
-                "job_title": v.job_title,
-                "company_name": v.company_name,
-                "industry": v.industry,
-                "linkedin_url": v.linkedin_url,
-                "twitter_handle": v.twitter_handle,
-                "intent_score": v.intent_score,
-            }
-            enriched = enrich_map.get(v.visitor_id)
-            if enriched:
-                recent = build_recent_content(enriched.social_context)
-                if recent:
-                    profile["recent_content"] = recent
-            profiles.append(profile)
+        # Identity fields (email, name) live on IdentifiedVisitor and enrichment
+        # fields (job, company, socials, recent content) on EnrichmentProfile —
+        # NOT on Visitor. build_visitor_profiles joins all three correctly; it's
+        # the same builder the auto-segmentation path uses.
+        profiles = await build_visitor_profiles(
+            db, site_id, list(visitors_result.scalars().all())
+        )
 
     # Get connected social accounts for this user
     accts_result = await db.execute(
