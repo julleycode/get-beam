@@ -257,6 +257,9 @@ export default function VisitorDetailPage() {
   // Recent social posts by this visitor, pulled from the EasyEngage feed
   // (source=visitors) and matched on their Twitter handle. null = not loaded.
   const [posts, setPosts] = useState<SocialPost[] | null>(null);
+  // Recent LinkedIn posts for this visitor, pulled from the feed (source=visitors)
+  // and matched on their LinkedIn vanity slug. null = not loaded.
+  const [liPosts, setLiPosts] = useState<SocialPost[] | null>(null);
 
   useEffect(() => {
     if (!siteId || !visitorId) return;
@@ -288,6 +291,34 @@ export default function VisitorDetailPage() {
       cancelled = true;
     };
   }, [handle]);
+
+  const liUrl = visitor?.linkedin_url;
+  useEffect(() => {
+    if (!liUrl) return;
+    const m = liUrl.match(/\/in\/([^/?#]+)/);
+    const vanity = (m?.[1] || "").toLowerCase();
+    if (!vanity) return;
+    let cancelled = false;
+    api
+      .getFeed(1, undefined, undefined, undefined, "visitors")
+      .then((res) => {
+        if (cancelled) return;
+        const mine = res.posts
+          .filter(
+            (p) =>
+              String(p.platform).toLowerCase() === "linkedin" &&
+              (p.author_username ?? "").toLowerCase() === vanity
+          )
+          .slice(0, 4);
+        setLiPosts(mine);
+      })
+      .catch(() => {
+        if (!cancelled) setLiPosts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [liUrl]);
 
   async function handleResolveSocial(force = false) {
     if (!siteId || !visitorId) return;
@@ -690,6 +721,50 @@ export default function VisitorDetailPage() {
                   ))}
                 </div>
               )}
+            </Section>
+          )}
+
+          {liPosts && liPosts.length > 0 && (
+            <Section
+              title="Recent LinkedIn posts"
+              icon={Briefcase}
+              action={
+                visitor.linkedin_url ? (
+                  <a
+                    href={visitor.linkedin_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-muted-foreground transition hover:text-primary"
+                  >
+                    View profile
+                  </a>
+                ) : undefined
+              }
+            >
+              <div className="space-y-3">
+                {liPosts.map((p) => (
+                  <a
+                    key={p.id}
+                    href={p.post_url ?? visitor.linkedin_url ?? "#"}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block rounded-lg border border-border/60 p-3 transition hover:border-primary/40"
+                  >
+                    <div className="mb-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">{p.author_name}</span>
+                      <span>{timeAgo(p.posted_at)}</span>
+                    </div>
+                    {p.content && (
+                      <p className="line-clamp-4 whitespace-pre-wrap text-sm leading-relaxed">
+                        {p.content}
+                      </p>
+                    )}
+                    <span className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary">
+                      <ExternalLink className="h-3 w-3 opacity-60" /> View on LinkedIn
+                    </span>
+                  </a>
+                ))}
+              </div>
             </Section>
           )}
 
