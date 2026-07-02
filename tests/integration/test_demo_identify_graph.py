@@ -1,10 +1,19 @@
-"""POST /api/v1/demo/identify — known-device path.
+"""POST /api/v1/demo/identify — fingerprint paths must not leak graph PII.
 
-When a fingerprint was already identified on ANY Beam site (a row in the
-cross-customer beam_identity_graph), the demo must return that real person
-immediately — not punt to "drop your work email". This is the "detect for
-real" behavior: device-level should only ask for email when the device is
-genuinely unknown.
+History: the demo originally returned the real person from the cross-customer
+beam_identity_graph when the client-supplied fingerprint matched (b3a41d6).
+That was a cross-tenant PII leak — an unauthenticated caller could replay any
+fingerprint and receive another tenant's stored name + email — and was removed
+in the Phase 6 security fix (7e798ab). The demo now keeps only the
+device-level fingerprint *proof* ("the pixel saw this device") and the
+resolve-the-caller's-own-IP waterfall.
+
+These tests pin the secure behavior:
+- Known device (Visitor row + graph node for the same fingerprint) gets at
+  most a device-level match — the graph identity is never echoed.
+- Unknown device never gets a fabricated person.
+
+See tests/integration/test_demo_security.py for the node-only leak test.
 """
 
 from datetime import datetime
@@ -21,7 +30,9 @@ HEADERS = {"x-forwarded-for": "1.2.3.4"}
 
 
 @pytest.mark.asyncio
-async def test_identify_returns_known_person_from_fingerprint(test_db, test_client):
+async def test_identify_known_device_matches_without_leaking_graph_pii(
+    test_db, test_client
+):
     now = datetime.utcnow()
     test_db.add(
         Visitor(
@@ -32,6 +43,8 @@ async def test_identify_returns_known_person_from_fingerprint(test_db, test_clie
             fingerprint=FP,
         )
     )
+    # Even with a graph identity stored for this exact fingerprint, the demo
+    # must not return it — that path was the cross-tenant leak.
     test_db.add(
         BeamIdentityNode(
             fingerprint=FP,
@@ -49,11 +62,17 @@ async def test_identify_returns_known_person_from_fingerprint(test_db, test_clie
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["matched"] is True
-    assert data["level"] == "person"
-    assert data["email"] == "jordan@acme.com"
-    assert data["full_name"] == "Jordan Lee"
-    assert "beam_identity_graph" in data["providers_tried"]
+    # Fingerprint proof: the pixel saw this device.
+    assert data["fingerprint_matched"] is True
+    assert "fingerprint" in data["providers_tried"]
+    # But never the stored graph identity.
+    assert data.get("email") != "jordan@acme.com"
+    assert data.get("full_name") != "Jordan Lee"
+    assert data.get("resolution_provider") != "beam_identity_graph"
+    assert "beam_identity_graph" not in data["providers_tried"]
+    # With no provider keys configured the match caps at device level.
+    if data.get("matched"):
+        assert data["level"] in ("device", "company")
 
 
 @pytest.mark.asyncio

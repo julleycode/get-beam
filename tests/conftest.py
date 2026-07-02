@@ -111,6 +111,25 @@ async def test_client(test_engine) -> AsyncGenerator[AsyncClient, None]:
     app.dependency_overrides[get_db] = override_get_db
     limiter.enabled = False
 
+    # The /demo budget is a raw Redis daily counter (demo:budget:{day}) on the
+    # real test Redis — it survives across pytest runs, so after ~50 demo
+    # requests in one day every /demo endpoint starts 429ing ("Demo limit
+    # reached"). Reset it here; fail open like _enforce_demo_budget does.
+    try:
+        from redis.asyncio import Redis
+
+        from apps.api.config import settings as _settings
+
+        _r = Redis.from_url(_settings.redis_url)
+        try:
+            _keys = await _r.keys("demo:budget:*")
+            if _keys:
+                await _r.delete(*_keys)
+        finally:
+            await _r.aclose()
+    except Exception:
+        pass
+
     import apps.api.routers.demo as demo_mod
     import apps.api.routers.events as events_mod
     # The visitors background jobs (which use async_session directly) live in
