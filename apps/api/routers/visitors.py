@@ -430,6 +430,31 @@ async def cleanup_test_visitors(
     )
     events_deleted = event_del.rowcount
 
+    # Delete the visitors' satellite rows too (identity, enrichment, captured
+    # emails) — deleting only Visitor used to leave these behind as orphans
+    # that no page can ever render (2026-07-02: 8 orphan enrichment_profiles
+    # found on prod from exactly this gap).
+    from apps.api.models.visitor_email import VisitorEmail
+
+    await db.execute(
+        IdentifiedVisitor.__table__.delete().where(
+            IdentifiedVisitor.site_id == site_id,
+            IdentifiedVisitor.visitor_id.in_(test_vids),
+        )
+    )
+    await db.execute(
+        EnrichmentProfile.__table__.delete().where(
+            EnrichmentProfile.site_id == site_id,
+            EnrichmentProfile.visitor_id.in_(test_vids),
+        )
+    )
+    await db.execute(
+        VisitorEmail.__table__.delete().where(
+            VisitorEmail.site_id == site_id,
+            VisitorEmail.visitor_id.in_(test_vids),
+        )
+    )
+
     # Delete the visitors
     visitor_del = await db.execute(
         Visitor.__table__.delete().where(
