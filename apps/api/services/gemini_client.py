@@ -43,9 +43,17 @@ async def gemini_generate(
         raise GeminiError("GEMINI_API_KEY is not configured")
 
     model = model or settings.gemini_model or DEFAULT_MODEL
+    gen_config: dict = {"maxOutputTokens": max_output_tokens}
+    if not grounding:
+        # gemini-2.5-flash enables "thinking" by default. For deterministic JSON
+        # tasks (segmentation, campaign planning) thinking adds ~60-100s latency
+        # (blowing the client timeout) and consumes the output-token budget
+        # (empty response -> JSON parse failure). Disable it here; grounded calls
+        # (deep research) keep thinking because they genuinely benefit from it.
+        gen_config["thinkingConfig"] = {"thinkingBudget": 0}
     body: dict = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"maxOutputTokens": max_output_tokens},
+        "generationConfig": gen_config,
     }
     if grounding:
         body["tools"] = [{"google_search": {}}]
@@ -55,7 +63,7 @@ async def gemini_generate(
 
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(url, params={"key": settings.gemini_api_key}, json=body)
         except (httpx.TimeoutException, httpx.TransportError) as e:
             last_exc = e
