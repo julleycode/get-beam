@@ -306,6 +306,11 @@ class ApiClient {
     return this.request<Site>(`/api/v1/sites/${siteId}`);
   }
 
+  // Permanently delete a site and ALL of its data. Destructive + irreversible.
+  async deleteSite(siteId: string) {
+    return this.request<void>(`/api/v1/sites/${siteId}`, { method: "DELETE" });
+  }
+
   // Toggle the per-site auto-identify sweep on/off.
   async setAutoIdentify(siteId: string, enabled: boolean) {
     return this.request<Site>(`/api/v1/sites/${siteId}`, {

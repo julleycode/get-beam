@@ -112,6 +112,92 @@ async def get_site(
     return SiteOut.model_validate(site)
 
 
+@router.delete("/{site_id}", status_code=204)
+async def delete_site(
+    site_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Permanently delete a site and ALL of its data.
+
+    DESTRUCTIVE + IRREVERSIBLE. Cascades across every site-scoped table before
+    removing the site row itself. Owner-scoped (404 for non-owners so we never
+    leak which site_ids exist). There is no soft-delete / undo.
+
+    Ordering matters: grandchildren keyed only by a parent id (e.g.
+    campaign_touchpoints → campaigns.id) are deleted BEFORE their parent so no
+    orphan/FK issue can occur. `blog_posts.site_id` is a real FK with
+    ondelete="SET NULL", so those rows are nulled by the DB when the site row
+    goes — we never hard-delete blog posts. `events` live in PostgreSQL
+    (ClickHouse is dormant at MVP scale), so the raw-event delete below is the
+    complete purge. User-owned tables (social_accounts, drafts, messages, etc.
+    keyed by user_id) belong to the account, not the site, and are left intact.
+
+    The whole cascade runs inside one transaction: any mid-way failure rolls the
+    entire delete back, so a site is never left half-deleted.
+    """
+    from sqlalchemy import text as sql_text
+
+    site = await verify_site_access(db, site_id, user)
+
+    # Grandchildren first (no site_id of their own; keyed via a parent id), then
+    # every table with a direct site_id / source_site_id column, then the site
+    # row itself. Site row is deleted last so blog_posts FK SET NULL fires cleanly.
+    deleted: dict[str, int] = {}
+    try:
+        # Grandchild: campaign_touchpoints has no site_id — scope via its campaigns.
+        r = await db.execute(
+            sql_text(
+                "DELETE FROM campaign_touchpoints WHERE campaign_id IN "
+                "(SELECT id FROM campaigns WHERE site_id = :sid)"
+            ),
+            {"sid": site_id},
+        )
+        deleted["campaign_touchpoints"] = r.rowcount
+
+        # Direct site_id columns (String site_id).
+        for table in (
+            "events",
+            "resolution_logs",
+            "identified_visitors",
+            "enrichment_profiles",
+            "visitor_emails",
+            "segment_members",
+            "visitors",
+            "segments",
+            "campaigns",
+            "companies",
+            "known_contacts",
+            "crm_connections",
+            "engagement_attributions",
+            "api_usage_logs",
+        ):
+            r = await db.execute(
+                sql_text(f"DELETE FROM {table} WHERE site_id = :sid"),
+                {"sid": site_id},
+            )
+            deleted[table] = r.rowcount
+
+        # beam_identity_graph references the site via source_site_id.
+        r = await db.execute(
+            sql_text("DELETE FROM beam_identity_graph WHERE source_site_id = :sid"),
+            {"sid": site_id},
+        )
+        deleted["beam_identity_graph"] = r.rowcount
+
+        # The site row last (blog_posts.site_id FK -> SET NULL fires here).
+        await db.delete(site)
+
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logger.error("site_delete_failed", site_id=site_id, error=str(exc))
+        raise HTTPException(status_code=500, detail="Failed to delete site")
+
+    logger.info("site_deleted", site_id=site_id, deleted=deleted)
+    return Response(status_code=204)
+
+
 @router.patch("/{site_id}", response_model=SiteOut)
 async def update_site(
     site_id: str,

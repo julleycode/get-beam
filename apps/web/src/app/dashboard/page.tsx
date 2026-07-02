@@ -4,7 +4,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Users, FileText, Megaphone, AtSign } from "lucide-react";
+import { RefreshCw, Trash2, Users, FileText, Megaphone, AtSign } from "lucide-react";
 import { api, Site } from "@/lib/api";
 import { SiteCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
@@ -16,6 +16,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { StatTile } from "@/components/stat-tile";
 import { AskAi } from "@/components/ask-ai";
 import { TodayActions } from "@/components/today-actions";
@@ -42,13 +50,39 @@ function OverviewSkeleton() {
   );
 }
 
-function SiteCard({ site }: { site: Site }) {
+function SiteCard({
+  site,
+  onDeleted,
+}: {
+  site: Site;
+  onDeleted: (siteId: string) => void;
+}) {
   // Local pixel status so a successful re-verify flips the card immediately
   // without refetching the whole site list.
   const [pixelVerified, setPixelVerified] = useState(site.pixel_verified);
   const [verifying, setVerifying] = useState(false);
   const [verifyMessage, setVerifyMessage] = useState<string | null>(null);
   const [shotFailed, setShotFailed] = useState(false);
+
+  // Delete-site confirm dialog state.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleDelete() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.deleteSite(site.site_id);
+      // Card removed by the parent (updates local list + drops stale caches).
+      onDeleted(site.site_id);
+    } catch (err) {
+      setDeleteError(
+        err instanceof Error ? err.message : "Couldn't delete the site — try again."
+      );
+      setDeleting(false);
+    }
+  }
 
   // Free, key-less landing-page screenshot (WordPress mShots). First hit may
   // return a "generating" placeholder; on error we fall back to a gradient.
@@ -150,7 +184,52 @@ function SiteCard({ site }: { site: Site }) {
             <StatTile label="Enriched" value={stats.enriched} tone="success" />
           </div>
         )}
+
+        {/* Delete site — visible but low-emphasis so it isn't a mis-click magnet. */}
+        <div className="flex justify-end border-t pt-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setDeleteError(null);
+              setConfirmOpen(true);
+            }}
+            className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-destructive"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete
+          </Button>
+        </div>
       </CardContent>
+
+      {/* Confirm dialog — destructive, no undo. */}
+      <Dialog open={confirmOpen} onOpenChange={(open) => !deleting && setConfirmOpen(open)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete this site?</DialogTitle>
+            <DialogDescription>
+              This permanently deletes <span className="font-medium text-foreground">{site.name}</span>{" "}
+              and all of its data — every visitor, identity, segment, campaign, and event.
+              This can&apos;t be undone.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteError && (
+            <p className="text-sm text-destructive">{deleteError}</p>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmOpen(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? "Deleting…" : "Delete"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
@@ -240,6 +319,7 @@ function DashboardContent({
 }
 
 export default function DashboardPage() {
+  const qc = useQueryClient();
   const [sites, setSites] = useState<Site[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -257,6 +337,15 @@ export default function DashboardPage() {
     setSites(s);
     setLoaded(true);
   })[0];
+
+  // Drop a just-deleted site from the visible list and evict its stale caches
+  // (the dashboard holds sites in local state, seeded from getDashboardOverview).
+  const handleSiteDeleted = (siteId: string) => {
+    setSites((prev) => prev.filter((s) => s.site_id !== siteId));
+    qc.removeQueries({ queryKey: ["visitor-stats", siteId] });
+    qc.invalidateQueries({ queryKey: ["dashboard-overview"] });
+    qc.invalidateQueries({ queryKey: ["sites"] });
+  };
 
   const content = (
     <>
@@ -316,7 +405,7 @@ export default function DashboardPage() {
             </div>
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {(showAllSites ? sites : sites.slice(0, 3)).map((site) => (
-                <SiteCard key={site.site_id} site={site} />
+                <SiteCard key={site.site_id} site={site} onDeleted={handleSiteDeleted} />
               ))}
             </div>
           </div>
