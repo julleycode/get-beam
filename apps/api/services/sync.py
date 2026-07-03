@@ -51,12 +51,25 @@ def _decrypt_access_token(account: SocialAccount) -> str | None:
 
 
 async def _get_fresh_token(db: AsyncSession, account: SocialAccount) -> str | None:
-    """Get a valid access token, refreshing if expired."""
+    """Get a valid access token, refreshing if expired.
+
+    Returns None when the token is known-dead (can't refresh) so the caller
+    SKIPS the sync instead of hammering the platform API with an expired token
+    (guaranteed 401s that silently burn the rate budget). Other/transient
+    refresh errors fall back to the stored token, which may still work.
+    """
     if not account.access_token:
         return None
     try:
-        from apps.api.services.sender import _refresh_if_expired
+        from apps.api.services.sender import (
+            SocialTokenExpiredError,
+            _refresh_if_expired,
+        )
+
         return await _refresh_if_expired(db, account)
+    except SocialTokenExpiredError:
+        logger.warning("sync_token_expired_needs_reconnect", account=account.username)
+        return None
     except Exception:
         logger.warning("token_refresh_failed_in_sync", account=account.username)
         return _decrypt_access_token(account)

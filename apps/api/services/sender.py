@@ -15,6 +15,24 @@ from apps.api.services.platforms import get_platform_service
 logger = structlog.get_logger()
 
 
+class SocialTokenExpiredError(Exception):
+    """Raised when a social account's token is expired and cannot be refreshed.
+
+    Distinct from a generic send failure: it means the user must RECONNECT the
+    account (re-run OAuth) — retrying the send will never succeed. Callers should
+    surface `str(self)` to the user as an actionable message rather than the
+    vague "couldn't be sent" error.
+    """
+
+    def __init__(self, platform: str, username: str) -> None:
+        self.platform = platform
+        self.username = username
+        super().__init__(
+            f"Your {platform} session for @{username} has expired. "
+            f"Reconnect the account in Social Accounts and try again."
+        )
+
+
 def _http_error_detail(exc: Exception) -> str:
     """Best-effort HTTP error detail string from an exception."""
     if hasattr(exc, "response"):
@@ -28,52 +46,54 @@ def _http_error_detail(exc: Exception) -> str:
 async def _refresh_if_expired(
     db: AsyncSession, account: SocialAccount
 ) -> str:
-    """Check if the access token is expired and refresh if possible.
+    """Return a usable plaintext access token, refreshing if needed.
 
-    Returns the (possibly refreshed) plaintext access token.
+    Raises SocialTokenExpiredError when the token is known-expired and cannot be
+    refreshed (no refresh token, or the refresh call failed). Previously this
+    swallowed refresh failures and returned the *expired* token, which then 401s
+    at the platform API and records the draft as a vague `failed` — hiding the
+    real fix (reconnect the account). See the 2026-07-03 incident writeup.
+
+    Note on concurrency: callers MUST load `account` with `SELECT ... FOR UPDATE`
+    so two simultaneous sends for the same account serialize here. Platform
+    refresh tokens (e.g. Twitter/X) are single-use and rotate on every refresh;
+    without the row lock, two sends read the same refresh token, both refresh,
+    only one rotation persists, and the loser's stored refresh token goes stale.
     """
     access_token = decrypt_token(account.access_token)
-
     now = datetime.now(timezone.utc)
 
-    # If expiry is set and token is still valid (with 5-minute buffer), use it
+    # Token has a known expiry that's still in the future — use it as-is.
     if account.token_expires_at and account.token_expires_at > now:
         return access_token
 
-    # If no expiry is set, check if the account is old enough that the token
-    # has likely expired (Twitter tokens last ~2 hours).
+    # `is_expired` = we are CONFIDENT the token is dead (expiry set and in the
+    # past). A null expiry means "unknown" — we still try to refresh, but we do
+    # NOT hard-fail on it, so accounts with valid-but-undated tokens keep working.
+    is_expired = account.token_expires_at is not None and account.token_expires_at <= now
+
     if not account.token_expires_at:
-        # If we don't know when it expires, proactively refresh if possible
         logger.info(
             "token_expiry_unknown_refreshing",
             account_id=str(account.id),
             platform=account.platform.value,
         )
 
-    # Token is expired — try to refresh
     refresh_token = decrypt_token(account.refresh_token) if account.refresh_token else None
     if not refresh_token:
-        logger.warning(
-            "token_expired_no_refresh",
-            account_id=str(account.id),
-            platform=account.platform.value,
-        )
-        return access_token  # Return expired token, will fail at the API level
+        if is_expired:
+            logger.warning(
+                "token_expired_no_refresh",
+                account_id=str(account.id),
+                platform=account.platform.value,
+            )
+            raise SocialTokenExpiredError(account.platform.value, account.username)
+        # Unknown expiry, no refresh token — let the API decide.
+        return access_token
 
     service = get_platform_service(account.platform)
     try:
         new_tokens = await service.refresh_tokens(refresh_token)
-        account.access_token = encrypt_token(new_tokens.access_token)
-        if new_tokens.refresh_token:
-            account.refresh_token = encrypt_token(new_tokens.refresh_token)
-        account.token_expires_at = new_tokens.expires_at
-        await db.commit()
-        logger.info(
-            "token_refreshed",
-            account_id=str(account.id),
-            platform=account.platform.value,
-        )
-        return new_tokens.access_token
     except Exception as exc:
         error_detail = _http_error_detail(exc)
         logger.exception(
@@ -82,13 +102,39 @@ async def _refresh_if_expired(
             platform=account.platform.value,
             error_detail=error_detail,
         )
-        return access_token  # Fall back to expired token
+        if is_expired:
+            raise SocialTokenExpiredError(account.platform.value, account.username) from exc
+        # Unknown expiry and refresh failed — fall back to the existing token.
+        return access_token
+
+    # Persist the rotated tokens, then commit — which also releases the row's
+    # FOR UPDATE lock. A concurrent send that was BLOCKED on its own
+    # `SELECT ... FOR UPDATE` for this account now unblocks and RE-READS the row
+    # (READ COMMITTED), so it sees the freshly-rotated refresh token and the new
+    # future expiry. Its expiry check (which always runs after the locked read)
+    # then returns early without a second refresh — so the single-use refresh
+    # token is never consumed twice. Correctness relies on expiry being
+    # evaluated only after the FOR UPDATE read; keep it that way.
+    account.access_token = encrypt_token(new_tokens.access_token)
+    if new_tokens.refresh_token:
+        account.refresh_token = encrypt_token(new_tokens.refresh_token)
+    account.token_expires_at = new_tokens.expires_at
+    await db.commit()
+    logger.info(
+        "token_refreshed",
+        account_id=str(account.id),
+        platform=account.platform.value,
+    )
+    return new_tokens.access_token
 
 
 async def send_draft(db: AsyncSession, draft: Draft) -> bool:
     """Send an approved draft to the platform.
 
-    Returns True if sent successfully, False otherwise.
+    Returns True if sent successfully, False on an ordinary send failure.
+    Raises SocialTokenExpiredError when the account must be reconnected — the
+    draft is marked `failed` first, then the error propagates so the caller can
+    show the user an actionable "reconnect" message.
     """
     if draft.status != DraftStatus.approved:
         logger.warning("send_draft_not_approved", draft_id=str(draft.id))
@@ -107,11 +153,13 @@ async def send_draft(db: AsyncSession, draft: Draft) -> bool:
             await db.commit()
             return False
 
-        # Get the social account for access token
+        # Load the social account FOR UPDATE so concurrent sends for the same
+        # account serialize through the token refresh below (single-use refresh
+        # token race — see _refresh_if_expired). On SQLite the clause is a no-op.
         result = await db.execute(
-            select(SocialAccount).where(
-                SocialAccount.id == post.social_account_id
-            )
+            select(SocialAccount)
+            .where(SocialAccount.id == post.social_account_id)
+            .with_for_update()
         )
         account = result.scalar_one_or_none()
         if not account:
@@ -120,8 +168,15 @@ async def send_draft(db: AsyncSession, draft: Draft) -> bool:
             await db.commit()
             return False
 
-        # Refresh token if expired before attempting to send
-        access_token = await _refresh_if_expired(db, account)
+        # Refresh token if expired before attempting to send. A dead-token
+        # situation raises SocialTokenExpiredError: mark the draft failed, then
+        # re-raise so the caller surfaces a "reconnect" message.
+        try:
+            access_token = await _refresh_if_expired(db, account)
+        except SocialTokenExpiredError:
+            draft.status = DraftStatus.failed
+            await db.commit()
+            raise
 
         service = get_platform_service(draft.platform)
         try:

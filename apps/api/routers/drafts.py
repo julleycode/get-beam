@@ -35,7 +35,7 @@ from apps.api.services.ai_reply import (
     generate_multi_drafts,
     _count_voice_examples,
 )
-from apps.api.services.sender import send_draft
+from apps.api.services.sender import SocialTokenExpiredError, send_draft
 
 router = APIRouter(tags=["drafts"])
 
@@ -272,8 +272,13 @@ async def approve_draft(
     # Save voice example for GBrain learning
     await _save_voice_example(db, draft)
 
-    # Send immediately
-    success = await send_draft(db, draft)
+    # Send immediately. A dead token raises SocialTokenExpiredError (the draft
+    # is already marked failed inside send_draft) — surface the actionable
+    # "reconnect" message instead of the generic send-failure error.
+    try:
+        success = await send_draft(db, draft)
+    except SocialTokenExpiredError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
     await db.refresh(draft)
 
     if success:
