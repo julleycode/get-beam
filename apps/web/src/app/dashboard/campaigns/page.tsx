@@ -42,17 +42,70 @@ export default function CampaignsPage() {
   const [testCampaign, setTestCampaign] = useState<{ id: string; name: string } | null>(null);
   const [testEmail, setTestEmail] = useState("");
   const [testSending, setTestSending] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(
+    null
+  );
+  const [deleting, setDeleting] = useState(false);
   const queryClient = useQueryClient();
 
   const { data, isLoading } = useQuery({
-    queryKey: ["campaigns", siteId],
-    queryFn: () => api.listCampaigns(siteId),
+    queryKey: ["campaigns", siteId, showArchived],
+    queryFn: () => api.listCampaigns(siteId, showArchived),
     enabled: !!siteId,
   });
   const campaigns = data?.campaigns ?? [];
 
   function reload() {
     queryClient.invalidateQueries({ queryKey: ["campaigns", siteId] });
+  }
+
+  async function handleArchive(campaignId: string, name: string) {
+    setActionError(null);
+    setSendResult(null);
+    setBusyId(campaignId);
+    try {
+      await api.archiveCampaign(siteId, campaignId);
+      setSendResult(`"${name}" archived.`);
+      reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Archive failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleUnarchive(campaignId: string, name: string) {
+    setActionError(null);
+    setSendResult(null);
+    setBusyId(campaignId);
+    try {
+      await api.unarchiveCampaign(siteId, campaignId);
+      setSendResult(`"${name}" restored to draft.`);
+      reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Unarchive failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleDelete() {
+    if (!confirmDelete) return;
+    setActionError(null);
+    setSendResult(null);
+    setDeleting(true);
+    try {
+      await api.deleteCampaign(siteId, confirmDelete.id);
+      setSendResult(`"${confirmDelete.name}" deleted.`);
+      setConfirmDelete(null);
+      reload();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setDeleting(false);
+    }
   }
 
   async function handleStatusChange(campaignId: string, newStatus: string) {
@@ -128,6 +181,17 @@ export default function CampaignsPage() {
         <p className="mb-3 text-sm rounded-md bg-secondary px-3 py-2">{sendResult}</p>
       )}
 
+      {siteId && (
+        <label className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(e) => setShowArchived(e.target.checked)}
+          />
+          Show archived
+        </label>
+      )}
+
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view campaigns.</p>
       ) : isLoading ? (
@@ -164,46 +228,76 @@ export default function CampaignsPage() {
                   {new Date(c.created_at).toLocaleDateString()}
                 </TableCell>
                 <TableCell>
-                  <div className="flex gap-2">
-                    {c.status !== "completed" && (
-                      <Button
-                        size="sm"
-                        disabled={sendingId !== null}
-                        onClick={() =>
-                          setConfirmCampaign({
-                            id: c.id,
-                            name: c.name,
-                            isEmail: c.campaign_type === "email",
-                          })
-                        }
-                      >
-                        {sendingId === c.id
-                          ? "Starting..."
-                          : c.status === "active"
-                            ? "Send new"
-                            : "Start beam"}
-                      </Button>
-                    )}
-                    {c.status === "active" && (
+                  <div className="flex flex-wrap gap-2">
+                    {c.status === "archived" ? (
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={sendingId === c.id}
-                        onClick={() => handleStatusChange(c.id, "paused")}
+                        disabled={busyId === c.id}
+                        onClick={() => handleUnarchive(c.id, c.name)}
                       >
-                        Pause
+                        {busyId === c.id ? "Restoring..." : "Unarchive"}
                       </Button>
+                    ) : (
+                      <>
+                        {c.status !== "completed" && (
+                          <Button
+                            size="sm"
+                            disabled={sendingId !== null}
+                            onClick={() =>
+                              setConfirmCampaign({
+                                id: c.id,
+                                name: c.name,
+                                isEmail: c.campaign_type === "email",
+                              })
+                            }
+                          >
+                            {sendingId === c.id
+                              ? "Starting..."
+                              : c.status === "active"
+                                ? "Send new"
+                                : "Start beam"}
+                          </Button>
+                        )}
+                        {c.status === "active" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={sendingId === c.id}
+                            onClick={() => handleStatusChange(c.id, "paused")}
+                          >
+                            Pause
+                          </Button>
+                        )}
+                        {c.campaign_type === "email" && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={sendingId !== null}
+                            onClick={() => openTestDialog(c.id, c.name)}
+                          >
+                            Send test
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={busyId === c.id}
+                          onClick={() => handleArchive(c.id, c.name)}
+                        >
+                          {busyId === c.id ? "Archiving..." : "Archive"}
+                        </Button>
+                      </>
                     )}
-                    {c.campaign_type === "email" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={sendingId !== null}
-                        onClick={() => openTestDialog(c.id, c.name)}
-                      >
-                        Send test
-                      </Button>
-                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      disabled={busyId === c.id}
+                      onClick={() => setConfirmDelete({ id: c.id, name: c.name })}
+                    >
+                      Delete
+                    </Button>
                   </div>
                 </TableCell>
               </TableRow>
@@ -296,6 +390,36 @@ export default function CampaignsPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!confirmDelete}
+        onOpenChange={(o) => {
+          if (!o && !deleting) setConfirmDelete(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete &ldquo;{confirmDelete?.name}&rdquo;?</DialogTitle>
+            <DialogDescription>
+              This permanently deletes the campaign and its send/open/click
+              history. This cannot be undone. To keep it out of the way without
+              losing data, use Archive instead.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmDelete(null)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
+              {deleting ? "Deleting..." : "Delete"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

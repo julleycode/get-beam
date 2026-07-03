@@ -24,6 +24,7 @@ const STATUS_TONE: Record<string, Tone> = {
   active: "success",
   paused: "warning",
   completed: "info",
+  archived: "neutral",
   // billing
   trialing: "info",
   past_due: "warning",

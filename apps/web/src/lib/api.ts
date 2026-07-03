@@ -488,12 +488,36 @@ class ApiClient {
   }
 
   // Campaigns
-  async listCampaigns(siteId: string) {
-    return this.request<CampaignListResponse>(`/api/v1/campaigns/${siteId}`);
+  async listCampaigns(siteId: string, includeArchived = false) {
+    const qs = includeArchived ? "?include_archived=true" : "";
+    return this.request<CampaignListResponse>(`/api/v1/campaigns/${siteId}${qs}`);
   }
 
   async getCampaign(siteId: string, campaignId: string) {
     return this.request<Campaign>(`/api/v1/campaigns/${siteId}/${campaignId}`);
+  }
+
+  /** Hide a campaign from the default list (reversible via unarchiveCampaign). */
+  async archiveCampaign(siteId: string, campaignId: string) {
+    return this.request<Campaign>(
+      `/api/v1/campaigns/${siteId}/${campaignId}/archive`,
+      { method: "POST" }
+    );
+  }
+
+  /** Restore an archived campaign back to draft. */
+  async unarchiveCampaign(siteId: string, campaignId: string) {
+    return this.request<Campaign>(
+      `/api/v1/campaigns/${siteId}/${campaignId}/unarchive`,
+      { method: "POST" }
+    );
+  }
+
+  /** Permanently delete a campaign and its touchpoints. */
+  async deleteCampaign(siteId: string, campaignId: string) {
+    return this.request<void>(`/api/v1/campaigns/${siteId}/${campaignId}`, {
+      method: "DELETE",
+    });
   }
 
   async updateCampaignStatus(siteId: string, campaignId: string, status: string) {

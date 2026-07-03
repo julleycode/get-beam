@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.campaign import Campaign, CampaignTouchpoint
@@ -46,14 +46,18 @@ VALID_TRANSITIONS: dict[str, list[str]] = {
 @router.get("/{site_id}", response_model=CampaignListResponse)
 async def list_campaigns(
     site_id: str,
+    include_archived: bool = False,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CampaignListResponse:
     await verify_site_access(db, site_id, user)
 
-    result = await db.execute(
-        select(Campaign).where(Campaign.site_id == site_id).order_by(Campaign.created_at.desc())
-    )
+    query = select(Campaign).where(Campaign.site_id == site_id)
+    if not include_archived:
+        query = query.where(Campaign.status != "archived")
+    query = query.order_by(Campaign.created_at.desc())
+
+    result = await db.execute(query)
     campaigns = [CampaignOut.model_validate(c) for c in result.scalars().all()]
     return CampaignListResponse(campaigns=campaigns, total=len(campaigns))
 
@@ -313,6 +317,77 @@ async def update_campaign_status(
     return CampaignOut.model_validate(campaign)
 
 
+async def _get_campaign_or_404(
+    db: AsyncSession, site_id: str, campaign_id: str
+) -> Campaign:
+    result = await db.execute(
+        select(Campaign).where(Campaign.id == campaign_id, Campaign.site_id == site_id)
+    )
+    campaign = result.scalar_one_or_none()
+    if not campaign:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return campaign
+
+
+@router.post("/{site_id}/{campaign_id}/archive", response_model=CampaignOut)
+async def archive_campaign(
+    site_id: str,
+    campaign_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CampaignOut:
+    """Hide a campaign from the default list without deleting it. Reversible
+    via /unarchive. Allowed from any status."""
+    await verify_site_access(db, site_id, user)
+    campaign = await _get_campaign_or_404(db, site_id, campaign_id)
+
+    campaign.status = "archived"
+    await db.commit()
+    await db.refresh(campaign)
+    logger.info("campaign_archived", site_id=site_id, campaign_id=campaign_id)
+    return CampaignOut.model_validate(campaign)
+
+
+@router.post("/{site_id}/{campaign_id}/unarchive", response_model=CampaignOut)
+async def unarchive_campaign(
+    site_id: str,
+    campaign_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> CampaignOut:
+    """Restore an archived campaign back to draft."""
+    await verify_site_access(db, site_id, user)
+    campaign = await _get_campaign_or_404(db, site_id, campaign_id)
+
+    if campaign.status != "archived":
+        raise HTTPException(status_code=400, detail="Campaign is not archived")
+
+    campaign.status = "draft"
+    await db.commit()
+    await db.refresh(campaign)
+    logger.info("campaign_unarchived", site_id=site_id, campaign_id=campaign_id)
+    return CampaignOut.model_validate(campaign)
+
+
+@router.delete("/{site_id}/{campaign_id}", status_code=204)
+async def delete_campaign(
+    site_id: str,
+    campaign_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Permanently delete a campaign and its touchpoints (open/click history)."""
+    await verify_site_access(db, site_id, user)
+    campaign = await _get_campaign_or_404(db, site_id, campaign_id)
+
+    await db.execute(
+        delete(CampaignTouchpoint).where(CampaignTouchpoint.campaign_id == campaign.id)
+    )
+    await db.delete(campaign)
+    await db.commit()
+    logger.info("campaign_deleted", site_id=site_id, campaign_id=campaign_id)
+
+
 @router.post("/{site_id}/{campaign_id}/test-send")
 async def test_send_campaign(
     site_id: str,
@@ -347,10 +422,19 @@ async def test_send_campaign(
             detail="Hourly email cap reached for this site — try again later",
         )
 
-    subject = "[TEST] " + _personalize(touchpoint["subject"], "Alex Example")
+    # Sample recipient values so the preview renders fully (no raw
+    # {{placeholders}}); [Your Name] resolves to the admin running the test.
+    sample_name = "Alex Example"
+    sample_company = "Acme Inc"
+    sender_name = user.full_name or None
+    subject = "[TEST] " + _personalize(
+        touchpoint["subject"], sample_name, sample_company, sender_name
+    )
     # Links are NOT click-decorated here: a test click must not create
     # VisitorEmail rows or tracking state for the admin's own address.
-    body_html = _personalize(touchpoint["body"], "Alex Example").replace("\n", "<br/>")
+    body_html = _personalize(
+        touchpoint["body"], sample_name, sample_company, sender_name
+    ).replace("\n", "<br/>")
 
     sender = EmailSender()
     try:
