@@ -22,7 +22,9 @@ const PLANS = [
     yearly: 0,
     limit: "10 identified visitors/mo",
     features: [
-      "Core enrichment",
+      "See who they are — name, job, company",
+      "Their LinkedIn & Twitter profiles",
+      "AI writes the reply for you",
       "Basic visitor analytics",
       "1 website",
       "Email support",
@@ -38,8 +40,6 @@ const PLANS = [
     limit: "50 identified visitors/mo",
     features: [
       "Everything in Free",
-      "Social enrichment",
-      "AI reply drafts",
       "Priority support",
       "3 websites",
     ],
@@ -54,7 +54,6 @@ const PLANS = [
     limit: "Unlimited identified visitors",
     features: [
       "Everything in Pro",
-      "Priority identification",
       "Team seats",
       "API access",
       "Unlimited websites",

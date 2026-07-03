@@ -22,7 +22,12 @@ export const PLANS: Plan[] = [
     monthly: 0,
     yearly: 0,
     limit: "10 identified visitors/mo",
-    features: ["Core enrichment", "Basic visitor analytics"],
+    features: [
+      "See who they are — name, job, company",
+      "Their LinkedIn & Twitter profiles",
+      "AI writes the reply for you",
+      "Basic visitor analytics",
+    ],
     highlight: false,
   },
   {
@@ -31,7 +36,7 @@ export const PLANS: Plan[] = [
     monthly: 19,
     yearly: 15,
     limit: "50 identified visitors/mo",
-    features: ["Social enrichment", "AI reply drafts", "Priority support"],
+    features: ["Priority support", "3 websites"],
     highlight: true,
   },
   {
@@ -42,7 +47,6 @@ export const PLANS: Plan[] = [
     limit: "Unlimited identified visitors",
     features: [
       "Everything in Pro",
-      "Priority identification",
       "Team seats",
       "API access",
     ],
