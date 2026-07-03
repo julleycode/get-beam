@@ -27,6 +27,7 @@ import {
 import { StatTile } from "@/components/stat-tile";
 import { AskAi } from "@/components/ask-ai";
 import { TodayActions } from "@/components/today-actions";
+import { UsageWarningBanner } from "@/components/usage-warning-banner";
 
 const QUICK_ACTIONS: {
   href: string;
@@ -380,6 +381,9 @@ export default function DashboardPage() {
               <Button size="sm">Add site</Button>
             </Link>
           </div>
+
+          {/* Usage nudge — appears once monthly identify usage nears the cap */}
+          <UsageWarningBanner />
 
           {/* 1. Ask Beam anything */}
           <AskAi siteId={sites[0]?.site_id} />

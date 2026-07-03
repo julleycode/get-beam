@@ -26,49 +26,9 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-
-// ── Plan metadata ──────────────────────────────────────────────────────────
-
-const PLANS = [
-  {
-    id: "free" as const,
-    name: "Free",
-    monthly: 0,
-    yearly: 0,
-    limit: "10 identified visitors/mo",
-    features: ["Core enrichment", "Basic visitor analytics"],
-    highlight: false,
-  },
-  {
-    id: "pro" as const,
-    name: "Pro",
-    monthly: 19,
-    yearly: 15,
-    limit: "50 identified visitors/mo",
-    features: ["Social enrichment", "AI reply drafts", "Priority support"],
-    highlight: true,
-  },
-  {
-    id: "max" as const,
-    name: "Max",
-    monthly: 49,
-    yearly: 39,
-    limit: "Unlimited identified visitors",
-    features: [
-      "Everything in Pro",
-      "Priority identification",
-      "Team seats",
-      "API access",
-    ],
-    highlight: false,
-  },
-];
+import { PLANS, planLabel } from "@/lib/plans";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-
-function planLabel(plan: string): string {
-  return PLANS.find((p) => p.id === plan)?.name ?? plan;
-}
 
 function formatDate(value: string): string {
   return new Date(value).toLocaleDateString("en-US", {

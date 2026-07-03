@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { api } from "@/lib/api";
+import { useBillingStatus } from "@/lib/use-billing";
+import { planLabel } from "@/lib/plans";
 import { cn } from "@/lib/utils";
 import { BeamLogo } from "@/components/beam-logo";
 import { Button } from "@/components/ui/button";
@@ -111,6 +113,50 @@ function NavLink({
     >
       <Icon className="h-4 w-4 shrink-0" />
       {label}
+    </Link>
+  );
+}
+
+/**
+ * Compact plan + usage badge in the sidebar. Always-visible awareness of the
+ * current tier and how much of the monthly identify cap is spent — the primary
+ * "there are paid tiers" signal. Clicks through to Billing. Fails quiet (hidden
+ * while loading / on error), and shows "Unlimited" for the Max plan.
+ */
+function SidebarPlanBadge({ onNavigate }: { onNavigate?: () => void }) {
+  const { data: billing } = useBillingStatus();
+  if (!billing) return null;
+
+  const { plan, monthly_identified_count: used, monthly_limit: limit } = billing;
+  const pct =
+    limit !== null && limit > 0
+      ? Math.min(100, Math.round((used / limit) * 100))
+      : 0;
+  const near = pct >= 80;
+
+  return (
+    <Link
+      href="/dashboard/billing"
+      onClick={onNavigate}
+      className="mb-1 block rounded-md border border-border bg-background/50 px-3 py-2 transition-colors hover:bg-secondary"
+    >
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-medium text-foreground">{planLabel(plan)} plan</span>
+        <span className={cn("tabular-nums", near ? "text-warning" : "text-muted-foreground")}>
+          {limit === null ? "Unlimited" : `${used} / ${limit}`}
+        </span>
+      </div>
+      {limit !== null && (
+        <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-secondary">
+          <div
+            className={cn(
+              "h-full rounded-full transition-all",
+              pct >= 90 ? "bg-destructive" : near ? "bg-warning" : "bg-primary"
+            )}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      )}
     </Link>
   );
 }
@@ -333,6 +379,7 @@ function SidebarBody({
         <div className="flex-1" />
       </nav>
       <Separator className="my-2" />
+      <SidebarPlanBadge onNavigate={onNavigate} />
       {onReplayTour && (
         <Button
           variant="ghost"

@@ -50,6 +50,7 @@ import type {
   EngagementROI,
   BillingPlan,
   BillingInterval,
+  LimitKind,
   WaitlistListResponse,
   BillingStatus,
   CancelSubscriptionResponse,
@@ -766,6 +767,10 @@ class ApiClient {
       message?: string;
       email?: string | null;
       full_name?: string | null;
+      skip_reason?: string;
+      // Present only on limit outcomes. "monthly_plan" is the upgrade moment;
+      // "daily_budget" is BYOK-only (daily caps don't differ by tier).
+      limit_kind?: LimitKind;
     }>(`/api/v1/visitors/${siteId}/${visitorId}/resolve`, {
       method: "POST",
     });
@@ -778,6 +783,7 @@ class ApiClient {
       completeness?: number;
       message: string;
       social_context?: Record<string, unknown>;
+      limit_kind?: LimitKind;
     }>(`/api/v1/visitors/${siteId}/${visitorId}/enrich`, {
       method: "POST",
     });
@@ -1404,6 +1410,7 @@ export type {
   EngagementROI,
   BillingPlan,
   BillingInterval,
+  LimitKind,
   WaitlistSignup,
   WaitlistListResponse,
   BillingStatus,

@@ -660,6 +660,11 @@ export interface EngagementROI {
 export type BillingPlan = "free" | "pro" | "max";
 export type BillingInterval = "monthly" | "yearly";
 
+// Classifies a usage-limit outcome from resolve/enrich. "monthly_plan" is the
+// only upgrade moment (plan tiers differ only on the monthly cap); daily kinds
+// are BYOK-only and must NOT open the upgrade modal.
+export type LimitKind = "monthly_plan" | "daily_budget" | "daily_enrichment";
+
 // ── Waitlist types ───────────────────────────────────────
 
 export interface WaitlistSignup {

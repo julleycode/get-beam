@@ -12,6 +12,9 @@ import { EmptyState } from "@/components/empty-state";
 import { SiteSelector } from "@/components/site-selector";
 import { VisitorWidgets } from "@/components/visitor-widgets";
 import { PageHeader } from "@/components/page-header";
+import { UsageWarningBanner } from "@/components/usage-warning-banner";
+import { UpgradeModal } from "@/components/upgrade-modal";
+import { useBillingStatus } from "@/lib/use-billing";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
@@ -180,6 +183,20 @@ export default function VisitorsPage() {
   const [actioningId, setActioningId] = useState<string | null>(null);
   // Transient notice for non-visual outcomes (limit reached, skipped, error).
   const [notice, setNotice] = useState<string | null>(null);
+  // Upsell modal: opened only when a hit is the monthly plan limit (upgrading
+  // lifts it). Daily caps stay as a plain notice — upgrading doesn't raise them.
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const { data: billing } = useBillingStatus();
+
+  // A resolve/enrich outcome is an upgrade moment only when it's the monthly
+  // plan limit. Opens the modal; otherwise surface the message as a notice.
+  const handleLimitOutcome = (res: { message?: string | null; limit_kind?: string }) => {
+    if (res.limit_kind === "monthly_plan") {
+      setUpgradeOpen(true);
+    } else if (res.message) {
+      setNotice(res.message);
+    }
+  };
 
   const refreshRows = () => {
     setActioningId(null);
@@ -195,8 +212,8 @@ export default function VisitorsPage() {
     onSuccess: (res) => {
       // Surface any explanatory message (limit, privacy opt-out, region
       // coverage). A successful identify shows up visually, so skip only that.
-      if (res.status !== "identified" && res.message) {
-        setNotice(res.message);
+      if (res.status !== "identified") {
+        handleLimitOutcome(res);
       }
     },
     onError: (e) => setNotice(e instanceof Error ? e.message : "Identify failed"),
@@ -210,7 +227,7 @@ export default function VisitorsPage() {
       setNotice(null);
     },
     onSuccess: (res) => {
-      if (res.status !== "enriched") setNotice(res.message ?? null);
+      if (res.status !== "enriched") handleLimitOutcome(res);
     },
     onError: (e) => setNotice(e instanceof Error ? e.message : "Enrich failed"),
     onSettled: refreshRows,
@@ -332,6 +349,10 @@ export default function VisitorsPage() {
           </div>
         }
       />
+
+      <div className="mb-4">
+        <UsageWarningBanner />
+      </div>
 
       {siteId && <VisitorWidgets siteId={siteId} />}
 
@@ -605,6 +626,13 @@ export default function VisitorsPage() {
           )}
         </>
       )}
+
+      <UpgradeModal
+        open={upgradeOpen}
+        onOpenChange={setUpgradeOpen}
+        currentPlan={billing?.plan ?? "free"}
+        reason="You've hit your plan's monthly identification limit."
+      />
     </div>
   );
 }
