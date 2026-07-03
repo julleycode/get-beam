@@ -1,7 +1,9 @@
 # Phase 4 (P4) — Draft lifecycle relabel (bản anh em)
 
-**Trạng thái:** ⬜ Chưa làm
-**Effort:** Thấp–TB · **Migration:** Có (`drafts.rejection_reason`) · **ROI:** TB — gỡ ĐÚNG confuse gốc ("draft chưa duyệt biến đâu")
+**Trạng thái:** ✅ SHIPPED main `550322c` + pushed (2026-07-03) — prod deploy
+**Effort:** Thấp–TB · **Migration:** Có (`drafts.rejection_reason`, rev `c7e1a4b9d3f2`) · **ROI:** TB — gỡ ĐÚNG confuse gốc
+
+> **Đã làm:** cột `rejection_reason` (String, `user_rejected`|`auto_rejected_sibling`, nullable, không backfill); `reject_draft`→user_rejected, `_auto_reject_siblings`→auto_rejected_sibling; draft-card đổi nhãn bản auto-reject thành **"Not used"** (giữ "Rejected" cho user tự reject). KHÔNG ẩn tab (chỉ relabel — đơn giản, không mất data cảm giác). Verify: 567 unit pass (+test `_auto_reject_siblings` chỉ tag đúng siblings, không đụng post khác), tsc/lint sạch, migration full chain OK.
 
 ## Mục tiêu
 
