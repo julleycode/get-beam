@@ -10,6 +10,7 @@ recipient this:
   5. sends through EmailSender, which injects a signed unsubscribe link.
 """
 
+import re
 from datetime import datetime, timezone
 
 import structlog
@@ -18,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.models.campaign import Campaign, CampaignTouchpoint
+from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.segment import SegmentMember
 from apps.api.models.visitor import IdentifiedVisitor
 from apps.api.services.email_rate_limiter import check_and_reserve_email
@@ -36,10 +38,37 @@ def _first_email_touchpoint(plan: dict) -> dict | None:
     return None
 
 
-def _personalize(text: str, full_name: str | None) -> str:
+# Matches any leftover {{token}} the substitutions below did not resolve, so a
+# recipient never sees a raw mustache placeholder.
+_LEFTOVER_TOKEN = re.compile(r"\{\{\s*[\w.]+\s*\}\}")
+
+
+def _personalize(
+    text: str,
+    full_name: str | None,
+    company_name: str | None = None,
+    sender_name: str | None = None,
+) -> str:
+    """Fill campaign template placeholders.
+
+    Handles ``{{first_name}}``, ``{{company_name}}`` (both single- and
+    double-brace forms) and the AI planner's ``[Your Name]`` signature stub.
+    Anything we can't resolve falls back to a neutral phrase, and any remaining
+    ``{{token}}`` is stripped so broken templates can't ship literal mustache.
+    """
     first = (full_name or "").strip().split(" ")[0] if full_name else ""
     first = first or "there"
-    return text.replace("{{first_name}}", first).replace("{first_name}", first)
+    company = (company_name or "").strip() or "your company"
+    sender = (sender_name or "").strip() or "The Beam Team"
+
+    out = (
+        text.replace("{{first_name}}", first)
+        .replace("{first_name}", first)
+        .replace("{{company_name}}", company)
+        .replace("{company_name}", company)
+        .replace("[Your Name]", sender)
+    )
+    return _LEFTOVER_TOKEN.sub("", out)
 
 
 async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
@@ -84,11 +113,19 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
     # the site's own host is decorated (the token never leaks to third parties).
     from urllib.parse import urlsplit
     from apps.api.models.site import Site
+    from apps.api.models.user import User
     from apps.api.services.link_decorator import decorate_links
 
-    site_url = (
-        await db.execute(select(Site.url).where(Site.site_id == campaign.site_id))
-    ).scalar_one_or_none()
+    site_row = (
+        await db.execute(
+            select(Site.url, User.full_name)
+            .outerjoin(User, User.id == Site.user_id)
+            .where(Site.site_id == campaign.site_id)
+        )
+    ).first()
+    site_url = site_row[0] if site_row else None
+    # Signature stub [Your Name] → the site owner's name.
+    sender_name = (site_row[1] if site_row else None) or None
     site_host = urlsplit(site_url or "").netloc or None
 
     for vid in visitor_ids:
@@ -136,8 +173,19 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
             summary["throttled"] += 1
             continue
 
-        subject = _personalize(subject_tpl, iv.full_name)
-        body_html = _personalize(body_tpl, iv.full_name).replace("\n", "<br/>")
+        company_name = (
+            await db.execute(
+                select(EnrichmentProfile.company_name).where(
+                    EnrichmentProfile.site_id == campaign.site_id,
+                    EnrichmentProfile.visitor_id == vid,
+                )
+            )
+        ).scalar_one_or_none()
+
+        subject = _personalize(subject_tpl, iv.full_name, company_name, sender_name)
+        body_html = _personalize(
+            body_tpl, iv.full_name, company_name, sender_name
+        ).replace("\n", "<br/>")
 
         # Create the touchpoint BEFORE sending so its id can ride in the email:
         # the open pixel (/o/{id}) stamps opened_at, and _tp on decorated links
