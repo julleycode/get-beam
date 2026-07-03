@@ -61,6 +61,27 @@ def _first_email_touchpoint(plan: dict) -> dict | None:
 # Matches any leftover {{token}} the substitutions below did not resolve, so a
 # recipient never sees a raw mustache placeholder.
 _LEFTOVER_TOKEN = re.compile(r"\{\{\s*[\w.]+\s*\}\}")
+# Lowercase-led [bracket hints] the LLM sometimes emits ("[their industry]"),
+# distinct from the capitalized [Your Name] signature stub we fill above.
+_LEFTOVER_HINT = re.compile(r"\[[a-z][^\]]*\]")
+# A parenthetical left hollow once a placeholder inside it is removed, e.g.
+# "(especially in {{industry}})" -> "(especially in )". Only matches when every
+# inner word is followed by a space before ")", i.e. the trailing token was
+# stripped — legit parens like "(see below)" are preserved.
+_HOLLOW_PARENS = re.compile(r"\(\s*(?:[A-Za-z]+\s+)*\)")
+
+
+def _tidy(text: str) -> str:
+    """Strip unresolved placeholders and the whitespace/paren debris they leave,
+    so a recipient never sees a raw token or a dangling "(especially in )"."""
+    text = _LEFTOVER_TOKEN.sub("", text)
+    text = _LEFTOVER_HINT.sub("", text)
+    text = _HOLLOW_PARENS.sub("", text)
+    text = re.sub(r"\(\s+", "(", text)           # no space just inside "("
+    text = re.sub(r"\s+\)", ")", text)           # no space just inside ")"
+    text = re.sub(r"[ \t]{2,}", " ", text)       # collapse runs of spaces
+    text = re.sub(r" +([.,!?;:])", r"\1", text)  # no space before punctuation
+    return text
 
 
 def _personalize(
@@ -88,7 +109,7 @@ def _personalize(
         .replace("{company_name}", company)
         .replace("[Your Name]", sender)
     )
-    return _LEFTOVER_TOKEN.sub("", out)
+    return _tidy(out)
 
 
 async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
