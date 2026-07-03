@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""  # Google Gemini — deep research (Google Search grounding) + segmentation/campaigns
     gemini_model: str = "gemini-2.5-flash"  # free tier + grounding; 3.x needs billing
     openrouter_api_key: str = ""  # OpenRouter.ai — single key for 100+ models
-    default_ai_model: str = "openai/gpt-oss-120b:free"  # free tier; deepseek-v4-flash:free retired (404). Draft gen falls back to Gemini free tier.
+    default_ai_model: str = "deepseek/deepseek-v4-flash"  # PAID (~$0.00008/reply) — uses OpenRouter credit, avoids free-tier 429. Falls back to :free chain then Gemini.
     resend_api_key: str = ""  # deprecated — use SendGrid
     sendgrid_api_key: str = ""
     sendgrid_webhook_secret: str = ""  # shared secret for the SendGrid event webhook URL
