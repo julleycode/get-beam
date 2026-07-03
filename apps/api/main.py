@@ -37,6 +37,26 @@ from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+# Configure structlog once, at import time. Keep the console-friendly output
+# (timestamp + level + event) but render exceptions as PLAIN tracebacks with NO
+# local variables. structlog's default rich formatter prints every frame's
+# locals — which leaked secrets into production logs (e.g. the OpenRouter API
+# key sat in a failing frame's `api_key` local and was printed verbatim on every
+# draft-generation error). `plain_traceback` never shows locals.
+structlog.configure(
+    processors=[
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.StackInfoRenderer(),
+        structlog.dev.set_exc_info,
+        structlog.processors.TimeStamper(fmt="%Y-%m-%d %H:%M:%S", utc=False),
+        structlog.dev.ConsoleRenderer(
+            exception_formatter=structlog.dev.plain_traceback,
+        ),
+    ],
+    cache_logger_on_first_use=True,
+)
+
 logger = structlog.get_logger()
 
 # Phase 05 (5b): dual-write encrypted PII columns on every ORM insert/update.

@@ -367,21 +367,59 @@ async def generate_draft(
         )
     user_prompt += "\nReply with ONLY the comment text, nothing else."
 
-    # Resolve API key: user's BYOK OpenRouter key → app default → mock
+    # Resolve API key: user's BYOK OpenRouter key → app default.
     api_key = await _resolve_ai_key(db, user_id)
 
-    if not api_key:
-        raise RuntimeError("No OpenRouter API key configured. Set OPENROUTER_API_KEY or add a BYOK key.")
-
+    # Primary: OpenRouter (respects BYOK + the user's chosen model). Its free-tier
+    # models are frequently rate-limited (429) or retired (404 — the whole free
+    # slug disappears), so ANY failure here falls through to Gemini, which runs on
+    # Google's free tier and is already this app's default provider for other AI
+    # features (segmentation, enrichment). This keeps "Generate Reply" working
+    # even when the entire OpenRouter free chain is down.
     model = settings.default_ai_model
+    if api_key:
+        try:
+            draft = await _call_openrouter(api_key, model, system_prompt, user_prompt)
+            return _truncate_draft(draft, char_limit)
+        except Exception as e:
+            logger.warning(
+                "openrouter_draft_failed_falling_back_to_gemini",
+                model=model,
+                error=str(e)[:200],
+            )
+    else:
+        logger.info("no_openrouter_key_using_gemini_for_draft")
+
+    # Fallback: Gemini free tier.
     try:
-        draft = await _call_openrouter(api_key, model, system_prompt, user_prompt)
-        if len(draft) > char_limit:
-            draft = draft[: char_limit - 3] + "..."
-        return draft
+        draft = await _gemini_draft(system_prompt, user_prompt)
+        return _truncate_draft(draft, char_limit)
     except Exception:
-        logger.exception("ai_draft_generation_failed", model=model)
+        logger.exception("ai_draft_generation_failed_all_providers", model=model)
         raise
+
+
+def _truncate_draft(draft: str, char_limit: int) -> str:
+    """Clamp a draft to the platform character limit (leaving room for an ellipsis)."""
+    if len(draft) > char_limit:
+        return draft[: char_limit - 3] + "..."
+    return draft
+
+
+async def _gemini_draft(system_prompt: str, user_prompt: str) -> str:
+    """Generate a draft via Gemini (free tier) — OpenRouter fallback.
+
+    Gemini's generateContent takes a single prompt, so fold the system prompt
+    into the user prompt. Imported locally to avoid any import-time coupling.
+    """
+    from apps.api.services.gemini_client import gemini_generate
+
+    combined = f"{system_prompt}\n\n{user_prompt}"
+    draft = await gemini_generate(combined, grounding=False, max_output_tokens=400)
+    draft = draft.strip()
+    if not draft:
+        raise RuntimeError("Gemini returned empty content")
+    return draft
 
 
 async def generate_multi_drafts(
@@ -427,9 +465,12 @@ async def generate_multi_drafts(
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
-# Fallback chain: try these models in order if the primary fails
+# Fallback chain: try these models in order if the primary fails.
+# NOTE: `deepseek/deepseek-v4-flash:free` was retired by OpenRouter (its free
+# slug now 404s permanently — "use the paid slug instead"), so it is deliberately
+# NOT in this list. When the whole chain is rate-limited/unavailable, generate_draft
+# falls back to Gemini's free tier.
 _FREE_MODEL_FALLBACKS: list[str] = [
-    "deepseek/deepseek-v4-flash:free",
     "openai/gpt-oss-120b:free",
     "qwen/qwen3-next-80b-a3b-instruct:free",
     "nvidia/nemotron-nano-9b-v2:free",
@@ -482,7 +523,26 @@ async def _call_openrouter(
                     continue
 
                 data = resp.json()
-                content = data["choices"][0]["message"]["content"].strip()
+                # OpenRouter sometimes returns HTTP 200 with an error body (an
+                # upstream provider failed) and NO `choices`. Blindly indexing
+                # data["choices"][0] then raises KeyError/IndexError and 500s the
+                # whole request. Treat a missing/empty choice as a failed attempt
+                # and fall through to the next model instead.
+                choices = data.get("choices") or []
+                message = choices[0].get("message", {}) if choices else {}
+                content = (message.get("content") or "").strip()
+                if not content:
+                    err = data.get("error") or {}
+                    detail = err.get("message") if isinstance(err, dict) else str(err)
+                    logger.warning(
+                        "openrouter_no_content",
+                        model=try_model,
+                        detail=detail or str(data)[:200],
+                    )
+                    last_error = RuntimeError(
+                        f"OpenRouter returned no usable content: {detail or 'empty'}"
+                    )
+                    continue
                 if try_model != model:
                     logger.info("openrouter_fallback_used", primary=model, used=try_model)
                 return content
