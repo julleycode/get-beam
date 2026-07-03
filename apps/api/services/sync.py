@@ -9,6 +9,10 @@ Feed sources:
 - **visitors**: tweets from people identified by EasyTrack (enrichment → twitter_handle)
 - **following**: tweets from people the user follows (Playwright only — needs cookies)
 - **my_posts**: the user's own tweets
+
+LinkedIn accounts sync their own posts via the versioned Posts API
+(sync_linkedin_my_posts) — restricted by LinkedIn to Community Management
+API partners, degrades to 0 posts otherwise.
 """
 
 import uuid
@@ -233,6 +237,37 @@ async def sync_my_posts(
     return await _save_posts(db, account, feed_posts, source="my_posts")
 
 
+# ── LinkedIn: the user's own posts via the versioned Posts API ──
+
+async def sync_linkedin_my_posts(
+    db: AsyncSession, account: SocialAccount
+) -> int:
+    """Fetch the user's own LinkedIn posts.
+
+    LinkedIn has no public feed/timeline API — reading even your own posts
+    needs the Community Management API product. LinkedInService.fetch_feed
+    degrades to [] on 403, so this stays a no-op until LinkedIn grants access.
+    """
+    if account.platform != Platform.linkedin:
+        return 0
+
+    token = await _get_fresh_token(db, account)
+    if not token:
+        logger.info("sync_linkedin_no_token", account=account.username)
+        return 0
+
+    from apps.api.services.platforms import get_platform_service
+
+    service = get_platform_service(Platform.linkedin)
+    try:
+        feed_posts = await service.fetch_feed(token, limit=20)
+    except Exception:
+        logger.exception("sync_linkedin_my_posts_failed", account=account.username)
+        return 0
+
+    return await _save_posts(db, account, feed_posts, source="my_posts")
+
+
 # ── Shared helpers ────────────────────────────────────────
 
 async def _save_posts(
@@ -292,6 +327,9 @@ async def sync_account_feed(
     db: AsyncSession, account: SocialAccount
 ) -> int:
     """Sync all feed sources for one account."""
+    if account.platform == Platform.linkedin:
+        return await sync_linkedin_my_posts(db, account)
+
     total = 0
 
     # 1. Visitor posts (syndication scraper)

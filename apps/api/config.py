@@ -201,6 +201,8 @@ class Settings(BaseSettings):
     linkedin_client_id: str = ""
     linkedin_client_secret: str = ""
     linkedin_redirect_uri: str = "http://localhost:8000/api/v1/social/callback/linkedin"
+    # LinkedIn versioned REST API month (YYYYMM), sent as the LinkedIn-Version header
+    linkedin_api_version: str = "202506"
     linkedin_browser_cookie_path: str = "~/.retarget/linkedin_cookies.json"
     linkedin_browser_headless: bool = True
     linkedin_browser_cookies_b64: str = ""
