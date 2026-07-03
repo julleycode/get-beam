@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
 import { Input } from "@/components/ui/input";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -77,7 +79,7 @@ export default function CampaignDetailPage() {
     queryFn: () => api.getLinkedInOutreachStatus(),
     enabled: !!siteId && !!campaignId,
   });
-  const [outreachOpen, setOutreachOpen] = useState(false);
+  const [dialog, setDialog] = useState<"send" | "schedule" | null>(null);
   const [dryRun, setDryRun] = useState(true);
   const [outreachLimit, setOutreachLimit] = useState(20);
   const [outreachJob, setOutreachJob] =
@@ -92,12 +94,12 @@ export default function CampaignDetailPage() {
       }),
     onSuccess: (res) => {
       setOutreachJob(res);
-      setOutreachOpen(false);
+      setScheduleResult(null);
+      setDialog(null);
     },
   });
 
   // ── Schedule LinkedIn outreach (durable drip campaign) ──
-  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleDryRun, setScheduleDryRun] = useState(true);
   const [scheduleLimit, setScheduleLimit] = useState(20);
   const [scheduleResult, setScheduleResult] =
@@ -118,7 +120,8 @@ export default function CampaignDetailPage() {
       }),
     onSuccess: (res) => {
       setScheduleResult(res);
-      setScheduleOpen(false);
+      setOutreachJob(null);
+      setDialog(null);
     },
   });
 
@@ -131,6 +134,86 @@ export default function CampaignDetailPage() {
     refetchInterval: (query) =>
       query.state.data?.status === "done" ? false : 3000,
   });
+
+  // One config drives the single shared outreach dialog (send vs schedule).
+  const dialogConfig =
+    dialog === "send"
+      ? {
+          title: "Send LinkedIn outreach",
+          lead: "Sends connection requests to this campaign's audience right now.",
+          dry: dryRun,
+          setDry: setDryRun,
+          limit: outreachLimit,
+          setLimit: setOutreachLimit,
+          mut: outreachMut,
+          busy: "Sending…",
+          live: "Send for real",
+        }
+      : dialog === "schedule"
+        ? {
+            title: "Schedule LinkedIn outreach",
+            lead: `Queues a drip that starts in ${linkedinDelayHours}h, then sends within daily limits.`,
+            dry: scheduleDryRun,
+            setDry: setScheduleDryRun,
+            limit: scheduleLimit,
+            setLimit: setScheduleLimit,
+            mut: scheduleMut,
+            busy: "Scheduling…",
+            live: "Schedule for real",
+          }
+        : null;
+
+  const renderOutreachResult = () => {
+    if (outreachJob) {
+      return (
+        <>
+          {outreachJob.dry_run && (
+            <p className="font-medium text-warning">
+              Dry run — nothing was sent.
+            </p>
+          )}
+          <p>
+            {jobStatus
+              ? `${jobStatus.status} · ${jobStatus.done}/${jobStatus.total} processed · ${jobStatus.sent} sent`
+              : "Starting…"}
+          </p>
+          <p className="text-muted-foreground">
+            {outreachJob.total_targets} targeted ·{" "}
+            {outreachJob.audience_skipped_no_linkedin} skipped (no LinkedIn URL)
+          </p>
+        </>
+      );
+    }
+    if (scheduleResult) {
+      return (
+        <>
+          {scheduleResult.dry_run ? (
+            <p className="font-medium text-warning">
+              Dry run — nothing was scheduled.
+            </p>
+          ) : (
+            scheduleResult.campaign_id && (
+              <p>
+                Scheduled ·{" "}
+                <span className="font-mono">{scheduleResult.campaign_id}</span>
+              </p>
+            )
+          )}
+          <p>
+            Starts{" "}
+            {scheduleResult.scheduled_at
+              ? new Date(scheduleResult.scheduled_at).toLocaleString()
+              : `in ${scheduleResult.delay_hours}h`}
+          </p>
+          <p className="text-muted-foreground">
+            {scheduleResult.total_targets} targeted ·{" "}
+            {scheduleResult.audience_skipped_no_linkedin} skipped (no LinkedIn URL)
+          </p>
+        </>
+      );
+    }
+    return null;
+  };
 
   if (loading)
     return (
@@ -316,9 +399,30 @@ export default function CampaignDetailPage() {
             )}
 
             {tp.channel === "linkedin" && (
-              <div className="mt-3 border-t pt-3 space-y-2">
-                {outreachStatus && !outreachStatus.outreach_connected ? (
-                  <p className="text-xs text-muted-foreground">
+              <div className="mt-3 border-t pt-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    LinkedIn outreach
+                  </span>
+                  <StatusBadge
+                    status={outreachStatus?.outreach_connected ? "on" : "off"}
+                    tone={
+                      outreachStatus?.outreach_connected ? "success" : "neutral"
+                    }
+                    label={
+                      outreachStatus?.outreach_connected
+                        ? "Connected"
+                        : "Not connected"
+                    }
+                  />
+                </div>
+
+                {!outreachStatus ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Checking LinkedIn connection…
+                  </p>
+                ) : !outreachStatus.outreach_connected ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
                     Connect a LinkedIn session in{" "}
                     <Link
                       href="/dashboard/social-accounts"
@@ -328,78 +432,28 @@ export default function CampaignDetailPage() {
                     </Link>{" "}
                     to send connection requests.
                   </p>
-                ) : null}
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() => setOutreachOpen(true)}
-                    disabled={!outreachStatus?.outreach_connected}
-                  >
-                    Send LinkedIn outreach
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setScheduleOpen(true)}
-                    disabled={!outreachStatus?.outreach_connected}
-                  >
-                    Schedule
-                  </Button>
-                </div>
-                {outreachStatus?.outreach_connected && (
-                  <p className="text-xs text-muted-foreground">
-                    Schedule starts the drip in {tp.delay_hours_from_start}h,
-                    then sends within daily limits.
-                  </p>
-                )}
-
-                {outreachJob && (
-                  <div className="rounded-md border bg-muted/50 p-3 text-xs space-y-1">
-                    {outreachJob.dry_run && (
-                      <p className="font-medium text-warning">
-                        Dry run — no real connection requests were sent.
-                      </p>
-                    )}
-                    <p>
-                      Targets: {outreachJob.total_targets} · Skipped (no
-                      LinkedIn): {outreachJob.audience_skipped_no_linkedin}
-                    </p>
-                    {jobStatus ? (
-                      <p>
-                        Status: {jobStatus.status} · {jobStatus.done}/
-                        {jobStatus.total} processed · {jobStatus.sent} sent
-                      </p>
-                    ) : (
-                      <p className="text-muted-foreground">Starting…</p>
-                    )}
+                ) : (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Button size="sm" onClick={() => setDialog("send")}>
+                      Send now
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setDialog("schedule")}
+                    >
+                      Schedule
+                    </Button>
+                    <span className="text-xs text-muted-foreground">
+                      Schedule drips after {tp.delay_hours_from_start}h, within
+                      daily limits.
+                    </span>
                   </div>
                 )}
 
-                {scheduleResult && (
-                  <div className="rounded-md border bg-muted/50 p-3 text-xs space-y-1">
-                    {scheduleResult.dry_run && (
-                      <p className="font-medium text-warning">
-                        Dry run — nothing was scheduled.
-                      </p>
-                    )}
-                    {!scheduleResult.dry_run && scheduleResult.campaign_id && (
-                      <p>
-                        Scheduled campaign:{" "}
-                        <span className="font-mono">
-                          {scheduleResult.campaign_id}
-                        </span>
-                      </p>
-                    )}
-                    <p>
-                      Starts:{" "}
-                      {scheduleResult.scheduled_at
-                        ? new Date(scheduleResult.scheduled_at).toLocaleString()
-                        : `in ${scheduleResult.delay_hours}h`}
-                    </p>
-                    <p>
-                      Targets: {scheduleResult.total_targets} · Skipped (no
-                      LinkedIn): {scheduleResult.audience_skipped_no_linkedin}
-                    </p>
+                {(outreachJob || scheduleResult) && (
+                  <div className="mt-3 space-y-1 rounded-md border bg-muted/40 p-3 text-xs">
+                    {renderOutreachResult()}
                   </div>
                 )}
               </div>
@@ -409,160 +463,109 @@ export default function CampaignDetailPage() {
       ))}
 
       <Dialog
-        open={outreachOpen}
+        open={!!dialog}
         onOpenChange={(o) => {
-          if (!outreachMut.isPending) setOutreachOpen(o);
+          if (!o && !dialogConfig?.mut.isPending) setDialog(null);
         }}
       >
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Send LinkedIn outreach?</DialogTitle>
-            <DialogDescription>
-              This sends LinkedIn connection requests from your connected account
-              to this campaign&apos;s audience. Automating LinkedIn is against
-              LinkedIn&apos;s Terms of Service and can get your account
-              restricted. Keep dry run on to preview without sending.
-            </DialogDescription>
-          </DialogHeader>
+          {dialogConfig && (
+            <>
+              <DialogHeader>
+                <DialogTitle>{dialogConfig.title}</DialogTitle>
+                <DialogDescription>{dialogConfig.lead}</DialogDescription>
+              </DialogHeader>
 
-          <div className="space-y-4">
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={dryRun}
-                onChange={(e) => setDryRun(e.target.checked)}
-                className="h-4 w-4"
-              />
-              Dry run (preview only — nothing is sent)
-            </label>
-            <div className="space-y-1.5">
-              <label htmlFor="outreach-limit" className="text-sm font-medium">
-                Limit
-              </label>
-              <Input
-                id="outreach-limit"
-                type="number"
-                min={1}
-                max={50}
-                value={outreachLimit}
-                onChange={(e) =>
-                  setOutreachLimit(
-                    Math.max(1, Math.min(50, Number(e.target.value) || 1))
-                  )
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                Max 50 profiles per run.
-              </p>
-            </div>
-            {outreachMut.isError && (
-              <p className="text-sm text-destructive">
-                {(outreachMut.error as Error)?.message ?? "Failed to start"}
-              </p>
-            )}
-          </div>
+              <div className="space-y-4">
+                <p className="rounded-md bg-warning-muted px-3 py-2 text-xs text-warning">
+                  Automating LinkedIn breaks its Terms of Service and can get
+                  your account restricted. Start with a dry run.
+                </p>
 
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setOutreachOpen(false)}
-              disabled={outreachMut.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant={dryRun ? "default" : "destructive"}
-              onClick={() => outreachMut.mutate()}
-              disabled={outreachMut.isPending}
-            >
-              {outreachMut.isPending
-                ? "Starting..."
-                : dryRun
-                  ? "Preview (dry run)"
-                  : "Send for real"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                <div className="space-y-1.5">
+                  <span className="text-sm font-medium">Mode</span>
+                  <div className="flex rounded-md border p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => dialogConfig.setDry(true)}
+                      className={cn(
+                        "flex-1 rounded px-3 py-1.5 text-xs font-medium transition-colors",
+                        dialogConfig.dry
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      Dry run (preview)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => dialogConfig.setDry(false)}
+                      className={cn(
+                        "flex-1 rounded px-3 py-1.5 text-xs font-medium transition-colors",
+                        !dialogConfig.dry
+                          ? "bg-destructive text-destructive-foreground"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      Live send
+                    </button>
+                  </div>
+                </div>
 
-      <Dialog
-        open={scheduleOpen}
-        onOpenChange={(o) => {
-          if (!scheduleMut.isPending) setScheduleOpen(o);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Schedule LinkedIn outreach?</DialogTitle>
-            <DialogDescription>
-              This schedules a durable drip campaign that starts in{" "}
-              {linkedinDelayHours}h, then sends within daily limits. Automating
-              LinkedIn is against LinkedIn&apos;s Terms of Service and can get
-              your account restricted. Keep dry run on to preview without
-              scheduling.
-            </DialogDescription>
-          </DialogHeader>
+                <div className="space-y-1.5">
+                  <label
+                    htmlFor="outreach-limit"
+                    className="text-sm font-medium"
+                  >
+                    Limit
+                  </label>
+                  <Input
+                    id="outreach-limit"
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={dialogConfig.limit}
+                    onChange={(e) =>
+                      dialogConfig.setLimit(
+                        Math.max(1, Math.min(50, Number(e.target.value) || 1))
+                      )
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Max 50 profiles per run.
+                  </p>
+                </div>
 
-          <div className="space-y-4">
-            <div className="rounded-md border bg-muted/50 p-3 text-sm">
-              Starts in {linkedinDelayHours}h, then sends within daily limits.
-            </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={scheduleDryRun}
-                onChange={(e) => setScheduleDryRun(e.target.checked)}
-                className="h-4 w-4"
-              />
-              Dry run (preview only — nothing is scheduled)
-            </label>
-            <div className="space-y-1.5">
-              <label htmlFor="schedule-limit" className="text-sm font-medium">
-                Limit
-              </label>
-              <Input
-                id="schedule-limit"
-                type="number"
-                min={1}
-                max={50}
-                value={scheduleLimit}
-                onChange={(e) =>
-                  setScheduleLimit(
-                    Math.max(1, Math.min(50, Number(e.target.value) || 1))
-                  )
-                }
-              />
-              <p className="text-xs text-muted-foreground">
-                Max 50 profiles per run.
-              </p>
-            </div>
-            {scheduleMut.isError && (
-              <p className="text-sm text-destructive">
-                {(scheduleMut.error as Error)?.message ?? "Failed to schedule"}
-              </p>
-            )}
-          </div>
+                {dialogConfig.mut.isError && (
+                  <p className="text-sm text-destructive">
+                    {(dialogConfig.mut.error as Error)?.message ??
+                      "Something went wrong"}
+                  </p>
+                )}
+              </div>
 
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setScheduleOpen(false)}
-              disabled={scheduleMut.isPending}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant={scheduleDryRun ? "default" : "destructive"}
-              onClick={() => scheduleMut.mutate()}
-              disabled={scheduleMut.isPending}
-            >
-              {scheduleMut.isPending
-                ? "Scheduling..."
-                : scheduleDryRun
-                  ? "Preview (dry run)"
-                  : "Schedule for real"}
-            </Button>
-          </DialogFooter>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => setDialog(null)}
+                  disabled={dialogConfig.mut.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant={dialogConfig.dry ? "default" : "destructive"}
+                  onClick={() => dialogConfig.mut.mutate()}
+                  disabled={dialogConfig.mut.isPending}
+                >
+                  {dialogConfig.mut.isPending
+                    ? dialogConfig.busy
+                    : dialogConfig.dry
+                      ? "Run dry run"
+                      : dialogConfig.live}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>
