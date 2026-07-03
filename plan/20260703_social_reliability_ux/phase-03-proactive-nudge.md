@@ -1,7 +1,9 @@
 # Phase 3 (P3) — Proactive nudge (in-app + email)
 
-**Trạng thái:** ⬜ Chưa làm
-**Effort:** TB · **Migration:** Có (`*.last_expiry_alert_sent_at`) · **ROI:** Cao — chặn churn âm thầm
+**Trạng thái:** ✅ SHIPPED main `de6d488` + pushed (2026-07-03) — prod deploy
+**Effort:** TB · **Migration:** Có (`social_accounts.last_expiry_alert_sent_at`, rev `d8a3c6b2f915`) · **ROI:** Cao
+
+> **Đã làm:** Banner in-app `expiring-connection-banner.tsx` (tái dùng `connectionHealth` P1 + query `["social-accounts"]`, KHÔNG endpoint mới; dismiss theo ngày) mount ở dashboard layout. Email: job APScheduler mỗi giờ `connection_nudge.check_expiring_connections` → email chủ account khi token ≤7d/hết hạn, throttle `last_expiry_alert_sent_at` 24h, bỏ outreach, isolate per-account, tôn trọng opt-out. **GATED `connection_nudge_enabled` default OFF** — bật ở Railway mới gửi. Verify: 568 unit pass (+test detector chọn đúng account), tsc/lint sạch, migration full chain OK. Banner in-app chạy ngay (không gate); email chờ bật flag.
 
 ## Mục tiêu
 
