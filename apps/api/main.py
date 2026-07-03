@@ -32,6 +32,7 @@ from apps.api.routers import events, visitors, segments, campaigns, exports, sit
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
 from apps.api.routers import known_contacts, costs, ai, dashboard, crm, changelog, click, open_pixel
+from apps.api.routers import email_sender_oauth
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
 from slowapi import _rate_limit_exceeded_handler
@@ -195,6 +196,7 @@ app.include_router(privacy.router, prefix="/api/v1/privacy", tags=["privacy"])
 
 # ── EasyEngage routers ──────────────────────────────────
 app.include_router(social_auth.router, prefix="/api/v1/social", tags=["social-auth"])
+app.include_router(email_sender_oauth.router, prefix="/api/v1/email", tags=["email-sender"])
 app.include_router(social_accounts.router, prefix="/api/v1/social", tags=["social-accounts"])
 app.include_router(drafts.router, prefix="/api/v1/drafts", tags=["drafts"])
 app.include_router(feed.router, prefix="/api/v1/feed", tags=["feed"])

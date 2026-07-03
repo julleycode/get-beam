@@ -12,6 +12,8 @@ recipient this:
 
 import re
 from datetime import datetime, timezone
+from html import escape
+from urllib.parse import quote
 
 import structlog
 from sqlalchemy import select
@@ -22,10 +24,28 @@ from apps.api.models.campaign import Campaign, CampaignTouchpoint
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.segment import SegmentMember
 from apps.api.models.visitor import IdentifiedVisitor
+from apps.api.services.email_providers import gmail as gmail_client
+from apps.api.services.email_providers.gmail_sender import (
+    resolve_sender_for_site,
+    send_via_gmail,
+)
 from apps.api.services.email_rate_limiter import check_and_reserve_email
 from apps.api.services.email_sender import EmailSender
 from apps.api.services.identity_classification import is_emailable_identity
+from apps.api.services.link_decorator import generate_unsubscribe_token
 from apps.api.services.suppression import is_email_suppressed
+
+
+def _unsubscribe_footer(to_email: str) -> tuple[str, str]:
+    """(unsubscribe_url, html_footer) — parity with EmailSender's own footer, for
+    the Gmail path which bypasses EmailSender.send."""
+    token = generate_unsubscribe_token(to_email)
+    url = f"{settings.api_base_url}/unsubscribe?t={quote(token, safe='')}"
+    footer = (
+        f'\n<br/><br/>\n<p style="font-size:12px;color:#999;">'
+        f'<a href="{escape(url, quote=True)}">Unsubscribe</a> from future emails.</p>'
+    )
+    return url, footer
 
 logger = structlog.get_logger()
 
@@ -132,6 +152,12 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
     owner_email = (site_row[3] if site_row else None) or None
     site_host = urlsplit(site_url or "").netloc or None
 
+    # If the site owner connected their Gmail, send FROM their address (no "via
+    # sendgrid.info"). None → send via Beam/SendGrid as before. Resolved once;
+    # cleared to None if a send hits a dead grant so the rest of the run falls
+    # back to Beam instead of hammering a revoked token.
+    gmail_sender = await resolve_sender_for_site(db, campaign.site_id)
+
     for vid in visitor_ids:
         iv_row = await db.execute(
             select(IdentifiedVisitor).where(
@@ -213,25 +239,50 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
             f'<img src="{settings.api_base_url}/o/{tp_row.id}"'
             ' width="1" height="1" alt="" style="display:none;max-height:1px;">'
         )
-        try:
-            await sender.send(
-                to_email=iv.email,
-                subject=subject,
-                body_html=body_html,
-                from_name=site_name,
-                reply_to=owner_email,
-            )
-        except Exception as exc:
-            logger.warning("campaign_email_failed", visitor_id=vid[:8], error=str(exc))
-            # Discard the pending touchpoint — per-iteration commits mean the
-            # rollback can only drop this row. rollback() expires ALL attached
-            # objects (even with expire_on_commit=False), so refresh campaign or
-            # the next loop iteration's campaign.site_id access would raise
-            # MissingGreenlet (sync IO on an expired async object).
-            await db.rollback()
-            await db.refresh(campaign)
-            summary["failed"] += 1
-            continue
+        sent_ok = False
+        # Preferred channel: the owner's connected Gmail. On a dead grant or
+        # transient Gmail error, disable Gmail for the rest of this run and fall
+        # through to Beam/SendGrid so the campaign still goes out.
+        if gmail_sender is not None:
+            try:
+                unsub_url, unsub_footer = _unsubscribe_footer(iv.email)
+                await send_via_gmail(
+                    db,
+                    gmail_sender,
+                    to_email=iv.email,
+                    subject=subject,
+                    body_html=body_html + unsub_footer,
+                    unsubscribe_url=unsub_url,
+                )
+                sent_ok = True
+            except (gmail_client.GmailOAuthError, RuntimeError) as exc:
+                logger.warning(
+                    "campaign_gmail_send_failed_fallback_beam",
+                    visitor_id=vid[:8],
+                    error=str(exc),
+                )
+                gmail_sender = None
+
+        if not sent_ok:
+            try:
+                await sender.send(
+                    to_email=iv.email,
+                    subject=subject,
+                    body_html=body_html,
+                    from_name=site_name,
+                    reply_to=owner_email,
+                )
+            except Exception as exc:
+                logger.warning("campaign_email_failed", visitor_id=vid[:8], error=str(exc))
+                # Discard the pending touchpoint — per-iteration commits mean the
+                # rollback can only drop this row. rollback() expires ALL attached
+                # objects (even with expire_on_commit=False), so refresh campaign or
+                # the next loop iteration's campaign.site_id access would raise
+                # MissingGreenlet (sync IO on an expired async object).
+                await db.rollback()
+                await db.refresh(campaign)
+                summary["failed"] += 1
+                continue
 
         tp_row.status = "sent"
         # Naive UTC — CampaignTouchpoint.sent_at is a naive column.

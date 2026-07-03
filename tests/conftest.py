@@ -59,6 +59,7 @@ async def test_engine():
     from apps.api.models.beam_identity import BeamIdentityNode  # noqa: F401
     from apps.api.models.visitor_email import VisitorEmail  # noqa: F401
     from apps.api.models.suppression import SuppressionEntry  # noqa: F401
+    from apps.api.models.email_sender_account import EmailSenderAccount  # noqa: F401
     # Importing the app registers EVERY model on Base.metadata (waitlist,
     # feature requests, stripe_events, ...). Without this, table creation
     # depends on which test imported apps.api.main first — the explicit list

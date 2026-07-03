@@ -459,6 +459,44 @@ async def test_send_campaign(
         touchpoint["body"], sample_name, sample_company, sender_name
     ).replace("\n", "<br/>")
 
+    # Preview through the SAME channel a real send would use: the owner's
+    # connected Gmail if present, otherwise Beam/SendGrid.
+    from apps.api.services.email_providers.gmail_sender import (
+        resolve_sender_for_site,
+        send_via_gmail,
+    )
+    from apps.api.services.email_providers import gmail as gmail_client
+    from apps.api.services.campaign_sender import _unsubscribe_footer
+
+    gmail_sender = await resolve_sender_for_site(db, site_id)
+
+    if gmail_sender is not None:
+        if await is_email_suppressed(db, body.email, "do_not_email"):
+            raise HTTPException(
+                status_code=400,
+                detail="This address is unsubscribed/suppressed and cannot receive email",
+            )
+        try:
+            unsub_url, unsub_footer = _unsubscribe_footer(body.email)
+            await send_via_gmail(
+                db,
+                gmail_sender,
+                to_email=body.email,
+                subject=subject,
+                body_html=body_html + unsub_footer,
+                unsubscribe_url=unsub_url,
+            )
+        except (gmail_client.GmailOAuthError, RuntimeError):
+            logger.exception("campaign_test_send_gmail_failed", campaign_id=str(campaign.id))
+            raise HTTPException(status_code=502, detail="Test email failed to send via Gmail")
+        logger.info(
+            "campaign_test_sent",
+            campaign_id=str(campaign.id),
+            to=mask_email(body.email),
+            channel="gmail",
+        )
+        return {"sent": True, "to": mask_email(body.email), "channel": "gmail"}
+
     sender = EmailSender()
     try:
         send_result = await sender.send(
@@ -480,7 +518,7 @@ async def test_send_campaign(
         )
 
     logger.info("campaign_test_sent", campaign_id=str(campaign.id), to=mask_email(body.email))
-    return {"sent": True, "to": mask_email(body.email)}
+    return {"sent": True, "to": mask_email(body.email), "channel": "beam"}
 
 
 @router.post("/{site_id}/{campaign_id}/start")

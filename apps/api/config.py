@@ -225,6 +225,13 @@ class Settings(BaseSettings):
     tiktok_browser_headless: bool = True
     tiktok_browser_cookies_b64: str = ""
 
+    # ─── Connect-Gmail (send campaign email from the site owner's Gmail) ───
+    # OAuth client from Google Cloud (Gmail API, scope gmail.send). When empty,
+    # the Connect-Gmail endpoints 400 and campaign sends stay on SendGrid.
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:8000/api/v1/email/callback/google"
+
     # ─── Encryption ───
     encryption_key: str = ""  # Fernet key for BYOK API keys (strict)
     token_encryption_key: str = ""  # Fernet key for OAuth tokens (graceful)

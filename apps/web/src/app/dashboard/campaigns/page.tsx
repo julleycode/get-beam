@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import { TableSkeleton } from "@/components/skeletons";
 import { SiteSelector } from "@/components/site-selector";
 import { PageHeader } from "@/components/page-header";
+import { GmailSenderBanner } from "@/components/gmail-sender-banner";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
@@ -175,6 +176,8 @@ export default function CampaignsPage() {
         title="Campaigns"
         actions={<SiteSelector value={siteId} onChange={setSiteId} />}
       />
+
+      <GmailSenderBanner />
 
       {actionError && (
         <p className="mb-3 text-sm text-destructive">{actionError}</p>

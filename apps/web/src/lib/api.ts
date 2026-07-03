@@ -577,6 +577,25 @@ class ApiClient {
     );
   }
 
+  // ── Connect-Gmail: send campaign email from the owner's own Gmail ──
+  /** Whether the current user has connected a Gmail to send from. */
+  async getEmailSenderStatus() {
+    return this.request<{ connected: boolean; email: string | null; configured: boolean }>(
+      `/api/v1/email/status`
+    );
+  }
+
+  /** Start the Gmail OAuth flow; returns the Google consent URL to redirect to. */
+  async connectGmail() {
+    return this.request<{ auth_url: string }>(`/api/v1/email/connect/google`);
+  }
+
+  async disconnectGmail() {
+    return this.request<{ disconnected: boolean }>(`/api/v1/email/disconnect`, {
+      method: "POST",
+    });
+  }
+
   // Platform Detection & Pixel Install
   async detectPlatform(url: string) {
     return this.request<{
