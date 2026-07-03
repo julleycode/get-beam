@@ -33,10 +33,17 @@ export default function SocialAccountsPage() {
     onSuccess: (data) => {
       window.open(data.auth_url, "_blank");
     },
-    onError: (error: Error) => {
+    onError: (error: Error, platform: Platform) => {
+      const name =
+        ALL_PLATFORMS.find((p) => p.platform === platform)?.label ?? platform;
+      // Backend returns a "missing credentials" 400 when the platform's API keys
+      // aren't configured yet. Translate that dev-facing message into something
+      // an end user can act on, and fall back to the raw error otherwise.
+      const notConfigured = /credential/i.test(error.message);
       alert(
-        error.message ||
-          "Failed to connect. Check your OAuth credentials in .env"
+        notConfigured
+          ? `${name} isn't available to connect yet — its API keys haven't been set up. An admin needs to add them before you can connect ${name}.`
+          : error.message || `Couldn't connect ${name}. Please try again in a moment.`
       );
     },
   });
