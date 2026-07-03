@@ -111,13 +111,9 @@ async def test_fetch_feed_403_degrades_to_empty(monkeypatch):
     assert posts == []
 
 
-def test_auth_url_uses_live_scopes():
+async def test_auth_url_uses_live_scopes():
     """r_liteprofile is retired — requesting it breaks the OAuth screen."""
-    import asyncio
-
-    url = asyncio.get_event_loop().run_until_complete(
-        LinkedInService().get_auth_url("state123")
-    )
+    url = await LinkedInService().get_auth_url("state123")
     assert "r_liteprofile" not in url
     assert "openid" in url
     assert "w_member_social" in url
