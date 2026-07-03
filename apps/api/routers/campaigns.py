@@ -433,6 +433,14 @@ async def test_send_campaign(
             detail="Hourly email cap reached for this site — try again later",
         )
 
+    # From-name = the site's own name; Reply-To = the admin's address (this is a
+    # preview to themselves). Mirrors the real send in campaign_sender.
+    from apps.api.models.site import Site
+
+    site_name = (
+        await db.execute(select(Site.name).where(Site.site_id == site_id))
+    ).scalar_one_or_none() or "Beam"
+
     # Sample recipient values so the preview renders fully (no raw
     # {{placeholders}}); [Your Name] resolves to the admin running the test.
     sample_name = "Alex Example"
@@ -453,6 +461,8 @@ async def test_send_campaign(
             to_email=body.email,
             subject=subject,
             body_html=body_html,
+            from_name=site_name,
+            reply_to=user.email,
             db=db,
         )
     except Exception:

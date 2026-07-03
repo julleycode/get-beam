@@ -118,14 +118,18 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
 
     site_row = (
         await db.execute(
-            select(Site.url, User.full_name)
+            select(Site.url, Site.name, User.full_name, User.email)
             .outerjoin(User, User.id == Site.user_id)
             .where(Site.site_id == campaign.site_id)
         )
     ).first()
     site_url = site_row[0] if site_row else None
-    # Signature stub [Your Name] → the site owner's name.
-    sender_name = (site_row[1] if site_row else None) or None
+    # From-name = the site's own name (falls back to "Beam"); [Your Name]
+    # signature stub → the site owner's name; Reply-To → the owner's inbox so
+    # replies reach the customer, not Beam's shared address.
+    site_name = (site_row[1] if site_row else None) or "Beam"
+    sender_name = (site_row[2] if site_row else None) or None
+    owner_email = (site_row[3] if site_row else None) or None
     site_host = urlsplit(site_url or "").netloc or None
 
     for vid in visitor_ids:
@@ -210,7 +214,13 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
             ' width="1" height="1" alt="" style="display:none;max-height:1px;">'
         )
         try:
-            await sender.send(to_email=iv.email, subject=subject, body_html=body_html)
+            await sender.send(
+                to_email=iv.email,
+                subject=subject,
+                body_html=body_html,
+                from_name=site_name,
+                reply_to=owner_email,
+            )
         except Exception as exc:
             logger.warning("campaign_email_failed", visitor_id=vid[:8], error=str(exc))
             # Discard the pending touchpoint — per-iteration commits mean the

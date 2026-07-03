@@ -48,6 +48,7 @@ class EmailSender:
         body_html: str,
         from_name: str = "Beam",
         from_email: str = "hello@getbeam.fyi",
+        reply_to: str | None = None,
         unsubscribe_url: str | None = None,
         db: AsyncSession | None = None,
     ) -> dict | None:
@@ -78,6 +79,11 @@ class EmailSender:
             "content": [{"type": "text/html", "value": full_html}],
             "headers": {"List-Unsubscribe": f"<{unsubscribe_url}>"},
         }
+        # Reply-To = the customer's own inbox so a recipient's reply reaches them,
+        # not Beam's shared from-address. (The From/DKIM stays Beam until the
+        # Connect-Gmail work lands; this is the interim personalization.)
+        if reply_to:
+            payload["reply_to"] = {"email": reply_to}
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
