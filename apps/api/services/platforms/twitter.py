@@ -235,22 +235,18 @@ class TwitterService(PlatformService):
                 },
             )
 
-            # If reply/quote is blocked (403 — Free tier limitation),
-            # fall back to Playwright browser automation.
+            # A 403 here means X refused the reply itself (e.g. the target
+            # tweet restricts who can reply, a duplicate, or an account-level
+            # limit) — NOT a token problem. We deliberately do NOT fall back to
+            # browser automation: X blocks automated logins, so the Playwright
+            # path is a dead end on the server and only produces confusing
+            # failures. Surface the real 403 reason instead.
             if resp.status_code == 403:
                 logger.warning(
-                    "twitter_api_reply_blocked_trying_browser",
+                    "twitter_api_reply_forbidden",
                     post_id=platform_post_id,
-                    detail=resp.text,
+                    detail=resp.text[:300],
                 )
-                from apps.api.services.platforms.twitter_browser import (
-                    TwitterBrowserPoster,
-                )
-
-                poster = TwitterBrowserPoster()
-                tweet_url = f"https://x.com/i/status/{platform_post_id}"
-                reply_id = await poster.post_reply(tweet_url, text)
-                return reply_id
 
             resp.raise_for_status()
             return resp.json()["data"]["id"]
