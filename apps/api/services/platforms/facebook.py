@@ -40,16 +40,29 @@ class FacebookService(PlatformService):
 
     async def exchange_code(self, code: str, state: str = "") -> OAuthTokens:
         async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
+            # POST so the client_secret rides in the body, never the URL query —
+            # a GET leaks the secret into any URL-bearing error log.
+            resp = await client.post(
                 _FB_TOKEN_URL,
-                params={
+                data={
                     "client_id": settings.facebook_app_id,
                     "client_secret": settings.facebook_app_secret,
                     "redirect_uri": settings.facebook_redirect_uri,
                     "code": code,
                 },
             )
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                # Log Meta's exact reason (bad secret / redirect mismatch /
+                # expired code). raise_for_status() would instead throw an error
+                # whose message embeds the secret-bearing URL — don't use it.
+                logger.error(
+                    "facebook_token_exchange_failed",
+                    status=resp.status_code,
+                    body=resp.text[:500],
+                )
+                raise RuntimeError(
+                    f"Facebook token exchange returned {resp.status_code}"
+                )
             data = resp.json()
 
         user_info = await self._get_me(data["access_token"])
