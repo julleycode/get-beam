@@ -760,14 +760,27 @@ async def beta_slots() -> dict:
 FOUNDER_WALL_SIZE = 100
 
 
+def _founder_initials(full_name: str | None, email: str) -> str:
+    """Two public-safe initials for a wall tile, from name or email local part."""
+    source = (full_name or "").strip() or email.split("@", 1)[0]
+    parts = [p for p in re.split(r"[^A-Za-z]+", source) if p]
+    if len(parts) >= 2:
+        return (parts[0][0] + parts[1][0]).upper()
+    if parts:
+        return parts[0][:2].upper()
+    return "BM"
+
+
 @router.get("/founders")
 async def founders_wall() -> dict:
     """Public endpoint: the Founders Wall roster.
 
-    Returns up to the first FOUNDER_WALL_SIZE signups that opted in by providing
-    an X handle, ordered by signup time, so the earliest climbers fill the wall
-    first. Exposes ONLY the public X handle (never email). The frontend resolves
-    each avatar via unavatar.io and links to x.com/<handle>.
+    Two sources, in order:
+    1. Waitlist signups that opted in with an X handle (earliest first). The
+       frontend resolves avatars via unavatar.io and links to x.com/<handle>.
+    2. Registered accounts (Clerk-synced users table, earliest first) that are
+       not already on the wall — shown as anonymous initials tiles derived from
+       full name or email local part. Exposes ONLY initials (never email/name).
 
     Fails soft: any DB error yields an empty roster so the landing page renders
     a clean all-empty wall instead of breaking.
@@ -775,20 +788,49 @@ async def founders_wall() -> dict:
     founders: list[dict] = []
     claimed = 0
     try:
+        from apps.api.models.user import User
         from apps.api.models.waitlist import WaitlistSignup
-        async with async_session() as db:
-            # Total signups (capped) drives the "N / 100 claimed" counter.
-            count_result = await db.execute(select(WaitlistSignup.id))
-            claimed = min(len(count_result.scalars().all()), FOUNDER_WALL_SIZE)
 
-            result = await db.execute(
-                select(WaitlistSignup.x_handle)
-                .where(WaitlistSignup.x_handle.isnot(None))
+        async with async_session() as db:
+            wl_result = await db.execute(
+                select(WaitlistSignup.email, WaitlistSignup.x_handle)
                 .order_by(WaitlistSignup.created_at.asc())
+            )
+            wl_rows = wl_result.all()
+            waitlist_emails = {(e or "").lower() for e, _ in wl_rows}
+
+            position = 0
+            tiled_emails: set[str] = set()
+            for email, handle in wl_rows:
+                if not handle or position >= FOUNDER_WALL_SIZE:
+                    continue
+                founders.append({"position": position, "handle": handle})
+                tiled_emails.add((email or "").lower())
+                position += 1
+
+            user_result = await db.execute(
+                select(User.email, User.full_name)
+                .order_by(User.created_at.asc())
                 .limit(FOUNDER_WALL_SIZE)
             )
-            for position, (handle,) in enumerate(result.all()):
-                founders.append({"position": position, "handle": handle})
+            extra_claimed = 0
+            for email, full_name in user_result.all():
+                key = (email or "").lower()
+                if not key or key in tiled_emails:
+                    continue
+                if position < FOUNDER_WALL_SIZE:
+                    founders.append({
+                        "position": position,
+                        "initials": _founder_initials(full_name, key),
+                    })
+                    tiled_emails.add(key)
+                    position += 1
+                # Waitlist signups are already counted below; only accounts
+                # that never went through the waitlist add to the counter.
+                if key not in waitlist_emails:
+                    extra_claimed += 1
+
+            claimed = min(len(wl_rows) + extra_claimed, FOUNDER_WALL_SIZE)
     except Exception as exc:
         logger.warning("founders_wall_query_failed", error=str(exc))
         return {"spots": FOUNDER_WALL_SIZE, "claimed": 0, "founders": []}
