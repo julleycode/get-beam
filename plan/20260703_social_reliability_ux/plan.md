@@ -1,7 +1,7 @@
 # Plan — Social connection reliability UX (commercialize)
 
 **Ngày:** 2026-07-03
-**Trạng thái tổng:** 🔄 P1 `a621a28` · P2 `8ca2bf4` · P4 `550322c` · P3 `de6d488` SHIPPED (prod deploy) · còn P5. **P3 email GATED off — bật `connection_nudge_enabled` ở Railway mới gửi.**
+**Trạng thái tổng:** ✅ HOÀN TẤT — P1 `a621a28` · P2 `8ca2bf4` · P4 `550322c` · P3 `de6d488` · P5 `e1878ca` ALL SHIPPED (prod deploy). **P3 email GATED off — bật `connection_nudge_enabled` ở Railway mới gửi.** Bonus: fix has_refresh_token (Twitter 2h token không báo động giả) gộp trong P5.
 **Bối cảnh:** sau sự cố Twitter send fail âm thầm (đã fix backend — token lifecycle, shipped main `75c7730`). Giờ làm phần **user tự hiểu + tự sửa** để bán được.
 
 ---

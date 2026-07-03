@@ -1,7 +1,9 @@
 # Phase 5 (P5) — Connect-time write-access verify
 
-**Trạng thái:** ⬜ Chưa làm
-**Effort:** Cao · **Migration:** Có (`social_accounts.post_ready`) · **ROI:** TB — chốt trải nghiệm, làm SAU cùng
+**Trạng thái:** ✅ SHIPPED main `e1878ca` + pushed (2026-07-03) — prod deploy
+**Effort:** Cao · **Migration:** Có (`social_accounts.post_ready`, rev `e2f5b8c1d094`) · **ROI:** TB
+
+> **Đã làm (scope thực tế):** probe THẬT cho Twitter (`x-access-level` qua `/2/users/me`); platform khác default `None` (không claim sai). `PlatformService.check_write_access` (base None, không raise) + TwitterService override; `oauth_callback` probe → lưu `post_ready` + đẩy vào redirect param; callback page hiện "✓ Ready to post" hoặc cảnh báo "needs write access". Bỏ badge ở list page (tránh collision session khác). **GỘP kèm fix has_refresh_token** (session khác, cùng file) — account có refresh token auto-renew nên health/banner/nudge KHÔNG cảnh báo. Verify: 577 unit pass (+write-probe test), tsc/lint sạch. **Multi-head Alembic (email_senders vs post_ready) đã tự resolve** — session khác rebase migration của họ lên `e2f5b8c1d094` → chain linear single-head `f3d9b1c7a2e4`, `alembic upgrade head` chạy sạch.
 
 ## Mục tiêu
 
