@@ -29,7 +29,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Plug } from "lucide-react";
+import { Plug, Unplug } from "lucide-react";
+import { IconButton } from "@/components/ui/icon-button";
 
 // OAuth CRMs. HubSpot ships now; the rest are wired server-side later — shown
 // disabled so the surface is discoverable without promising a broken click.
@@ -240,14 +241,14 @@ export function CrmConnectPanel({
             >
               {busy === conn.provider ? "Working…" : "Test"}
             </Button>
-            <Button
-              variant="ghost"
-              size="sm"
+            <IconButton
+              label="Disconnect"
+              danger
               disabled={busy === conn.provider}
               onClick={() => handleDisconnect(conn)}
             >
-              Disconnect
-            </Button>
+              <Unplug className="h-4 w-4" />
+            </IconButton>
           </CardContent>
         </Card>
       ))}

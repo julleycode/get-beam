@@ -4,11 +4,13 @@ import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { TableSkeleton } from "@/components/skeletons";
 import { SiteSelector } from "@/components/site-selector";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
@@ -230,14 +232,13 @@ export default function CampaignsPage() {
                 <TableCell>
                   <div className="flex flex-wrap gap-2">
                     {c.status === "archived" ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      <IconButton
+                        label="Restore to draft"
                         disabled={busyId === c.id}
                         onClick={() => handleUnarchive(c.id, c.name)}
                       >
-                        {busyId === c.id ? "Restoring..." : "Unarchive"}
-                      </Button>
+                        <ArchiveRestore className="h-4 w-4" />
+                      </IconButton>
                     ) : (
                       <>
                         {c.status !== "completed" && (
@@ -279,25 +280,23 @@ export default function CampaignsPage() {
                             Send test
                           </Button>
                         )}
-                        <Button
-                          size="sm"
-                          variant="outline"
+                        <IconButton
+                          label="Archive"
                           disabled={busyId === c.id}
                           onClick={() => handleArchive(c.id, c.name)}
                         >
-                          {busyId === c.id ? "Archiving..." : "Archive"}
-                        </Button>
+                          <Archive className="h-4 w-4" />
+                        </IconButton>
                       </>
                     )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive hover:text-destructive"
+                    <IconButton
+                      label="Delete"
+                      danger
                       disabled={busyId === c.id}
                       onClick={() => setConfirmDelete({ id: c.id, name: c.name })}
                     >
-                      Delete
-                    </Button>
+                      <Trash2 className="h-4 w-4" />
+                    </IconButton>
                   </div>
                 </TableCell>
               </TableRow>

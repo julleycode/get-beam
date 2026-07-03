@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 function priorityColor(priority: string) {
@@ -134,16 +135,14 @@ export default function SegmentsPage() {
                   <CardTitle className="text-base">{seg.name}</CardTitle>
                   <div className="flex items-center gap-1.5">
                     <Badge variant={priorityColor(seg.priority)}>{seg.priority}</Badge>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                    <IconButton
+                      label={`Delete segment ${seg.name}`}
+                      danger
                       onClick={() => handleDelete(seg.id, seg.name)}
                       disabled={deletingId !== null}
-                      aria-label={`Delete segment ${seg.name}`}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                      <Trash2 className="h-4 w-4" />
+                    </IconButton>
                   </div>
                 </div>
                 <CardDescription>{seg.description}</CardDescription>
