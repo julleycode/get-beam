@@ -1098,6 +1098,16 @@ footer.legal a:hover { color: var(--ink); }
   font-size: 11px;
   font-weight: 600;
   color: var(--ink);
+  position: relative;
+  overflow: hidden;
+}
+.vlist-avatar img,
+.match-avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 .vlist-info { flex: 1; min-width: 0; }
 .vlist-name { font-weight: 600; font-size: 13px; color: var(--ink); line-height: 1.2; }
@@ -1129,6 +1139,9 @@ footer.legal a:hover { color: var(--ink); }
   display: grid; place-items: center;
   font-weight: 600;
   color: var(--ink);
+  position: relative;
+  overflow: hidden;
+  flex: 0 0 auto;
 }
 .match-id { font-weight: 600; font-size: 14px; color: var(--ink); }
 .match-sub { font-size: 11.5px; color: var(--ink-3); margin-top: 2px; }
