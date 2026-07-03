@@ -1,7 +1,7 @@
 # Plan — Social connection reliability UX (commercialize)
 
 **Ngày:** 2026-07-03
-**Trạng thái tổng:** 🔄 P1 code xong (chưa commit/deploy) · P2–P5 chưa làm
+**Trạng thái tổng:** 🔄 P1 SHIPPED `a621a28` · P2 SHIPPED `8ca2bf4` (cả 2 prod deploy) · P4→P3→P5 chưa
 **Bối cảnh:** sau sự cố Twitter send fail âm thầm (đã fix backend — token lifecycle, shipped main `75c7730`). Giờ làm phần **user tự hiểu + tự sửa** để bán được.
 
 ---

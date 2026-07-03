@@ -1,7 +1,9 @@
 # Phase 2 (P2) — Draft fail reason + Retry
 
-**Trạng thái:** ⬜ Chưa làm
-**Effort:** TB · **Migration:** Có (`drafts.failure_reason`) · **ROI:** Cao
+**Trạng thái:** ✅ SHIPPED main `8ca2bf4` + pushed (2026-07-03) — prod deploy
+**Effort:** TB · **Migration:** Có (`drafts.failure_reason`, rev `b3d9f2a71c84`) · **ROI:** Cao
+
+> **Đã làm:** model+migration `failure_reason`; `sender.py` set reason mọi điểm fail + `_friendly_send_error` phân loại (403/401/429/timeout) + clear khi (re)send OK; `POST /drafts/{id}/retry` (chỉ draft failed); draft-card hiện reason + nút **Reconnect** (lỗi token) / **Retry** (lỗi tạm). Verify: 566 unit pass (3 test P2 mới), tsc/lint sạch, migration upgrade+downgrade chạy sạch trên full chain (throwaway DB).
 
 ## Mục tiêu
 

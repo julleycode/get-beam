@@ -1,6 +1,6 @@
 # Phase 1 (P1) — Connection health badge + Reconnect
 
-**Trạng thái:** ✅ Code xong + verify local (2026-07-03) — CHƯA commit/deploy
+**Trạng thái:** ✅ SHIPPED main `a621a28` + pushed (2026-07-03) — prod đang deploy
 **Effort:** TB · **Migration:** Không · **ROI:** Cao — làm ĐẦU TIÊN (dữ liệu đã có sẵn)
 
 > **Đã làm gọn hơn plan gốc:** KHÔNG cần endpoint reconnect mới / sửa oauth_callback. Reconnect = tái dùng `connectPlatform` (OAuth upsert theo `platform_user_id` → update đúng row cũ, không trùng). Backend chỉ thêm `is_outreach` vào response (ẩn badge/reconnect cho LinkedIn cookie). Không migration.
