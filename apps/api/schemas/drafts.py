@@ -18,6 +18,8 @@ class DraftResponse(BaseModel):
     strategy_label: Optional[str] = None
     sent_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
+    # Plain-language reason a send failed (set on failed drafts).
+    failure_reason: Optional[str] = None
 
     # Inline context so the user knows what this draft is for
     original_content: Optional[str] = None

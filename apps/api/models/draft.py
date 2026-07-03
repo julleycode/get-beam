@@ -45,6 +45,9 @@ class Draft(Base):
         Enum(DraftStatus), default=DraftStatus.pending
     )
     strategy: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    # Plain-language reason a send failed (shown on the failed draft card so the
+    # user knows why + what to do). Cleared on a successful (re)send.
+    failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # Auto-generation fields (set when draft is created from visitor social context)
     auto_generated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     visitor_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

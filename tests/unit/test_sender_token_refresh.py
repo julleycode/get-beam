@@ -28,6 +28,7 @@ from apps.api.services.encryption import decrypt_token, encrypt_token
 from apps.api.services.platforms.base import OAuthTokens
 from apps.api.services.sender import (
     SocialTokenExpiredError,
+    _friendly_send_error,
     _refresh_if_expired,
     send_draft,
 )
@@ -69,10 +70,11 @@ async def _make_account(
 class _FakeService:
     """Stand-in for a PlatformService with controllable refresh/post behavior."""
 
-    def __init__(self, *, refresh=None, refresh_exc=None, comment_id="c1"):
+    def __init__(self, *, refresh=None, refresh_exc=None, comment_id="c1", post_exc=None):
         self._refresh = refresh
         self._refresh_exc = refresh_exc
         self._comment_id = comment_id
+        self._post_exc = post_exc
         self.refresh_called = 0
 
     async def refresh_tokens(self, refresh_token: str) -> OAuthTokens:
@@ -82,6 +84,8 @@ class _FakeService:
         return self._refresh
 
     async def post_comment(self, access_token, platform_post_id, text) -> str:
+        if self._post_exc:
+            raise self._post_exc
         return self._comment_id
 
 
@@ -191,6 +195,8 @@ async def test_send_draft_marks_failed_and_raises_on_expiry(test_db, monkeypatch
 
     await test_db.refresh(draft)
     assert draft.status == DraftStatus.failed
+    # The failed draft carries the actionable reason for the UI.
+    assert draft.failure_reason and "reconnect" in draft.failure_reason.lower()
 
 
 async def test_concurrent_sends_same_account_refresh_only_once(test_engine, monkeypatch):
@@ -301,3 +307,86 @@ async def test_send_draft_success_posts_and_marks_sent(test_db, monkeypatch):
     await test_db.refresh(draft)
     assert draft.status == DraftStatus.sent
     assert draft.sent_at is not None
+
+
+async def test_friendly_send_error_classifies():
+    assert "restrict" in _friendly_send_error("HTTP 403: Forbidden", "twitter").lower()
+    assert "reconnect" in _friendly_send_error("HTTP 401: Unauthorized", "twitter").lower()
+    assert "busy" in _friendly_send_error("HTTP 429: Too Many Requests", "twitter").lower()
+    assert "busy" in _friendly_send_error("Read timed out", "twitter").lower()
+    # Unknown → generic, still names the platform.
+    assert "linkedin" in _friendly_send_error("some odd error", "linkedin").lower()
+
+
+async def test_send_failure_sets_friendly_reason(test_db, monkeypatch):
+    account = await _make_account(test_db, expires_at=_now() + timedelta(hours=1))
+    post = Post(
+        id=uuid.uuid4(),
+        social_account_id=account.id,
+        platform=Platform.twitter,
+        platform_post_id="tweet-3",
+        author_name="A",
+        author_username="a",
+        content="original",
+        posted_at=_now(),
+    )
+    test_db.add(post)
+    draft = Draft(
+        id=uuid.uuid4(),
+        user_id=account.user_id,
+        type=DraftType.comment,
+        post_id=post.id,
+        platform=Platform.twitter,
+        ai_content="reply",
+        status=DraftStatus.approved,
+    )
+    test_db.add(draft)
+    await test_db.commit()
+
+    # post_comment raises a 403-ish error → friendly reply-forbidden reason.
+    _patch_service(
+        monkeypatch, _FakeService(post_exc=RuntimeError("HTTP 403: Forbidden"))
+    )
+
+    ok = await send_draft(test_db, draft)
+
+    assert ok is False
+    await test_db.refresh(draft)
+    assert draft.status == DraftStatus.failed
+    assert draft.failure_reason and "restrict" in draft.failure_reason.lower()
+
+
+async def test_successful_send_clears_prior_failure_reason(test_db, monkeypatch):
+    account = await _make_account(test_db, expires_at=_now() + timedelta(hours=1))
+    post = Post(
+        id=uuid.uuid4(),
+        social_account_id=account.id,
+        platform=Platform.twitter,
+        platform_post_id="tweet-4",
+        author_name="A",
+        author_username="a",
+        content="original",
+        posted_at=_now(),
+    )
+    test_db.add(post)
+    draft = Draft(
+        id=uuid.uuid4(),
+        user_id=account.user_id,
+        type=DraftType.comment,
+        post_id=post.id,
+        platform=Platform.twitter,
+        ai_content="reply",
+        status=DraftStatus.approved,
+        failure_reason="an old failure from a previous attempt",
+    )
+    test_db.add(draft)
+    await test_db.commit()
+
+    _patch_service(monkeypatch, _FakeService(comment_id="ok"))
+
+    ok = await send_draft(test_db, draft)
+
+    assert ok is True
+    await test_db.refresh(draft)
+    assert draft.status == DraftStatus.sent
+    assert draft.failure_reason is None

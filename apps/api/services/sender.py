@@ -43,6 +43,29 @@ def _http_error_detail(exc: Exception) -> str:
     return str(exc)
 
 
+def _friendly_send_error(detail: str, platform: str) -> str:
+    """Map a raw send error into a plain-language reason for the failed draft.
+
+    Kept deliberately non-technical: the failed-draft card shows this to the
+    user, so it names the likely cause and the fix rather than an HTTP status.
+    """
+    d = detail.lower()
+    name = platform.capitalize()
+    if "403" in d or "forbidden" in d:
+        return (
+            f"{name} wouldn't allow this reply — the post may restrict who can "
+            "reply, or it was removed."
+        )
+    if "401" in d or "unauthor" in d:
+        return (
+            f"Your {platform} session was rejected. Reconnect the account in "
+            "Social Accounts and try again."
+        )
+    if "429" in d or "rate" in d or "timeout" in d or "timed out" in d:
+        return f"{name} is busy or rate-limited right now. Try again shortly."
+    return f"Couldn't send to {platform}. Please try again in a moment."
+
+
 async def _refresh_if_expired(
     db: AsyncSession, account: SocialAccount
 ) -> str:
@@ -150,6 +173,7 @@ async def send_draft(db: AsyncSession, draft: Draft) -> bool:
         if not post:
             logger.error("send_draft_post_not_found", draft_id=str(draft.id))
             draft.status = DraftStatus.failed
+            draft.failure_reason = "The original post is no longer available."
             await db.commit()
             return False
 
@@ -165,6 +189,10 @@ async def send_draft(db: AsyncSession, draft: Draft) -> bool:
         if not account:
             logger.error("send_draft_account_not_found", draft_id=str(draft.id))
             draft.status = DraftStatus.failed
+            draft.failure_reason = (
+                f"Your {draft.platform.value} account is no longer connected. "
+                "Reconnect it in Social Accounts."
+            )
             await db.commit()
             return False
 
@@ -173,8 +201,9 @@ async def send_draft(db: AsyncSession, draft: Draft) -> bool:
         # re-raise so the caller surfaces a "reconnect" message.
         try:
             access_token = await _refresh_if_expired(db, account)
-        except SocialTokenExpiredError:
+        except SocialTokenExpiredError as exc:
             draft.status = DraftStatus.failed
+            draft.failure_reason = str(exc)
             await db.commit()
             raise
 
@@ -185,6 +214,7 @@ async def send_draft(db: AsyncSession, draft: Draft) -> bool:
             )
             draft.status = DraftStatus.sent
             draft.sent_at = datetime.now(timezone.utc)
+            draft.failure_reason = None  # clear any reason from a prior failed try
             post.commented = True
             await db.commit()
             logger.info(
@@ -204,10 +234,14 @@ async def send_draft(db: AsyncSession, draft: Draft) -> bool:
                 error_detail=error_detail,
             )
             draft.status = DraftStatus.failed
+            draft.failure_reason = _friendly_send_error(
+                error_detail, draft.platform.value
+            )
             await db.commit()
             return False
 
     logger.warning("send_draft_no_target", draft_id=str(draft.id))
     draft.status = DraftStatus.failed
+    draft.failure_reason = "This draft has nothing to reply to."
     await db.commit()
     return False

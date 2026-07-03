@@ -627,6 +627,8 @@ export interface SocialDraft {
   strategy_label: string | null;
   sent_at: string | null;
   created_at: string;
+  /** Plain-language reason a send failed (set on failed drafts). */
+  failure_reason: string | null;
   original_content: string | null;
   original_author: string | null;
 }

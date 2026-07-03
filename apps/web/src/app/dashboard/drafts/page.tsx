@@ -46,6 +46,15 @@ export default function DraftsPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["drafts"] }),
   });
 
+  const retryMut = useMutation({
+    mutationFn: (id: string) => api.retryDraft(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["drafts"] }),
+    onError: (error: Error) => {
+      alert(error.message || "Still couldn't send. Please try again.");
+      queryClient.invalidateQueries({ queryKey: ["drafts"] });
+    },
+  });
+
   const editMut = useMutation({
     mutationFn: ({ id, content }: { id: string; content: string }) =>
       api.editDraft(id, content),
@@ -86,7 +95,8 @@ export default function DraftsPage() {
               onApprove={(id) => approveMut.mutate(id)}
               onReject={(id) => rejectMut.mutate(id)}
               onEdit={(id, content) => editMut.mutate({ id, content })}
-              loading={approveMut.isPending || rejectMut.isPending}
+              onRetry={(id) => retryMut.mutate(id)}
+              loading={approveMut.isPending || rejectMut.isPending || retryMut.isPending}
             />
           ))}
         </div>

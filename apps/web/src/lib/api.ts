@@ -1001,6 +1001,21 @@ class ApiClient {
     );
   }
 
+  async retryDraft(draftId: string) {
+    // Re-sending can be slow (token refresh + platform call), mirror approve's
+    // client-side abort so a stalled network doesn't hang the button forever.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 90_000);
+    try {
+      return await this.request<{ id: string; status: DraftStatus; message: string }>(
+        `/api/v1/drafts/${draftId}/retry`,
+        { method: "POST", signal: controller.signal }
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
   // ── EasyTrack + EasyEngage: Campaign creation from segment ─
   async createCampaignFromSegment(siteId: string, segmentId: string) {
     return this.request<Campaign>(

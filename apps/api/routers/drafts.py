@@ -61,6 +61,7 @@ def _draft_to_response(
         strategy_label=strategy_label,
         sent_at=d.sent_at,
         created_at=d.created_at or datetime.now(timezone.utc),
+        failure_reason=d.failure_reason,
         original_content=original_content,
         original_author=original_author,
     )
@@ -323,6 +324,54 @@ async def reject_draft(
         id=str(draft.id),
         status=draft.status,
         message="Draft rejected",
+    )
+
+
+@router.post("/{draft_id}/retry", response_model=DraftActionResponse)
+async def retry_draft(
+    draft_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retry a draft that previously failed to send.
+
+    Only failed drafts can be retried (approval / sibling auto-reject / voice
+    example already happened on the first approve). We just re-approve and
+    re-send; a dead token surfaces the same actionable 401.
+    """
+    result = await db.execute(
+        select(Draft).where(
+            Draft.id == draft_id,
+            Draft.user_id == current_user.id,
+        )
+    )
+    draft = result.scalar_one_or_none()
+    if not draft:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    if draft.status != DraftStatus.failed:
+        raise HTTPException(status_code=400, detail="Can only retry failed drafts")
+
+    # Re-approve so send_draft's status guard passes, then re-send.
+    draft.status = DraftStatus.approved
+    draft.failure_reason = None
+    await db.commit()
+
+    try:
+        success = await send_draft(db, draft)
+    except SocialTokenExpiredError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    await db.refresh(draft)
+
+    if success:
+        return DraftActionResponse(
+            id=str(draft.id),
+            status=draft.status,
+            message="Draft sent successfully!",
+        )
+    raise HTTPException(
+        status_code=502,
+        detail=draft.failure_reason
+        or f"Still couldn't send to {draft.platform.value}. Please try again.",
     )
 
 

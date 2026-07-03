@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { SocialDraft as Draft } from "@/lib/api";
 import { PlatformBadge } from "./platform-badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,6 +15,7 @@ interface DraftCardProps {
   onApprove: (id: string) => void;
   onReject: (id: string) => void;
   onEdit: (id: string, content: string) => void;
+  onRetry?: (id: string) => void;
   loading?: boolean;
 }
 
@@ -22,8 +24,14 @@ export function DraftCard({
   onApprove,
   onReject,
   onEdit,
+  onRetry,
   loading,
 }: DraftCardProps) {
+  // A token/session failure needs a reconnect (retrying with the same dead
+  // token is pointless); anything else is worth a plain retry.
+  const needsReconnect =
+    !!draft.failure_reason &&
+    /reconnect|expired|session|no longer connected/i.test(draft.failure_reason);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(
     draft.edited_content || draft.ai_content
@@ -64,6 +72,28 @@ export function DraftCard({
             </p>
           )}
         </div>
+
+        {/* Failed: explain why + offer the right fix */}
+        {draft.status === "failed" && draft.failure_reason && (
+          <div className="space-y-2 rounded-md border border-destructive/30 bg-destructive/10 p-3">
+            <p className="text-sm text-destructive">{draft.failure_reason}</p>
+            {needsReconnect ? (
+              <Button asChild size="sm" variant="outline">
+                <Link href="/dashboard/social-accounts">Reconnect account</Link>
+              </Button>
+            ) : (
+              onRetry && (
+                <Button
+                  size="sm"
+                  onClick={() => onRetry(draft.id)}
+                  disabled={loading}
+                >
+                  {loading ? "Retrying..." : "Retry"}
+                </Button>
+              )
+            )}
+          </div>
+        )}
 
         {/* Actions */}
         {draft.status === "pending" && (
