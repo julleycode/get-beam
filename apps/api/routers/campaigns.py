@@ -15,14 +15,18 @@ from apps.api.models.user import User
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.dependencies import get_current_user, verify_site_access
 from apps.api.schemas.campaigns import (
+    MAX_LINKEDIN_OUTREACH_LIMIT,
     CampaignListResponse,
     CampaignOut,
     CampaignStatsResponse,
     CampaignStatusUpdate,
     CampaignTestSendRequest,
+    LinkedInCampaignDetailResponse,
     LinkedInOutreachJobResponse,
     LinkedInOutreachRequest,
     LinkedInOutreachResponse,
+    LinkedInScheduleRequest,
+    LinkedInScheduleResponse,
     ReturnedVisitor,
 )
 from apps.api.agents.campaign_planner import plan_campaign
@@ -620,6 +624,84 @@ def _first_linkedin_touchpoint(plan: dict) -> dict | None:
     return None
 
 
+async def _resolve_linkedin_targets(
+    db: AsyncSession, site_id: str, campaign: Campaign, limit: int
+) -> tuple[list[str], int]:
+    """Resolve a campaign's segment audience to LinkedIn profile URLs.
+
+    Walks the segment members, applies the same emailability/do_not_email/
+    suppression guards the email send path uses, and collects each visitor's
+    enriched LinkedIn URL (up to a hard server-side cap). Returns
+    ``(urls, skipped_no_linkedin)``.
+
+    Shared by both the immediate outreach and the scheduled-campaign endpoints
+    so audience selection behaves identically for both.
+    """
+    member_rows = await db.execute(
+        select(SegmentMember.visitor_id).where(
+            SegmentMember.segment_id == campaign.segment_id
+        )
+    )
+    visitor_ids = [r[0] for r in member_rows.all()]
+
+    urls: list[str] = []
+    skipped_no_linkedin = 0
+    hard_limit = min(limit, MAX_LINKEDIN_OUTREACH_LIMIT)
+
+    for vid in visitor_ids:
+        if len(urls) >= hard_limit:
+            break
+
+        iv_row = await db.execute(
+            select(IdentifiedVisitor).where(
+                IdentifiedVisitor.site_id == site_id,
+                IdentifiedVisitor.visitor_id == vid,
+            )
+        )
+        iv = iv_row.scalar_one_or_none()
+        # Skip do_not_contact (do_not_email covers unsubscribed/bounced) and
+        # company-level guesses (same non-emailable guard the email path uses).
+        if iv is not None:
+            if iv.do_not_email:
+                skipped_no_linkedin += 1
+                continue
+            if not is_emailable_identity(iv.resolution_provider):
+                skipped_no_linkedin += 1
+                continue
+            if iv.email and await is_email_suppressed(db, iv.email, "do_not_email"):
+                skipped_no_linkedin += 1
+                continue
+
+        linkedin_url = (
+            await db.execute(
+                select(EnrichmentProfile.linkedin_url).where(
+                    EnrichmentProfile.site_id == site_id,
+                    EnrichmentProfile.visitor_id == vid,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if not linkedin_url:
+            skipped_no_linkedin += 1
+            continue
+        urls.append(linkedin_url)
+
+    return urls, skipped_no_linkedin
+
+
+async def _linkedin_connection_id(db: AsyncSession, user: User) -> str | None:
+    """Return the user's active LinkedIn outreach connection id, or None."""
+    acct_row = await db.execute(
+        select(SocialAccount).where(
+            SocialAccount.user_id == user.id,
+            SocialAccount.platform == Platform.linkedin,
+            SocialAccount.is_active.is_(True),
+        )
+    )
+    account = acct_row.scalars().first()
+    return account.outreach_connection_id if account else None
+
+
 def _beam_note_to_phantommm(note: str) -> str:
     """Translate Beam's ``{{placeholder}}`` tokens into phantommm's ``#token#``.
 
@@ -682,15 +764,7 @@ async def start_linkedin_outreach(
         raise HTTPException(status_code=400, detail="Campaign has no segment audience")
 
     # The caller must have registered a LinkedIn session with phantommm.
-    acct_row = await db.execute(
-        select(SocialAccount).where(
-            SocialAccount.user_id == user.id,
-            SocialAccount.platform == Platform.linkedin,
-            SocialAccount.is_active.is_(True),
-        )
-    )
-    account = acct_row.scalars().first()
-    connection_id = account.outreach_connection_id if account else None
+    connection_id = await _linkedin_connection_id(db, user)
     if not connection_id:
         raise HTTPException(
             status_code=400, detail="Connect your LinkedIn session first"
@@ -702,54 +776,9 @@ async def start_linkedin_outreach(
         raise HTTPException(status_code=503, detail="LinkedIn outreach not configured")
 
     # Resolve the segment audience exactly like send_campaign_emails does.
-    member_rows = await db.execute(
-        select(SegmentMember.visitor_id).where(
-            SegmentMember.segment_id == campaign.segment_id
-        )
+    urls, skipped_no_linkedin = await _resolve_linkedin_targets(
+        db, site_id, campaign, body.limit
     )
-    visitor_ids = [r[0] for r in member_rows.all()]
-
-    urls: list[str] = []
-    skipped_no_linkedin = 0
-    hard_limit = min(body.limit, 50)  # hard server-side cap (see schema constant)
-
-    for vid in visitor_ids:
-        if len(urls) >= hard_limit:
-            break
-
-        iv_row = await db.execute(
-            select(IdentifiedVisitor).where(
-                IdentifiedVisitor.site_id == site_id,
-                IdentifiedVisitor.visitor_id == vid,
-            )
-        )
-        iv = iv_row.scalar_one_or_none()
-        # Skip do_not_contact (do_not_email covers unsubscribed/bounced) and
-        # company-level guesses (same non-emailable guard the email path uses).
-        if iv is not None:
-            if iv.do_not_email:
-                skipped_no_linkedin += 1
-                continue
-            if not is_emailable_identity(iv.resolution_provider):
-                skipped_no_linkedin += 1
-                continue
-            if iv.email and await is_email_suppressed(db, iv.email, "do_not_email"):
-                skipped_no_linkedin += 1
-                continue
-
-        linkedin_url = (
-            await db.execute(
-                select(EnrichmentProfile.linkedin_url).where(
-                    EnrichmentProfile.site_id == site_id,
-                    EnrichmentProfile.visitor_id == vid,
-                )
-            )
-        ).scalar_one_or_none()
-
-        if not linkedin_url:
-            skipped_no_linkedin += 1
-            continue
-        urls.append(linkedin_url)
 
     if not urls:
         raise HTTPException(
@@ -766,7 +795,7 @@ async def start_linkedin_outreach(
             note=note,
             action=body.action,
             dry_run=body.dry_run,
-            limit=hard_limit,
+            limit=min(body.limit, MAX_LINKEDIN_OUTREACH_LIMIT),
         )
     except PhantommmError:
         raise HTTPException(
@@ -822,4 +851,148 @@ async def get_linkedin_outreach_job(
         total=int(job.get("total") or 0),
         sent=int(job.get("sent") or 0),
         results=results if isinstance(results, list) else [],
+    )
+
+
+@router.post(
+    "/{site_id}/{campaign_id}/linkedin-outreach/schedule",
+    response_model=LinkedInScheduleResponse,
+)
+async def schedule_linkedin_outreach(
+    site_id: str,
+    campaign_id: str,
+    body: LinkedInScheduleRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LinkedInScheduleResponse:
+    """Schedule a durable LinkedIn drip campaign that STARTS after the step's
+    suggested delay.
+
+    Complements the immediate "Send LinkedIn outreach" endpoint: rather than a
+    one-shot job, this enqueues a persistent phantommm campaign that begins only
+    once the touchpoint's ``delay_hours_from_start`` has elapsed, then paces
+    sends within daily limits. dry_run defaults ON — a real schedule requires
+    ``dry_run=false``. Audience selection is identical to the immediate path
+    (shared ``_resolve_linkedin_targets`` helper).
+    """
+    await verify_site_access(db, site_id, user)
+    campaign = await _get_campaign_or_404(db, site_id, campaign_id)
+
+    touchpoint = _first_linkedin_touchpoint(campaign.plan or {})
+    if touchpoint is None:
+        raise HTTPException(
+            status_code=400, detail="Campaign has no LinkedIn touchpoint"
+        )
+    if campaign.segment_id is None:
+        raise HTTPException(status_code=400, detail="Campaign has no segment audience")
+
+    connection_id = await _linkedin_connection_id(db, user)
+    if not connection_id:
+        raise HTTPException(
+            status_code=400, detail="Connect your LinkedIn session first"
+        )
+
+    # The campaign-suggested start offset for this step (hours), clamped ≥ 0.
+    delay_hours = max(0, int(touchpoint.get("delay_hours_from_start") or 0))
+
+    try:
+        client = PhantommmClient()
+    except PhantommmNotConfigured:
+        raise HTTPException(status_code=503, detail="LinkedIn outreach not configured")
+
+    urls, skipped_no_linkedin = await _resolve_linkedin_targets(
+        db, site_id, campaign, body.limit
+    )
+    if not urls:
+        raise HTTPException(
+            status_code=400,
+            detail="No audience members have a LinkedIn profile to reach",
+        )
+
+    note = _beam_note_to_phantommm(touchpoint.get("connection_note") or "")
+
+    try:
+        result = await client.start_campaign(
+            connection_id=connection_id,
+            urls=urls,
+            note=note,
+            action=body.action,
+            dry_run=body.dry_run,
+            delay_hours=delay_hours,
+        )
+    except PhantommmError:
+        raise HTTPException(
+            status_code=502,
+            detail="LinkedIn outreach failed to schedule — try again",
+        )
+
+    # Live sends return campaignId; dry-run may omit it → empty string.
+    phantommm_campaign_id = str(result.get("campaignId") or "")
+    scheduled_at = result.get("scheduledAt")
+    logger.info(
+        "linkedin_outreach_scheduled",
+        campaign_id=str(campaign.id),
+        phantommm_campaign_id=phantommm_campaign_id,
+        dry_run=body.dry_run,
+        delay_hours=delay_hours,
+        total_targets=len(urls),
+        skipped_no_linkedin=skipped_no_linkedin,
+    )
+    return LinkedInScheduleResponse(
+        campaign_id=phantommm_campaign_id,
+        scheduled_at=str(scheduled_at) if scheduled_at is not None else None,
+        delay_hours=delay_hours,
+        dry_run=bool(result.get("dryRun", body.dry_run)),
+        total_targets=len(urls),
+        audience_skipped_no_linkedin=skipped_no_linkedin,
+    )
+
+
+@router.get(
+    "/{site_id}/{campaign_id}/linkedin-outreach/campaign/{phantommm_campaign_id}",
+    response_model=LinkedInCampaignDetailResponse,
+)
+async def get_linkedin_campaign_detail(
+    site_id: str,
+    campaign_id: str,
+    phantommm_campaign_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LinkedInCampaignDetailResponse:
+    """Proxy a durable phantommm campaign's status for the campaign owner."""
+    await verify_site_access(db, site_id, user)
+    await _get_campaign_or_404(db, site_id, campaign_id)
+
+    connection_id = await _linkedin_connection_id(db, user)
+    if not connection_id:
+        raise HTTPException(
+            status_code=400, detail="Connect your LinkedIn session first"
+        )
+
+    try:
+        client = PhantommmClient()
+    except PhantommmNotConfigured:
+        raise HTTPException(status_code=503, detail="LinkedIn outreach not configured")
+
+    try:
+        detail = await client.get_campaign_detail(
+            phantommm_campaign_id, connection_id
+        )
+    except PhantommmError:
+        raise HTTPException(status_code=502, detail="Could not fetch campaign status")
+
+    counts = detail.get("counts")
+    campaign_obj = detail.get("campaign")
+    scheduled_at = (
+        campaign_obj.get("scheduledAt") if isinstance(campaign_obj, dict) else None
+    )
+    days = detail.get("days")
+    return LinkedInCampaignDetailResponse(
+        status_counts={
+            k: int(v)
+            for k, v in (counts.items() if isinstance(counts, dict) else [])
+            if isinstance(v, (int, float))
+        },
+        scheduled_at=str(scheduled_at) if scheduled_at is not None else None,
+        days=days if isinstance(days, list) else [],
     )

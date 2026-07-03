@@ -290,3 +290,172 @@ class TestLinkedInOutreachHappyPath:
         )
         resp = await test_client.post(_url(setup), json={"dry_run": True})
         assert resp.status_code in (401, 403), resp.text
+
+
+async def _make_li_campaign_with_delay(
+    test_db, *, site_id: str, user_email: str, delay_hours: int
+) -> dict:
+    """Like _make_li_campaign but stamps delay_hours_from_start on the LinkedIn
+    touchpoint so the schedule endpoint can echo it back."""
+    from apps.api.models.campaign import Campaign
+
+    setup = await _make_li_campaign(
+        test_db, site_id=site_id, user_email=user_email,
+    )
+    campaign = (
+        await test_db.execute(
+            select(Campaign).where(Campaign.id == setup["campaign_id"])
+        )
+    ).scalar_one()
+    plan = dict(campaign.plan)
+    tps = [dict(tp) for tp in plan.get("touchpoints", [])]
+    for tp in tps:
+        if tp.get("channel") == "linkedin":
+            tp["delay_hours_from_start"] = delay_hours
+    plan["touchpoints"] = tps
+    campaign.plan = plan
+    await test_db.commit()
+    return setup
+
+
+def _schedule_url(setup: dict) -> str:
+    return f"{_url(setup)}/schedule"
+
+
+class TestLinkedInSchedule:
+    @pytest.mark.asyncio
+    async def test_email_campaign_has_no_linkedin_touchpoint_400(
+        self, test_client, test_db, li_token
+    ):
+        setup = await _make_li_campaign(
+            test_db, site_id="li_sched_email", user_email="li-outreach@test.com",
+            channel="email",
+        )
+        resp = await test_client.post(
+            _schedule_url(setup), headers=_auth(li_token), json={"dry_run": True}
+        )
+        assert resp.status_code == 400, resp.text
+        assert "LinkedIn touchpoint" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_not_connected_400(self, test_client, test_db, li_token):
+        setup = await _make_li_campaign(
+            test_db, site_id="li_sched_noconn", user_email="li-outreach@test.com",
+        )
+        resp = await test_client.post(
+            _schedule_url(setup), headers=_auth(li_token), json={"dry_run": True}
+        )
+        assert resp.status_code == 400, resp.text
+        assert "Connect your LinkedIn session" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_connected_but_phantommm_unconfigured_503(
+        self, test_client, test_db, li_token, monkeypatch
+    ):
+        from apps.api.services import phantommm_client as pc
+
+        monkeypatch.setattr(pc.settings, "phantommm_base_url", None, raising=False)
+        monkeypatch.setattr(pc.settings, "phantommm_api_key", None, raising=False)
+
+        setup = await _make_li_campaign(
+            test_db, site_id="li_sched_503", user_email="li-outreach@test.com",
+        )
+        await _connect_linkedin(test_db, "li-outreach@test.com")
+        resp = await test_client.post(
+            _schedule_url(setup), headers=_auth(li_token), json={"dry_run": True}
+        )
+        assert resp.status_code == 503, resp.text
+
+    @pytest.mark.asyncio
+    async def test_connected_but_no_enriched_linkedin_url_400(
+        self, test_client, test_db, li_token, monkeypatch
+    ):
+        import apps.api.routers.campaigns as camp
+
+        class _Fake:
+            def __init__(self):
+                pass
+
+        monkeypatch.setattr(camp, "PhantommmClient", _Fake)
+        setup = await _make_li_campaign(
+            test_db, site_id="li_sched_nourl", user_email="li-outreach@test.com",
+            with_enrichment=False,
+        )
+        await _connect_linkedin(test_db, "li-outreach@test.com")
+        resp = await test_client.post(
+            _schedule_url(setup), headers=_auth(li_token), json={"dry_run": True}
+        )
+        assert resp.status_code == 400, resp.text
+        assert "LinkedIn profile" in resp.json()["detail"]
+
+    @pytest.mark.asyncio
+    async def test_dry_run_schedules_and_echoes_delay_and_converts_note(
+        self, test_client, test_db, li_token, monkeypatch
+    ):
+        import apps.api.routers.campaigns as camp
+
+        calls: dict = {}
+
+        class _FakeClient:
+            def __init__(self):
+                pass
+
+            async def start_campaign(self, **kw):
+                calls["schedule"] = kw
+                return {
+                    "campaignId": "camp-1",
+                    "scheduledAt": "2026-07-04T00:00:00Z",
+                    "dryRun": kw["dry_run"],
+                }
+
+            async def get_campaign_detail(self, campaign_id, connection_id):
+                calls["detail"] = (campaign_id, connection_id)
+                return {
+                    "campaign": {"scheduledAt": "2026-07-04T00:00:00Z"},
+                    "counts": {"total": 1, "pending": 1, "sent": 0,
+                               "skipped": 0, "failed": 0},
+                    "budget": {},
+                    "days": [{"date": "2026-07-04", "sent": 0}],
+                }
+
+        monkeypatch.setattr(camp, "PhantommmClient", _FakeClient)
+
+        setup = await _make_li_campaign_with_delay(
+            test_db, site_id="li_sched_ok", user_email="li-outreach@test.com",
+            delay_hours=24,
+        )
+        await _connect_linkedin(test_db, "li-outreach@test.com")
+
+        resp = await test_client.post(
+            _schedule_url(setup),
+            headers=_auth(li_token),
+            json={"dry_run": True, "limit": 20},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["campaign_id"] == "camp-1"
+        assert body["dry_run"] is True
+        assert body["delay_hours"] == 24
+        assert body["scheduled_at"] == "2026-07-04T00:00:00Z"
+        assert body["total_targets"] == 1
+        assert body["audience_skipped_no_linkedin"] == 0
+
+        # delay_hours_from_start on the touchpoint is passed through to phantommm.
+        assert calls["schedule"]["delay_hours"] == 24
+        assert calls["schedule"]["connection_id"] == "conn-abc"
+        assert calls["schedule"]["dry_run"] is True
+        # Beam {{first_name}} → phantommm #firstName#; no raw mustache leaks.
+        note = calls["schedule"]["note"]
+        assert "#firstName#" in note
+        assert "{{" not in note and "}}" not in note
+
+        # Detail endpoint proxies phantommm and shapes the counts.
+        detail_resp = await test_client.get(
+            f"{_url(setup)}/campaign/camp-1", headers=_auth(li_token)
+        )
+        assert detail_resp.status_code == 200, detail_resp.text
+        dj = detail_resp.json()
+        assert dj["status_counts"]["total"] == 1
+        assert dj["scheduled_at"] == "2026-07-04T00:00:00Z"
+        assert dj["days"] == [{"date": "2026-07-04", "sent": 0}]
+        assert calls["detail"] == ("camp-1", "conn-abc")

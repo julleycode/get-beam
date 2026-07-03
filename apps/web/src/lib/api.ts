@@ -40,6 +40,8 @@ import type {
   LinkedInOutreachStatus,
   LinkedInOutreachResponse,
   LinkedInOutreachJob,
+  LinkedInScheduleResponse,
+  LinkedInCampaignDetail,
   SocialPost,
   FeedResponse,
   SocialDraft,
@@ -881,6 +883,40 @@ class ApiClient {
     );
   }
 
+  /**
+   * Schedule a durable LinkedIn drip campaign that STARTS after the step's
+   * suggested delay, then sends within daily limits. dryRun defaults ON — pass
+   * dryRun: false to schedule for real.
+   */
+  async scheduleLinkedInOutreach(
+    siteId: string,
+    campaignId: string,
+    opts: { dryRun: boolean; limit: number; action: "connect" | "message" }
+  ) {
+    return this.request<LinkedInScheduleResponse>(
+      `/api/v1/campaigns/${siteId}/${campaignId}/linkedin-outreach/schedule`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          dry_run: opts.dryRun,
+          limit: opts.limit,
+          action: opts.action,
+        }),
+      }
+    );
+  }
+
+  /** Fetch a durable LinkedIn drip campaign's status. */
+  async getLinkedInCampaign(
+    siteId: string,
+    campaignId: string,
+    phantommmCampaignId: string
+  ) {
+    return this.request<LinkedInCampaignDetail>(
+      `/api/v1/campaigns/${siteId}/${campaignId}/linkedin-outreach/campaign/${phantommmCampaignId}`
+    );
+  }
+
   // ── EasyEngage: Feed ───────────────────────────────
   async getFeed(
     page = 1,
@@ -1343,6 +1379,8 @@ export type {
   LinkedInOutreachStatus,
   LinkedInOutreachResponse,
   LinkedInOutreachJob,
+  LinkedInScheduleResponse,
+  LinkedInCampaignDetail,
   SocialPost,
   FeedResponse,
   SocialDraft,

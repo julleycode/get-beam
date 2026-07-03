@@ -84,3 +84,33 @@ class LinkedInOutreachJobResponse(BaseModel):
     total: int
     sent: int
     results: list[dict]
+
+
+class LinkedInScheduleRequest(BaseModel):
+    """Schedule a durable LinkedIn drip campaign for a campaign's LinkedIn step.
+
+    Unlike the immediate outreach run, this schedules a persistent campaign on
+    the phantommm sidecar that STARTS after the touchpoint's suggested delay,
+    then sends within daily limits. dry_run defaults ON everywhere — a real
+    schedule requires the caller to explicitly pass ``dry_run=false``.
+    """
+
+    dry_run: bool = True
+    limit: int = Field(default=20, ge=1, le=MAX_LINKEDIN_OUTREACH_LIMIT)
+    action: Literal["connect", "message"] = "connect"
+
+
+class LinkedInScheduleResponse(BaseModel):
+    # In dry-run phantommm may not return a campaignId → empty string.
+    campaign_id: str
+    scheduled_at: str | None
+    delay_hours: int
+    dry_run: bool
+    total_targets: int
+    audience_skipped_no_linkedin: int
+
+
+class LinkedInCampaignDetailResponse(BaseModel):
+    status_counts: dict[str, int]
+    scheduled_at: str | None
+    days: list[dict]

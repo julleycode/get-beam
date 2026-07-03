@@ -5,7 +5,10 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, Campaign } from "@/lib/api";
-import type { LinkedInOutreachResponse } from "@/lib/api-types";
+import type {
+  LinkedInOutreachResponse,
+  LinkedInScheduleResponse,
+} from "@/lib/api-types";
 import { ListCardSkeleton, PageHeaderSkeleton, StatGridSkeleton } from "@/components/skeletons";
 import { StatTile } from "@/components/stat-tile";
 import { Badge } from "@/components/ui/badge";
@@ -90,6 +93,32 @@ export default function CampaignDetailPage() {
     onSuccess: (res) => {
       setOutreachJob(res);
       setOutreachOpen(false);
+    },
+  });
+
+  // ── Schedule LinkedIn outreach (durable drip campaign) ──
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleDryRun, setScheduleDryRun] = useState(true);
+  const [scheduleLimit, setScheduleLimit] = useState(20);
+  const [scheduleResult, setScheduleResult] =
+    useState<LinkedInScheduleResponse | null>(null);
+
+  // The LinkedIn step's suggested start offset (hours), read off the plan.
+  const linkedinDelayHours =
+    (
+      (campaign?.plan as { touchpoints?: Touchpoint[] })?.touchpoints || []
+    ).find((tp) => tp.channel === "linkedin")?.delay_hours_from_start ?? 0;
+
+  const scheduleMut = useMutation({
+    mutationFn: () =>
+      api.scheduleLinkedInOutreach(siteId, campaignId, {
+        dryRun: scheduleDryRun,
+        limit: scheduleLimit,
+        action: "connect",
+      }),
+    onSuccess: (res) => {
+      setScheduleResult(res);
+      setScheduleOpen(false);
     },
   });
 
@@ -300,13 +329,29 @@ export default function CampaignDetailPage() {
                     to send connection requests.
                   </p>
                 ) : null}
-                <Button
-                  size="sm"
-                  onClick={() => setOutreachOpen(true)}
-                  disabled={!outreachStatus?.outreach_connected}
-                >
-                  Send LinkedIn outreach
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => setOutreachOpen(true)}
+                    disabled={!outreachStatus?.outreach_connected}
+                  >
+                    Send LinkedIn outreach
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setScheduleOpen(true)}
+                    disabled={!outreachStatus?.outreach_connected}
+                  >
+                    Schedule
+                  </Button>
+                </div>
+                {outreachStatus?.outreach_connected && (
+                  <p className="text-xs text-muted-foreground">
+                    Schedule starts the drip in {tp.delay_hours_from_start}h,
+                    then sends within daily limits.
+                  </p>
+                )}
 
                 {outreachJob && (
                   <div className="rounded-md border bg-muted/50 p-3 text-xs space-y-1">
@@ -327,6 +372,34 @@ export default function CampaignDetailPage() {
                     ) : (
                       <p className="text-muted-foreground">Starting…</p>
                     )}
+                  </div>
+                )}
+
+                {scheduleResult && (
+                  <div className="rounded-md border bg-muted/50 p-3 text-xs space-y-1">
+                    {scheduleResult.dry_run && (
+                      <p className="font-medium text-warning">
+                        Dry run — nothing was scheduled.
+                      </p>
+                    )}
+                    {!scheduleResult.dry_run && scheduleResult.campaign_id && (
+                      <p>
+                        Scheduled campaign:{" "}
+                        <span className="font-mono">
+                          {scheduleResult.campaign_id}
+                        </span>
+                      </p>
+                    )}
+                    <p>
+                      Starts:{" "}
+                      {scheduleResult.scheduled_at
+                        ? new Date(scheduleResult.scheduled_at).toLocaleString()
+                        : `in ${scheduleResult.delay_hours}h`}
+                    </p>
+                    <p>
+                      Targets: {scheduleResult.total_targets} · Skipped (no
+                      LinkedIn): {scheduleResult.audience_skipped_no_linkedin}
+                    </p>
                   </div>
                 )}
               </div>
@@ -407,6 +480,87 @@ export default function CampaignDetailPage() {
                 : dryRun
                   ? "Preview (dry run)"
                   : "Send for real"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={scheduleOpen}
+        onOpenChange={(o) => {
+          if (!scheduleMut.isPending) setScheduleOpen(o);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Schedule LinkedIn outreach?</DialogTitle>
+            <DialogDescription>
+              This schedules a durable drip campaign that starts in{" "}
+              {linkedinDelayHours}h, then sends within daily limits. Automating
+              LinkedIn is against LinkedIn&apos;s Terms of Service and can get
+              your account restricted. Keep dry run on to preview without
+              scheduling.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="rounded-md border bg-muted/50 p-3 text-sm">
+              Starts in {linkedinDelayHours}h, then sends within daily limits.
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={scheduleDryRun}
+                onChange={(e) => setScheduleDryRun(e.target.checked)}
+                className="h-4 w-4"
+              />
+              Dry run (preview only — nothing is scheduled)
+            </label>
+            <div className="space-y-1.5">
+              <label htmlFor="schedule-limit" className="text-sm font-medium">
+                Limit
+              </label>
+              <Input
+                id="schedule-limit"
+                type="number"
+                min={1}
+                max={50}
+                value={scheduleLimit}
+                onChange={(e) =>
+                  setScheduleLimit(
+                    Math.max(1, Math.min(50, Number(e.target.value) || 1))
+                  )
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Max 50 profiles per run.
+              </p>
+            </div>
+            {scheduleMut.isError && (
+              <p className="text-sm text-destructive">
+                {(scheduleMut.error as Error)?.message ?? "Failed to schedule"}
+              </p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setScheduleOpen(false)}
+              disabled={scheduleMut.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant={scheduleDryRun ? "default" : "destructive"}
+              onClick={() => scheduleMut.mutate()}
+              disabled={scheduleMut.isPending}
+            >
+              {scheduleMut.isPending
+                ? "Scheduling..."
+                : scheduleDryRun
+                  ? "Preview (dry run)"
+                  : "Schedule for real"}
             </Button>
           </DialogFooter>
         </DialogContent>

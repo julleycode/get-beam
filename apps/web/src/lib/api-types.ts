@@ -392,6 +392,23 @@ export interface LinkedInOutreachJob {
   results: Record<string, unknown>[];
 }
 
+// ── LinkedIn scheduled drip campaign (via phantommm sidecar) ──
+export interface LinkedInScheduleResponse {
+  // Empty string in dry-run (phantommm may omit campaignId).
+  campaign_id: string;
+  scheduled_at: string | null;
+  delay_hours: number;
+  dry_run: boolean;
+  total_targets: number;
+  audience_skipped_no_linkedin: number;
+}
+
+export interface LinkedInCampaignDetail {
+  status_counts: Record<string, number>;
+  scheduled_at: string | null;
+  days: Record<string, unknown>[];
+}
+
 export interface BrowserRow {
   browser: string;
   captured: number;

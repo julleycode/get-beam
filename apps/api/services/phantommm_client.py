@@ -18,6 +18,7 @@ If ``phantommm_base_url`` or ``phantommm_api_key`` is unset, every call raises
 """
 
 from typing import Any, Literal
+from urllib.parse import urlencode
 
 import httpx
 import structlog
@@ -213,3 +214,68 @@ class PhantommmClient:
         if not isinstance(job, dict):
             raise PhantommmError("phantommm job status returned no job")
         return job
+
+    async def start_campaign(
+        self,
+        *,
+        connection_id: str,
+        urls: list[str],
+        note: str,
+        action: OutreachAction = "connect",
+        dry_run: bool = True,
+        delay_hours: int = 0,
+    ) -> dict[str, Any]:
+        """Schedule a durable drip campaign that STARTS after ``delay_hours``.
+
+        Unlike ``start_outreach`` (a one-shot job), this creates a persistent
+        campaign on phantommm that begins sending only once the campaign's
+        suggested delay has elapsed, then paces sends within daily limits.
+
+        Returns the parsed response dict:
+          * dry-run (200): ``{dryRun, wouldEnqueue, totalCandidates, scheduledAt,
+            delayHours, preview:[...]}``
+          * live (202): ``{campaignId, enqueued, pending, scheduledAt, action,
+            campaignLabel, message}``
+
+        The ``note`` and ``urls`` are PII/secrets and are NOT logged.
+        """
+        body: dict[str, Any] = {
+            "connectionId": connection_id,
+            "urls": urls,
+            "note": note,
+            "action": action,
+            "dryRun": dry_run,
+            "delayHours": delay_hours,
+            "source": "urls",
+        }
+        data = await self._request("POST", "/api/campaign", body)
+        logger.info(
+            "phantommm_campaign_started",
+            connection_id=connection_id,
+            campaign_id=data.get("campaignId"),
+            action=action,
+            dry_run=bool(data.get("dryRun", dry_run)),
+            delay_hours=delay_hours,
+            url_count=len(urls),
+            enqueued=data.get("enqueued"),
+            would_enqueue=data.get("wouldEnqueue"),
+        )
+        return data
+
+    async def get_campaign_detail(
+        self, campaign_id: str, connection_id: str
+    ) -> dict[str, Any]:
+        """Fetch a durable campaign's status.
+
+        Returns the parsed response dict
+        (``{campaign:{...,scheduledAt}, counts:{...}, budget:{...}, days:[...]}``).
+        """
+        qs = urlencode({"campaignId": campaign_id, "connectionId": connection_id})
+        path = f"/api/campaign/detail?{qs}"
+        data = await self._request("GET", path)
+        logger.info(
+            "phantommm_campaign_detail",
+            connection_id=connection_id,
+            campaign_id=campaign_id,
+        )
+        return data
