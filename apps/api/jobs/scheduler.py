@@ -90,6 +90,20 @@ async def _changelog_sync_job() -> None:
         logger.exception("changelog_sync_crashed")
 
 
+async def _connection_nudge_job() -> None:
+    """Periodic job: email owners whose social token is expiring/expired.
+
+    check_expiring_connections manages its own session, throttles per account,
+    and isolates per-account send failures.
+    """
+    try:
+        from apps.api.services.connection_nudge import check_expiring_connections
+
+        await check_expiring_connections()
+    except Exception:
+        logger.exception("connection_nudge_crashed")
+
+
 def start_scheduler() -> None:
     """Start the background scheduler. Call once at app startup."""
     scheduler.add_job(
@@ -136,6 +150,15 @@ def start_scheduler() -> None:
             id="changelog_sync",
             replace_existing=True,
             next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+        )
+    if settings.connection_nudge_enabled:
+        scheduler.add_job(
+            _connection_nudge_job,
+            "interval",
+            hours=1,
+            id="connection_nudge",
+            replace_existing=True,
+            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
         )
     scheduler.start()
     logger.info(

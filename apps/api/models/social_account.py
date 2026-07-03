@@ -52,6 +52,11 @@ class SocialAccount(Base):
         String(255), nullable=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Last time an expiry nudge email was sent for this account — throttles the
+    # hourly nudge job so a user isn't emailed more than once per window.
+    last_expiry_alert_sent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

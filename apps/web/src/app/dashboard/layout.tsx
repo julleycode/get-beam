@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { OnboardingTour } from "@/components/onboarding-tour";
+import { ExpiringConnectionBanner } from "@/components/expiring-connection-banner";
 import { TOUR_STEPS } from "@/lib/tour-steps";
 
 const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -532,7 +533,17 @@ export default function DashboardLayout({
         </header>
 
         <main className="bg-pixel-sky flex-1 overflow-auto p-6">
-          {HAS_CLERK ? <ClerkTokenGate>{children}</ClerkTokenGate> : children}
+          {HAS_CLERK ? (
+            <ClerkTokenGate>
+              <ExpiringConnectionBanner />
+              {children}
+            </ClerkTokenGate>
+          ) : (
+            <>
+              <ExpiringConnectionBanner />
+              {children}
+            </>
+          )}
         </main>
       </div>
 
