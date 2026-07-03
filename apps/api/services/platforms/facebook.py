@@ -29,7 +29,11 @@ class FacebookService(PlatformService):
             "client_id": settings.facebook_app_id,
             "redirect_uri": settings.facebook_redirect_uri,
             "state": state,
-            "scope": "public_profile,user_posts,publish_to_groups",
+            # Only public_profile is still grantable. Meta retired user_posts
+            # (personal-feed read) and publish_to_groups (Groups API, 2024) —
+            # including them makes the OAuth dialog reject the request with
+            # "Invalid Scopes" instead of showing the consent screen.
+            "scope": "public_profile",
             "response_type": "code",
         }
         return f"{_FB_AUTH_URL}?{urlencode(params)}"
