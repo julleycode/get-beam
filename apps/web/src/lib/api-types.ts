@@ -574,6 +574,8 @@ export interface SocialAccount {
   is_active: boolean;
   token_expires_at: string | null;
   created_at: string;
+  /** LinkedIn cookie-registered outreach account: no OAuth token to expire/reconnect. */
+  is_outreach: boolean;
 }
 
 export interface SocialPost {

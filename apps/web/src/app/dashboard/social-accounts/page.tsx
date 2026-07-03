@@ -6,6 +6,10 @@ import { api, type Platform } from "@/lib/api";
 import { ListCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { PlatformBadge } from "@/components/platform-badge";
+import {
+  ConnectionHealthBadge,
+  connectionHealth,
+} from "@/components/connection-health";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -85,29 +89,56 @@ export default function SocialAccountsPage() {
         />
       ) : accounts && accounts.length > 0 ? (
         <div className="space-y-3">
-          {accounts.map((account) => (
-            <div
-              key={account.id}
-              className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold">
-                  {account.username.charAt(0).toUpperCase()}
+          {accounts.map((account) => {
+            const health = connectionHealth(account);
+            return (
+              <div
+                key={account.id}
+                className="bg-white rounded-lg border border-gray-200 p-4 flex items-center justify-between gap-3"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-sm font-bold">
+                    {account.username.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">{account.username}</p>
+                    <div className="flex items-center gap-2">
+                      <PlatformBadge platform={account.platform} />
+                      {!account.is_outreach && (
+                        <ConnectionHealthBadge health={health} />
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-medium">{account.username}</p>
-                  <PlatformBadge platform={account.platform} />
+                <div className="flex items-center gap-2">
+                  {/* Reconnect re-runs the OAuth connect flow. The callback upserts
+                      by (platform, platform_user_id, user) so the SAME account row is
+                      refreshed — no duplicate. Outreach (cookie) accounts have no
+                      OAuth token, so use the LinkedIn outreach form to refresh those. */}
+                  {!account.is_outreach && (
+                    <button
+                      onClick={() => connectMut.mutate(account.platform)}
+                      disabled={connectMut.isPending}
+                      className={`text-xs px-3 py-1.5 rounded-md border ${
+                        health === "connected"
+                          ? "border-gray-200 text-gray-600 hover:bg-gray-50"
+                          : "border-[#FFA8BD] bg-[#FFF1F5] text-[#c2185b] font-medium hover:bg-[#ffe4ec]"
+                      }`}
+                    >
+                      Reconnect
+                    </button>
+                  )}
+                  <button
+                    onClick={() => disconnectMut.mutate(account.id)}
+                    disabled={disconnectMut.isPending}
+                    className="text-xs px-3 py-1.5 rounded-md border border-red-200 text-red-600 hover:bg-red-50"
+                  >
+                    Disconnect
+                  </button>
                 </div>
               </div>
-              <button
-                onClick={() => disconnectMut.mutate(account.id)}
-                disabled={disconnectMut.isPending}
-                className="text-xs px-3 py-1.5 rounded-md border border-red-200 text-red-600 hover:bg-red-50"
-              >
-                Disconnect
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <p className="text-sm text-gray-400">

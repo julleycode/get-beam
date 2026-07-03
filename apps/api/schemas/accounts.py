@@ -14,6 +14,10 @@ class SocialAccountResponse(BaseModel):
     is_active: bool
     token_expires_at: Optional[datetime] = None
     created_at: datetime
+    # True for LinkedIn outreach (cookie-registered via phantommm): there is no
+    # OAuth token to expire or reconnect, so the UI hides the health/reconnect
+    # affordances for these rows.
+    is_outreach: bool = False
 
     model_config = {"from_attributes": True}
 

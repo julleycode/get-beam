@@ -49,6 +49,7 @@ async def list_accounts(
             is_active=a.is_active,
             token_expires_at=a.token_expires_at,
             created_at=a.created_at,
+            is_outreach=a.outreach_connection_id is not None,
         )
         for a in accounts
     ]
