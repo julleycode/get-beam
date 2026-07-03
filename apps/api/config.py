@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     changelog_sync_enabled: bool = False  # master switch for the daily auto-sync job
     changelog_sync_interval_hours: int = 24  # how often the daily job pulls new merged PRs
 
+    # ─── Connection-expiry nudge (email account owners before a social token dies) ───
+    connection_nudge_enabled: bool = False  # master switch for the hourly nudge job
+    connection_nudge_warn_days: int = 7  # warn when a token expires within this window
+
     # ─── Identity Graph (person-level from IP) ───
     rb2b_api_key: str = ""          # RB2B API Suite — IP → hashed email → person (US traffic)
     leadpipe_api_key: str = ""      # Leadpipe — pixel-based identity graph (500 free IDs)
@@ -196,6 +200,13 @@ class Settings(BaseSettings):
     facebook_app_secret: str = ""
     facebook_redirect_uri: str = "http://localhost:8000/api/v1/social/callback/facebook"
 
+    # Instagram can use a SEPARATE Meta app from Facebook. Meta does not allow the
+    # Instagram use case and the consumer "Facebook Login" use case in the same app,
+    # so Facebook Login typically lives in a consumer app while Instagram lives in a
+    # business app. If instagram_app_id/secret are empty they fall back to the
+    # facebook_* credentials (legacy single-app setups keep working).
+    instagram_app_id: str = ""
+    instagram_app_secret: str = ""
     instagram_redirect_uri: str = "http://localhost:8000/api/v1/social/callback/instagram"
 
     linkedin_client_id: str = ""

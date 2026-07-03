@@ -22,10 +22,20 @@ _IG_TOKEN_URL = "https://graph.facebook.com/v19.0/oauth/access_token"
 _IG_API = "https://graph.facebook.com/v19.0"
 
 
+def instagram_app_id() -> str:
+    """Instagram's Meta app id, falling back to the Facebook app for legacy setups."""
+    return settings.instagram_app_id or settings.facebook_app_id
+
+
+def instagram_app_secret() -> str:
+    """Instagram's Meta app secret, falling back to the Facebook app for legacy setups."""
+    return settings.instagram_app_secret or settings.facebook_app_secret
+
+
 class InstagramService(PlatformService):
     async def get_auth_url(self, state: str) -> str:
         params = {
-            "client_id": settings.facebook_app_id,
+            "client_id": instagram_app_id(),
             "redirect_uri": settings.instagram_redirect_uri,
             "state": state,
             "scope": "instagram_basic,instagram_manage_comments,pages_show_list",
@@ -38,8 +48,8 @@ class InstagramService(PlatformService):
             resp = await client.get(
                 _IG_TOKEN_URL,
                 params={
-                    "client_id": settings.facebook_app_id,
-                    "client_secret": settings.facebook_app_secret,
+                    "client_id": instagram_app_id(),
+                    "client_secret": instagram_app_secret(),
                     "redirect_uri": settings.instagram_redirect_uri,
                     "code": code,
                 },

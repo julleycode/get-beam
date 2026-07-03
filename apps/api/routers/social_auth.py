@@ -50,7 +50,9 @@ async def get_me(current_user: User = Depends(get_current_user)):
 _PLATFORM_CREDENTIALS = {
     Platform.twitter: ("twitter_client_id", "twitter_client_secret"),
     Platform.facebook: ("facebook_app_id", "facebook_app_secret"),
-    Platform.instagram: ("facebook_app_id", "facebook_app_secret"),  # IG uses FB app
+    # Instagram is validated separately below: it uses instagram_app_id/secret
+    # (which may live in a different Meta app than Facebook) and falls back to
+    # the facebook_* credentials for legacy single-app setups.
     Platform.linkedin: ("linkedin_client_id", "linkedin_client_secret"),
     Platform.tiktok: ("tiktok_client_key", "tiktok_client_secret"),
 }
@@ -62,16 +64,32 @@ async def connect_platform(
     current_user: User = Depends(get_current_user),
 ):
     # Validate credentials are configured before sending user to OAuth
-    required_fields = _PLATFORM_CREDENTIALS.get(platform, ())
-    missing = [f for f in required_fields if not getattr(settings, f, "")]
-    if missing:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Cannot connect to {platform.value}: missing credentials "
-                f"({', '.join(missing)}). Add them to your .env file."
-            ),
+    if platform == Platform.instagram:
+        from apps.api.services.platforms.instagram import (
+            instagram_app_id,
+            instagram_app_secret,
         )
+
+        if not (instagram_app_id() and instagram_app_secret()):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Cannot connect to instagram: missing credentials "
+                    "(instagram_app_id/instagram_app_secret, or facebook_app_id/"
+                    "facebook_app_secret as fallback). Add them to your .env file."
+                ),
+            )
+    else:
+        required_fields = _PLATFORM_CREDENTIALS.get(platform, ())
+        missing = [f for f in required_fields if not getattr(settings, f, "")]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Cannot connect to {platform.value}: missing credentials "
+                    f"({', '.join(missing)}). Add them to your .env file."
+                ),
+            )
 
     service = get_platform_service(platform)
     state = uuid.uuid4().hex
