@@ -629,6 +629,8 @@ export interface SocialDraft {
   created_at: string;
   /** Plain-language reason a send failed (set on failed drafts). */
   failure_reason: string | null;
+  /** Why a rejected draft was rejected: "user_rejected" | "auto_rejected_sibling". */
+  rejection_reason: string | null;
   original_content: string | null;
   original_author: string | null;
 }

@@ -32,6 +32,12 @@ export function DraftCard({
   const needsReconnect =
     !!draft.failure_reason &&
     /reconnect|expired|session|no longer connected/i.test(draft.failure_reason);
+
+  // A sibling auto-rejected because the user approved a different reply for the
+  // same post — label it "Not used" instead of a blunt "Rejected".
+  const isAutoRejected =
+    draft.status === "rejected" &&
+    draft.rejection_reason === "auto_rejected_sibling";
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState(
     draft.edited_content || draft.ai_content
@@ -54,7 +60,10 @@ export function DraftCard({
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <PlatformBadge platform={draft.platform} />
-            <StatusBadge status={draft.status} />
+            <StatusBadge
+              status={draft.status}
+              label={isAutoRejected ? "Not used" : undefined}
+            />
             {draft.strategy_label && (
               <Badge variant="secondary">{draft.strategy_label}</Badge>
             )}

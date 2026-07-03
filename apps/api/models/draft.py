@@ -48,6 +48,11 @@ class Draft(Base):
     # Plain-language reason a send failed (shown on the failed draft card so the
     # user knows why + what to do). Cleared on a successful (re)send.
     failure_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Why a draft is `rejected`: "user_rejected" (the user clicked Reject) vs
+    # "auto_rejected_sibling" (another draft for the same post was approved).
+    # NULL for historical rows / non-rejected drafts. Lets the UI relabel
+    # auto-rejected siblings as "Not used" instead of a blunt "Rejected".
+    rejection_reason: Mapped[Optional[str]] = mapped_column(String(30), nullable=True)
     # Auto-generation fields (set when draft is created from visitor social context)
     auto_generated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="false")
     visitor_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)

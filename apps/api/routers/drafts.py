@@ -39,6 +39,10 @@ from apps.api.services.sender import SocialTokenExpiredError, send_draft
 
 router = APIRouter(tags=["drafts"])
 
+# Values for Draft.rejection_reason — why a draft ended up `rejected`.
+REJECTION_USER = "user_rejected"
+REJECTION_AUTO_SIBLING = "auto_rejected_sibling"
+
 
 def _draft_to_response(
     d: Draft,
@@ -62,6 +66,7 @@ def _draft_to_response(
         sent_at=d.sent_at,
         created_at=d.created_at or datetime.now(timezone.utc),
         failure_reason=d.failure_reason,
+        rejection_reason=d.rejection_reason,
         original_content=original_content,
         original_author=original_author,
     )
@@ -315,6 +320,7 @@ async def reject_draft(
         raise HTTPException(status_code=404, detail="Draft not found")
 
     draft.status = DraftStatus.rejected
+    draft.rejection_reason = REJECTION_USER
     await db.commit()
 
     # Save as rejected voice example for GBrain learning
@@ -393,6 +399,7 @@ async def _auto_reject_siblings(db: AsyncSession, approved_draft: Draft) -> None
         siblings = result.scalars().all()
         for sibling in siblings:
             sibling.status = DraftStatus.rejected
+            sibling.rejection_reason = REJECTION_AUTO_SIBLING
             await _save_voice_example(db, sibling)
             logger.info(
                 "sibling_draft_auto_rejected",

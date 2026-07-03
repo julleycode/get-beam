@@ -20,6 +20,8 @@ class DraftResponse(BaseModel):
     created_at: Optional[datetime] = None
     # Plain-language reason a send failed (set on failed drafts).
     failure_reason: Optional[str] = None
+    # Why a rejected draft was rejected: "user_rejected" | "auto_rejected_sibling".
+    rejection_reason: Optional[str] = None
 
     # Inline context so the user knows what this draft is for
     original_content: Optional[str] = None
