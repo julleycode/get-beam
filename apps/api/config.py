@@ -285,6 +285,16 @@ class Settings(BaseSettings):
     enable_content_reader: bool = False          # master gate — off until explicitly enabled
     content_reader_max_items: int = 5            # number of recent videos/posts to keep per source
 
+    # ─── phantommm sidecar (LinkedIn outreach automation) ───
+    # Beam NEVER talks to LinkedIn directly and NEVER stores the raw LinkedIn
+    # session cookie. The cookie lives encrypted inside the phantommm sidecar;
+    # Beam only holds an opaque connection_id reference. Both must be set for the
+    # LinkedIn-outreach endpoints to work (else they return HTTP 503, mirroring
+    # the Lemon Squeezy "not configured" pattern). PHANTOMMM_API_KEY must match
+    # phantommm's own API_KEY — it's sent as the `x-api-key` header on every call.
+    phantommm_base_url: str | None = None
+    phantommm_api_key: str | None = None
+
     # ─── Twitter/X enrichment fallback ───
     # TwitterAPI.io — cheap third-party X data provider used as a FALLBACK when
     # the official X API v2 call errors / returns non-200 / no bearer token.

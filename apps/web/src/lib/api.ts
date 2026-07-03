@@ -36,6 +36,10 @@ import type {
   Platform,
   DraftStatus,
   SocialAccount,
+  LinkedInOutreachConnectResponse,
+  LinkedInOutreachStatus,
+  LinkedInOutreachResponse,
+  LinkedInOutreachJob,
   SocialPost,
   FeedResponse,
   SocialDraft,
@@ -813,6 +817,70 @@ class ApiClient {
     );
   }
 
+  // ── LinkedIn outreach (via phantommm sidecar) ──────
+  /**
+   * Register a LinkedIn `li_at` session cookie + User-Agent with the phantommm
+   * sidecar. Beam never stores the raw cookie — only the opaque connection id.
+   * The cookie is never returned.
+   */
+  async enableLinkedInOutreach(
+    sessionCookie: string,
+    userAgent: string,
+    label?: string
+  ) {
+    return this.request<LinkedInOutreachConnectResponse>(
+      "/api/v1/social/accounts/linkedin/outreach-connect",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          session_cookie: sessionCookie,
+          user_agent: userAgent,
+          label,
+        }),
+      }
+    );
+  }
+
+  /** Whether the caller has a usable LinkedIn outreach connection. */
+  async getLinkedInOutreachStatus() {
+    return this.request<LinkedInOutreachStatus>(
+      "/api/v1/social/accounts/linkedin/outreach-status"
+    );
+  }
+
+  /**
+   * Send LinkedIn connection requests to a campaign's segment audience via
+   * phantommm. dryRun defaults ON — pass dryRun: false to send for real.
+   */
+  async sendLinkedInOutreach(
+    siteId: string,
+    campaignId: string,
+    opts: { dryRun: boolean; limit: number; action: "connect" | "message" }
+  ) {
+    return this.request<LinkedInOutreachResponse>(
+      `/api/v1/campaigns/${siteId}/${campaignId}/linkedin-outreach`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          dry_run: opts.dryRun,
+          limit: opts.limit,
+          action: opts.action,
+        }),
+      }
+    );
+  }
+
+  /** Poll a LinkedIn outreach job's status. */
+  async getLinkedInOutreachJob(
+    siteId: string,
+    campaignId: string,
+    jobId: string
+  ) {
+    return this.request<LinkedInOutreachJob>(
+      `/api/v1/campaigns/${siteId}/${campaignId}/linkedin-outreach/${jobId}`
+    );
+  }
+
   // ── EasyEngage: Feed ───────────────────────────────
   async getFeed(
     page = 1,
@@ -1271,6 +1339,10 @@ export type {
   Platform,
   DraftStatus,
   SocialAccount,
+  LinkedInOutreachConnectResponse,
+  LinkedInOutreachStatus,
+  LinkedInOutreachResponse,
+  LinkedInOutreachJob,
   SocialPost,
   FeedResponse,
   SocialDraft,

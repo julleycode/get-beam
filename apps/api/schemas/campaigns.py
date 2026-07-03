@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class CampaignOut(BaseModel):
@@ -50,3 +51,36 @@ class CampaignStatsResponse(BaseModel):
     open_rate: float
     click_rate: float
     returned_visitors: list[ReturnedVisitor]
+
+
+# Hard server-side cap on how many LinkedIn profiles one outreach run may target,
+# independent of the per-request `limit`. Automating LinkedIn is high-risk; this
+# bounds blast radius even if the client sends a large value.
+MAX_LINKEDIN_OUTREACH_LIMIT = 50
+
+
+class LinkedInOutreachRequest(BaseModel):
+    """Start a LinkedIn outreach run for a campaign's LinkedIn step.
+
+    dry_run defaults ON everywhere — a real (non-dry-run) send requires the
+    caller to explicitly pass ``dry_run=false``.
+    """
+
+    dry_run: bool = True
+    limit: int = Field(default=20, ge=1, le=MAX_LINKEDIN_OUTREACH_LIMIT)
+    action: Literal["connect", "message"] = "connect"
+
+
+class LinkedInOutreachResponse(BaseModel):
+    job_id: str
+    dry_run: bool
+    total_targets: int
+    audience_skipped_no_linkedin: int
+
+
+class LinkedInOutreachJobResponse(BaseModel):
+    status: str
+    done: int
+    total: int
+    sent: int
+    results: list[dict]

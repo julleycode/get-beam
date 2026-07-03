@@ -1,10 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Platform } from "@/lib/api";
 import { ListCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { PlatformBadge } from "@/components/platform-badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const ALL_PLATFORMS: { platform: Platform; label: string; color: string }[] = [
   { platform: "twitter", label: "Twitter / X", color: "bg-sky-500" },
@@ -42,6 +48,22 @@ export default function SocialAccountsPage() {
   });
 
   const connectedPlatforms = new Set(accounts?.map((a) => a.platform) ?? []);
+
+  // ── LinkedIn outreach (advanced) ──
+  const [liCookie, setLiCookie] = useState("");
+  const [liUserAgent, setLiUserAgent] = useState("");
+  const { data: outreachStatus } = useQuery({
+    queryKey: ["linkedin-outreach-status"],
+    queryFn: () => api.getLinkedInOutreachStatus(),
+  });
+  const outreachMut = useMutation({
+    mutationFn: () =>
+      api.enableLinkedInOutreach(liCookie.trim(), liUserAgent.trim()),
+    onSuccess: () => {
+      setLiCookie("");
+      queryClient.invalidateQueries({ queryKey: ["linkedin-outreach-status"] });
+    },
+  });
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -118,6 +140,118 @@ export default function SocialAccountsPage() {
           })}
         </div>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            LinkedIn outreach
+            <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
+              Advanced
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Lets Beam send real LinkedIn connection requests from your account
+            for a campaign&apos;s LinkedIn step. Your session cookie is stored
+            encrypted in the outreach service — Beam never keeps a copy and never
+            shows it again.
+          </p>
+          <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+            <strong>Warning:</strong> automating LinkedIn is against LinkedIn&apos;s
+            Terms of Service and can get your account restricted or banned. Use a
+            low daily volume and only with accounts you&apos;re willing to risk.
+          </div>
+
+          {outreachStatus?.outreach_connected ? (
+            <div className="rounded-md border border-success/30 bg-success/10 p-3 text-sm text-success">
+              LinkedIn outreach is connected. You can re-paste a fresh cookie
+              below to update it.
+            </div>
+          ) : outreachStatus && !outreachStatus.configured ? (
+            <div className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">
+              LinkedIn outreach is not enabled on this server yet. Ask your admin
+              to configure the outreach service.
+            </div>
+          ) : null}
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (liCookie.trim() && liUserAgent.trim() && !outreachMut.isPending) {
+                outreachMut.mutate();
+              }
+            }}
+            className="space-y-3"
+          >
+            <div className="space-y-1.5">
+              <Label htmlFor="li-cookie">
+                LinkedIn session cookie (li_at)
+              </Label>
+              <Textarea
+                id="li-cookie"
+                value={liCookie}
+                onChange={(e) => setLiCookie(e.target.value)}
+                placeholder="Paste the value of the li_at cookie"
+                rows={2}
+                autoComplete="off"
+                disabled={outreachMut.isPending}
+              />
+              <p className="text-xs text-muted-foreground">
+                In your browser, open DevTools → Application → Cookies →
+                linkedin.com, and copy the <span className="font-mono">li_at</span>{" "}
+                value.
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="li-ua">Browser User-Agent</Label>
+              <Input
+                id="li-ua"
+                value={liUserAgent}
+                onChange={(e) => setLiUserAgent(e.target.value)}
+                placeholder="Mozilla/5.0 (...) Chrome/... Safari/..."
+                autoComplete="off"
+                disabled={outreachMut.isPending}
+              />
+              <p className="text-xs text-muted-foreground">
+                Paste the exact User-Agent of the browser where you copied the
+                cookie (from{" "}
+                <span className="font-mono">navigator.userAgent</span> in the
+                console).
+              </p>
+            </div>
+
+            {outreachMut.isError && (
+              <p className="text-sm text-destructive">
+                Couldn&apos;t connect LinkedIn outreach —{" "}
+                {(outreachMut.error as Error)?.message ?? "request failed"}
+              </p>
+            )}
+            {outreachMut.isSuccess && (
+              <p className="text-sm text-success">
+                Connected
+                {outreachMut.data?.name ? ` as ${outreachMut.data.name}` : ""}.
+              </p>
+            )}
+
+            <Button
+              type="submit"
+              disabled={
+                outreachMut.isPending ||
+                !liCookie.trim() ||
+                !liUserAgent.trim() ||
+                outreachStatus?.configured === false
+              }
+            >
+              {outreachMut.isPending
+                ? "Connecting..."
+                : outreachStatus?.outreach_connected
+                  ? "Update session"
+                  : "Enable LinkedIn outreach"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }

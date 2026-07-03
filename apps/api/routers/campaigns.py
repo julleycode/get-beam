@@ -7,9 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.campaign import Campaign, CampaignTouchpoint
 from apps.api.models.database import get_db
+from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.event import Event
 from apps.api.models.segment import Segment, SegmentMember
-from apps.api.models.social_account import SocialAccount
+from apps.api.models.social_account import Platform, SocialAccount
 from apps.api.models.user import User
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.dependencies import get_current_user, verify_site_access
@@ -19,6 +20,9 @@ from apps.api.schemas.campaigns import (
     CampaignStatsResponse,
     CampaignStatusUpdate,
     CampaignTestSendRequest,
+    LinkedInOutreachJobResponse,
+    LinkedInOutreachRequest,
+    LinkedInOutreachResponse,
     ReturnedVisitor,
 )
 from apps.api.agents.campaign_planner import plan_campaign
@@ -30,7 +34,14 @@ from apps.api.services.campaign_sender import (
 )
 from apps.api.services.email_rate_limiter import check_and_reserve_email
 from apps.api.services.email_sender import EmailSender
+from apps.api.services.identity_classification import is_emailable_identity
+from apps.api.services.phantommm_client import (
+    PhantommmClient,
+    PhantommmError,
+    PhantommmNotConfigured,
+)
 from apps.api.services.pii import mask_email
+from apps.api.services.suppression import is_email_suppressed
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -586,3 +597,219 @@ async def send_campaign(
         failed=summary["failed"],
     )
     return {"campaign_id": str(campaign.id), "status": campaign.status, "summary": summary}
+
+
+# ─── LinkedIn outreach (via phantommm sidecar) ───────────────────────────────
+
+
+def _first_linkedin_touchpoint(plan: dict) -> dict | None:
+    """Return the first LinkedIn touchpoint in the campaign plan, or None."""
+    for tp in (plan or {}).get("touchpoints", []):
+        if tp.get("channel") == "linkedin":
+            return tp
+    return None
+
+
+def _beam_note_to_phantommm(note: str) -> str:
+    """Translate Beam's ``{{placeholder}}`` tokens into phantommm's ``#token#``.
+
+    phantommm scrapes each LinkedIn profile and templates ``#firstName#`` /
+    ``#lastName#`` / ``#fullName#`` itself, so we map Beam's supported name
+    placeholders onto those.
+
+    LIMITATION: phantommm only knows the scraped LinkedIn profile — it has NO
+    company/job data — so ``{{company_name}}`` (and any other unsupported
+    ``{{token}}``) is replaced with a neutral fallback ("your team") rather than
+    a real value. A recipient therefore never sees a raw mustache placeholder,
+    but company-level personalization is not available on the LinkedIn channel.
+    See TODO in the module report: real company personalization would require
+    per-URL note rendering (Beam-side) instead of phantommm's shared template.
+    """
+    import re
+
+    out = (
+        note.replace("{{first_name}}", "#firstName#")
+        .replace("{first_name}", "#firstName#")
+        .replace("{{last_name}}", "#lastName#")
+        .replace("{last_name}", "#lastName#")
+        .replace("{{full_name}}", "#fullName#")
+        .replace("{full_name}", "#fullName#")
+        # Unsupported on this channel — neutral fallback, never a raw token.
+        .replace("{{company_name}}", "your team")
+        .replace("{company_name}", "your team")
+    )
+    # Strip any remaining {{token}} so no raw mustache reaches a recipient.
+    return re.sub(r"\{\{?\s*[\w.]+\s*\}?\}", "", out).strip()
+
+
+@router.post(
+    "/{site_id}/{campaign_id}/linkedin-outreach",
+    response_model=LinkedInOutreachResponse,
+)
+async def start_linkedin_outreach(
+    site_id: str,
+    campaign_id: str,
+    body: LinkedInOutreachRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LinkedInOutreachResponse:
+    """Send LinkedIn connection requests to a campaign's segment audience.
+
+    Real sends run through the phantommm sidecar (Beam never talks to LinkedIn
+    directly). dry_run defaults ON — a real send requires ``dry_run=false``. The
+    audience is resolved the same way the email send path does, then filtered to
+    visitors with a LinkedIn URL that are not suppressed / do_not_contact.
+    """
+    await verify_site_access(db, site_id, user)
+    campaign = await _get_campaign_or_404(db, site_id, campaign_id)
+
+    touchpoint = _first_linkedin_touchpoint(campaign.plan or {})
+    if touchpoint is None:
+        raise HTTPException(
+            status_code=400, detail="Campaign has no LinkedIn touchpoint"
+        )
+    if campaign.segment_id is None:
+        raise HTTPException(status_code=400, detail="Campaign has no segment audience")
+
+    # The caller must have registered a LinkedIn session with phantommm.
+    acct_row = await db.execute(
+        select(SocialAccount).where(
+            SocialAccount.user_id == user.id,
+            SocialAccount.platform == Platform.linkedin,
+            SocialAccount.is_active.is_(True),
+        )
+    )
+    account = acct_row.scalars().first()
+    connection_id = account.outreach_connection_id if account else None
+    if not connection_id:
+        raise HTTPException(
+            status_code=400, detail="Connect your LinkedIn session first"
+        )
+
+    try:
+        client = PhantommmClient()
+    except PhantommmNotConfigured:
+        raise HTTPException(status_code=503, detail="LinkedIn outreach not configured")
+
+    # Resolve the segment audience exactly like send_campaign_emails does.
+    member_rows = await db.execute(
+        select(SegmentMember.visitor_id).where(
+            SegmentMember.segment_id == campaign.segment_id
+        )
+    )
+    visitor_ids = [r[0] for r in member_rows.all()]
+
+    urls: list[str] = []
+    skipped_no_linkedin = 0
+    hard_limit = min(body.limit, 50)  # hard server-side cap (see schema constant)
+
+    for vid in visitor_ids:
+        if len(urls) >= hard_limit:
+            break
+
+        iv_row = await db.execute(
+            select(IdentifiedVisitor).where(
+                IdentifiedVisitor.site_id == site_id,
+                IdentifiedVisitor.visitor_id == vid,
+            )
+        )
+        iv = iv_row.scalar_one_or_none()
+        # Skip do_not_contact (do_not_email covers unsubscribed/bounced) and
+        # company-level guesses (same non-emailable guard the email path uses).
+        if iv is not None:
+            if iv.do_not_email:
+                skipped_no_linkedin += 1
+                continue
+            if not is_emailable_identity(iv.resolution_provider):
+                skipped_no_linkedin += 1
+                continue
+            if iv.email and await is_email_suppressed(db, iv.email, "do_not_email"):
+                skipped_no_linkedin += 1
+                continue
+
+        linkedin_url = (
+            await db.execute(
+                select(EnrichmentProfile.linkedin_url).where(
+                    EnrichmentProfile.site_id == site_id,
+                    EnrichmentProfile.visitor_id == vid,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if not linkedin_url:
+            skipped_no_linkedin += 1
+            continue
+        urls.append(linkedin_url)
+
+    if not urls:
+        raise HTTPException(
+            status_code=400,
+            detail="No audience members have a LinkedIn profile to reach",
+        )
+
+    note = _beam_note_to_phantommm(touchpoint.get("connection_note") or "")
+
+    try:
+        result = await client.start_outreach(
+            connection_id=connection_id,
+            urls=urls,
+            note=note,
+            action=body.action,
+            dry_run=body.dry_run,
+            limit=hard_limit,
+        )
+    except PhantommmError:
+        raise HTTPException(
+            status_code=502, detail="LinkedIn outreach failed to start — try again"
+        )
+
+    job_id = str(result.get("jobId") or "")
+    logger.info(
+        "linkedin_outreach_started",
+        campaign_id=str(campaign.id),
+        job_id=job_id,
+        dry_run=body.dry_run,
+        total_targets=len(urls),
+        skipped_no_linkedin=skipped_no_linkedin,
+    )
+    return LinkedInOutreachResponse(
+        job_id=job_id,
+        dry_run=bool(result.get("dryRun", body.dry_run)),
+        total_targets=len(urls),
+        audience_skipped_no_linkedin=skipped_no_linkedin,
+    )
+
+
+@router.get(
+    "/{site_id}/{campaign_id}/linkedin-outreach/{job_id}",
+    response_model=LinkedInOutreachJobResponse,
+)
+async def get_linkedin_outreach_job(
+    site_id: str,
+    campaign_id: str,
+    job_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> LinkedInOutreachJobResponse:
+    """Proxy a phantommm outreach job's status for the campaign owner."""
+    await verify_site_access(db, site_id, user)
+    await _get_campaign_or_404(db, site_id, campaign_id)
+
+    try:
+        client = PhantommmClient()
+    except PhantommmNotConfigured:
+        raise HTTPException(status_code=503, detail="LinkedIn outreach not configured")
+
+    try:
+        job = await client.get_outreach_job(job_id)
+    except PhantommmError:
+        raise HTTPException(status_code=502, detail="Could not fetch outreach status")
+
+    results = job.get("results")
+    return LinkedInOutreachJobResponse(
+        status=str(job.get("status") or "unknown"),
+        done=int(job.get("done") or 0),
+        total=int(job.get("total") or 0),
+        sent=int(job.get("sent") or 0),
+        results=results if isinstance(results, list) else [],
+    )

@@ -365,6 +365,33 @@ export interface CampaignStats {
   returned_visitors: ReturnedVisitor[];
 }
 
+// ── LinkedIn outreach (via phantommm sidecar) ──
+export interface LinkedInOutreachConnectResponse {
+  connected: boolean;
+  name: string | null;
+  connection_id_present: boolean;
+}
+
+export interface LinkedInOutreachStatus {
+  outreach_connected: boolean;
+  configured: boolean;
+}
+
+export interface LinkedInOutreachResponse {
+  job_id: string;
+  dry_run: boolean;
+  total_targets: number;
+  audience_skipped_no_linkedin: number;
+}
+
+export interface LinkedInOutreachJob {
+  status: string;
+  done: number;
+  total: number;
+  sent: number;
+  results: Record<string, unknown>[];
+}
+
 export interface BrowserRow {
   browser: string;
   captured: number;

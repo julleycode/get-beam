@@ -3,13 +3,24 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, Campaign } from "@/lib/api";
+import type { LinkedInOutreachResponse } from "@/lib/api-types";
 import { ListCardSkeleton, PageHeaderSkeleton, StatGridSkeleton } from "@/components/skeletons";
 import { StatTile } from "@/components/stat-tile";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -55,6 +66,41 @@ export default function CampaignDetailPage() {
     queryKey: ["campaign-stats", siteId, campaignId],
     queryFn: () => api.getCampaignStats(siteId, campaignId),
     enabled: !!siteId && !!campaignId && isEmail,
+  });
+
+  // ── LinkedIn outreach ──
+  const { data: outreachStatus } = useQuery({
+    queryKey: ["linkedin-outreach-status"],
+    queryFn: () => api.getLinkedInOutreachStatus(),
+    enabled: !!siteId && !!campaignId,
+  });
+  const [outreachOpen, setOutreachOpen] = useState(false);
+  const [dryRun, setDryRun] = useState(true);
+  const [outreachLimit, setOutreachLimit] = useState(20);
+  const [outreachJob, setOutreachJob] =
+    useState<LinkedInOutreachResponse | null>(null);
+
+  const outreachMut = useMutation({
+    mutationFn: () =>
+      api.sendLinkedInOutreach(siteId, campaignId, {
+        dryRun,
+        limit: outreachLimit,
+        action: "connect",
+      }),
+    onSuccess: (res) => {
+      setOutreachJob(res);
+      setOutreachOpen(false);
+    },
+  });
+
+  // Poll the job until it reports done — react-query drives the interval.
+  const { data: jobStatus } = useQuery({
+    queryKey: ["linkedin-outreach-job", siteId, campaignId, outreachJob?.job_id],
+    queryFn: () =>
+      api.getLinkedInOutreachJob(siteId, campaignId, outreachJob!.job_id),
+    enabled: !!outreachJob?.job_id,
+    refetchInterval: (query) =>
+      query.state.data?.status === "done" ? false : 3000,
   });
 
   if (loading)
@@ -239,9 +285,132 @@ export default function CampaignDetailPage() {
                 <span>{tp.cta}</span>
               </div>
             )}
+
+            {tp.channel === "linkedin" && (
+              <div className="mt-3 border-t pt-3 space-y-2">
+                {outreachStatus && !outreachStatus.outreach_connected ? (
+                  <p className="text-xs text-muted-foreground">
+                    Connect a LinkedIn session in{" "}
+                    <Link
+                      href="/dashboard/social-accounts"
+                      className="underline hover:text-foreground"
+                    >
+                      Social Accounts
+                    </Link>{" "}
+                    to send connection requests.
+                  </p>
+                ) : null}
+                <Button
+                  size="sm"
+                  onClick={() => setOutreachOpen(true)}
+                  disabled={!outreachStatus?.outreach_connected}
+                >
+                  Send LinkedIn outreach
+                </Button>
+
+                {outreachJob && (
+                  <div className="rounded-md border bg-muted/50 p-3 text-xs space-y-1">
+                    {outreachJob.dry_run && (
+                      <p className="font-medium text-warning">
+                        Dry run — no real connection requests were sent.
+                      </p>
+                    )}
+                    <p>
+                      Targets: {outreachJob.total_targets} · Skipped (no
+                      LinkedIn): {outreachJob.audience_skipped_no_linkedin}
+                    </p>
+                    {jobStatus ? (
+                      <p>
+                        Status: {jobStatus.status} · {jobStatus.done}/
+                        {jobStatus.total} processed · {jobStatus.sent} sent
+                      </p>
+                    ) : (
+                      <p className="text-muted-foreground">Starting…</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       ))}
+
+      <Dialog
+        open={outreachOpen}
+        onOpenChange={(o) => {
+          if (!outreachMut.isPending) setOutreachOpen(o);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Send LinkedIn outreach?</DialogTitle>
+            <DialogDescription>
+              This sends LinkedIn connection requests from your connected account
+              to this campaign&apos;s audience. Automating LinkedIn is against
+              LinkedIn&apos;s Terms of Service and can get your account
+              restricted. Keep dry run on to preview without sending.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={dryRun}
+                onChange={(e) => setDryRun(e.target.checked)}
+                className="h-4 w-4"
+              />
+              Dry run (preview only — nothing is sent)
+            </label>
+            <div className="space-y-1.5">
+              <label htmlFor="outreach-limit" className="text-sm font-medium">
+                Limit
+              </label>
+              <Input
+                id="outreach-limit"
+                type="number"
+                min={1}
+                max={50}
+                value={outreachLimit}
+                onChange={(e) =>
+                  setOutreachLimit(
+                    Math.max(1, Math.min(50, Number(e.target.value) || 1))
+                  )
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Max 50 profiles per run.
+              </p>
+            </div>
+            {outreachMut.isError && (
+              <p className="text-sm text-destructive">
+                {(outreachMut.error as Error)?.message ?? "Failed to start"}
+              </p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setOutreachOpen(false)}
+              disabled={outreachMut.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant={dryRun ? "default" : "destructive"}
+              onClick={() => outreachMut.mutate()}
+              disabled={outreachMut.isPending}
+            >
+              {outreachMut.isPending
+                ? "Starting..."
+                : dryRun
+                  ? "Preview (dry run)"
+                  : "Send for real"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

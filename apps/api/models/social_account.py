@@ -44,6 +44,13 @@ class SocialAccount(Base):
     scopes: Mapped[Optional[list[str]]] = mapped_column(
         ARRAY(String), nullable=True
     )
+    # Opaque reference to a LinkedIn session registered in the phantommm sidecar
+    # (LinkedIn outreach automation). Beam NEVER stores the raw LinkedIn cookie —
+    # that lives encrypted inside phantommm; this is just the id it hands back.
+    # Nullable: only LinkedIn rows that opted into outreach have one.
+    outreach_connection_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
