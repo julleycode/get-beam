@@ -228,9 +228,18 @@ _SKIP_REASON_MESSAGES: dict[str, str] = {
     "below_intent_threshold": "Intent score is below 40 — not eligible for identification yet.",
     "no_ip_address": "No IP address captured for this visitor — can't run identity lookup.",
     "recently_attempted": "Already attempted in the last 30 days. Will retry automatically after the cooldown.",
-    "daily_budget_exhausted": "Daily identification budget used up for this site. Resets tomorrow (UTC).",
-    "monthly_plan_limit_reached": "Monthly identification limit reached for your plan. Add your own API keys in Settings to unlock unlimited.",
+    "daily_budget_exhausted": "Daily identification budget used up for this site. Resets tomorrow (UTC). Add your own API keys in Settings to lift the daily cap.",
+    "monthly_plan_limit_reached": "You've hit your plan's monthly identification limit. Upgrade to Pro (50/mo) or Max (unlimited) — or add your own API keys to unlock.",
     "awaiting_next_run": "Eligible — couldn't identify from available providers this time.",
+}
+
+# Machine-readable limit classification for the frontend upsell router. Only
+# "monthly_plan" hits are an upgrade moment (plan tiers differ ONLY on the
+# monthly cap); daily caps are identical across tiers, so those stay BYOK-led
+# and must NOT trigger the upgrade modal. Skip reasons absent here aren't limits.
+_SKIP_REASON_LIMIT_KIND: dict[str, str] = {
+    "daily_budget_exhausted": "daily_budget",
+    "monthly_plan_limit_reached": "monthly_plan",
 }
 
 

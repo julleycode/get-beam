@@ -13,6 +13,7 @@ from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog, Visitor
 from apps.api.dependencies import get_current_user, verify_site_access as _verify_site_access
 from apps.api.routers.visitors_helpers import (
     _EXPORT_EVENT_CAP,
+    _SKIP_REASON_LIMIT_KIND,
     _SKIP_REASON_MESSAGES,
     _build_visitor_filters,
     _compute_visitor_stat_counts,
@@ -589,6 +590,7 @@ async def enrich_visitor(
     if not budget["allowed"]:
         return {
             "status": "limit_reached",
+            "limit_kind": "daily_enrichment",
             "message": (
                 f"Daily enrichment limit reached ({budget['used']}/{budget['limit']}). "
                 "Add your own API keys in Settings to unlock unlimited enrichments."
@@ -675,10 +677,8 @@ async def resolve_one_visitor(
     if not await check_usage_allowed(db, site.user_id):
         return {
             "status": "limit_reached",
-            "message": (
-                "Monthly identification limit reached for your plan. "
-                "Add your own API keys in Settings to unlock unlimited."
-            ),
+            "limit_kind": "monthly_plan",
+            "message": _SKIP_REASON_MESSAGES["monthly_plan_limit_reached"],
         }
 
     identified = await IdentityResolver(db).resolve(visitor)
@@ -719,11 +719,15 @@ async def resolve_one_visitor(
             )
         ).scalar_one_or_none()
         reason = await _resolution_skip_reason(db, site, visitor, last_attempt)
-        return {
+        resp = {
             "status": "anonymous",
             "skip_reason": reason,
             "message": _SKIP_REASON_MESSAGES.get(reason, "Not resolved. Try again later."),
         }
+        limit_kind = _SKIP_REASON_LIMIT_KIND.get(reason)
+        if limit_kind:
+            resp["limit_kind"] = limit_kind
+        return resp
     messages = {
         "unresolvable": _coverage_note(visitor)
         or "Couldn't identify this visitor from available providers.",
@@ -837,6 +841,7 @@ async def resolve_site_visitors(
     if not budget["allowed"]:
         return {
             "status": "limit_reached",
+            "limit_kind": "daily_budget",
             "message": (
                 f"Daily identification limit reached ({budget['used']}/{budget['limit']}). "
                 "Add your own API keys in Settings to unlock unlimited identifications."
@@ -875,6 +880,7 @@ async def resolve_site_visitors(
         if eligible_raw > 0:
             return {
                 "status": "limit_reached",
+                "limit_kind": "daily_budget",
                 "message": (
                     f"Daily limit allows {remaining} more identification(s) today, "
                     f"but {eligible_raw} visitor(s) are eligible. "
