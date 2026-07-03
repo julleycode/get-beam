@@ -10,6 +10,7 @@ function CallbackContent() {
   const error = params.get("error");
   const platform = params.get("platform") || "unknown";
   const username = params.get("username");
+  const postReady = params.get("post_ready"); // "true" | "false" | null (unknown)
 
   return (
     <div className="max-w-md mx-auto mt-20 text-center space-y-4">
@@ -25,6 +26,18 @@ function CallbackContent() {
             Successfully connected <span className="font-medium capitalize">{platform}</span>
             {username && <> as <span className="font-medium">{username}</span></>}.
           </p>
+          {postReady === "true" && (
+            <p className="text-sm font-medium text-green-600">
+              ✓ Ready to post — this account can send replies.
+            </p>
+          )}
+          {postReady === "false" && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-left text-sm text-amber-800">
+              Connected, but this account can&apos;t post yet — its app
+              permissions look read-only. Check the {platform} app&apos;s write
+              access, then reconnect.
+            </div>
+          )}
         </>
       ) : (
         <>

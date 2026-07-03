@@ -593,6 +593,13 @@ export interface SocialAccount {
   created_at: string;
   /** LinkedIn cookie-registered outreach account: no OAuth token to expire/reconnect. */
   is_outreach: boolean;
+  /** Backend holds a refresh token and renews access automatically at send
+   * time, so a short access-token expiry (e.g. Twitter's 2h) is not a
+   * user-facing problem. */
+  has_refresh_token: boolean;
+  /** Connect-time write-access probe: true = ready to post, false = needs
+   * write access, null = unknown / not probed. */
+  post_ready: boolean | null;
 }
 
 export interface SocialPost {

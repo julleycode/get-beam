@@ -17,6 +17,9 @@ export function connectionHealth(account: SocialAccount): ConnectionHealth {
   if (!account.is_active) return "reconnect";
   // Cookie-registered outreach accounts have no OAuth token to expire.
   if (account.is_outreach) return "connected";
+  // With a refresh token the backend renews access automatically at send time
+  // (e.g. Twitter's 2h tokens), so the access-token expiry is not user-facing.
+  if (account.has_refresh_token) return "connected";
   // No known expiry (some platforms don't return one) — assume usable.
   if (!account.token_expires_at) return "connected";
   const remaining = expiryEpochMs(account.token_expires_at) - Date.now();

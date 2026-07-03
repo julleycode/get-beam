@@ -151,6 +151,15 @@ async def oauth_callback(
         })
         return RedirectResponse(f"{frontend_url}/dashboard/social-accounts/callback?{params}")
 
+    # Probe write access at connect time so the UI can show Ready-to-post vs
+    # Needs-write-access right away. None (unknown) for platforms we can't
+    # cheaply verify; never blocks connect.
+    try:
+        post_ready = await service.check_write_access(tokens.access_token)
+    except Exception:
+        logger.warning("write_access_probe_failed", platform=platform.value)
+        post_ready = None
+
     # Encrypt tokens before storing
     encrypted_access = encrypt_token(tokens.access_token)
     encrypted_refresh = encrypt_token(tokens.refresh_token) if tokens.refresh_token else None
@@ -171,6 +180,7 @@ async def oauth_callback(
         account.refresh_token = encrypted_refresh
         account.token_expires_at = tokens.expires_at
         account.is_active = True
+        account.post_ready = post_ready
     else:
         account = SocialAccount(
             id=uuid.uuid4(),
@@ -182,15 +192,21 @@ async def oauth_callback(
             refresh_token=encrypted_refresh,
             token_expires_at=tokens.expires_at,
             scopes=tokens.scopes,
+            post_ready=post_ready,
         )
         db.add(account)
 
     await db.commit()
 
-    # Redirect to frontend with success
-    params = urlencode({
+    # Redirect to frontend with success. Include the connect-time write-access
+    # probe result (omitted when unknown) so the callback page can confirm the
+    # account can actually post.
+    success_params = {
         "success": "true",
         "platform": platform.value,
         "username": tokens.username,
-    })
+    }
+    if post_ready is not None:
+        success_params["post_ready"] = "true" if post_ready else "false"
+    params = urlencode(success_params)
     return RedirectResponse(f"{frontend_url}/dashboard/social-accounts/callback?{params}")

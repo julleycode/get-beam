@@ -22,7 +22,9 @@ def _now():
     return datetime.now(timezone.utc)
 
 
-async def _account(test_db, user_id, *, expires_delta, tag, outreach=False, last_alert=None):
+async def _account(
+    test_db, user_id, *, expires_delta, tag, outreach=False, last_alert=None, refresh_token=None
+):
     acct = SocialAccount(
         id=uuid.uuid4(),
         user_id=user_id,
@@ -30,6 +32,7 @@ async def _account(test_db, user_id, *, expires_delta, tag, outreach=False, last
         platform_user_id=f"pu-{tag}",
         username=f"acct_{tag}",
         access_token="x",
+        refresh_token=refresh_token,
         token_expires_at=(_now() + expires_delta) if expires_delta is not None else None,
         is_active=True,
         outreach_connection_id="conn-1" if outreach else None,
@@ -49,6 +52,11 @@ async def test_nudges_only_the_right_accounts(test_db, monkeypatch):
     expired = await _account(test_db, user.id, expires_delta=timedelta(days=-1), tag="expired")
     healthy = await _account(test_db, user.id, expires_delta=timedelta(days=30), tag="healthy")
     outreach = await _account(test_db, user.id, expires_delta=timedelta(days=1), tag="outreach", outreach=True)
+    # Auto-renews at send time (e.g. Twitter's 2h tokens) — never nudged.
+    refreshable = await _account(
+        test_db, user.id, expires_delta=timedelta(hours=1), tag="refreshable",
+        refresh_token="enc-refresh",
+    )
     throttled = await _account(
         test_db, user.id, expires_delta=timedelta(days=1), tag="throttled",
         last_alert=_now() - timedelta(hours=1),  # nudged 1h ago → within throttle
@@ -68,7 +76,8 @@ async def test_nudges_only_the_right_accounts(test_db, monkeypatch):
 
     count = await connection_nudge.check_expiring_connections()
 
-    # expiring + expired only; healthy (>7d), outreach, and throttled excluded.
+    # expiring + expired only; healthy (>7d), outreach, refreshable (auto-renews),
+    # and throttled excluded.
     assert count == 2
     assert sent_to.count(user.email) == 2
 
@@ -76,6 +85,6 @@ async def test_nudges_only_the_right_accounts(test_db, monkeypatch):
     for acct in (expiring, expired):
         await test_db.refresh(acct)
         assert acct.last_expiry_alert_sent_at is not None
-    for acct in (healthy, outreach):
+    for acct in (healthy, outreach, refreshable):
         await test_db.refresh(acct)
         assert acct.last_expiry_alert_sent_at is None

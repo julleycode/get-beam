@@ -292,6 +292,25 @@ class TwitterService(PlatformService):
 
         return posts[:limit]
 
+    async def check_write_access(self, access_token: str) -> bool | None:
+        """True if the token can post, per X's ``x-access-level`` header on an
+        authenticated read. "read-write"(-directmessages) → can post; "read" →
+        cannot. Returns None on any error so a probe failure never blocks connect.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    f"{_TWITTER_API}/users/me",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+            if resp.status_code != 200:
+                return None
+            level = resp.headers.get("x-access-level", "").lower()
+            return "write" in level if level else None
+        except Exception:
+            logger.warning("twitter_write_probe_failed")
+            return None
+
     # ── Helpers ──────────────────────────────────────────
     async def _get_me(self, access_token: str) -> dict:
         async with httpx.AsyncClient(timeout=10) as client:

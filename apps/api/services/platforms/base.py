@@ -119,3 +119,13 @@ class PlatformService(ABC):
     ) -> str:
         """Reply to a DM. Default: not supported (Phase 2)."""
         raise NotImplementedError("DM replies not yet supported on this platform")
+
+    async def check_write_access(self, access_token: str) -> bool | None:
+        """Whether this token can actually post. None = unknown / not probed.
+
+        Overridden per platform where a cheap, reliable probe exists (e.g.
+        Twitter's ``x-access-level`` header). The default is None so we never
+        make a false Ready/Not-ready claim for a platform we can't verify.
+        Must never raise — probes run at connect time and must not block it.
+        """
+        return None

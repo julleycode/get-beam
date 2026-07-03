@@ -52,6 +52,11 @@ class SocialAccount(Base):
         String(255), nullable=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Whether the account can actually POST, probed at connect time (e.g. X's
+    # x-access-level). True = ready, False = needs write access, None = unknown
+    # (platform not probed). Lets the UI flag a can't-post account before the
+    # first send fails.
+    post_ready: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     # Last time an expiry nudge email was sent for this account — throttles the
     # hourly nudge job so a user isn't emailed more than once per window.
     last_expiry_alert_sent_at: Mapped[Optional[datetime]] = mapped_column(

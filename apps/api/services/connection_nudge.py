@@ -49,7 +49,9 @@ async def check_expiring_connections() -> int:
     """Email owners of social accounts whose token expires within the warn
     window (or is already expired). Returns the number of nudges sent.
 
-    Excludes cookie-based LinkedIn outreach accounts (no OAuth token) and rows
+    Excludes cookie-based LinkedIn outreach accounts (no OAuth token), accounts
+    holding a refresh token (access is renewed automatically at send time —
+    e.g. Twitter's 2h tokens would otherwise nudge on every run), and rows
     nudged within the throttle window. Per-account failures are logged and
     skipped so one bad send doesn't abort the whole run.
     """
@@ -65,6 +67,7 @@ async def check_expiring_connections() -> int:
             .where(
                 SocialAccount.is_active.is_(True),
                 SocialAccount.outreach_connection_id.is_(None),
+                SocialAccount.refresh_token.is_(None),
                 SocialAccount.token_expires_at.is_not(None),
                 SocialAccount.token_expires_at <= warn_before,
                 or_(

@@ -18,6 +18,13 @@ class SocialAccountResponse(BaseModel):
     # OAuth token to expire or reconnect, so the UI hides the health/reconnect
     # affordances for these rows.
     is_outreach: bool = False
+    # True when we hold a refresh token: access is renewed automatically at
+    # send time, so a short access-token expiry (e.g. Twitter's 2h) is not a
+    # user-facing problem and the UI must not warn on it.
+    has_refresh_token: bool = False
+    # Whether the account can post, probed at connect time. True = ready,
+    # False = needs write access, None = unknown / not probed.
+    post_ready: Optional[bool] = None
 
     model_config = {"from_attributes": True}
 
