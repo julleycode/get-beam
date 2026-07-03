@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 # Only these app_env values skip production safety checks. ANYTHING else — a
@@ -224,6 +225,25 @@ class Settings(BaseSettings):
     tiktok_browser_cookie_path: str = "~/.retarget/tiktok_cookies.json"
     tiktok_browser_headless: bool = True
     tiktok_browser_cookies_b64: str = ""
+
+    # Trailing whitespace pasted into an env var (e.g. a stray newline when
+    # copying an OAuth secret into Railway) silently breaks credential
+    # validation: the value looks correct in the dashboard but the provider
+    # rejects it with a baffling "invalid client secret". Strip every OAuth
+    # id/secret/redirect so a fat-fingered paste can't cause that failure.
+    @field_validator(
+        "twitter_client_id", "twitter_client_secret", "twitter_redirect_uri",
+        "twitter_bearer_token",
+        "facebook_app_id", "facebook_app_secret", "facebook_redirect_uri",
+        "instagram_app_id", "instagram_app_secret", "instagram_redirect_uri",
+        "linkedin_client_id", "linkedin_client_secret", "linkedin_redirect_uri",
+        "tiktok_client_key", "tiktok_client_secret", "tiktok_redirect_uri",
+        "google_client_id", "google_client_secret", "google_redirect_uri",
+        mode="after",
+    )
+    @classmethod
+    def _strip_oauth_credential(cls, v: str) -> str:
+        return v.strip() if isinstance(v, str) else v
 
     # ─── Connect-Gmail (send campaign email from the site owner's Gmail) ───
     # OAuth client from Google Cloud (Gmail API, scope gmail.send). When empty,
