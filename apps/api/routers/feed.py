@@ -123,7 +123,12 @@ async def import_post(
     db: AsyncSession = Depends(get_db),
 ):
     """Import a post by URL so you can generate a reply to it."""
-    # Find a connected account for this platform owned by the current user
+    # Prefer a connected account for this platform; fall back to ANY active
+    # account the user has. Import is manual copy-paste — it never calls the
+    # platform's API — so requiring a same-platform connection only blocks
+    # importing posts from platforms the user hasn't wired up yet.
+    # (Post.social_account_id is a non-nullable FK, so the row anchors to
+    # whichever account exists; Post.platform stays the imported platform.)
     result = await db.execute(
         select(SocialAccount).where(
             SocialAccount.platform == body.platform,
@@ -133,9 +138,17 @@ async def import_post(
     )
     account = result.scalar_one_or_none()
     if not account:
+        fallback = await db.execute(
+            select(SocialAccount).where(
+                SocialAccount.user_id == current_user.id,
+                SocialAccount.is_active == True,
+            ).limit(1)
+        )
+        account = fallback.scalar_one_or_none()
+    if not account:
         raise HTTPException(
             status_code=400,
-            detail=f"No {body.platform.value} account connected. Connect one first.",
+            detail="No social account connected. Connect one first.",
         )
 
     # Extract platform post ID from URL
