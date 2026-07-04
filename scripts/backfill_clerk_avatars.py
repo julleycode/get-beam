@@ -25,6 +25,7 @@ import asyncio
 import httpx
 from sqlalchemy import func, select
 
+import apps.api.main  # noqa: F401 — registers every ORM model (User has relationships)
 from apps.api.config import settings
 from apps.api.models.database import async_session
 from apps.api.models.user import User
