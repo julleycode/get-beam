@@ -158,6 +158,9 @@ async def delete_site(
         # Direct site_id columns (String site_id).
         for table in (
             "events",
+            "conversions",
+            "campaign_clicks",
+            "conversion_goals",
             "resolution_logs",
             "identified_visitors",
             "enrichment_profiles",

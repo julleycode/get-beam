@@ -213,6 +213,16 @@ async def ingest_events(
     # Process identification signal events (form email capture + UTM _bid)
     await _process_signal_events(db, batch, svid)
 
+    # Conversion goal matching (best-effort — never blocks the 204). Runs AFTER
+    # signal processing so a landing pageview that carries _tp has its
+    # campaign_clicks link committed before attribution looks for it.
+    try:
+        from apps.api.services.conversion_tracker import process_batch as _track_conversions
+
+        await _track_conversions(db, batch)
+    except Exception as exc:
+        logger.warning("conversion_tracking_failed", error=str(exc))
+
     # Run aggregation in background so we don't block the 204 response — but
     # coalesce per site so a burst of batches can't spawn an unbounded pile of
     # overlapping aggregations.
@@ -403,6 +413,33 @@ async def _process_signal_events(
                 )
                 .values(opened_at=now_naive)
             )
+            # Durable touchpoint ↔ landing-visitor link for conversion
+            # attribution. Runs even when clicked_at was already stamped — a
+            # second device clicking the same link needs its own link row (the
+            # unique constraint keeps beacon replays idempotent). Scoped by the
+            # same site subquery, so a forged/foreign _tp inserts nothing.
+            from apps.api.models.outcome import CampaignClick
+
+            tp_rows = (
+                await db.execute(
+                    select(CampaignTouchpoint.id, CampaignTouchpoint.campaign_id).where(
+                        CampaignTouchpoint.id.in_(tp_ids),
+                        CampaignTouchpoint.campaign_id.in_(site_campaign_ids),
+                    )
+                )
+            ).all()
+            for tp_id, tp_campaign_id in tp_rows:
+                await db.execute(
+                    pg_insert(CampaignClick)
+                    .values(
+                        touchpoint_id=tp_id,
+                        campaign_id=tp_campaign_id,
+                        site_id=batch.site_id,
+                        visitor_id=batch.visitor_id,
+                        clicked_at=now_naive,
+                    )
+                    .on_conflict_do_nothing(constraint="uq_campaign_clicks_tp_visitor")
+                )
             if clicked.rowcount:
                 logger.info(
                     "campaign_click_tracked",

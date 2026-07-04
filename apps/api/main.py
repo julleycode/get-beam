@@ -28,11 +28,12 @@ from apps.api.models.blog_post import BlogPost  # noqa: F401 — register for cr
 from apps.api.models.api_usage import ApiUsageLog  # noqa: F401 — register for create_all
 from apps.api.models.crm_connection import CrmConnection  # noqa: F401 — register for create_all
 from apps.api.models.changelog_entry import ChangelogEntry  # noqa: F401 — register for create_all
+from apps.api.models.outcome import ConversionGoal, CampaignClick, Conversion  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
 from apps.api.routers import known_contacts, costs, ai, dashboard, crm, changelog, click, open_pixel
-from apps.api.routers import email_sender_oauth
+from apps.api.routers import email_sender_oauth, outcomes
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
 from slowapi import _rate_limit_exceeded_handler
@@ -189,6 +190,7 @@ app.include_router(ai.router, prefix="/api/v1/ai", tags=["ai"])
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])
 app.include_router(segments.router, prefix="/api/v1/segments", tags=["segments"])
 app.include_router(campaigns.router, prefix="/api/v1/campaigns", tags=["campaigns"])
+app.include_router(outcomes.router, prefix="/api/v1/outcomes", tags=["outcomes"])
 app.include_router(exports.router, prefix="/api/v1/exports", tags=["exports"])
 app.include_router(api_keys.router, prefix="/api/v1/api-keys", tags=["api-keys"])
 app.include_router(crm.router, prefix="/api/v1/crm", tags=["crm"])

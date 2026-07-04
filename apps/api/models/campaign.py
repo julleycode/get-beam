@@ -39,6 +39,9 @@ class CampaignTouchpoint(Base):
     __tablename__ = "campaign_touchpoints"
     __table_args__ = (
         Index("idx_campaign_touchpoints_campaign", "campaign_id"),
+        # Conversion attribution fallback looks up touchpoints by the
+        # converting visitor's id (conversion_tracker.attribute_visitor).
+        Index("idx_campaign_touchpoints_visitor", "visitor_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
