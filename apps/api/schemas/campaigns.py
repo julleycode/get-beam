@@ -50,6 +50,10 @@ class CampaignStatsResponse(BaseModel):
     clicked: int
     open_rate: float
     click_rate: float
+    # Conversion outcomes (campaign lifetime). Defaults keep older clients happy.
+    converted: int = 0
+    conversion_rate: float = 0.0
+    revenue_cents: int = 0
     returned_visitors: list[ReturnedVisitor]
 
 

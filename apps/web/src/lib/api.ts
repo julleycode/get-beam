@@ -24,6 +24,11 @@ import type {
   CampaignListResponse,
   CampaignSendResponse,
   CampaignStats,
+  ConversionGoal,
+  GoalListResponse,
+  GoalCreatePayload,
+  GoalUpdatePayload,
+  OutcomesReport,
   BrowserBreakdown,
   TrafficFit,
   SiteKpis,
@@ -574,6 +579,37 @@ class ApiClient {
   async getCampaignStats(siteId: string, campaignId: string) {
     return this.request<CampaignStats>(
       `/api/v1/campaigns/${siteId}/${campaignId}/stats`
+    );
+  }
+
+  // ── Conversion outcomes ──
+  async getConversionGoals(siteId: string) {
+    return this.request<GoalListResponse>(`/api/v1/outcomes/${siteId}/goals`);
+  }
+
+  async createConversionGoal(siteId: string, payload: GoalCreatePayload) {
+    return this.request<ConversionGoal>(`/api/v1/outcomes/${siteId}/goals`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updateConversionGoal(siteId: string, goalId: string, patch: GoalUpdatePayload) {
+    return this.request<ConversionGoal>(`/api/v1/outcomes/${siteId}/goals/${goalId}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  }
+
+  async deleteConversionGoal(siteId: string, goalId: string) {
+    return this.request<void>(`/api/v1/outcomes/${siteId}/goals/${goalId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getOutcomesReport(siteId: string, days: number) {
+    return this.request<OutcomesReport>(
+      `/api/v1/outcomes/${siteId}/report?days=${days}`
     );
   }
 

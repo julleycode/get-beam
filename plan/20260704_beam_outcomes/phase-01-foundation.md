@@ -1,7 +1,8 @@
 # Phase 01 — Nền tảng: goals + campaign_clicks + conversion theo URL
 
-**Status:** 🚧 IN PROGRESS
-**Migration:** `<rev>_add_conversion_outcomes.py` (chain lên head thật — lúc plan là `f3d9b1c7a2e4`)
+**Status:** ✅ SHIPPED 2026-07-04
+**Migration:** `b7e3a9c4d1f6_add_conversion_outcomes.py` (rebase lên `a9d4e7f2c1b8` avatar_url — head mới đáp giữa chừng; multi-head xử lý đúng playbook)
+**Verify:** 17 unit + 18 integration pass; regression ingest/site-delete pass; alembic upgrade sạch trên docker local.
 
 ## Bảng mới (model `apps/api/models/outcome.py`)
 

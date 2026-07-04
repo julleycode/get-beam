@@ -255,10 +255,24 @@ export default function CampaignDetailPage() {
 
       {isEmail && stats && (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
             <StatTile label="Sent" value={stats.sent} />
             <StatTile label="Opened" value={stats.opened} tone="info" />
             <StatTile label="Clicked" value={stats.clicked} tone="success" />
+            <StatTile
+              label="Converted"
+              value={
+                <span className="inline-flex items-center gap-1.5">
+                  {stats.converted}
+                  <InfoTooltip label="About conversions">
+                    People from this campaign who hit one of your conversion
+                    goals (last click within 30 days). Define goals on the
+                    Outcomes page.
+                  </InfoTooltip>
+                </span>
+              }
+              tone="primary"
+            />
             <StatTile
               label="Open rate"
               value={
@@ -278,6 +292,13 @@ export default function CampaignDetailPage() {
               value={stats.sent ? `${Math.round(stats.click_rate * 100)}%` : "—"}
               tone="success"
             />
+            {stats.revenue_cents > 0 && (
+              <StatTile
+                label="Revenue"
+                value={`$${(stats.revenue_cents / 100).toLocaleString()}`}
+                tone="primary"
+              />
+            )}
           </div>
 
           <Card>

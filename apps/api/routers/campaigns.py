@@ -284,12 +284,31 @@ async def get_campaign_stats(
                     )
                 )
 
+    # Conversion outcomes for this campaign (lifetime, matching the counters
+    # above). Distinct visitors so one buyer hitting a repeatable goal twice
+    # still counts as one converted person.
+    from apps.api.models.outcome import Conversion
+
+    conv_row = (
+        await db.execute(
+            select(
+                func.count(func.distinct(Conversion.visitor_id)),
+                func.coalesce(func.sum(Conversion.value_cents), 0),
+            ).where(Conversion.campaign_id == campaign.id)
+        )
+    ).one()
+    converted = int(conv_row[0] or 0)
+    revenue_cents = int(conv_row[1] or 0)
+
     return CampaignStatsResponse(
         sent=sent,
         opened=opened,
         clicked=clicked,
         open_rate=round(opened / sent, 4) if sent else 0.0,
         click_rate=round(clicked / sent, 4) if sent else 0.0,
+        converted=converted,
+        conversion_rate=round(converted / sent, 4) if sent else 0.0,
+        revenue_cents=revenue_cents,
         returned_visitors=returned,
     )
 

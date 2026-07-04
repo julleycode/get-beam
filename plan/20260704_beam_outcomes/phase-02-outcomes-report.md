@@ -1,7 +1,8 @@
 # Phase 02 — Trang báo cáo Outcomes
 
-**Status:** 📋 chờ P1
+**Status:** ✅ SHIPPED 2026-07-04
 **Migration:** không
+**Verify:** 6 integration test report pass; `next build` + lint + `tsc --noEmit` sạch. UI sau login chưa click-through thủ công (cần Clerk session) — xem checklist manual trong plan.md.
 
 ## API
 

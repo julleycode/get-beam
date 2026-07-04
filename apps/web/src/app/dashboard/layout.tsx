@@ -19,6 +19,7 @@ import {
   Shield,
   Menu,
   HelpCircle,
+  Target,
 } from "lucide-react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { api } from "@/lib/api";
@@ -50,6 +51,7 @@ const EASYTRACK_ITEMS: NavItem[] = [
   { href: "/dashboard/visitors", label: "Visitors", icon: Users, tour: "visitors" },
   { href: "/dashboard/segments", label: "Segments", icon: Layers, tour: "segments" },
   { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone, tour: "campaigns" },
+  { href: "/dashboard/outcomes", label: "Outcomes", icon: Target },
   { href: "/dashboard/connectors", label: "Connectors", icon: Plug, tour: "connectors" },
 ];
 

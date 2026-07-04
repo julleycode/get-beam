@@ -1,7 +1,7 @@
 # Plan — Beam Outcomes: Conversion Attribution
 
 **Ngày:** 2026-07-04
-**Trạng thái tổng:** 🚧 IN PROGRESS (P1+P2 được duyệt làm ngay; P3/P4 backlog)
+**Trạng thái tổng:** ✅ P1+P2 SHIPPED (2026-07-04); P3/P4 backlog đã thiết kế
 
 ## Vấn đề
 
@@ -21,8 +21,8 @@ Khách định nghĩa "conversion goal" (ví dụ: khách của họ vào trang 
 
 | Phase | Mục tiêu 1 dòng | Migration? | Effort | ROI | Status |
 |---|---|---|---|---|---|
-| **P1** — Nền tảng | Bảng goals + conversions + campaign_clicks (vá click↔visitor), match goal theo URL trong ingest | Có (1) | TB | Rất cao | 🚧 |
-| **P2** — Báo cáo | Trang Outcomes + funnel sent→open→click→convert trên campaign | Không | TB | Rất cao | 📋 |
+| **P1** — Nền tảng | Bảng goals + conversions + campaign_clicks (vá click↔visitor), match goal theo URL trong ingest | Có (`b7e3a9c4d1f6`) | TB | Rất cao | ✅ |
+| **P2** — Báo cáo | Trang Outcomes + funnel sent→open→click→convert trên campaign | Không | TB | Rất cao | ✅ |
 | **P3** — Doanh thu | `beamConvert()` JS API + webhook HMAC (Stripe/Zapier gửi conversion kèm $) | Có (1) | TB | Cao | 📦 backlog |
 | **P4** — Chứng minh định kỳ | Email tuần "Beam tuần này đem về X, $Y" + widget Overview | Có (nhỏ) | Nhỏ | Cao | 📦 backlog |
 

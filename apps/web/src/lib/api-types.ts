@@ -362,7 +362,81 @@ export interface CampaignStats {
   clicked: number;
   open_rate: number;
   click_rate: number;
+  converted: number;
+  conversion_rate: number;
+  revenue_cents: number;
   returned_visitors: ReturnedVisitor[];
+}
+
+// ── Conversion outcomes ──
+export interface ConversionGoal {
+  id: string;
+  name: string;
+  goal_type: string;
+  match_type: "exact" | "prefix" | "contains";
+  pattern: string;
+  value_cents: number | null;
+  repeatable: boolean;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface GoalListResponse {
+  goals: ConversionGoal[];
+  total: number;
+}
+
+export interface GoalCreatePayload {
+  name: string;
+  match_type: "exact" | "prefix" | "contains";
+  pattern: string;
+  value_cents?: number | null;
+  repeatable?: boolean;
+}
+
+export interface GoalUpdatePayload {
+  name?: string;
+  match_type?: "exact" | "prefix" | "contains";
+  pattern?: string;
+  value_cents?: number | null;
+  repeatable?: boolean;
+  enabled?: boolean;
+}
+
+export interface OutcomeTotals {
+  conversions: number;
+  attributed: number;
+  organic: number;
+  revenue_cents: number;
+  attributed_revenue_cents: number;
+}
+
+export interface CampaignOutcomeRow {
+  campaign_id: string;
+  name: string;
+  sent: number;
+  opened: number;
+  clicked: number;
+  converted: number;
+  conversion_rate: number;
+  revenue_cents: number;
+}
+
+export interface GoalOutcomeRow {
+  goal_id: string;
+  name: string;
+  goal_type: string;
+  enabled: boolean;
+  conversions: number;
+  attributed: number;
+  revenue_cents: number;
+}
+
+export interface OutcomesReport {
+  days: number;
+  totals: OutcomeTotals;
+  campaigns: CampaignOutcomeRow[];
+  goals: GoalOutcomeRow[];
 }
 
 // ── LinkedIn outreach (via phantommm sidecar) ──
