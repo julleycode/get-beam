@@ -1,7 +1,8 @@
-# Phase 04 — Email tuần + widget Overview (BACKLOG — đã thiết kế)
+# Phase 04 — Email tuần + widget Overview
 
-**Status:** 📦 backlog
-**Migration:** 1 nhỏ (`sites.last_outcome_digest_sent_at`)
+**Status:** ✅ SHIPPED 2026-07-04 — **email GATED sau flag `OUTCOMES_DIGEST_ENABLED` (default OFF)**; bật ở Railway để chạy thứ 2 hàng tuần 15:00 UTC
+**Migration:** `d8f1c5a3b9e7_add_last_outcome_digest_sent_at.py` (chain `c4f8b2d6a9e1`)
+**Verify:** 3 unit (build email + escape) + 2 integration (send+stamp+throttle, fail→rollback không stamp); regression full suite outcomes 94 pass; tsc+build sạch.
 
 - Config: `outcomes_digest_enabled` default **OFF** (config.py:96, pattern connection_nudge).
 - Scheduler: APScheduler CronTrigger thứ 2 hàng tuần (scheduler.py:93-104 pattern), job thin gọi service.

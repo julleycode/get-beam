@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     connection_nudge_enabled: bool = False  # master switch for the hourly nudge job
     connection_nudge_warn_days: int = 7  # warn when a token expires within this window
 
+    # ─── Weekly outcomes digest ("Beam this week: X sent, Y clicks, Z conversions") ───
+    outcomes_digest_enabled: bool = False  # master switch for the Monday digest email job
+
     # ─── Identity Graph (person-level from IP) ───
     rb2b_api_key: str = ""          # RB2B API Suite — IP → hashed email → person (US traffic)
     leadpipe_api_key: str = ""      # Leadpipe — pixel-based identity graph (500 free IDs)

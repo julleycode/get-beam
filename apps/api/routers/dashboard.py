@@ -25,11 +25,18 @@ from apps.api.services.usage_limits import _today_start, is_full_byok
 router = APIRouter()
 
 
+class SiteOutcomeSummary(BaseModel):
+    conversions_30d: int = 0
+    attributed_revenue_cents_30d: int = 0
+
+
 class DashboardOverview(BaseModel):
     sites: list[SiteOut]
     # Per-site visitor stats, keyed by site_id. Same shape as
     # GET /api/v1/visitors/{site_id}/stats so the frontend can reuse it.
     stats: dict[str, VisitorStatsResponse]
+    # Per-site conversion outcomes (30-day window), keyed by site_id.
+    outcomes: dict[str, SiteOutcomeSummary] = {}
 
 
 @router.get("/overview", response_model=DashboardOverview)
@@ -125,6 +132,41 @@ async def get_overview(
     ).all()
     usage_map = {row.site_id: row.count for row in usage_rows}
 
+    # Conversion outcomes, 30-day window, one grouped scan (hits
+    # idx_conversions_site_time). Revenue counts attributed conversions only —
+    # the number the owner can credit to Beam campaigns.
+    from datetime import datetime, timedelta, timezone
+
+    from apps.api.models.outcome import Conversion
+
+    conv_cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+    outcome_rows = (
+        await db.execute(
+            select(
+                Conversion.site_id,
+                func.count().label("conversions"),
+                func.coalesce(
+                    func.sum(Conversion.value_cents).filter(
+                        Conversion.attribution == "campaign"
+                    ),
+                    0,
+                ).label("attributed_revenue_cents"),
+            )
+            .where(
+                Conversion.site_id.in_(site_ids),
+                Conversion.occurred_at >= conv_cutoff,
+            )
+            .group_by(Conversion.site_id)
+        )
+    ).all()
+    outcomes = {
+        row.site_id: SiteOutcomeSummary(
+            conversions_30d=int(row.conversions or 0),
+            attributed_revenue_cents_30d=int(row.attributed_revenue_cents or 0),
+        )
+        for row in outcome_rows
+    }
+
     stats: dict[str, VisitorStatsResponse] = {}
     for site in sites:
         counts = visitor_map.get(site.site_id)
@@ -149,4 +191,5 @@ async def get_overview(
     return DashboardOverview(
         sites=[SiteOut.model_validate(s) for s in sites],
         stats=stats,
+        outcomes=outcomes,
     )

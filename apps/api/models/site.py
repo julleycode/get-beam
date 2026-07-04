@@ -56,5 +56,10 @@ class Site(Base):
     outcomes_webhook_secret_hint: Mapped[str | None] = mapped_column(
         String(12), nullable=True
     )
+    # Throttle stamp for the weekly outcomes digest email (naive UTC). NULL =
+    # never sent; the digest job skips sites stamped within the last 6 days.
+    last_outcome_digest_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

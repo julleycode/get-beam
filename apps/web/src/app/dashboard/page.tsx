@@ -4,7 +4,7 @@ import { useEffect, useState, type ComponentType } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Trash2, Users, FileText, Megaphone, AtSign } from "lucide-react";
+import { RefreshCw, Trash2, Users, FileText, Megaphone, AtSign, Target } from "lucide-react";
 import { api, Site } from "@/lib/api";
 import { SiteCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
@@ -96,6 +96,14 @@ function SiteCard({
     queryFn: () => api.getVisitorStats(site.site_id),
   });
 
+  // Same cache key shape as the Outcomes page (30-day report), so navigating
+  // there is instant and this card never adds a second copy of the data.
+  const { data: outcomeReport } = useQuery({
+    queryKey: ["outcomes-report", site.site_id, 30],
+    queryFn: () => api.getOutcomesReport(site.site_id, 30),
+  });
+  const outcomes30 = outcomeReport?.totals;
+
   async function handleVerify() {
     setVerifying(true);
     setVerifyMessage(null);
@@ -184,6 +192,32 @@ function SiteCard({
             <StatTile label="Identified" value={stats.identified} tone="info" />
             <StatTile label="Enriched" value={stats.enriched} tone="success" />
           </div>
+        )}
+
+        {/* Outcomes strip: only once there's something to brag about. */}
+        {outcomes30 && outcomes30.conversions > 0 && (
+          <Link
+            href={`/dashboard/outcomes?site=${site.site_id}`}
+            className="flex items-center gap-1.5 rounded-md bg-secondary/60 px-2.5 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <Target className="h-3.5 w-3.5 text-primary" />
+            <span>
+              <span className="font-medium text-foreground">
+                {outcomes30.conversions} conversion{outcomes30.conversions !== 1 ? "s" : ""}
+              </span>
+              {" last 30d"}
+              {outcomes30.attributed_revenue_cents > 0 && (
+                <>
+                  {" · "}
+                  <span className="font-medium text-primary">
+                    ${(outcomes30.attributed_revenue_cents / 100).toLocaleString()}
+                  </span>
+                  {" from Beam"}
+                </>
+              )}
+            </span>
+            <span className="ml-auto">→</span>
+          </Link>
         )}
 
         {/* Delete site — visible but low-emphasis so it isn't a mis-click magnet. */}

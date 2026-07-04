@@ -104,6 +104,20 @@ async def _connection_nudge_job() -> None:
         logger.exception("connection_nudge_crashed")
 
 
+async def _outcome_digest_job() -> None:
+    """Weekly job: email site owners their Beam outcomes summary.
+
+    send_weekly_outcome_digests manages its own session, holds an advisory
+    lock, throttles per site, and isolates per-site send failures.
+    """
+    try:
+        from apps.api.services.outcome_digest import send_weekly_outcome_digests
+
+        await send_weekly_outcome_digests()
+    except Exception:
+        logger.exception("outcome_digest_crashed")
+
+
 def start_scheduler() -> None:
     """Start the background scheduler. Call once at app startup."""
     scheduler.add_job(
@@ -159,6 +173,15 @@ def start_scheduler() -> None:
             id="connection_nudge",
             replace_existing=True,
             next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
+        )
+    if settings.outcomes_digest_enabled:
+        from apscheduler.triggers.cron import CronTrigger
+
+        scheduler.add_job(
+            _outcome_digest_job,
+            CronTrigger(day_of_week="mon", hour=15, timezone="UTC"),
+            id="outcome_digest",
+            replace_existing=True,
         )
     scheduler.start()
     logger.info(
