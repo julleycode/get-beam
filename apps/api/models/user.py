@@ -16,6 +16,9 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True, nullable=False)
     hashed_password: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     full_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    # Clerk-hosted profile image (img.clerk.com), set only when Clerk reports
+    # has_image=true. Shown publicly on the landing founders wall.
+    avatar_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
     clerk_user_id: Mapped[Optional[str]] = mapped_column(
         String(255), unique=True, index=True, nullable=True
     )

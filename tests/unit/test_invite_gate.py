@@ -38,7 +38,15 @@ def _patch_clerk(monkeypatch, *, invite_only: bool, allowlisted: bool) -> None:
         deps, "_verify_clerk_token", AsyncMock(return_value={"sub": "user_selfcheck_new"})
     )
     monkeypatch.setattr(
-        deps, "_fetch_clerk_email", AsyncMock(return_value="selfcheck-newacct@example.com")
+        deps,
+        "_fetch_clerk_profile",
+        AsyncMock(
+            return_value={
+                "email": "selfcheck-newacct@example.com",
+                "avatar_url": "https://img.clerk.com/selfcheck",
+                "full_name": "Self Check",
+            }
+        ),
     )
     monkeypatch.setattr(deps, "_send_welcome_email", AsyncMock())
     monkeypatch.setattr(deps, "_is_email_allowlisted", AsyncMock(return_value=allowlisted))

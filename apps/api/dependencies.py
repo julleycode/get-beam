@@ -106,18 +106,21 @@ async def _verify_clerk_token(token: str) -> dict:
         raise
 
 
-async def _fetch_clerk_email(clerk_user_id: str) -> Optional[str]:
-    """Fetch a user's primary email from the Clerk Backend API.
+async def _fetch_clerk_profile(clerk_user_id: str) -> dict:
+    """Fetch a user's profile (email, avatar, name) from the Clerk Backend API.
 
     Clerk's default session JWT does NOT carry an email claim, so without this
     every Clerk login falls back to a fabricated ``{id}@clerk.user`` address.
     That breaks the link-existing-user-by-email path below and orphans data
     when an instance changes (e.g. dev -> prod) and re-issues user ids.
 
-    Returns the primary email address, or None if it can't be resolved.
+    Returns {"email", "avatar_url", "full_name"} with None for anything that
+    can't be resolved. avatar_url is set only when Clerk reports has_image=true
+    (their generated gray fallback is skipped — our initials tiles look better).
     """
+    profile: dict = {"email": None, "avatar_url": None, "full_name": None}
     if not settings.clerk_secret_key:
-        return None
+        return profile
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.get(
@@ -125,21 +128,35 @@ async def _fetch_clerk_email(clerk_user_id: str) -> Optional[str]:
                 headers={"Authorization": f"Bearer {settings.clerk_secret_key}"},
             )
         if resp.status_code != 200:
-            return None
+            return profile
         data = resp.json()
         primary_id = data.get("primary_email_address_id")
         emails = data.get("email_addresses", []) or []
         for entry in emails:
             if entry.get("id") == primary_id and entry.get("email_address"):
-                return entry["email_address"]
-        # No primary flagged — fall back to the first verified address.
-        for entry in emails:
-            if entry.get("email_address"):
-                return entry["email_address"]
-        return None
+                profile["email"] = entry["email_address"]
+                break
+        if not profile["email"]:
+            # No primary flagged — fall back to the first verified address.
+            for entry in emails:
+                if entry.get("email_address"):
+                    profile["email"] = entry["email_address"]
+                    break
+        if data.get("has_image") and data.get("image_url"):
+            profile["avatar_url"] = data["image_url"]
+        name = " ".join(
+            p for p in [data.get("first_name"), data.get("last_name")] if p
+        ).strip()
+        profile["full_name"] = name or None
+        return profile
     except Exception:
-        logger.exception("clerk_email_fetch_failed", clerk_id=clerk_user_id)
-        return None
+        logger.exception("clerk_profile_fetch_failed", clerk_id=clerk_user_id)
+        return profile
+
+
+async def _fetch_clerk_email(clerk_user_id: str) -> Optional[str]:
+    """Back-compat shim: primary email only. See _fetch_clerk_profile."""
+    return (await _fetch_clerk_profile(clerk_user_id))["email"]
 
 
 async def _is_email_allowlisted(db: AsyncSession, email: str) -> bool:
@@ -245,13 +262,16 @@ async def get_current_user(
             user = result.scalar_one_or_none()
 
             if user is None:
-                # Resolve the real email: prefer a JWT claim, then the Clerk
-                # Backend API, and only fabricate as a last resort. Having the
-                # real email is what lets us link to a pre-existing row instead
-                # of spawning a duplicate when the user's id changes.
-                email = payload.get("email") or payload.get("email_address")
-                if not email:
-                    email = await _fetch_clerk_email(clerk_user_id)
+                # One-time Clerk API fetch: real email (prefer a JWT claim,
+                # fabricate only as a last resort — the real email is what lets
+                # us link to a pre-existing row instead of spawning a duplicate
+                # when the user's id changes) plus avatar + display name.
+                profile = await _fetch_clerk_profile(clerk_user_id)
+                email = (
+                    payload.get("email")
+                    or payload.get("email_address")
+                    or profile["email"]
+                )
                 if not email:
                     email = f"{clerk_user_id}@clerk.user"
 
@@ -263,6 +283,10 @@ async def get_current_user(
                     # Link existing user to Clerk (re-points the row at the
                     # current id, restoring access to all of their data).
                     user.clerk_user_id = clerk_user_id
+                    if profile["avatar_url"] and not user.avatar_url:
+                        user.avatar_url = profile["avatar_url"]
+                    if profile["full_name"] and not user.full_name:
+                        user.full_name = profile["full_name"]
                     await db.commit()
                     logger.info(
                         "clerk_user_relinked",
@@ -290,6 +314,8 @@ async def get_current_user(
                         email=email,
                         clerk_user_id=clerk_user_id,
                         tone_preference="casual",
+                        avatar_url=profile["avatar_url"],
+                        full_name=profile["full_name"],
                     )
                     db.add(user)
                     await db.commit()

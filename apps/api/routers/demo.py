@@ -779,8 +779,9 @@ async def founders_wall() -> dict:
     1. Waitlist signups that opted in with an X handle (earliest first). The
        frontend resolves avatars via unavatar.io and links to x.com/<handle>.
     2. Registered accounts (Clerk-synced users table, earliest first) that are
-       not already on the wall — shown as anonymous initials tiles derived from
-       full name or email local part. Exposes ONLY initials (never email/name).
+       not already on the wall — initials derived from full name or email local
+       part, plus their Clerk profile image when one exists. Exposes ONLY
+       initials + the img.clerk.com avatar URL (never email/name).
 
     Fails soft: any DB error yields an empty roster so the landing page renders
     a clean all-empty wall instead of breaking.
@@ -809,20 +810,23 @@ async def founders_wall() -> dict:
                 position += 1
 
             user_result = await db.execute(
-                select(User.email, User.full_name)
+                select(User.email, User.full_name, User.avatar_url)
                 .order_by(User.created_at.asc())
                 .limit(FOUNDER_WALL_SIZE)
             )
             extra_claimed = 0
-            for email, full_name in user_result.all():
+            for email, full_name, avatar_url in user_result.all():
                 key = (email or "").lower()
                 if not key or key in tiled_emails:
                     continue
                 if position < FOUNDER_WALL_SIZE:
-                    founders.append({
+                    entry = {
                         "position": position,
                         "initials": _founder_initials(full_name, key),
-                    })
+                    }
+                    if avatar_url:
+                        entry["avatar"] = avatar_url
+                    founders.append(entry)
                     tiled_emails.add(key)
                     position += 1
                 # Waitlist signups are already counted below; only accounts

@@ -18,11 +18,17 @@ async def test_founders_wall_merges_waitlist_and_accounts(test_client, test_db):
     test_db.add(WaitlistSignup(email="claimer@test.com", x_handle="claimer"))
     test_db.add(WaitlistSignup(email="lurker@test.com"))
     # Accounts: one duplicating the claim, one duplicating the plain signup,
-    # one brand-new (never waitlisted), one with a full name.
+    # one brand-new (never waitlisted), one with a full name + Clerk avatar.
     test_db.add(User(email="claimer@test.com"))
     test_db.add(User(email="lurker@test.com"))
     test_db.add(User(email="fresh.person@test.com"))
-    test_db.add(User(email="named@test.com", full_name="Anh Thu Pham"))
+    test_db.add(
+        User(
+            email="named@test.com",
+            full_name="Anh Thu Pham",
+            avatar_url="https://img.clerk.com/abc123",
+        )
+    )
     await test_db.commit()
 
     resp = await test_client.get("/api/v1/demo/founders")
@@ -41,6 +47,10 @@ async def test_founders_wall_merges_waitlist_and_accounts(test_client, test_db):
     assert handles == ["claimer"]
     # lurker -> LU, fresh.person -> FP, "Anh Thu Pham" -> AT
     assert initials == {"LU", "FP", "AT"}
+    # Clerk avatar rides along only for the account that has one.
+    avatars = [f.get("avatar") for f in founders if "initials" in f]
+    assert avatars.count("https://img.clerk.com/abc123") == 1
+    assert sum(1 for a in avatars if a) == 1
     # Positions are sequential with handle tiles leading.
     assert [f["position"] for f in founders] == list(range(len(founders)))
     assert "handle" in founders[0]
