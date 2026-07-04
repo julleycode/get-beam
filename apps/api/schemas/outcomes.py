@@ -5,7 +5,9 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-GOAL_TYPES = {"url_match"}  # P3 adds "js_event"
+# url_match: pageview path matching. js_event: fired only via
+# window.beamConvert(name) / the server webhook — no URL rule.
+GOAL_TYPES = {"url_match", "js_event"}
 MATCH_TYPES = {"exact", "prefix", "contains"}
 
 
@@ -35,7 +37,8 @@ class GoalCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     goal_type: str = "url_match"
     match_type: str = "contains"
-    pattern: str = Field(..., min_length=1, max_length=500)
+    # Required for url_match; ignored (stored empty) for js_event goals.
+    pattern: str = Field("", max_length=500)
     value_cents: int | None = Field(None, ge=0, le=100_000_000)
     repeatable: bool = False
 
@@ -48,7 +51,10 @@ class GoalCreate(BaseModel):
             raise ValueError(f"goal_type must be one of {sorted(GOAL_TYPES)}")
         if self.match_type not in MATCH_TYPES:
             raise ValueError(f"match_type must be one of {sorted(MATCH_TYPES)}")
-        self.pattern = validate_goal_pattern(self.match_type, self.pattern)
+        if self.goal_type == "js_event":
+            self.pattern = ""
+        else:
+            self.pattern = validate_goal_pattern(self.match_type, self.pattern)
         return self
 
 
@@ -126,3 +132,41 @@ class OutcomesReportResponse(BaseModel):
     totals: OutcomeTotals
     campaigns: list[CampaignOutcomeRow]
     goals: list[GoalOutcomeRow]
+
+
+# ── Server-side conversion webhook ──
+
+
+class OutcomeWebhookPayload(BaseModel):
+    goal: str = Field(..., min_length=1, max_length=100)
+    email: str | None = None
+    visitor_id: str | None = Field(None, max_length=100)
+    value: float | None = Field(None, ge=0)
+    occurred_at: datetime | None = None
+    # Caller idempotency id (e.g. an order id) — retries with the same id
+    # record at most one conversion for repeatable goals.
+    event_id: str | None = Field(None, max_length=64)
+
+    @model_validator(mode="after")
+    def _require_identity(self) -> "OutcomeWebhookPayload":
+        if not self.visitor_id and not (self.email and "@" in self.email):
+            raise ValueError("Provide visitor_id or a valid email")
+        return self
+
+
+class OutcomeWebhookResponse(BaseModel):
+    recorded: bool
+    attributed: bool
+
+
+class WebhookSecretResponse(BaseModel):
+    # Plaintext shown exactly once at generate/rotate time; only the hint is
+    # stored in a recoverable form for display.
+    secret: str
+    hint: str
+
+
+class WebhookConfigResponse(BaseModel):
+    configured: bool
+    hint: str | None
+    url: str

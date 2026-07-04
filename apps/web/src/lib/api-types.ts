@@ -388,8 +388,9 @@ export interface GoalListResponse {
 
 export interface GoalCreatePayload {
   name: string;
-  match_type: "exact" | "prefix" | "contains";
-  pattern: string;
+  goal_type?: "url_match" | "js_event";
+  match_type?: "exact" | "prefix" | "contains";
+  pattern?: string;
   value_cents?: number | null;
   repeatable?: boolean;
 }
@@ -437,6 +438,17 @@ export interface OutcomesReport {
   totals: OutcomeTotals;
   campaigns: CampaignOutcomeRow[];
   goals: GoalOutcomeRow[];
+}
+
+export interface OutcomesWebhookConfig {
+  configured: boolean;
+  hint: string | null;
+  url: string;
+}
+
+export interface OutcomesWebhookSecret {
+  secret: string;
+  hint: string;
 }
 
 // ── LinkedIn outreach (via phantommm sidecar) ──

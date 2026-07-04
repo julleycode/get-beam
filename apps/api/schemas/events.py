@@ -19,7 +19,7 @@ class Viewport(BaseModel):
 class Event(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
-    type: str = Field(..., pattern="^(pageview|scroll|time_on_page|click|visibility|form_email_capture|utm_identify)$")
+    type: str = Field(..., pattern="^(pageview|scroll|time_on_page|click|visibility|form_email_capture|utm_identify|conversion)$")
     # Client-generated idempotency key; duplicates are dropped at insert.
     event_id: str | None = Field(None, max_length=64)
     url: str | None = None
@@ -44,6 +44,11 @@ class Event(BaseModel):
     source: str | None = Field(None, max_length=20)
     # UTM link decoration
     bid: str | None = None
+    # Conversion events (window.beamConvert): goal name + optional $ value.
+    # Consumed by services/conversion_tracker — NOT persisted to the events
+    # table (the row still lands generically with event_type="conversion").
+    goal: str | None = Field(None, max_length=100)
+    value: float | None = None
     # Browser fingerprint (sent on every event by the pixel as _fp field)
     fp: str | None = Field(None, alias="_fp")
     # Privacy opt-out: pixel sets true when navigator.globalPrivacyControl (GPC)

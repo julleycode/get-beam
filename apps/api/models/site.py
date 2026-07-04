@@ -47,5 +47,14 @@ class Site(Base):
     consent_mode: Mapped[str] = mapped_column(
         String(10), default="off", nullable=False, server_default="off"
     )
+    # Server-side conversion webhook (outcomes P3). The signing secret is
+    # Fernet-encrypted at rest; only the display hint ("...abcd") is readable.
+    # NULL = webhook not configured (endpoint answers 503).
+    outcomes_webhook_secret_ciphertext: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )
+    outcomes_webhook_secret_hint: Mapped[str | None] = mapped_column(
+        String(12), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

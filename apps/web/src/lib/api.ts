@@ -29,6 +29,8 @@ import type {
   GoalCreatePayload,
   GoalUpdatePayload,
   OutcomesReport,
+  OutcomesWebhookConfig,
+  OutcomesWebhookSecret,
   BrowserBreakdown,
   TrafficFit,
   SiteKpis,
@@ -610,6 +612,20 @@ class ApiClient {
   async getOutcomesReport(siteId: string, days: number) {
     return this.request<OutcomesReport>(
       `/api/v1/outcomes/${siteId}/report?days=${days}`
+    );
+  }
+
+  async getOutcomesWebhookConfig(siteId: string) {
+    return this.request<OutcomesWebhookConfig>(
+      `/api/v1/outcomes/${siteId}/webhook-config`
+    );
+  }
+
+  /** Generates or rotates the signing secret; plaintext returned once. */
+  async rotateOutcomesWebhookSecret(siteId: string) {
+    return this.request<OutcomesWebhookSecret>(
+      `/api/v1/outcomes/${siteId}/webhook-secret`,
+      { method: "POST" }
     );
   }
 

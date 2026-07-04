@@ -308,6 +308,19 @@
   document.addEventListener("change",onFieldDone,true);
   try{window.beamIdentify=function(email){captureEmail(email,"identify");};}catch(e){}
 
+  // Conversion signal: site code calls window.beamConvert("purchase",{value:49.99})
+  // on a success page/action. Goal must exist (by name) in the Beam dashboard.
+  // Same consent path as everything else: pushEvent queues, flush() holds until
+  // consent; OPTOUT drops it entirely.
+  try{window.beamConvert=function(goal,opts){
+    try{
+      if(OPTOUT||typeof goal!=="string"||!goal)return;
+      var v=opts&&typeof opts.value==="number"&&isFinite(opts.value)?opts.value:null;
+      pushEvent({type:"conversion",goal:goal.slice(0,100),value:v,url:window.location.href,ts:now()});
+      flush();
+    }catch(e){}
+  };}catch(e){}
+
   // --- Cookie consent (EU-gated, opt-in). data-consent: off|eu|all|cmp ---
   // "off" (default) = today's behavior. "eu" = banner + hold events only for
   // EU/EEA visitors (timezone heuristic); non-EU keep firing immediately +

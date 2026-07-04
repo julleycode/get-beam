@@ -182,10 +182,11 @@ async def record_conversion(
     url: str = "",
     source: str = "url_match",
     event_id: str | None = None,
-) -> bool:
+) -> tuple[bool, Attribution | None]:
     """Attribute + insert one conversion. Idempotent; does NOT commit.
 
-    Returns True when a new row was inserted (False = deduped).
+    Returns (inserted, attribution): inserted is False when deduped;
+    attribution is None for organic conversions.
     """
     attribution = await attribute_visitor(db, site_id, visitor_id, occurred_at)
 
@@ -223,7 +224,7 @@ async def record_conversion(
             matched_by=attribution.matched_by if attribution else None,
             source=source,
         )
-    return inserted
+    return inserted, attribution
 
 
 async def process_batch(db: AsyncSession, batch: EventBatch) -> int:
@@ -246,7 +247,8 @@ async def process_batch(db: AsyncSession, batch: EventBatch) -> int:
 
 async def _process_batch(db: AsyncSession, batch: EventBatch) -> int:
     pageviews = [e for e in batch.events if e.type == "pageview"]
-    if not pageviews:
+    js_conversions = [e for e in batch.events if e.type == "conversion" and e.goal]
+    if not pageviews and not js_conversions:
         return 0
 
     goals = (
@@ -261,15 +263,21 @@ async def _process_batch(db: AsyncSession, batch: EventBatch) -> int:
         .scalars()
         .all()
     )
-    url_goals = [g for g in goals if g.goal_type == "url_match"]
-    if not url_goals:
+    if not goals:
         return 0
+    url_goals = [g for g in goals if g.goal_type == "url_match"]
+    # beamConvert() may target ANY enabled goal by name (a url_match goal can
+    # also take explicit values), so the name map spans all goal types.
+    goals_by_name = {g.name.strip().lower(): g for g in goals}
 
     # (goal, event) candidates, deduped in-memory by dedupe key so one batch
     # can't insert the same conversion twice before the DB constraint sees it.
     seen_keys: set[str] = set()
     inserted = 0
+
     for event in pageviews:
+        if not url_goals:
+            break
         path = normalize_path(event.page_path or event.url)
         if not path:
             continue
@@ -285,7 +293,7 @@ async def _process_batch(db: AsyncSession, batch: EventBatch) -> int:
             if key in seen_keys:
                 continue
             seen_keys.add(key)
-            if await record_conversion(
+            did_insert, _ = await record_conversion(
                 db,
                 site_id=batch.site_id,
                 goal=goal,
@@ -293,8 +301,44 @@ async def _process_batch(db: AsyncSession, batch: EventBatch) -> int:
                 occurred_at=occurred_at,
                 url=event.url or "",
                 source="url_match",
-            ):
+            )
+            if did_insert:
                 inserted += 1
+
+    for event in js_conversions:
+        goal = goals_by_name.get((event.goal or "").strip().lower())
+        if not goal:
+            continue
+        occurred_at = (
+            event.ts.replace(tzinfo=None) if event.ts.tzinfo else event.ts
+        )
+        value_cents = (
+            round(event.value * 100) if event.value is not None else None
+        )
+        key = build_dedupe_key(
+            goal.id,
+            goal.repeatable,
+            batch.visitor_id,
+            occurred_at,
+            event.event_id,
+            "js_event",
+        )
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        did_insert, _ = await record_conversion(
+            db,
+            site_id=batch.site_id,
+            goal=goal,
+            visitor_id=batch.visitor_id,
+            occurred_at=occurred_at,
+            value_cents=value_cents,
+            url=event.url or "",
+            source="js_event",
+            event_id=event.event_id,
+        )
+        if did_insert:
+            inserted += 1
 
     if inserted:
         await db.commit()

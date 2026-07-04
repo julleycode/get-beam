@@ -46,6 +46,16 @@ function usd(cents: number): string {
   return `$${(cents / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
 
+async function copyText(text: string, flag: (v: boolean) => void) {
+  try {
+    await navigator.clipboard.writeText(text);
+    flag(true);
+    setTimeout(() => flag(false), 1500);
+  } catch {
+    // clipboard unavailable (permissions/http) — silently ignore
+  }
+}
+
 export default function OutcomesPage() {
   const searchParams = useSearchParams();
   const [siteId, setSiteId] = useState(searchParams.get("site") || "");
@@ -57,6 +67,7 @@ export default function OutcomesPage() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [showNewGoal, setShowNewGoal] = useState(false);
   const [goalName, setGoalName] = useState("");
+  const [goalType, setGoalType] = useState<"url_match" | "js_event">("url_match");
   const [matchType, setMatchType] = useState<"contains" | "prefix" | "exact">("contains");
   const [pattern, setPattern] = useState("");
   const [valueUsd, setValueUsd] = useState("");
@@ -65,6 +76,11 @@ export default function OutcomesPage() {
   const [busyGoalId, setBusyGoalId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
+  const [copiedSnippet, setCopiedSnippet] = useState(false);
+  const [copiedSecret, setCopiedSecret] = useState(false);
+  const [copiedCurl, setCopiedCurl] = useState(false);
 
   const { data: report, isLoading: reportLoading } = useQuery({
     queryKey: ["outcomes-report", siteId, days],
@@ -74,6 +90,11 @@ export default function OutcomesPage() {
   const { data: goalsData, isLoading: goalsLoading } = useQuery({
     queryKey: ["conversion-goals", siteId],
     queryFn: () => api.getConversionGoals(siteId),
+    enabled: !!siteId,
+  });
+  const { data: webhookConfig } = useQuery({
+    queryKey: ["outcomes-webhook-config", siteId],
+    queryFn: () => api.getOutcomesWebhookConfig(siteId),
     enabled: !!siteId,
   });
 
@@ -89,6 +110,7 @@ export default function OutcomesPage() {
 
   function resetForm() {
     setGoalName("");
+    setGoalType("url_match");
     setMatchType("contains");
     setPattern("");
     setValueUsd("");
@@ -99,8 +121,9 @@ export default function OutcomesPage() {
     setActionError(null);
     const payload: GoalCreatePayload = {
       name: goalName.trim(),
+      goal_type: goalType,
       match_type: matchType,
-      pattern: pattern.trim(),
+      pattern: goalType === "js_event" ? "" : pattern.trim(),
       repeatable,
     };
     if (valueUsd.trim()) {
@@ -137,6 +160,20 @@ export default function OutcomesPage() {
     }
   }
 
+  async function handleRotate() {
+    setActionError(null);
+    setRotating(true);
+    try {
+      const result = await api.rotateOutcomesWebhookSecret(siteId);
+      setRevealedSecret(result.secret);
+      queryClient.invalidateQueries({ queryKey: ["outcomes-webhook-config", siteId] });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not generate secret");
+    } finally {
+      setRotating(false);
+    }
+  }
+
   async function handleDelete() {
     if (!confirmDelete) return;
     setActionError(null);
@@ -154,6 +191,18 @@ export default function OutcomesPage() {
 
   const totals = report?.totals;
   const hasGoals = goals.length > 0;
+  const exampleGoal =
+    goals.find((g) => g.goal_type === "js_event")?.name ?? goals[0]?.name ?? "Purchase";
+  const jsSnippet = `beamConvert("${exampleGoal}", { value: 49.99 })`;
+  const curlSample =
+    revealedSecret && webhookConfig
+      ? [
+          `BODY='{"goal":"${exampleGoal}","email":"customer@example.com","value":49.99,"event_id":"order_123"}'`,
+          `SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "${revealedSecret}" -hex | awk '{print $NF}')`,
+          `curl -X POST ${webhookConfig.url} \\`,
+          `  -H "X-Beam-Signature: $SIG" -H "Content-Type: application/json" -d "$BODY"`,
+        ].join("\n")
+      : "";
 
   return (
     <div>
@@ -302,7 +351,9 @@ export default function OutcomesPage() {
                         <TableCell className="font-medium">{g.name}</TableCell>
                         <TableCell className="text-muted-foreground">
                           <span className="font-mono text-xs">
-                            {g.match_type}: {g.pattern}
+                            {g.goal_type === "js_event"
+                              ? "beamConvert() / webhook"
+                              : `${g.match_type}: ${g.pattern}`}
                           </span>
                           {g.value_cents ? (
                             <span className="ml-2 text-xs">({usd(g.value_cents)} each)</span>
@@ -347,6 +398,71 @@ export default function OutcomesPage() {
               </p>
             </CardContent>
           </Card>
+
+          <div className="grid gap-6 md:grid-cols-2">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Track revenue from your site</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  Call this on your success page or after checkout. The goal name
+                  must match a goal above; the value lands as revenue on the
+                  campaign that drove the buyer.
+                </p>
+                <div className="relative">
+                  <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs">
+                    {jsSnippet}
+                  </pre>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="absolute right-2 top-2"
+                    onClick={() => copyText(jsSnippet, setCopiedSnippet)}
+                  >
+                    {copiedSnippet ? "Copied!" : "Copy"}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Works anywhere the Beam pixel is installed — no extra script.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">Send conversions from your server</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  For Stripe, Zapier, or your backend: POST conversions (with an
+                  email or visitor id) to your signed webhook. Beam matches the
+                  person and attributes the campaign.
+                </p>
+                {webhookConfig?.configured ? (
+                  <div className="space-y-2 text-xs">
+                    <p className="break-all font-mono text-muted-foreground">
+                      {webhookConfig.url}
+                    </p>
+                    <p className="text-muted-foreground">
+                      Secret: <span className="font-mono">{webhookConfig.hint}</span>{" "}
+                      (shown once at creation)
+                    </p>
+                    <Button size="sm" variant="outline" disabled={rotating} onClick={handleRotate}>
+                      {rotating ? "Rotating…" : "Rotate secret"}
+                    </Button>
+                    <p className="text-muted-foreground">
+                      Rotating invalidates the current secret immediately.
+                    </p>
+                  </div>
+                ) : (
+                  <Button size="sm" disabled={rotating} onClick={handleRotate}>
+                    {rotating ? "Generating…" : "Generate webhook secret"}
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </div>
       )}
 
@@ -373,31 +489,47 @@ export default function OutcomesPage() {
               />
             </div>
             <div className="space-y-1.5">
-              <label className="text-sm font-medium" htmlFor="goal-match">
-                Rule
+              <label className="text-sm font-medium" htmlFor="goal-type">
+                Tracked via
               </label>
-              <div className="flex gap-2">
-                <select
-                  id="goal-match"
-                  className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
-                  value={matchType}
-                  onChange={(e) =>
-                    setMatchType(e.target.value as "contains" | "prefix" | "exact")
-                  }
-                >
-                  <option value="contains">contains</option>
-                  <option value="prefix">starts with</option>
-                  <option value="exact">exactly</option>
-                </select>
-                <Input
-                  placeholder={matchType === "contains" ? "thank-you" : "/thank-you"}
-                  value={pattern}
-                  onChange={(e) => setPattern(e.target.value)}
-                  maxLength={500}
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">{MATCH_TYPE_HELP[matchType]}.</p>
+              <select
+                id="goal-type"
+                className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
+                value={goalType}
+                onChange={(e) => setGoalType(e.target.value as "url_match" | "js_event")}
+              >
+                <option value="url_match">Page URL (no code needed)</option>
+                <option value="js_event">beamConvert() / server webhook</option>
+              </select>
             </div>
+            {goalType === "url_match" && (
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium" htmlFor="goal-match">
+                  Rule
+                </label>
+                <div className="flex gap-2">
+                  <select
+                    id="goal-match"
+                    className="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+                    value={matchType}
+                    onChange={(e) =>
+                      setMatchType(e.target.value as "contains" | "prefix" | "exact")
+                    }
+                  >
+                    <option value="contains">contains</option>
+                    <option value="prefix">starts with</option>
+                    <option value="exact">exactly</option>
+                  </select>
+                  <Input
+                    placeholder={matchType === "contains" ? "thank-you" : "/thank-you"}
+                    value={pattern}
+                    onChange={(e) => setPattern(e.target.value)}
+                    maxLength={500}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">{MATCH_TYPE_HELP[matchType]}.</p>
+              </div>
+            )}
             <div className="space-y-1.5">
               <label className="text-sm font-medium" htmlFor="goal-value">
                 Value per conversion (USD, optional)
@@ -428,7 +560,11 @@ export default function OutcomesPage() {
             </Button>
             <Button
               onClick={handleCreate}
-              disabled={saving || !goalName.trim() || !pattern.trim()}
+              disabled={
+                saving ||
+                !goalName.trim() ||
+                (goalType === "url_match" && !pattern.trim())
+              }
             >
               {saving ? "Creating…" : "Create goal"}
             </Button>
@@ -455,6 +591,53 @@ export default function OutcomesPage() {
             <Button variant="destructive" onClick={handleDelete} disabled={deleting}>
               {deleting ? "Deleting…" : "Delete goal"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={!!revealedSecret}
+        onOpenChange={(open) => !open && setRevealedSecret(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Your webhook secret</DialogTitle>
+            <DialogDescription>
+              Copy it now — for safety Beam stores it encrypted and can never show
+              it again. Sign every request body with HMAC-SHA256 using this secret.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="relative">
+              <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs">
+                {revealedSecret}
+              </pre>
+              <Button
+                variant="outline"
+                size="sm"
+                className="absolute right-2 top-2"
+                onClick={() => revealedSecret && copyText(revealedSecret, setCopiedSecret)}
+              >
+                {copiedSecret ? "Copied!" : "Copy"}
+              </Button>
+            </div>
+            <p className="text-xs font-medium">Test it:</p>
+            <div className="relative">
+              <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-md bg-muted p-3 text-xs">
+                {curlSample}
+              </pre>
+              <Button
+                variant="outline"
+                size="sm"
+                className="absolute right-2 top-2"
+                onClick={() => copyText(curlSample, setCopiedCurl)}
+              >
+                {copiedCurl ? "Copied!" : "Copy"}
+              </Button>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setRevealedSecret(null)}>Done — I copied it</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

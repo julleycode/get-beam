@@ -6,20 +6,27 @@ event-ingest path (services/conversion_tracker) matches pageviews against the
 enabled goals and records attributed conversions.
 """
 
+import hashlib
+import hmac
+import secrets as pysecrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.config import settings
 from apps.api.dependencies import get_current_user, verify_site_access
 from apps.api.models.campaign import Campaign, CampaignTouchpoint
 from apps.api.models.database import get_db
 from apps.api.models.outcome import Conversion, ConversionGoal
+from apps.api.models.site import Site
 from apps.api.models.user import User
+from apps.api.models.visitor_email import VisitorEmail
 from apps.api.schemas.outcomes import (
     CampaignOutcomeRow,
     GoalCreate,
@@ -29,9 +36,15 @@ from apps.api.schemas.outcomes import (
     GoalUpdate,
     OutcomesReportResponse,
     OutcomeTotals,
+    OutcomeWebhookPayload,
+    OutcomeWebhookResponse,
+    WebhookConfigResponse,
+    WebhookSecretResponse,
     validate_goal_pattern,
 )
-from apps.api.services.conversion_tracker import MAX_GOALS_PER_SITE
+from apps.api.services.conversion_tracker import MAX_GOALS_PER_SITE, record_conversion
+from apps.api.services.key_vault import decrypt_key, encrypt_key, make_key_hint
+from apps.api.services.rate_limiter import limiter
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -366,3 +379,143 @@ async def delete_goal(
     await db.commit()
     logger.info("conversion_goal_deleted", site_id=site_id, goal_id=goal_id)
     return Response(status_code=204)
+
+
+# ── Server-side conversion webhook ──
+
+
+@router.post("/{site_id}/webhook-secret", response_model=WebhookSecretResponse)
+async def rotate_webhook_secret(
+    site_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WebhookSecretResponse:
+    """Generate (or rotate) the site's webhook signing secret.
+
+    The plaintext is returned exactly once — only the Fernet ciphertext and a
+    display hint are stored. Rotating immediately invalidates the old secret.
+    """
+    site = await verify_site_access(db, site_id, user)
+    secret = pysecrets.token_urlsafe(32)
+    site.outcomes_webhook_secret_ciphertext = encrypt_key(secret)
+    site.outcomes_webhook_secret_hint = make_key_hint(secret)
+    await db.commit()
+    logger.info("outcomes_webhook_secret_rotated", site_id=site_id)
+    return WebhookSecretResponse(secret=secret, hint=site.outcomes_webhook_secret_hint)
+
+
+@router.get("/{site_id}/webhook-config", response_model=WebhookConfigResponse)
+async def get_webhook_config(
+    site_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> WebhookConfigResponse:
+    site = await verify_site_access(db, site_id, user)
+    return WebhookConfigResponse(
+        configured=bool(site.outcomes_webhook_secret_ciphertext),
+        hint=site.outcomes_webhook_secret_hint,
+        url=f"{settings.api_base_url.rstrip('/')}/api/v1/outcomes/{site_id}/webhook",
+    )
+
+
+@router.post("/{site_id}/webhook", response_model=OutcomeWebhookResponse, status_code=202)
+@limiter.limit("60/minute")
+async def outcomes_webhook(
+    site_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> OutcomeWebhookResponse:
+    """Record a conversion from the customer's server (Stripe/Zapier/backend).
+
+    NO bearer auth — verified via ``X-Beam-Signature``: hex HMAC-SHA256 of the
+    raw request body with the site's webhook secret (billing-webhook pattern).
+    Payload: {goal, email|visitor_id, value?, occurred_at?, event_id?}.
+    """
+    body = await request.body()
+
+    site = (
+        await db.execute(select(Site).where(Site.site_id == site_id))
+    ).scalar_one_or_none()
+    if not site:
+        raise HTTPException(status_code=404, detail="Site not found")
+    if not site.outcomes_webhook_secret_ciphertext:
+        raise HTTPException(status_code=503, detail="Webhook not configured for this site")
+
+    signature = request.headers.get("X-Beam-Signature")
+    if not signature:
+        raise HTTPException(status_code=400, detail="Missing X-Beam-Signature header")
+    try:
+        secret = decrypt_key(site.outcomes_webhook_secret_ciphertext)
+    except ValueError:
+        logger.error("outcomes_webhook_secret_undecryptable", site_id=site_id)
+        raise HTTPException(status_code=503, detail="Webhook secret unavailable")
+    expected = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature.strip().lower()):
+        logger.warning("outcomes_webhook_invalid_signature", site_id=site_id)
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    try:
+        payload = OutcomeWebhookPayload.model_validate_json(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid payload: {exc.errors()[0].get('msg', 'validation error')}")
+
+    goal = (
+        await db.execute(
+            select(ConversionGoal).where(
+                ConversionGoal.site_id == site_id,
+                func.lower(ConversionGoal.name) == payload.goal.strip().lower(),
+                ConversionGoal.enabled.is_(True),
+            )
+        )
+    ).scalar_one_or_none()
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found or disabled")
+
+    # Resolve the visitor: explicit id wins; else the most recent visitor who
+    # used this email on this site (blind-index lookup — never plaintext); else
+    # mint the stable per-email id, SAME derivation as the click redirect
+    # (routers/click.py), so ESP-click-minted identities join up for free.
+    from apps.api.services.pii_crypto import email_hash
+
+    if payload.visitor_id:
+        visitor_id = payload.visitor_id
+    else:
+        email = (payload.email or "").strip().lower()
+        bidx = email_hash(email)
+        known = (
+            await db.execute(
+                select(VisitorEmail.visitor_id)
+                .where(
+                    VisitorEmail.site_id == site_id,
+                    VisitorEmail.email_bidx == bidx,
+                )
+                .order_by(VisitorEmail.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        visitor_id = known or ("ec" + bidx[:30])
+
+    occurred_at = payload.occurred_at or datetime.now(timezone.utc)
+    if occurred_at.tzinfo:
+        occurred_at = occurred_at.replace(tzinfo=None)
+    value_cents = round(payload.value * 100) if payload.value is not None else None
+
+    recorded, attribution = await record_conversion(
+        db,
+        site_id=site_id,
+        goal=goal,
+        visitor_id=visitor_id,
+        occurred_at=occurred_at,
+        value_cents=value_cents,
+        source="webhook",
+        event_id=payload.event_id,
+    )
+    await db.commit()
+    logger.info(
+        "outcomes_webhook_received",
+        site_id=site_id,
+        goal=goal.name,
+        recorded=recorded,
+        attributed=attribution is not None,
+    )
+    return OutcomeWebhookResponse(recorded=recorded, attributed=attribution is not None)

@@ -128,3 +128,25 @@ class TestPixelSize:
         stripped = pixel_code.strip()
         assert stripped.startswith("(function()"), "Pixel should start with IIFE"
         assert stripped.endswith("})();"), "Pixel should end with IIFE invocation"
+
+
+class TestBeamConvert:
+    """window.beamConvert (conversion signal) — added in outcomes P3."""
+
+    MIN_PATH = PIXEL_PATH.parent / "tracker.min.js"
+
+    def test_source_has_beam_convert(self, pixel_code: str):
+        assert "beamConvert" in pixel_code
+        assert '"conversion"' in pixel_code or "'conversion'" in pixel_code
+
+    def test_minified_build_has_beam_convert(self):
+        # The API serves the MINIFIED file — an unbuilt tracker.js change
+        # never reaches customers. This catches a forgotten `npm run build`.
+        assert self.MIN_PATH.exists(), "tracker.min.js missing — run npm run build in apps/pixel"
+        assert "beamConvert" in self.MIN_PATH.read_text()
+
+    def test_minified_gzip_size_within_budget(self):
+        import gzip
+
+        size = len(gzip.compress(self.MIN_PATH.read_bytes()))
+        assert size < 5120, f"pixel gzipped {size}B — over the 5KB budget"

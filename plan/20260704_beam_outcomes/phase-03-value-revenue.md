@@ -1,7 +1,8 @@
-# Phase 03 — Doanh thu: beamConvert() + webhook (BACKLOG — đã thiết kế)
+# Phase 03 — Doanh thu: beamConvert() + webhook
 
-**Status:** 📦 backlog
-**Migration:** 1 (`sites.outcomes_webhook_secret_ciphertext/_hint`)
+**Status:** ✅ SHIPPED 2026-07-04
+**Migration:** `c4f8b2d6a9e1_add_outcomes_webhook_secret.py` (chain lên `b7e3a9c4d1f6`)
+**Verify:** 12 integration (js_event + webhook HMAC/rotate/idempotency/attribution) + 3 pixel unit (beamConvert src+min, size 4308/5120 gz); regression 77 pass; build+tsc sạch.
 
 - Pixel: `window.beamConvert(goal, {value})` cạnh `beamIdentify` (tracker.js:309); dùng `pushEvent`/`flush`/`OPTOUT` sẵn có (đã verify tên); consent gating tự áp. Size budget: 4240/5120 gz, +~120B vừa. Rebuild `npm run build && npm run size` trong apps/pixel (pixel serve bản MINIFIED). Assert size vào test_pixel.py.
 - Schema events: regex type thêm `|conversion`; field `goal`/`value` (không persist bảng events, không cần migration events).
