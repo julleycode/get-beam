@@ -20,6 +20,7 @@ import {
   Menu,
   HelpCircle,
   Target,
+  Gift,
 } from "lucide-react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { api } from "@/lib/api";
@@ -64,6 +65,7 @@ const EASYENGAGE_ITEMS: NavItem[] = [
 // Everyone (non-admin) bottom links.
 const GENERAL_ITEMS: NavItem[] = [
   { href: "/dashboard/feature-board", label: "Feature Board", icon: Lightbulb },
+  { href: "/dashboard/referrals", label: "Referrals", icon: Gift },
   { href: "/dashboard/billing", label: "Billing", icon: CreditCard },
 ];
 
@@ -78,8 +80,13 @@ const ADMIN_ITEM: NavItem = {
 };
 
 // Set by the sign-up page so the invite token survives Clerk's multi-step
-// signup flow (see sign-up/[[...sign-up]]/page.tsx).
+// signup flow (see sign-up/[[...sign-up]]/page.tsx). localStorage — the
+// Clerk OAuth redirect can land in a fresh context, losing sessionStorage.
 const INVITE_TOKEN_KEY = "beam_invite";
+
+// Referral code captured by the sign-up page (?ref=...). localStorage — the
+// Clerk OAuth redirect can land in a fresh context, losing sessionStorage.
+const REFERRAL_CODE_KEY = "beam_ref";
 
 // Versioned so a future tour revision can re-trigger for everyone by bumping it.
 const TOUR_DONE_KEY = "beam_tour_done_v1";
@@ -209,6 +216,7 @@ function ClerkAuthGuard() {
   const { isLoaded, isSignedIn } = useAuth();
   const router = useRouter();
   const consumeAttempted = useRef(false);
+  const claimAttempted = useRef(false);
 
   useEffect(() => {
     // Only redirect once Clerk has fully resolved the session. Acting on a
@@ -228,9 +236,9 @@ function ClerkAuthGuard() {
     if (!isLoaded || !isSignedIn || consumeAttempted.current) return;
     let inviteToken: string | null = null;
     try {
-      inviteToken = sessionStorage.getItem(INVITE_TOKEN_KEY);
+      inviteToken = localStorage.getItem(INVITE_TOKEN_KEY);
     } catch {
-      return; // sessionStorage blocked — nothing to consume
+      return; // localStorage blocked — nothing to consume
     }
     if (!inviteToken) return;
     if (!api.getToken()) return; // API token not synced yet; retry next mount
@@ -238,14 +246,45 @@ function ClerkAuthGuard() {
     api
       .consumeInvite(inviteToken)
       .then(() => {
+        // Resolves on both terminal outcomes ("consumed" and "invalid") —
+        // either way the token is spent, so discard it. Transient failures
+        // throw and land in .catch, keeping the token for a later visit.
         try {
-          sessionStorage.removeItem(INVITE_TOKEN_KEY);
+          localStorage.removeItem(INVITE_TOKEN_KEY);
         } catch {
           /* ignore */
         }
       })
       .catch((err) => {
         console.warn("consume-invite failed (will retry next visit)", err);
+      });
+  }, [isLoaded, isSignedIn]);
+
+  useEffect(() => {
+    // Claim the referral captured at sign-up (?ref= → localStorage). Terminal
+    // outcomes (claimed/invalid) discard the code; transient failures keep it
+    // for a later visit. One attempt per mount, after the API token is synced.
+    if (!isLoaded || !isSignedIn || claimAttempted.current) return;
+    let refCode: string | null = null;
+    try {
+      refCode = localStorage.getItem(REFERRAL_CODE_KEY);
+    } catch {
+      return; // localStorage blocked — nothing to claim
+    }
+    if (!refCode) return;
+    if (!api.getToken()) return; // API token not synced yet; retry next mount
+    claimAttempted.current = true;
+    api
+      .claimReferral(refCode)
+      .then(() => {
+        try {
+          localStorage.removeItem(REFERRAL_CODE_KEY);
+        } catch {
+          /* ignore */
+        }
+      })
+      .catch((err) => {
+        console.warn("claim-referral failed (will retry next visit)", err);
       });
   }, [isLoaded, isSignedIn]);
 

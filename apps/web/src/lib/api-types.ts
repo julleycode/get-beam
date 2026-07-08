@@ -784,14 +784,35 @@ export interface BillingStatus {
   plan: BillingPlan;
   subscription_status: string | null;
   monthly_identified_count: number;
-  monthly_limit: number | null;  // null = unlimited
+  monthly_limit: number | null;  // null = unlimited; includes referral bonus
+  bonus_monthly_quota: number;   // earned referral bonus baked into monthly_limit
   trial_ends_at: string | null;
   current_period_end: string | null;
+}
+
+// ── Referral program ──────────────────────────────────────
+
+export interface ReferralEntry {
+  email_masked: string;
+  status: "pending" | "activated";
+  signed_up_at: string | null;
+  activated_at: string | null;
+}
+
+export interface ReferralInfo {
+  code: string;
+  link: string;
+  bonus_monthly_quota: number;
+  bonus_cap: number;
+  bonus_per_activation: number;
+  referred_count: number;
+  activated_count: number;
+  referrals: ReferralEntry[];
 }
 
 export interface CancelSubscriptionResponse {
   subscription_status: string | null;
   current_period_end: string | null;
-  portal_url?: string | null;
-  message?: string | null;
+  portal_url: string | null;
+  message: string | null;
 }

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Integer, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,9 +31,8 @@ class User(Base):
     )
 
     # ─── Billing fields ───
-    # Billing provider is Lemon Squeezy (Stripe is unavailable in VN). The
-    # stripe_* columns below are reused to store the LS customer id /
-    # subscription id — kept as-is to avoid a migration. See routers/billing.py.
+    # Billing provider is Gumroad. The historical stripe_* columns below are
+    # reused to store external billing ids to avoid a migration.
     stripe_customer_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     plan: Mapped[str] = mapped_column(String(20), default="free", nullable=False, server_default="free")
     stripe_subscription_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -42,6 +41,28 @@ class User(Base):
     current_period_end: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     monthly_identified_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False, server_default="0")
     billing_cycle_reset_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # ─── Referral program ───
+    # No separate referrals table: status is a single one-way transition
+    # (pending → rewarded), so referral_activated_at IS the status column and
+    # a conditional UPDATE on it is the race-proof idempotency gate.
+    referral_code: Mapped[Optional[str]] = mapped_column(
+        String(16), unique=True, index=True, nullable=True
+    )  # generated lazily on first GET /referrals/me
+    referred_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        index=True,
+        nullable=True,
+    )
+    referral_activated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )  # NULL = pending; set = referee activated and both sides were rewarded
+    # Extra identified-visitors added to the monthly plan limit, earned via
+    # referrals (+10 per activation, capped — see services/billing.py).
+    bonus_monthly_quota: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False, server_default="0"
+    )
 
     # ─── Dashboard prefs ───
     # Per-surface widget layout, e.g. {"visitors": ["funnel", "traffic_fit"]}.

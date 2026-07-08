@@ -18,9 +18,11 @@ pytestmark = pytest.mark.integration
 async def digest_setup(test_db):
     """Two sites for one owner: one with activity this week, one dead-quiet."""
     from apps.api.models.campaign import Campaign, CampaignTouchpoint
+    from apps.api.models.enrichment import EnrichmentProfile
     from apps.api.models.outcome import Conversion, ConversionGoal
     from apps.api.models.site import Site
     from apps.api.models.user import User
+    from apps.api.models.visitor import IdentifiedVisitor
 
     user = User(email=f"digest-{uuidlib.uuid4().hex[:8]}@test.com", full_name="Digest Tester")
     test_db.add(user)
@@ -62,6 +64,20 @@ async def digest_setup(test_db):
             dedupe_key=f"{goal.id}:dv-0", occurred_at=now - timedelta(hours=10),
         )
     )
+    # An identified visitor this week → the digest's "who visited" section.
+    test_db.add(
+        IdentifiedVisitor(
+            id=uuidlib.uuid4(), site_id=active_site, visitor_id="dv-0",
+            email="jane@corp.example.com", full_name="Jane Digest",
+            resolution_provider="form_capture",
+        )
+    )
+    test_db.add(
+        EnrichmentProfile(
+            id=uuidlib.uuid4(), site_id=active_site, visitor_id="dv-0",
+            job_title="VP Growth", company_name="Corp Example",
+        )
+    )
     await test_db.commit()
     return {"user_email": user.email, "active_site": active_site, "quiet_site": quiet_site}
 
@@ -92,6 +108,12 @@ class TestWeeklyDigest:
         assert "1 conversion" in ours[0]["subject"]
         assert "<strong>3</strong> campaign emails sent" in ours[0]["html"]
         assert "$49.00 attributed" in ours[0]["html"]
+        # "Who visited" section: name/title/company rendered, email NEVER —
+        # this report is built to be forwarded outside the account.
+        assert "Who visited" in ours[0]["html"]
+        assert "Jane Digest" in ours[0]["html"]
+        assert "VP Growth, Corp Example" in ours[0]["html"]
+        assert "jane@corp.example.com" not in ours[0]["html"]
 
         # Active site stamped; quiet site untouched (skipped, re-evaluated later).
         active = (

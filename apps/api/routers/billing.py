@@ -24,7 +24,7 @@ from apps.api.config import settings
 from apps.api.dependencies import get_current_user
 from apps.api.models.database import get_db
 from apps.api.models.user import User
-from apps.api.services.billing import get_plan_limits
+from apps.api.services.billing import check_usage_allowed, get_effective_limit
 
 logger = structlog.get_logger()
 
@@ -68,7 +68,8 @@ class BillingStatusResponse(BaseModel):
     plan: str
     subscription_status: Optional[str]
     monthly_identified_count: int
-    monthly_limit: Optional[int]       # None = unlimited
+    monthly_limit: Optional[int]       # None = unlimited; includes referral bonus
+    bonus_monthly_quota: int           # earned referral bonus baked into monthly_limit
     trial_ends_at: Optional[datetime]
     current_period_end: Optional[datetime]
 
@@ -104,34 +105,43 @@ def _variant_to_plan(variant_id: str) -> str:
 
 
 def _append_query_params(url: str, params: dict[str, str]) -> str:
-    """Append/override query params while preserving any Gumroad tier params."""
+    """Merge query params into a URL without clobbering existing keys."""
     parsed = urlparse(url)
-    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    query.update({key: value for key, value in params.items() if value})
-    return urlunparse(parsed._replace(query=urlencode(query)))
+    merged = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    for key, value in params.items():
+        if value:
+            merged[key] = value
+    return urlunparse(parsed._replace(query=urlencode(merged)))
 
 
 def _gumroad_checkout_base_url(plan: str, interval: str) -> str:
-    """Return the configured Gumroad checkout URL for a plan/interval."""
+    """Resolve the configured Gumroad checkout URL for a plan/interval."""
     mapping = {
         ("pro", "monthly"): settings.gumroad_checkout_pro_monthly_url,
         ("pro", "yearly"): settings.gumroad_checkout_pro_yearly_url,
         ("max", "monthly"): settings.gumroad_checkout_max_monthly_url,
         ("max", "yearly"): settings.gumroad_checkout_max_yearly_url,
     }
-    url = mapping.get((plan, interval))
-    if url:
-        return url
+    configured = (mapping.get((plan, interval)) or "").strip()
+    if configured:
+        return configured
 
-    if settings.gumroad_product_permalink:
-        return f"https://gumroad.com/l/{settings.gumroad_product_permalink}"
+    permalink = (settings.gumroad_product_permalink or "").strip()
+    if permalink:
+        # Fallback to the shared product page when per-tier deep links are not
+        # configured yet. The buyer can still choose the desired variant there.
+        return f"https://gumroad.com/l/{permalink}"
 
-    raise HTTPException(status_code=503, detail="Billing is not configured")
+    raise HTTPException(status_code=503, detail="Gumroad checkout is not configured")
 
 
-def _gumroad_management_url() -> str:
-    """Gumroad manages subscription changes from the buyer library."""
-    return settings.gumroad_customer_portal_url or "https://gumroad.com/library"
+def _gumroad_management_url(user: User) -> str:
+    """URL the customer can use to manage or cancel their Gumroad subscription."""
+    configured = (settings.gumroad_customer_portal_url or "").strip()
+    if configured:
+        return configured
+
+    return "https://gumroad.com/library"
 
 
 def _parse_dt(value: Optional[str]) -> Optional[datetime]:
@@ -197,9 +207,8 @@ async def create_checkout_session(
     if body.interval not in ("monthly", "yearly"):
         raise HTTPException(status_code=400, detail="interval must be 'monthly' or 'yearly'")
 
-    base_url = _gumroad_checkout_base_url(body.plan, body.interval)
     checkout_url = _append_query_params(
-        base_url,
+        _gumroad_checkout_base_url(body.plan, body.interval),
         {
             "wanted": "true",
             "email": user.email,
@@ -219,15 +228,15 @@ async def create_checkout_session(
 async def create_portal_session(
     user: User = Depends(get_current_user),
 ) -> PortalResponse:
-    """Return the Gumroad buyer-library URL for subscription management."""
+    """Return the Gumroad management URL for the user's subscription."""
     if not user.stripe_subscription_id:
         raise HTTPException(
             status_code=400,
             detail="No billing account found. Subscribe to a plan first.",
         )
-
+    portal_url = _gumroad_management_url(user)
     logger.info("gumroad_portal_created", user_id=str(user.id))
-    return PortalResponse(portal_url=_gumroad_management_url())
+    return PortalResponse(portal_url=portal_url)
 
 
 @router.post("/cancel", response_model=CancelResponse)
@@ -244,13 +253,11 @@ async def cancel_subscription(
     if not user.stripe_subscription_id:
         raise HTTPException(status_code=400, detail="No active paid plan to cancel.")
 
-    # Length-bound the optional reason so a runaway payload never hits the logs.
     reason = body.reason.strip()[:1000] if body.reason else None
     logger.info(
         "subscription_cancel_requested", user_id=str(user.id), reason=reason
     )
-
-    portal_url = _gumroad_management_url()
+    portal_url = _gumroad_management_url(user)
     logger.info(
         "gumroad_cancel_redirect_created",
         user_id=str(user.id),
@@ -266,13 +273,23 @@ async def cancel_subscription(
 @router.get("/status", response_model=BillingStatusResponse)
 async def get_billing_status(
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ) -> BillingStatusResponse:
-    """Return the current user's plan, usage count, and limits."""
+    """Return the current user's plan, usage count, and limits.
+
+    Also runs the lazy monthly reset so dashboard UI stays in sync with the same
+    quota logic the resolver enforces.
+    """
+    await check_usage_allowed(db, str(user.id))
+    await db.refresh(user)
     return BillingStatusResponse(
         plan=user.plan,
         subscription_status=user.subscription_status,
         monthly_identified_count=user.monthly_identified_count,
-        monthly_limit=get_plan_limits(user.plan),
+        # Effective limit (plan + referral bonus) so the sidebar badge and the
+        # billing page show the same number check_usage_allowed enforces.
+        monthly_limit=get_effective_limit(user.plan, user.bonus_monthly_quota),
+        bonus_monthly_quota=user.bonus_monthly_quota,
         trial_ends_at=user.trial_ends_at,
         current_period_end=user.current_period_end,
     )

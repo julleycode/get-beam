@@ -100,6 +100,7 @@ async def _notify_requester_status_change(
 <p style="margin-top:24px;font-size:13px;color:#999;">Thanks for helping us build a better product.</p>
 """,
             from_name="Beam",
+            branding=True,
         )
     except Exception:
         logger.warning("requester_notification_failed", request_id=str(req.id), email=mask_email(req.email))

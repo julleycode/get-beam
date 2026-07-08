@@ -99,6 +99,9 @@ class Settings(BaseSettings):
     # ─── Weekly outcomes digest ("Beam this week: X sent, Y clicks, Z conversions") ───
     outcomes_digest_enabled: bool = False  # master switch for the Monday digest email job
 
+    # ─── Referral program ("give quota, get quota") ───
+    referrals_enabled: bool = False  # master switch for the hourly activation-reward job
+
     # ─── Identity Graph (person-level from IP) ───
     rb2b_api_key: str = ""          # RB2B API Suite — IP → hashed email → person (US traffic)
     leadpipe_api_key: str = ""      # Leadpipe — pixel-based identity graph (500 free IDs)
@@ -286,14 +289,14 @@ class Settings(BaseSettings):
     ls_variant_max_monthly: str = ""         # LS variant id — Max monthly
     ls_variant_max_yearly: str = ""          # LS variant id — Max yearly
 
-    # ─── Gumroad Billing (active MoR) ───
+    # ─── Gumroad Billing (active Merchant of Record) ───
     # Gumroad provides NO webhook HMAC signature, so the Ping is authenticated by
     # a secret token appended to the endpoint URL plus an optional seller_id
     # match. Configure at Gumroad → Settings → Advanced → "Ping endpoint":
     #   https://<api-host>/api/v1/billing/gumroad/webhook?token=<gumroad_webhook_secret>
     gumroad_webhook_secret: str = ""         # secret URL token authenticating the Ping
     gumroad_seller_id: str = ""              # your Gumroad seller_id (optional defense-in-depth)
-    gumroad_product_permalink: str = ""      # product permalink, e.g. "rlkwnz" (optional sanity check)
+    gumroad_product_permalink: str = ""      # product permalink, e.g. "rlkwnz" (fallback checkout page)
     gumroad_checkout_pro_monthly_url: str = ""
     gumroad_checkout_pro_yearly_url: str = ""
     gumroad_checkout_max_monthly_url: str = ""

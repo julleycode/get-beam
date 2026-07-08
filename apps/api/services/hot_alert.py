@@ -106,6 +106,7 @@ async def maybe_send_hot_alert(
         subject=f"\U0001f525 Hot visitor on {site.name}: {name}",
         body_html="".join(parts),
         db=db,
+        branding=True,
     )
     logger.info(
         "hot_alert_sent",

@@ -221,6 +221,7 @@ async def _send_welcome_email(email: str) -> None:
 """,
             from_name="Beam",
             from_email="hello@getbeam.fyi",
+            branding=True,
         )
         logger.info("welcome_email_sent", email=mask_email(email))
     except Exception as e:

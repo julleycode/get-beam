@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.models.visitor import IdentifiedVisitor
+from apps.api.services.email_branding import beam_email_footer
 from apps.api.services.link_decorator import generate_unsubscribe_token
 from apps.api.services.pii import mask_email as _mask_email
 from apps.api.services.suppression import is_email_suppressed
@@ -51,6 +52,7 @@ class EmailSender:
         reply_to: str | None = None,
         unsubscribe_url: str | None = None,
         db: AsyncSession | None = None,
+        branding: bool = False,
     ) -> dict | None:
         # Suppression check (do_not_email set by unsubscribe + bounce webhook).
         # `db` is optional so purely transactional callers without a session
@@ -66,9 +68,13 @@ class EmailSender:
             token = generate_unsubscribe_token(to_email)
             unsubscribe_url = f"{settings.api_base_url}/unsubscribe?t={quote(token, safe='')}"
 
+        # branding is opt-IN: only Beam-owned emails TO our customers pass True.
+        # Campaign sends (a customer's outreach to THEIR prospects) never do —
+        # the default keeps any future caller safe by omission.
+        footer = beam_email_footer() if branding else ""
         full_html = f"""{body_html}
 <br/><br/>
-<p style="font-size:12px;color:#999;">
+{footer}<p style="font-size:12px;color:#999;">
     <a href="{escape(unsubscribe_url, quote=True)}">Unsubscribe</a> from future emails.
 </p>"""
 

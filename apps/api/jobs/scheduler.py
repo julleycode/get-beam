@@ -104,6 +104,20 @@ async def _connection_nudge_job() -> None:
         logger.exception("connection_nudge_crashed")
 
 
+async def _referral_activation_job() -> None:
+    """Periodic job: reward pending referrals whose referee has real events.
+
+    activate_pending_referrals manages its own session, holds an advisory
+    lock, and isolates per-row failures.
+    """
+    try:
+        from apps.api.services.referral_activation import activate_pending_referrals
+
+        await activate_pending_referrals()
+    except Exception:
+        logger.exception("referral_activation_crashed")
+
+
 async def _outcome_digest_job() -> None:
     """Weekly job: email site owners their Beam outcomes summary.
 
@@ -173,6 +187,15 @@ def start_scheduler() -> None:
             id="connection_nudge",
             replace_existing=True,
             next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
+        )
+    if settings.referrals_enabled:
+        scheduler.add_job(
+            _referral_activation_job,
+            "interval",
+            hours=1,
+            id="referral_activation",
+            replace_existing=True,
+            next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
         )
     if settings.outcomes_digest_enabled:
         from apscheduler.triggers.cron import CronTrigger

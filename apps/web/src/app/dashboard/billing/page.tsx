@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAuthSafe as useAuth } from "@/lib/use-auth-safe";
 import { Check } from "lucide-react";
@@ -116,9 +117,9 @@ function BillingContent() {
       setCancelOpen(false);
       if (res.portal_url) {
         window.location.href = res.portal_url;
-      } else {
-        setError(res.message ?? "Open Gumroad to manage this subscription.");
+        return;
       }
+      setError(res.message ?? "Couldn't open Gumroad cancellation page.");
     } catch (e: unknown) {
       setError((e as Error).message);
     } finally {
@@ -208,6 +209,21 @@ function BillingContent() {
                       style={{ width: `${usagePct}%` }}
                     />
                   </div>
+                )}
+                {billing.bonus_monthly_quota > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Includes{" "}
+                    <span className="font-medium text-primary">
+                      +{billing.bonus_monthly_quota}/mo referral bonus
+                    </span>{" "}
+                    —{" "}
+                    <Link
+                      href="/dashboard/referrals"
+                      className="underline underline-offset-2 hover:text-foreground"
+                    >
+                      earn more
+                    </Link>
+                  </p>
                 )}
               </div>
 

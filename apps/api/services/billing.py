@@ -18,10 +18,25 @@ PLAN_LIMITS: dict[str, Optional[int]] = {
     "max": None,
 }
 
+# Referral program: each activated referral permanently adds this many
+# identified visitors to the monthly limit, up to the cap. The cap is enforced
+# at award time (LEAST in SQL — see referral_activation) and again defensively
+# here at read time.
+REFERRAL_BONUS_PER_ACTIVATION = 10
+REFERRAL_BONUS_CAP = 50
+
 
 def get_plan_limits(plan: str) -> Optional[int]:
     """Return monthly identified-visitor limit for a plan. None = unlimited."""
     return PLAN_LIMITS.get(plan, 10)
+
+
+def get_effective_limit(plan: str, bonus_monthly_quota: int | None) -> Optional[int]:
+    """Plan limit plus earned referral bonus. None = unlimited (bonus moot)."""
+    limit = get_plan_limits(plan)
+    if limit is None:
+        return None
+    return limit + min(bonus_monthly_quota or 0, REFERRAL_BONUS_CAP)
 
 
 async def check_usage_allowed(db: AsyncSession, user_id: str) -> bool:
@@ -37,7 +52,7 @@ async def check_usage_allowed(db: AsyncSession, user_id: str) -> bool:
         logger.warning("billing_check_user_not_found", user_id=str(user_id))
         return False
 
-    limit = get_plan_limits(user.plan)
+    limit = get_effective_limit(user.plan, user.bonus_monthly_quota)
     if limit is None:
         return True  # Unlimited plan
 

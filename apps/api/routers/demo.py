@@ -700,6 +700,7 @@ async def join_waitlist(request: Request, body: WaitlistRequest) -> dict:
 """,
             from_name="Beam",
             from_email="hello@getbeam.fyi",
+            branding=True,
         )
     except Exception as e:
         logger.warning("waitlist_confirmation_email_failed", email=mask_email(email), error=str(e))

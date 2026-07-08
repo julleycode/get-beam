@@ -7,7 +7,6 @@ import {
   Activity,
   ArrowLeft,
   Briefcase,
-  Building2,
   ChevronDown,
   ExternalLink,
   Globe,
@@ -29,17 +28,6 @@ import { Button } from "@/components/ui/button";
 /* ------------------------------------------------------------------ */
 /* Small presentational helpers — a real profile, not a wall of cards. */
 /* ------------------------------------------------------------------ */
-
-function initials(name?: string | null, email?: string | null): string {
-  if (name?.trim()) {
-    const parts = name.trim().split(/\s+/);
-    const first = parts[0]?.[0] ?? "";
-    const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
-    return (first + last).toUpperCase();
-  }
-  if (email) return email[0]?.toUpperCase() ?? "";
-  return "";
-}
 
 // Compact a page path for the chips. Strips the origin, and collapses long
 // paths (e.g. /blog/2026/06/really-long-post-slug → /blog/…/really-long-post).
@@ -69,55 +57,6 @@ function timeAgo(iso: string): string {
   const d = Math.floor(h / 24);
   if (d < 30) return `${d}d ago`;
   return new Date(iso).toLocaleDateString();
-}
-
-function Avatar({
-  name,
-  email,
-  variant,
-  src,
-}: {
-  name?: string | null;
-  email?: string | null;
-  variant: "person" | "company" | "anonymous";
-  src?: string | null;
-}) {
-  const [imgFailed, setImgFailed] = useState(false);
-  const label = initials(name, email);
-  const tone =
-    variant === "company"
-      ? "bg-warning-muted text-warning"
-      : variant === "anonymous"
-        ? "bg-muted text-muted-foreground"
-        : "bg-primary/10 text-primary";
-  const Icon = variant === "company" ? Building2 : UserRound;
-
-  // Show the real social photo only when we have one, it hasn't failed to
-  // load, and this isn't an anonymous visitor. onError falls back to initials.
-  if (src && !imgFailed && variant !== "anonymous") {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element -- external CDN (pbs.twimg.com); next/image has no host allowlist here
-      <img
-        src={src}
-        alt={name || "avatar"}
-        referrerPolicy="no-referrer"
-        loading="lazy"
-        onError={() => setImgFailed(true)}
-        className="h-16 w-16 shrink-0 rounded-2xl object-cover"
-      />
-    );
-  }
-
-  return (
-    <div
-      className={cn(
-        "flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl font-serif text-xl font-semibold",
-        tone,
-      )}
-    >
-      {label && variant !== "anonymous" ? label : <Icon className="h-7 w-7" />}
-    </div>
-  );
 }
 
 function IntentRing({ score }: { score: number }) {
@@ -496,13 +435,6 @@ export default function VisitorDetailPage() {
       {/* ---- Profile hero ---- */}
       <section className="rounded-2xl border bg-card p-6 shadow-sm">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-          <Avatar
-            name={visitor.full_name}
-            email={visitor.email}
-            variant={!identified ? "anonymous" : isCompanyLevel ? "company" : "person"}
-            src={visitor.avatar_url}
-          />
-
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <h1 className="font-serif text-2xl font-semibold tracking-tight">

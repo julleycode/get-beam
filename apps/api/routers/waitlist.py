@@ -221,6 +221,7 @@ async def approve_waitlist(
 """,
             from_name="Beam",
             from_email="hello@getbeam.fyi",
+            branding=True,
         )
         logger.info("waitlist_invite_sent", email=mask_email(signup.email))
     except Exception as e:

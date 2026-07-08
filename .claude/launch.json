@@ -4,13 +4,22 @@
     {
       "name": "pixel-test",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "apps/pixel", "-l", "8888", "--no-clipboard"],
+      "runtimeArgs": [
+        "serve",
+        "apps/pixel",
+        "-l",
+        "8888",
+        "--no-clipboard"
+      ],
       "port": 8888
     },
     {
       "name": "web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 3000,
       "autoPort": true,
       "cwd": "apps/web"
@@ -18,8 +27,38 @@
     {
       "name": "beam-static",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["serve", "apps/web/public", "-l", "4599", "--no-clipboard"],
+      "runtimeArgs": [
+        "serve",
+        "apps/web/public",
+        "-l",
+        "4599",
+        "--no-clipboard"
+      ],
       "port": 4599
+    },
+    {
+      "name": "beam-static-alt",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "serve",
+        "apps/web/public",
+        "-l",
+        "4612",
+        "--no-clipboard"
+      ],
+      "port": 4612
+    },
+    {
+      "name": "beam-static-3",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "serve",
+        "apps/web/public",
+        "-l",
+        "4633",
+        "--no-clipboard"
+      ],
+      "port": 4633
     }
   ]
 }

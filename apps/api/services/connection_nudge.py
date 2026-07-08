@@ -91,6 +91,7 @@ async def check_expiring_connections() -> int:
                     subject=subject,
                     body_html=html,
                     db=db,
+                    branding=True,
                 )
                 account.last_expiry_alert_sent_at = now
                 await db.commit()

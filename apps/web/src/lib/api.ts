@@ -61,6 +61,7 @@ import type {
   WaitlistListResponse,
   BillingStatus,
   CancelSubscriptionResponse,
+  ReferralInfo,
 } from "./api-types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -1198,6 +1199,50 @@ class ApiClient {
     if (res.status === 404) return "invalid";
     if (!res.ok) throw new Error(`Request failed: ${res.status}`);
     return "consumed";
+  }
+
+  // ── Referrals ──────────────────────────────────────────
+  async getReferralInfo() {
+    return this.request<ReferralInfo>("/api/v1/referrals/me");
+  }
+
+  // Public: check a referral code for the signup-page banner
+  async validateReferral(code: string) {
+    return this.request<{ valid: boolean; referrer_name?: string | null }>(
+      `/api/v1/referrals/validate?code=${encodeURIComponent(code)}`
+    );
+  }
+
+  /**
+   * Link the new account to its referrer after first sign-in. Returns
+   * "claimed" on success and "invalid" on 404 (unknown code, self-referral,
+   * stale account) — both terminal, so callers can discard the stored code.
+   * Throws on transient failures (network, 5xx) so callers can retry on a
+   * later visit. Idempotent for the same referrer. Mirrors consumeInvite.
+   */
+  async claimReferral(code: string): Promise<"claimed" | "invalid"> {
+    const authToken = this.getToken();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (authToken) {
+      headers["Authorization"] = `Bearer ${authToken}`;
+    }
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/api/v1/referrals/claim`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ code }),
+      });
+    } catch (err) {
+      throw new Error(
+        `Network error: unable to reach API (${(err as Error).message})`
+      );
+    }
+    if (res.status === 404) return "invalid";
+    if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+    return "claimed";
   }
 
   // ── Billing ────────────────────────────────────────────

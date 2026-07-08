@@ -1,10 +1,11 @@
 """Weekly outcomes digest: email each site owner what Beam drove this week.
 
 "Beam this week: X emails sent, Y clicks, Z conversions ($R attributed)" —
-the recurring proof-of-outcome growth buyers keep. Sites with zero sends AND
-zero conversions in the window are skipped (no noise), and each site is
-throttled via ``sites.last_outcome_digest_sent_at`` so overlapping triggers
-can't double-send.
+plus a "who visited this week" highlight list, the recurring proof-of-outcome
+growth buyers keep (and forward — the branded footer rides every forward).
+Sites with zero sends, zero conversions AND zero identified visitors in the
+window are skipped (no noise), and each site is throttled via
+``sites.last_outcome_digest_sent_at`` so overlapping triggers can't double-send.
 
 Trigger-agnostic: the APScheduler job calls ``send_weekly_outcome_digests()``,
 but it manages its own session and takes a Postgres advisory lock, so it can
@@ -13,7 +14,7 @@ move to a Railway cron (or run alongside replicas) unchanged.
 
 from datetime import datetime, timedelta, timezone
 from html import escape
-from typing import NamedTuple
+from typing import NamedTuple, Sequence
 
 import structlog
 from sqlalchemy import func, or_, select, text, update
@@ -21,10 +22,13 @@ from sqlalchemy import func, or_, select, text, update
 from apps.api.config import settings
 from apps.api.models.campaign import Campaign, CampaignTouchpoint
 from apps.api.models.database import async_session
+from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.outcome import Conversion
 from apps.api.models.site import Site
 from apps.api.models.user import User
+from apps.api.models.visitor import IdentifiedVisitor
 from apps.api.services.email_sender import EmailSender
+from apps.api.services.identity_classification import is_emailable_identity
 
 logger = structlog.get_logger()
 
@@ -44,7 +48,28 @@ class DigestStats(NamedTuple):
     attributed_revenue_cents: int
 
 
-def build_digest_email(site_name: str, stats: DigestStats) -> tuple[str, str]:
+class VisitorHighlight(NamedTuple):
+    """A digest-safe slice of an identified visitor. Deliberately excludes the
+    email address: this email is BUILT to be forwarded, so anything in it leaks
+    to people outside the account."""
+
+    full_name: str | None
+    job_title: str | None
+    company_name: str | None
+
+
+def _visitor_line(v: VisitorHighlight) -> str:
+    """Render one highlight as 'Name — Title, Company' (whatever parts exist)."""
+    name = escape(v.full_name or "Someone")
+    detail = ", ".join(escape(p) for p in (v.job_title, v.company_name) if p)
+    return f"<li><strong>{name}</strong>{f' &mdash; {detail}' if detail else ''}</li>"
+
+
+def build_digest_email(
+    site_name: str,
+    stats: DigestStats,
+    visitors: Sequence[VisitorHighlight] = (),
+) -> tuple[str, str]:
     """Build (subject, html). Pure — unit-testable without a DB."""
     subject = (
         f"Beam this week: {stats.conversions} conversion"
@@ -56,6 +81,28 @@ def build_digest_email(site_name: str, stats: DigestStats) -> tuple[str, str]:
         else ""
     )
     outcomes_url = f"{settings.frontend_url}/dashboard/outcomes"
+    visitors_url = f"{settings.frontend_url}/dashboard/visitors"
+    visitors_section = (
+        (
+            f"<p><strong>Who visited {escape(site_name)} this week:</strong></p>"
+            f"<ul>{''.join(_visitor_line(v) for v in visitors)}</ul>"
+            f'<p><a href="{escape(visitors_url, quote=True)}">See all identified visitors &rarr;</a></p>'
+        )
+        if visitors
+        else ""
+    )
+    # Referral CTA rides the digest only while the program is live.
+    referrals_url = f"{settings.frontend_url}/dashboard/referrals"
+    referral_cta = (
+        (
+            f'<p style="font-size:13px;color:#777;">Know someone who\'d want '
+            f"this report for their own site? "
+            f'<a href="{escape(referrals_url, quote=True)}">Refer them &rarr;</a> '
+            f"and you both get +10 identified visitors/month.</p>"
+        )
+        if settings.referrals_enabled
+        else ""
+    )
     html = (
         f"<p>Hi,</p>"
         f"<p>Your Beam week for <strong>{escape(site_name)}</strong>:</p>"
@@ -65,10 +112,54 @@ def build_digest_email(site_name: str, stats: DigestStats) -> tuple[str, str]:
         f"<li><strong>{stats.conversions}</strong> conversions — "
         f"<strong>{stats.attributed}</strong> driven by Beam campaigns{escape(revenue)}</li>"
         f"</ul>"
+        f"{visitors_section}"
         f'<p><a href="{escape(outcomes_url, quote=True)}">See the full outcomes report &rarr;</a></p>'
+        f"{referral_cta}"
         f"<p>&mdash; Beam</p>"
     )
     return subject, html
+
+
+async def _top_visitors_this_week(
+    db, site_id: str, cutoff: datetime, limit: int = 8
+) -> list[VisitorHighlight]:
+    """Top identified visitors of the window, digest-safe fields only.
+
+    Ranking happens in Python (provider classification lives in
+    identity_classification, not SQL): person-level identities first, then
+    anything with a name or company; rows with neither are dropped — an
+    anonymous bullet would just be noise in a report meant to impress.
+    """
+    rows = (
+        await db.execute(
+            select(
+                IdentifiedVisitor.full_name,
+                IdentifiedVisitor.resolution_provider,
+                EnrichmentProfile.job_title,
+                EnrichmentProfile.company_name,
+            )
+            .outerjoin(
+                EnrichmentProfile,
+                (EnrichmentProfile.site_id == IdentifiedVisitor.site_id)
+                & (EnrichmentProfile.visitor_id == IdentifiedVisitor.visitor_id),
+            )
+            .where(
+                IdentifiedVisitor.site_id == site_id,
+                IdentifiedVisitor.resolved_at >= cutoff,
+            )
+            .order_by(IdentifiedVisitor.resolved_at.desc())
+            .limit(25)
+        )
+    ).all()
+
+    person_level: list[VisitorHighlight] = []
+    rest: list[VisitorHighlight] = []
+    for full_name, provider, job_title, company_name in rows:
+        if not full_name and not company_name:
+            continue
+        highlight = VisitorHighlight(full_name, job_title, company_name)
+        (person_level if is_emailable_identity(provider) else rest).append(highlight)
+    return (person_level + rest)[:limit]
 
 
 async def _site_week_stats(db, site_id: str, cutoff: datetime) -> DigestStats:
@@ -170,14 +261,21 @@ async def send_weekly_outcome_digests() -> int:
                     continue
                 try:
                     stats = await _site_week_stats(db, site_id, cutoff)
-                    if stats.sent == 0 and stats.conversions == 0:
+                    visitors = await _top_visitors_this_week(db, site_id, cutoff)
+                    if stats.sent == 0 and stats.conversions == 0 and not visitors:
                         # Nothing happened — no email, and no stamp so the site
-                        # is re-evaluated on the next run.
+                        # is re-evaluated on the next run. Identified visitors
+                        # alone DO earn a digest: pre-campaign owners forwarding
+                        # a "who visited" report is the growth loop.
                         continue
-                    subject, html = build_digest_email(site_name, stats)
+                    subject, html = build_digest_email(site_name, stats, visitors)
                     # Pass db so recipient opt-out (unsubscribe/bounce) is honored.
                     await sender.send(
-                        to_email=owner_email, subject=subject, body_html=html, db=db
+                        to_email=owner_email,
+                        subject=subject,
+                        body_html=html,
+                        db=db,
+                        branding=True,
                     )
                     await db.execute(
                         update(Site)
