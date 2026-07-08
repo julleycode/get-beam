@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { SlidersHorizontal, SearchX } from "lucide-react";
+import { SlidersHorizontal, SearchX, Target } from "lucide-react";
 import { TableSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { EmptyState } from "@/components/empty-state";
@@ -329,50 +329,58 @@ export default function VisitorsPage() {
         title="Visitors"
         actions={
           <div className="flex flex-wrap items-center gap-3">
-          <SiteSelector value={siteId} onChange={handleSiteChange} />
-          {siteId && site && (
-            <Button
-              variant={site.auto_identify_enabled ? "default" : "outline"}
-              size="sm"
-              disabled={autoMut.isPending}
-              onClick={() => autoMut.mutate(!site.auto_identify_enabled)}
-              title="On = tự động nhận diện khách intent cao. Off = bấm Identify từng người."
-            >
-              Auto-identify: {site.auto_identify_enabled ? "On" : "Off"}
-            </Button>
-          )}
-          {siteId && site && (
-            <Button
-              variant={site.hot_alert_enabled ? "default" : "outline"}
-              size="sm"
-              disabled={hotMut.isPending}
-              onClick={() => hotMut.mutate(!site.hot_alert_enabled)}
-              title="On = email báo ngay khi có khách US intent cao được nhận diện."
-            >
-              🔥 Hot alerts: {site.hot_alert_enabled ? "On" : "Off"}
-            </Button>
-          )}
-          <Select value={filter} onValueChange={(v) => { setFilter(v); setPage(1); }}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All status</SelectItem>
-              <SelectItem value="anonymous">Anonymous</SelectItem>
-              <SelectItem value="identified">Identified</SelectItem>
-              <SelectItem value="enriched">Enriched</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={sortBy} onValueChange={(v) => { setSortBy(v); setPage(1); }}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="intent_score">Intent score</SelectItem>
-              <SelectItem value="last_seen">Last seen</SelectItem>
-              <SelectItem value="pageviews">Pageviews</SelectItem>
-            </SelectContent>
-          </Select>
+            <SiteSelector value={siteId} onChange={handleSiteChange} />
+            {siteId && (
+              <Button asChild variant="outline" size="sm">
+                <Link href={`/dashboard/outcomes?site=${siteId}`}>
+                  <Target className="mr-1.5 h-4 w-4" />
+                  Outcomes
+                </Link>
+              </Button>
+            )}
+            {siteId && site && (
+              <Button
+                variant={site.auto_identify_enabled ? "default" : "outline"}
+                size="sm"
+                disabled={autoMut.isPending}
+                onClick={() => autoMut.mutate(!site.auto_identify_enabled)}
+                title="On = tự động nhận diện khách intent cao. Off = bấm Identify từng người."
+              >
+                Auto-identify: {site.auto_identify_enabled ? "On" : "Off"}
+              </Button>
+            )}
+            {siteId && site && (
+              <Button
+                variant={site.hot_alert_enabled ? "default" : "outline"}
+                size="sm"
+                disabled={hotMut.isPending}
+                onClick={() => hotMut.mutate(!site.hot_alert_enabled)}
+                title="On = email báo ngay khi có khách US intent cao được nhận diện."
+              >
+                🔥 Hot alerts: {site.hot_alert_enabled ? "On" : "Off"}
+              </Button>
+            )}
+            <Select value={filter} onValueChange={(v) => { setFilter(v); setPage(1); }}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All status</SelectItem>
+                <SelectItem value="anonymous">Anonymous</SelectItem>
+                <SelectItem value="identified">Identified</SelectItem>
+                <SelectItem value="enriched">Enriched</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sortBy} onValueChange={(v) => { setSortBy(v); setPage(1); }}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="intent_score">Intent score</SelectItem>
+                <SelectItem value="last_seen">Last seen</SelectItem>
+                <SelectItem value="pageviews">Pageviews</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         }
       />
