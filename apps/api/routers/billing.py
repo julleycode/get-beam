@@ -1,9 +1,9 @@
-"""Billing router — Lemon Squeezy Checkout, Portal, status, and webhook.
+"""Billing router — Gumroad checkout/management, status, and webhooks.
 
-Lemon Squeezy is the active billing provider (Merchant of Record). Stripe is
-unavailable in Vietnam, so the stripe_* settings are dormant. The existing
-`stripe_customer_id` / `stripe_subscription_id` columns are reused to store the
-Lemon Squeezy customer id / subscription id — no DB migration required.
+Gumroad is the active billing provider (Merchant of Record). Stripe is
+unavailable in Vietnam, and Lemon Squeezy rejected Beam's category. The existing
+`stripe_customer_id` / `stripe_subscription_id` columns are reused to store
+provider customer/subscription ids — no DB migration required.
 """
 
 import hashlib
@@ -11,6 +11,7 @@ import hmac
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 import structlog
@@ -59,6 +60,8 @@ class CancelRequest(BaseModel):
 class CancelResponse(BaseModel):
     subscription_status: Optional[str]
     current_period_end: Optional[datetime]
+    portal_url: Optional[str] = None
+    message: Optional[str] = None
 
 
 class BillingStatusResponse(BaseModel):
@@ -98,6 +101,37 @@ def _variant_to_plan(variant_id: str) -> str:
         str(settings.ls_variant_max_yearly): "max",
     }
     return mapping.get(str(variant_id), "free")
+
+
+def _append_query_params(url: str, params: dict[str, str]) -> str:
+    """Append/override query params while preserving any Gumroad tier params."""
+    parsed = urlparse(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query.update({key: value for key, value in params.items() if value})
+    return urlunparse(parsed._replace(query=urlencode(query)))
+
+
+def _gumroad_checkout_base_url(plan: str, interval: str) -> str:
+    """Return the configured Gumroad checkout URL for a plan/interval."""
+    mapping = {
+        ("pro", "monthly"): settings.gumroad_checkout_pro_monthly_url,
+        ("pro", "yearly"): settings.gumroad_checkout_pro_yearly_url,
+        ("max", "monthly"): settings.gumroad_checkout_max_monthly_url,
+        ("max", "yearly"): settings.gumroad_checkout_max_yearly_url,
+    }
+    url = mapping.get((plan, interval))
+    if url:
+        return url
+
+    if settings.gumroad_product_permalink:
+        return f"https://gumroad.com/l/{settings.gumroad_product_permalink}"
+
+    raise HTTPException(status_code=503, detail="Billing is not configured")
+
+
+def _gumroad_management_url() -> str:
+    """Gumroad manages subscription changes from the buyer library."""
+    return settings.gumroad_customer_portal_url or "https://gumroad.com/library"
 
 
 def _parse_dt(value: Optional[str]) -> Optional[datetime]:
@@ -157,51 +191,27 @@ async def create_checkout_session(
     body: CheckoutRequest,
     user: User = Depends(get_current_user),
 ) -> CheckoutResponse:
-    """Create a Lemon Squeezy checkout and return the redirect URL."""
+    """Return a Gumroad checkout URL for the selected Beam plan."""
     if body.plan not in ("pro", "max"):
         raise HTTPException(status_code=400, detail="plan must be 'pro' or 'max'")
     if body.interval not in ("monthly", "yearly"):
         raise HTTPException(status_code=400, detail="interval must be 'monthly' or 'yearly'")
 
-    variant_id = _resolve_variant_id(body.plan, body.interval)
+    base_url = _gumroad_checkout_base_url(body.plan, body.interval)
+    checkout_url = _append_query_params(
+        base_url,
+        {
+            "wanted": "true",
+            "email": user.email,
+        },
+    )
 
-    # Lemon Squeezy rejects an empty/null checkout_data.name (422 "must be a
-    # string"), so only include name when the user actually has one.
-    checkout_data: dict = {
-        "email": user.email,
-        # Carried back on every webhook as meta.custom_data.user_id.
-        "custom": {"user_id": str(user.id)},
-    }
-    full_name = (user.full_name or "").strip()
-    if full_name:
-        checkout_data["name"] = full_name
-
-    payload = {
-        "data": {
-            "type": "checkouts",
-            "attributes": {
-                "checkout_data": checkout_data,
-                "product_options": {
-                    "redirect_url": f"{settings.frontend_url}/dashboard/billing?success=1",
-                },
-            },
-            "relationships": {
-                "store": {
-                    "data": {"type": "stores", "id": str(settings.lemonsqueezy_store_id)}
-                },
-                "variant": {
-                    "data": {"type": "variants", "id": str(variant_id)}
-                },
-            },
-        }
-    }
-    resp = await _ls_request("POST", "/checkouts", payload)
-    checkout_url = resp.get("data", {}).get("attributes", {}).get("url")
-    if not checkout_url:
-        logger.error("lemonsqueezy_checkout_no_url", response=str(resp)[:500])
-        raise HTTPException(status_code=502, detail="Checkout creation failed")
-
-    logger.info("lemonsqueezy_checkout_created", user_id=str(user.id), plan=body.plan)
+    logger.info(
+        "gumroad_checkout_created",
+        user_id=str(user.id),
+        plan=body.plan,
+        interval=body.interval,
+    )
     return CheckoutResponse(checkout_url=checkout_url)
 
 
@@ -209,22 +219,15 @@ async def create_checkout_session(
 async def create_portal_session(
     user: User = Depends(get_current_user),
 ) -> PortalResponse:
-    """Return the Lemon Squeezy customer portal URL for the user's subscription."""
+    """Return the Gumroad buyer-library URL for subscription management."""
     if not user.stripe_subscription_id:
         raise HTTPException(
             status_code=400,
             detail="No billing account found. Subscribe to a plan first.",
         )
 
-    resp = await _ls_request("GET", f"/subscriptions/{user.stripe_subscription_id}")
-    urls = resp.get("data", {}).get("attributes", {}).get("urls", {}) or {}
-    portal_url = urls.get("customer_portal")
-    if not portal_url:
-        logger.error("lemonsqueezy_portal_no_url", user_id=str(user.id))
-        raise HTTPException(status_code=502, detail="Portal URL unavailable")
-
-    logger.info("lemonsqueezy_portal_created", user_id=str(user.id))
-    return PortalResponse(portal_url=portal_url)
+    logger.info("gumroad_portal_created", user_id=str(user.id))
+    return PortalResponse(portal_url=_gumroad_management_url())
 
 
 @router.post("/cancel", response_model=CancelResponse)
@@ -232,12 +235,11 @@ async def cancel_subscription(
     body: CancelRequest,
     user: User = Depends(get_current_user),
 ) -> CancelResponse:
-    """Cancel the user's paid plan via the Lemon Squeezy API.
+    """Send the user to Gumroad to cancel or manage their paid plan.
 
-    LS DELETE on a subscription cancels at the period end (status -> "cancelled",
-    access continues until renews_at). The authoritative state sync happens via
-    the `subscription_cancelled` webhook; this endpoint only returns enough for
-    immediate UI feedback ("you can use it until X").
+    Gumroad subscription cancellation must be completed by the buyer inside
+    Gumroad. The webhook remains authoritative and marks the subscription as
+    cancelled once Gumroad emits the lifecycle ping.
     """
     if not user.stripe_subscription_id:
         raise HTTPException(status_code=400, detail="No active paid plan to cancel.")
@@ -248,20 +250,17 @@ async def cancel_subscription(
         "subscription_cancel_requested", user_id=str(user.id), reason=reason
     )
 
-    resp = await _ls_request(
-        "DELETE", f"/subscriptions/{user.stripe_subscription_id}"
+    portal_url = _gumroad_management_url()
+    logger.info(
+        "gumroad_cancel_redirect_created",
+        user_id=str(user.id),
     )
-    attrs: dict = resp.get("data", {}).get("attributes", {}) or {}
-
-    period_end = (
-        _parse_dt(attrs.get("ends_at"))
-        or _parse_dt(attrs.get("renews_at"))
-        or user.current_period_end
+    return CancelResponse(
+        subscription_status=user.subscription_status,
+        current_period_end=user.current_period_end,
+        portal_url=portal_url,
+        message="Open Gumroad to cancel or manage this subscription.",
     )
-    status = attrs.get("status") or user.subscription_status
-
-    logger.info("lemonsqueezy_subscription_cancel", user_id=str(user.id), status=status)
-    return CancelResponse(subscription_status=status, current_period_end=period_end)
 
 
 @router.get("/status", response_model=BillingStatusResponse)

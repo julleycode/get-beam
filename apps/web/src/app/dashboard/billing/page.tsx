@@ -51,7 +51,6 @@ function BillingContent() {
   const [error, setError] = useState<string | null>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelLoading, setCancelLoading] = useState(false);
-  const [canceledUntil, setCanceledUntil] = useState<string | null>(null);
 
   const successParam = searchParams.get("success");
   const canceledParam = searchParams.get("canceled");
@@ -114,17 +113,11 @@ function BillingContent() {
     setError(null);
     try {
       const res = await api.cancelSubscription();
-      // Show the date access lasts until; fall back to whatever the status has.
-      const until =
-        res.current_period_end ?? billing?.current_period_end ?? null;
-      setCanceledUntil(until);
       setCancelOpen(false);
-      // Refresh billing so the badge/status reflect the cancellation.
-      try {
-        const status = await api.getBillingStatus();
-        setBilling(status);
-      } catch {
-        // Non-fatal: the success message already shows the key date.
+      if (res.portal_url) {
+        window.location.href = res.portal_url;
+      } else {
+        setError(res.message ?? "Open Gumroad to manage this subscription.");
       }
     } catch (e: unknown) {
       setError((e as Error).message);
@@ -239,13 +232,6 @@ function BillingContent() {
                 </p>
               )}
 
-              {canceledUntil && (
-                <div className="rounded-md border border-warning/30 bg-warning-muted px-4 py-3 text-sm text-warning">
-                  Your plan stays active until {formatDate(canceledUntil)}, then
-                  drops to Free. Your data is kept.
-                </div>
-              )}
-
               {billing.plan !== "free" && (
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -254,17 +240,16 @@ function BillingContent() {
                     onClick={handlePortal}
                     disabled={portalLoading}
                   >
-                    {portalLoading ? "Redirecting..." : "Manage subscription"}
+                    {portalLoading ? "Redirecting..." : "Manage in Gumroad"}
                   </Button>
-                  {billing.subscription_status !== "cancelled" &&
-                    !canceledUntil && (
+                  {billing.subscription_status !== "cancelled" && (
                       <Button
                         variant="ghost"
                         size="sm"
                         className="text-muted-foreground hover:text-destructive"
                         onClick={() => setCancelOpen(true)}
                       >
-                        Cancel plan
+                        Cancel in Gumroad
                       </Button>
                     )}
                 </div>
@@ -402,17 +387,19 @@ function BillingContent() {
             <DialogDescription>
               {billing?.current_period_end ? (
                 <>
-                  Your plan stays fully active until{" "}
+                  We&apos;ll open Gumroad so you can manage or cancel this
+                  subscription. Your plan stays fully active until{" "}
                   <span className="font-medium text-foreground">
                     {formatDate(billing.current_period_end)}
                   </span>
-                  , then your account drops to Free. All your data is kept — you
-                  can resubscribe any time.
+                  {" "}if you cancel there. All your data is kept, and you can
+                  resubscribe any time.
                 </>
               ) : (
                 <>
-                  Your plan drops to Free at the end of the current billing
-                  period. All your data is kept — you can resubscribe any time.
+                  We&apos;ll open Gumroad so you can manage or cancel this
+                  subscription. All your data is kept, and you can resubscribe
+                  any time.
                 </>
               )}
             </DialogDescription>
@@ -430,7 +417,7 @@ function BillingContent() {
               onClick={handleCancel}
               disabled={cancelLoading}
             >
-              {cancelLoading ? "Cancelling..." : "Confirm cancellation"}
+              {cancelLoading ? "Opening..." : "Open Gumroad"}
             </Button>
           </DialogFooter>
         </DialogContent>

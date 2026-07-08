@@ -275,9 +275,9 @@ class Settings(BaseSettings):
     stripe_price_max_yearly: str = ""        # Stripe Price ID — Max yearly
     stripe_portal_config_id: str = ""        # Optional Stripe Portal Configuration ID
 
-    # ─── Lemon Squeezy Billing (Merchant of Record — active billing provider) ───
-    # Stripe is unavailable in Vietnam; Lemon Squeezy is a MoR that handles
-    # global tax and pays out via Wise. The stripe_* vars above are dormant.
+    # ─── Lemon Squeezy Billing (legacy MoR fallback) ───
+    # Stripe is unavailable in Vietnam, and Lemon Squeezy rejected Beam's
+    # category. These settings remain for historical webhook compatibility.
     lemonsqueezy_api_key: str = ""           # Settings → API
     lemonsqueezy_store_id: str = ""          # numeric store id
     lemonsqueezy_webhook_secret: str = ""    # webhook signing secret
@@ -286,7 +286,7 @@ class Settings(BaseSettings):
     ls_variant_max_monthly: str = ""         # LS variant id — Max monthly
     ls_variant_max_yearly: str = ""          # LS variant id — Max yearly
 
-    # ─── Gumroad Billing (fallback MoR — Lemon Squeezy rejected Beam's category) ───
+    # ─── Gumroad Billing (active MoR) ───
     # Gumroad provides NO webhook HMAC signature, so the Ping is authenticated by
     # a secret token appended to the endpoint URL plus an optional seller_id
     # match. Configure at Gumroad → Settings → Advanced → "Ping endpoint":
@@ -294,6 +294,11 @@ class Settings(BaseSettings):
     gumroad_webhook_secret: str = ""         # secret URL token authenticating the Ping
     gumroad_seller_id: str = ""              # your Gumroad seller_id (optional defense-in-depth)
     gumroad_product_permalink: str = ""      # product permalink, e.g. "rlkwnz" (optional sanity check)
+    gumroad_checkout_pro_monthly_url: str = ""
+    gumroad_checkout_pro_yearly_url: str = ""
+    gumroad_checkout_max_monthly_url: str = ""
+    gumroad_checkout_max_yearly_url: str = ""
+    gumroad_customer_portal_url: str = "https://gumroad.com/library"
 
     # ─── Feature flags ───
     sync_interval_minutes: int = 60

@@ -792,4 +792,6 @@ export interface BillingStatus {
 export interface CancelSubscriptionResponse {
   subscription_status: string | null;
   current_period_end: string | null;
+  portal_url?: string | null;
+  message?: string | null;
 }
