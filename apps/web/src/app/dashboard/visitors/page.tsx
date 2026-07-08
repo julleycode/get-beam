@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -186,6 +186,10 @@ export default function VisitorsPage() {
   // Upsell modal: opened only when a hit is the monthly plan limit (upgrading
   // lifts it). Daily caps stay as a plain notice — upgrading doesn't raise them.
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  // Auto-identify should proactively upsell on page entry once the monthly plan
+  // limit is already exhausted. Reset per site so each site can show its own
+  // limit state once, but don't re-open immediately after the user closes it.
+  const [autoPromptSeenForSite, setAutoPromptSeenForSite] = useState<string | null>(null);
   const { data: billing } = useBillingStatus();
 
   // A resolve/enrich outcome is an upgrade moment only when it's the monthly
@@ -244,6 +248,29 @@ export default function VisitorsPage() {
     onSettled: () =>
       queryClient.invalidateQueries({ queryKey: ["site", siteId] }),
   });
+
+  useEffect(() => {
+    if (!siteId) {
+      setAutoPromptSeenForSite(null);
+      return;
+    }
+
+    const limit = billing?.monthly_limit;
+    const used = billing?.monthly_identified_count ?? 0;
+    const autoEnabled = !!site?.auto_identify_enabled;
+    const exhausted = limit !== null && limit !== undefined && used >= limit;
+
+    if (autoEnabled && exhausted && autoPromptSeenForSite !== siteId) {
+      setUpgradeOpen(true);
+      setAutoPromptSeenForSite(siteId);
+    }
+  }, [
+    autoPromptSeenForSite,
+    billing?.monthly_identified_count,
+    billing?.monthly_limit,
+    site?.auto_identify_enabled,
+    siteId,
+  ]);
 
   function renderIdentity(v: (typeof visitors)[number]) {
     const s = v.identity_status;
