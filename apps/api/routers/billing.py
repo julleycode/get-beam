@@ -11,7 +11,7 @@ import hmac
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, quote, urlencode, urlparse, urlunparse
 
 import httpx
 import structlog
@@ -24,7 +24,11 @@ from apps.api.config import settings
 from apps.api.dependencies import get_current_user
 from apps.api.models.database import get_db
 from apps.api.models.user import User
-from apps.api.services.billing import check_usage_allowed, get_effective_limit
+from apps.api.services.billing import (
+    check_usage_allowed,
+    get_effective_limit,
+    get_effective_plan,
+)
 
 logger = structlog.get_logger()
 
@@ -94,14 +98,24 @@ def _resolve_variant_id(plan: str, interval: str) -> str:
 
 
 def _variant_to_plan(variant_id: str) -> str:
-    """Reverse-map a Lemon Squeezy variant id to an internal plan name."""
+    """Reverse-map a Lemon Squeezy variant id to an internal plan name.
+
+    Only non-empty configured variant ids are mapped. On a Gumroad-only
+    deployment the ls_variant_* settings are all "", which would otherwise
+    collapse the dict to a single {"": "max"} key — making a blank/unmapped
+    variant_id resolve to the paid Max tier. Guarding the empty input and
+    dropping the empty key closes that free-Max hole."""
+    variant_id = str(variant_id or "").strip()
+    if not variant_id:
+        return "free"
     mapping = {
         str(settings.ls_variant_pro_monthly): "pro",
         str(settings.ls_variant_pro_yearly): "pro",
         str(settings.ls_variant_max_monthly): "max",
         str(settings.ls_variant_max_yearly): "max",
     }
-    return mapping.get(str(variant_id), "free")
+    mapping.pop("", None)  # never match on an unset (empty) variant setting
+    return mapping.get(variant_id, "free")
 
 
 def _append_query_params(url: str, params: dict[str, str]) -> str:
@@ -129,17 +143,37 @@ def _gumroad_checkout_base_url(plan: str, interval: str) -> str:
     permalink = (settings.gumroad_product_permalink or "").strip()
     if permalink:
         # Fallback to the shared product page when per-tier deep links are not
-        # configured yet. The buyer can still choose the desired variant there.
+        # configured yet. The buyer can still choose the desired variant there,
+        # but may land on the wrong tier — warn so the misconfig is visible.
+        logger.warning(
+            "gumroad_checkout_tier_url_missing",
+            plan=plan,
+            interval=interval,
+            detail="no per-tier checkout URL configured; buyer must pick the tier manually",
+        )
         return f"https://gumroad.com/l/{permalink}"
 
     raise HTTPException(status_code=503, detail="Gumroad checkout is not configured")
 
 
 def _gumroad_management_url(user: User) -> str:
-    """URL the customer can use to manage or cancel their Gumroad subscription."""
+    """URL the customer can use to manage or cancel their Gumroad subscription.
+
+    Prefer the operator-configured portal URL. Otherwise deep-link to the buyer's
+    own subscription-manage page — this resolves for guest buyers via Gumroad's
+    email magic link, so a customer who checked out without a Gumroad account can
+    still reach the cancel button. Fall back to the generic library only when no
+    subscription id is on record."""
     configured = (settings.gumroad_customer_portal_url or "").strip()
     if configured:
         return configured
+
+    subscription_id = (user.stripe_subscription_id or "").strip()
+    if subscription_id:
+        return (
+            "https://app.gumroad.com/subscriptions/"
+            f"{quote(subscription_id, safe='')}/manage"
+        )
 
     return "https://gumroad.com/library"
 
@@ -282,13 +316,16 @@ async def get_billing_status(
     """
     await check_usage_allowed(db, str(user.id))
     await db.refresh(user)
+    # Downgrade a lapsed paid plan (period ended, no renewal ping) to free so the
+    # dashboard shows the same tier + limit the resolver actually enforces.
+    effective_plan = get_effective_plan(user.plan, user.current_period_end)
     return BillingStatusResponse(
-        plan=user.plan,
+        plan=effective_plan,
         subscription_status=user.subscription_status,
         monthly_identified_count=user.monthly_identified_count,
         # Effective limit (plan + referral bonus) so the sidebar badge and the
         # billing page show the same number check_usage_allowed enforces.
-        monthly_limit=get_effective_limit(user.plan, user.bonus_monthly_quota),
+        monthly_limit=get_effective_limit(effective_plan, user.bonus_monthly_quota),
         bonus_monthly_quota=user.bonus_monthly_quota,
         trial_ends_at=user.trial_ends_at,
         current_period_end=user.current_period_end,

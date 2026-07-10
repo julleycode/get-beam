@@ -82,7 +82,7 @@ const FAQ = [
   },
   {
     q: "How do I cancel?",
-    a: "Cancel anytime from your billing settings. No lock-in, no cancellation fees. You keep access until the end of your billing period.",
+    a: "Cancel anytime — open your Beam billing page and click Manage, and we'll take you to Gumroad to cancel in a click. No lock-in, no cancellation fees. You keep access until the end of your billing period.",
   },
 ];
 
