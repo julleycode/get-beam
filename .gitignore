@@ -47,6 +47,5 @@ htmlcov/
 apps/web/public/beam/launch.src.mp4
 
 .ruff_cache/
-.omp/
 .codex/
 .claude/worktrees/
