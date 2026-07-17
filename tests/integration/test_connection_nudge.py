@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import apps.api.main  # noqa: F401 — registers every ORM model
 from apps.api.models.social_account import Platform, SocialAccount
@@ -43,7 +44,7 @@ async def _account(
     return acct
 
 
-async def test_nudges_only_the_right_accounts(test_db, monkeypatch):
+async def test_nudges_only_the_right_accounts(test_db, test_engine, monkeypatch):
     user = User(id=uuid.uuid4(), email=f"nudge-{uuid.uuid4().hex[:8]}@test.com")
     test_db.add(user)
     await test_db.flush()
@@ -72,6 +73,15 @@ async def test_nudges_only_the_right_accounts(test_db, monkeypatch):
     # Patch the class method so the detector's own EmailSender() instance uses it.
     monkeypatch.setattr(
         "apps.api.services.email_sender.EmailSender.send", _fake_send
+    )
+    # The detector opens its own global async_session — the app engine, which is
+    # bound to a different (closed) event loop once the full integration suite
+    # has run. Point it at the test engine so it shares this test's loop.
+    # Otherwise: "got Future attached to a different loop" / "Event loop is closed".
+    monkeypatch.setattr(
+        connection_nudge,
+        "async_session",
+        async_sessionmaker(test_engine, expire_on_commit=False),
     )
 
     count = await connection_nudge.check_expiring_connections()
