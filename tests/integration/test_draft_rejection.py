@@ -20,7 +20,7 @@ from apps.api.routers.drafts import (
     _auto_reject_siblings,
 )
 
-pytestmark = pytest.mark.asyncio
+pytestmark = pytest.mark.integration
 
 
 def _now():

@@ -33,7 +33,7 @@ from apps.api.services.sender import (
     send_draft,
 )
 
-pytestmark = pytest.mark.asyncio
+pytestmark = pytest.mark.integration
 
 
 def _now() -> datetime:

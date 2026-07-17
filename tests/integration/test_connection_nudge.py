@@ -15,7 +15,7 @@ from apps.api.models.social_account import Platform, SocialAccount
 from apps.api.models.user import User
 from apps.api.services import connection_nudge
 
-pytestmark = pytest.mark.asyncio
+pytestmark = pytest.mark.integration
 
 
 def _now():
