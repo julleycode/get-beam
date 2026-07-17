@@ -49,3 +49,5 @@ apps/web/public/beam/launch.src.mp4
 .ruff_cache/
 .codex/
 .claude/worktrees/
+.env.*
+**/.env
