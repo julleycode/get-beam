@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>beam · why customers don't use it — issue tree + fishbone</title>
+<style>
+  :root{
+    --bg:#0d0f12; --panel:#15181d; --line:#2a2f37; --ink:#e8eaed; --muted:#9aa3af;
+    --beam:#ff5c8a; --beam2:#7c5cff; --warn:#ffb02e; --ok:#36d399; --crit:#ff5c5c;
+    --b1:#5cc8ff; --b2:#7c5cff; --b3:#ff5c8a; --b4:#ffb02e; --b5:#36d399; --b6:#c084fc;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);line-height:1.55;padding:32px 20px 80px}
+  .wrap{max-width:1180px;margin:0 auto}
+  h1{font-size:30px;margin:0 0 4px;letter-spacing:-.5px}
+  h1 .b{color:var(--beam)}
+  .sub{color:var(--muted);font-size:15px;margin-bottom:6px}
+  .meta{color:#6b7280;font-size:12.5px;margin-bottom:28px}
+  h2{font-size:21px;margin:46px 0 6px;display:flex;align-items:center;gap:10px}
+  h2 .tag{font-size:11px;font-weight:600;background:var(--beam);color:#fff;padding:3px 9px;border-radius:20px;letter-spacing:.3px}
+  .lead{color:var(--muted);font-size:14px;margin:0 0 20px;max-width:850px}
+
+  /* callout */
+  .callout{background:linear-gradient(135deg,rgba(255,92,92,.10),rgba(124,92,255,.08));border:1px solid #3a2530;border-left:4px solid var(--crit);border-radius:12px;padding:18px 20px;margin:18px 0}
+  .callout h3{margin:0 0 8px;font-size:16px;color:var(--warn)}
+  .callout p{margin:6px 0;font-size:13.5px;color:#cdd2da}
+  .callout b{color:#fff}
+
+  /* ISSUE TREE */
+  .tree{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;overflow-x:auto}
+  .root{display:inline-block;background:#1f242c;border:2px solid var(--beam);border-radius:10px;padding:12px 18px;font-weight:700;font-size:15px;margin:0 auto 6px;color:#fff}
+  .rootwrap{text-align:center}
+  .branches{display:flex;gap:14px;margin-top:18px;min-width:1060px}
+  .col{flex:1;background:#11151a;border:1px solid var(--line);border-radius:12px;padding:0 0 12px;overflow:hidden}
+  .col .head{padding:11px 12px;font-weight:700;font-size:13.5px;color:#fff;display:flex;align-items:center;gap:8px}
+  .col .pct{font-size:11px;font-weight:600;opacity:.85;margin-left:auto;background:rgba(0,0,0,.25);padding:2px 7px;border-radius:10px}
+  .c1 .head{background:linear-gradient(90deg,var(--b1),transparent)}
+  .c2 .head{background:linear-gradient(90deg,var(--b2),transparent)}
+  .c3 .head{background:linear-gradient(90deg,var(--b3),transparent)}
+  .c4 .head{background:linear-gradient(90deg,var(--b4),transparent)}
+  .c5 .head{background:linear-gradient(90deg,var(--b5),transparent)}
+  .c6 .head{background:linear-gradient(90deg,var(--b6),transparent)}
+  .leaf{margin:8px 10px 0;background:#191e25;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;color:#d4d9e0;position:relative}
+  .leaf b{color:#fff;font-size:12px}
+  .leaf.hot{border-color:var(--crit);box-shadow:0 0 0 1px rgba(255,92,92,.25) inset}
+  .leaf .why{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+  .flag{position:absolute;top:7px;right:8px;font-size:9px;font-weight:700;color:#fff;background:var(--crit);padding:1px 6px;border-radius:8px}
+
+  /* FISHBONE */
+  .fishwrap{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px;overflow-x:auto}
+  svg{display:block;min-width:1080px;width:100%;height:auto}
+
+  /* RECS */
+  table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  th,td{text-align:left;padding:11px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#1b2027;color:#fff;font-size:12px;text-transform:uppercase;letter-spacing:.4px}
+  tr:last-child td{border-bottom:none}
+  td b{color:#fff}
+  .pri{font-weight:700;font-size:11px;padding:3px 8px;border-radius:6px;white-space:nowrap}
+  .p0{background:#3a1d1d;color:#ff8b8b}
+  .p1{background:#3a311d;color:var(--warn)}
+  .p2{background:#1d3a2b;color:var(--ok)}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin:10px 2px 0}
+  .legend span{display:flex;align-items:center;gap:6px}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+  .st{font-weight:700;font-size:10.5px;padding:3px 8px;border-radius:6px;white-space:nowrap}
+  .dn{background:#16331f;color:#5ee59b}
+  .td{background:#16331f;color:#5ee59b}
+  .sp{background:#3a311d;color:var(--warn)}
+  .nw{background:#2a1d3a;color:#c9a6ff}
+
+  /* outreach loop */
+  .loop{display:flex;align-items:stretch;gap:6px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .step{flex:1;min-width:150px;background:#11151a;border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;gap:10px;align-items:flex-start}
+  .step.gap{border-color:#3a311d;background:#171410}
+  .step .n{flex:none;width:24px;height:24px;border-radius:50%;background:var(--beam);color:#fff;font-weight:700;font-size:13px;display:flex;align-items:center;justify-content:center}
+  .step.gap .n{background:var(--warn);color:#1a1a1a}
+  .step .sc b{display:block;color:#fff;font-size:12.5px;margin-bottom:3px}
+  .step .sc span{color:var(--muted);font-size:11px;line-height:1.4}
+  .arw{display:flex;align-items:center;color:#4b525c;font-size:18px;font-weight:700}
+  @media(max-width:880px){.arw{display:none}.step{min-width:100%}}
+
+  .footer{margin-top:40px;color:#5b626c;font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>tại sao khách chưa dùng <span class="b">beam</span></h1>
+  <div class="sub">issue tree + fishbone (sơ đồ xương cá) phân tích nguyên nhân gốc, kèm hướng cải thiện product</div>
+  <div class="meta">beam = nhận diện khách truy cập ẩn danh (visitor de anonymization) + gợi ý tiếp cận trên social · ICP: indie founder, DTC · đối thủ: RB2B, Clay · 23 thg 6 2026</div>
+
+  <div class="callout">
+    <h3>điểm nóng nhất: nỗi sợ pháp lý (legal fear) đúng như chị nghi</h3>
+    <p>beam de anonymize khách ẩn danh ở cấp cá nhân (tên, công ty, social), rồi đề xuất nhắn họ trên feed. Đây là vùng xám pháp lý thật sự, không phải tưởng tượng:</p>
+    <p>• <b>GDPR (luật bảo vệ dữ liệu EU)</b>: xử lý dữ liệu cá nhân không có sự đồng ý hợp lệ, cơ sở pháp lý "legitimate interest" rất khó biện minh khi mục đích là outreach lạnh.</p>
+    <p>• <b>CCPA / CPRA (luật quyền riêng tư California)</b>: khách Mỹ ở California có quyền từ chối bán và chia sẻ dữ liệu. Đây là lý do RB2B chỉ chạy ở Mỹ và né EU.</p>
+    <p>• <b>Trách nhiệm đổ lên người mua</b>: khi founder gắn snippet beam lên site của họ, chính họ thành "data controller" và phải tự update privacy policy. Đa số không biết, nên sợ và bỏ.</p>
+    <p>• <b>Rủi ro thương hiệu</b>: nhắn người lạ "tôi thấy bạn vừa ghé site tôi" dễ bị thấy creepy, hại brand. Đây là nỗi sợ cảm tính nhưng giết conversion mạnh.</p>
+  </div>
+
+  <!-- ===================== ISSUE TREE ===================== -->
+  <h2><span class="tag">1</span> issue tree</h2>
+  <p class="lead">Tách "khách không dùng beam" theo phễu (funnel): mỗi cột là một bước rớt. Ô viền đỏ + nhãn FEAR/RISK là nhánh chị nên ưu tiên fix vì vừa nặng vừa khó thấy. % chỉ mức độ em ước lượng độ nghiêm trọng theo giai đoạn early stage, chị nên thay bằng số thật từ PostHog.</p>
+
+  <div class="tree">
+    <div class="rootwrap"><div class="root">khách không dùng beam</div></div>
+    <div class="branches">
+
+      <div class="col c1">
+        <div class="head">1. không biết tới <span class="pct">acquisition</span></div>
+        <div class="leaf"><b>chưa nghe tên beam</b><span class="why">brand mới, domain .fyi lạ, chưa có SEO/word of mouth</span></div>
+        <div class="leaf"><b>không hiểu nó làm gì trong 5 giây</b><span class="why">"see who's into you" thơ nhưng mơ hồ với người chưa biết category</span></div>
+        <div class="leaf"><b>không tự nhận ra mình có vấn đề này</b><span class="why">founder không nghĩ "97% bounce" là nỗi đau cần trả tiền</span></div>
+      </div>
+
+      <div class="col c2">
+        <div class="head">2. vào nhưng không đăng ký <span class="pct">signup</span></div>
+        <div class="leaf hot"><span class="flag">FEAR</span><b>sợ phạm luật riêng tư</b><span class="why">GDPR/CCPA, "de anon có hợp pháp không?"</span></div>
+        <div class="leaf hot"><span class="flag">TRUST</span><b>thiếu social proof</b><span class="why">founders wall 0/100, chưa logo, chưa review</span></div>
+        <div class="leaf"><b>nghi ngờ độ chính xác</b><span class="why">"60 tới 80%" nghe quá cao, dân tech hoài nghi</span></div>
+        <div class="leaf"><b>chưa thấy giá trị trước khi cho data</b><span class="why">phải nhập url + cài snippet mới thấy gì</span></div>
+      </div>
+
+      <div class="col c3">
+        <div class="head">3. đăng ký nhưng không cài snippet <span class="pct">setup</span></div>
+        <div class="leaf"><b>không có quyền sửa code</b><span class="why">site trên no code, hoặc dev mới sửa được</span></div>
+        <div class="leaf hot"><span class="flag">RISK</span><b>ngại gắn script lạ lên site</b><span class="why">sợ chậm site, sợ lộ data khách, sợ liên đới pháp lý</span></div>
+        <div class="leaf"><b>bỏ ngang lúc onboarding</b><span class="why">rớt giữa các bước, không ai nhắc quay lại</span></div>
+      </div>
+
+      <div class="col c4">
+        <div class="head">4. cài rồi nhưng không thấy giá trị <span class="pct">aha</span></div>
+        <div class="leaf hot"><span class="flag">FIT</span><b>traffic quá thấp nên gần như 0 lead</b><span class="why">indie site ít khách, free 10 ID/tháng có thể vài tuần mới đủ</span></div>
+        <div class="leaf hot"><span class="flag">FIT</span><b>traffic DTC/B2C match kém</b><span class="why">reverse IP mạnh cho B2B, yếu cho người tiêu dùng, lệch ICP</span></div>
+        <div class="leaf"><b>"biết rồi thì sao?"</b><span class="why">thấy tên khách nhưng không tự tin nhắn, không tin convert</span></div>
+        <div class="leaf"><b>chất lượng draft outreach kém</b><span class="why">copy AI nghe generic thì không ai dám gửi</span></div>
+      </div>
+
+      <div class="col c5">
+        <div class="head">5. dùng 1 lần rồi bỏ <span class="pct">retention</span></div>
+        <div class="leaf"><b>không thành thói quen</b><span class="why">không lý do quay lại mỗi ngày, không nudge</span></div>
+        <div class="leaf"><b>gửi đi nhưng không ai trả lời</b><span class="why">outreach không ra kết quả thì mất niềm tin nhanh</span></div>
+        <div class="leaf"><b>ngại bị LinkedIn khóa</b><span class="why">FAQ đã trấn an nhưng nỗi sợ vẫn còn</span></div>
+      </div>
+
+      <div class="col c6">
+        <div class="head">6. không trả tiền <span class="pct">monetization</span></div>
+        <div class="leaf"><b>free đủ xài / chưa đủ đau để nâng cấp</b><span class="why">10 ID quá ít để thấy value, nhưng cũng đủ để tò mò rồi thôi</span></div>
+        <div class="leaf"><b>ROI chưa chứng minh</b><span class="why">chưa quy ra được "X ID = Y doanh thu"</span></div>
+        <div class="leaf"><b>$19 cho 50 ID thấy đắt khi tỉ lệ convert mơ hồ</b><span class="why">định giá theo ID, không theo kết quả</span></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ===================== FISHBONE ===================== -->
+  <h2><span class="tag">2</span> fishbone · sơ đồ xương cá</h2>
+  <p class="lead">Cùng một "effect" (khách không dùng beam) nhìn theo 6 nhóm nguyên nhân gốc. Xương màu đỏ (Trust &amp; Legal) là nhóm chị nên đập trước.</p>
+
+  <div class="fishwrap">
+  <svg viewBox="0 0 1100 560" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,sans-serif">
+    <defs>
+      <marker id="arrow" markerWidth="12" markerHeight="12" refX="9" refY="6" orient="auto">
+        <path d="M0,0 L10,6 L0,12 Z" fill="#e8eaed"/>
+      </marker>
+    </defs>
+
+    <!-- spine -->
+    <line x1="70" y1="280" x2="930" y2="280" stroke="#e8eaed" stroke-width="3" marker-end="url(#arrow)"/>
+    <!-- head -->
+    <rect x="930" y="238" width="160" height="84" rx="12" fill="#1f242c" stroke="#ff5c8a" stroke-width="2"/>
+    <text x="1010" y="272" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">khách không</text>
+    <text x="1010" y="292" fill="#fff" font-size="14" font-weight="700" text-anchor="middle">dùng beam</text>
+    <text x="1010" y="312" fill="#9aa3af" font-size="10" text-anchor="middle">(effect)</text>
+
+    <!-- ====== TOP BONES ====== -->
+    <!-- bone A: Trust & Legal (red) -->
+    <line x1="200" y1="280" x2="300" y2="90" stroke="#ff5c5c" stroke-width="2.5"/>
+    <rect x="232" y="60" width="150" height="26" rx="6" fill="#ff5c5c"/>
+    <text x="307" y="78" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">trust &amp; legal</text>
+    <text x="250" y="120" fill="#ffb7b7" font-size="11">• sợ GDPR / CCPA</text>
+    <text x="262" y="138" fill="#cdd2da" font-size="11">• thiếu proof, brand mới</text>
+    <text x="274" y="156" fill="#cdd2da" font-size="11">• nhắn lạ thấy creepy</text>
+    <text x="286" y="174" fill="#cdd2da" font-size="11">• ai chịu trách nhiệm data?</text>
+
+    <!-- bone B: Value / Efficacy -->
+    <line x1="430" y1="280" x2="530" y2="90" stroke="#ffb02e" stroke-width="2.5"/>
+    <rect x="462" y="60" width="160" height="26" rx="6" fill="#ffb02e"/>
+    <text x="542" y="78" fill="#1a1a1a" font-size="13" font-weight="700" text-anchor="middle">value / hiệu quả</text>
+    <text x="480" y="120" fill="#cdd2da" font-size="11">• traffic thấp, ít lead</text>
+    <text x="492" y="138" fill="#cdd2da" font-size="11">• DTC/B2C match kém</text>
+    <text x="504" y="156" fill="#cdd2da" font-size="11">• "biết rồi thì sao?"</text>
+    <text x="516" y="174" fill="#cdd2da" font-size="11">• ROI chưa chứng minh</text>
+
+    <!-- bone C: Product / Activation -->
+    <line x1="660" y1="280" x2="760" y2="90" stroke="#5cc8ff" stroke-width="2.5"/>
+    <rect x="692" y="60" width="170" height="26" rx="6" fill="#5cc8ff"/>
+    <text x="777" y="78" fill="#0d0f12" font-size="13" font-weight="700" text-anchor="middle">product / activation</text>
+    <text x="710" y="120" fill="#cdd2da" font-size="11">• cần sửa code mới cài</text>
+    <text x="722" y="138" fill="#cdd2da" font-size="11">• rớt khi onboarding</text>
+    <text x="734" y="156" fill="#cdd2da" font-size="11">• time to value lâu</text>
+    <text x="746" y="174" fill="#cdd2da" font-size="11">• draft AI generic</text>
+
+    <!-- ====== BOTTOM BONES ====== -->
+    <!-- bone D: Awareness / Positioning -->
+    <line x1="200" y1="280" x2="300" y2="470" stroke="#7c5cff" stroke-width="2.5"/>
+    <rect x="232" y="474" width="180" height="26" rx="6" fill="#7c5cff"/>
+    <text x="322" y="492" fill="#fff" font-size="13" font-weight="700" text-anchor="middle">awareness / định vị</text>
+    <text x="250" y="445" fill="#cdd2da" font-size="11">• chưa ai biết tới beam</text>
+    <text x="262" y="427" fill="#cdd2da" font-size="11">• value prop mơ hồ</text>
+    <text x="274" y="409" fill="#cdd2da" font-size="11">• không tự thấy nỗi đau</text>
+
+    <!-- bone E: Pricing / Packaging -->
+    <line x1="430" y1="280" x2="530" y2="470" stroke="#36d399" stroke-width="2.5"/>
+    <rect x="462" y="474" width="180" height="26" rx="6" fill="#36d399"/>
+    <text x="552" y="492" fill="#0d0f12" font-size="13" font-weight="700" text-anchor="middle">pricing / gói</text>
+    <text x="480" y="445" fill="#cdd2da" font-size="11">• free 10 ID quá ít</text>
+    <text x="492" y="427" fill="#cdd2da" font-size="11">• tính tiền theo ID, không theo kết quả</text>
+    <text x="504" y="409" fill="#cdd2da" font-size="11">• $19 thấy đắt khi convert mơ hồ</text>
+
+    <!-- bone F: Competition / Status quo -->
+    <line x1="660" y1="280" x2="760" y2="470" stroke="#c084fc" stroke-width="2.5"/>
+    <rect x="692" y="474" width="200" height="26" rx="6" fill="#c084fc"/>
+    <text x="792" y="492" fill="#0d0f12" font-size="13" font-weight="700" text-anchor="middle">đối thủ / status quo</text>
+    <text x="710" y="445" fill="#cdd2da" font-size="11">• RB2B free, đã có tên</text>
+    <text x="722" y="427" fill="#cdd2da" font-size="11">• Clay mạnh hơn</text>
+    <text x="734" y="409" fill="#cdd2da" font-size="11">• "không làm gì cả" là lựa chọn dễ nhất</text>
+  </svg>
+  </div>
+  <div class="legend">
+    <span><i class="dot" style="background:#ff5c5c"></i>đập trước (cao nhất)</span>
+    <span><i class="dot" style="background:#ffb02e"></i>value</span>
+    <span><i class="dot" style="background:#5cc8ff"></i>product</span>
+    <span><i class="dot" style="background:#7c5cff"></i>awareness</span>
+    <span><i class="dot" style="background:#36d399"></i>pricing</span>
+    <span><i class="dot" style="background:#c084fc"></i>competition</span>
+  </div>
+
+  <!-- ===================== RECS ===================== -->
+  <h2><span class="tag">3</span> hướng cải thiện, ưu tiên theo impact</h2>
+  <p class="lead">Cập nhật theo phản hồi của Julley ngày 23 thg 6. Cột trạng thái phân biệt cái đã làm, cái mới làm một phần, và cái còn trống. Đừng tô xanh cái chưa thật sự giải quyết được nỗi đau của người mua.</p>
+  <table>
+    <thead><tr><th>ưu tiên</th><th>root cause</th><th>trạng thái</th><th>việc còn phải làm (đã refine)</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><span class="pri p0">P0</span></td>
+        <td><b>sợ pháp lý</b> (signup + setup)</td>
+        <td><span class="st sp">một phần</span></td>
+        <td>Privacy + terms hiện tại bảo vệ <b>beam</b>, không gỡ nỗi sợ của <b>người mua</b>. Hai việc khác nhau. Còn thiếu: trang "is beam legal for me to use" hướng tới người mua, và đoạn clause copy paste để họ dán vào privacy policy của chính họ. Biến trách nhiệm pháp lý từ rào cản thành thứ beam lo giùm.</td>
+      </tr>
+      <tr>
+        <td><span class="pri p0">P0</span></td>
+        <td><b>thiếu social proof</b></td>
+        <td><span class="st sp">một phần</span></td>
+        <td>Founders wall đã có nhưng chưa có case thành công để viết testimonials. Đây là bài toán con gà quả trứng ở giai đoạn đầu. Cách thay thế testimonials mà không xạo: (1) founder tự dogfood, chụp màn hình "tôi dùng beam kiếm N user đầu tiên"; (2) bộ đếm tổng thật "beam đã nhận diện X khách cho founders"; (3) build in public, kể số thật mỗi tuần; (4) badge GDPR/CCPA compliant. Khi có 1 case thật đầu tiên thì quay video liền.</td>
+      </tr>
+      <tr>
+        <td><span class="pri p0">P0</span></td>
+        <td><b>traffic thấp = 0 lead</b> (aha)</td>
+        <td><span class="st td">đồng ý</span></td>
+        <td>Đo traffic ngay lúc onboarding. Site quá ít khách thì nói thẳng và set kỳ vọng đúng, đừng để họ chờ 3 tuần mới có 1 ID rồi bỏ. Đo bằng thời gian tới ID đầu tiên.</td>
+      </tr>
+      <tr>
+        <td><span class="pri p2">P2</span></td>
+        <td><b>match kém cho DTC/B2C</b></td>
+        <td><span class="st dn">đã làm</span></td>
+        <td>Landing đã làm rõ hợp nhất với B2B. Giữ vậy. Chỉ cần thỉnh thoảng soi match rate theo loại site để chắc không hứa quá cho nhóm B2C.</td>
+      </tr>
+      <tr>
+        <td><span class="pri p1">P1 ↑</span></td>
+        <td><b>"biết rồi thì sao"</b> + draft generic</td>
+        <td><span class="st nw">đào sâu bên dưới</span></td>
+        <td>Đây là nhánh Julley muốn discover thêm. Em tách thành vòng lặp 6 bước ở mục 4. Quan trọng: đây không chỉ là lỗ hổng cần vá, nó chính là lý do beam tồn tại so với RB2B. Nên nâng từ P1 lên gần P0.</td>
+      </tr>
+      <tr>
+        <td><span class="pri p1">P1</span></td>
+        <td><b>setup cần sửa code</b></td>
+        <td><span class="st sp">một phần</span></td>
+        <td>Đã có feature "send to my AI agent" để cài. Bổ sung: email nhắc khi cài dở dang (Julley đồng ý), và bước tự xác minh snippet đã chạy đúng để người dùng yên tâm.</td>
+      </tr>
+      <tr>
+        <td><span class="pri p1">P1</span></td>
+        <td><b>ROI chưa rõ</b> (monetization)</td>
+        <td><span class="st nw">cần định nghĩa KPI</span></td>
+        <td>Julley đồng ý: growth marketer càng thấy rõ kết quả càng thích, mà beam đang mơ hồ về KPI. Em đề xuất bộ KPI cụ thể beam nên show ở mục 5, gắn trực tiếp với vòng lặp outreach.</td>
+      </tr>
+      <tr>
+        <td><span class="pri p2">P2</span></td>
+        <td><b>đối thủ / status quo</b></td>
+        <td><span class="st td">đồng ý</span></td>
+        <td>Highlight wedge lên landing: beam khép cả vòng, RB2B chỉ nhận diện, Clay cần setup. Làm bảng so sánh trực diện.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ===================== DEEP DIVE: OUTREACH LOOP ===================== -->
+  <h2><span class="tag">4</span> đào sâu · nhánh "biết rồi thì sao"</h2>
+  <p class="lead">Reframe cốt lõi: nhận diện được khách không tự thành doanh thu. Khoảng cách giữa "thấy tên" và "có khách trả lời" mới là sản phẩm thật. RB2B dừng ở bước 1, nên 5 bước còn lại chính là moat của beam. Mỗi bước là một điểm rớt, em chỉ ra cái thiếu và cái nên build.</p>
+
+  <div class="loop">
+    <div class="step">
+      <div class="n">1</div>
+      <div class="sc"><b>identify · nhận diện</b><span>beam đã làm tốt. Nhưng một list 50 cái tên là noise, không phải insight.</span></div>
+    </div>
+    <div class="arw">→</div>
+    <div class="step gap">
+      <div class="n">2</div>
+      <div class="sc"><b>prioritize · chấm điểm intent</b><span>thiếu: ai trong 50 người đáng nhắn? Cần intent score: xem trang pricing, quay lại nhiều lần, ở lại lâu, hợp ICP. Không xếp hạng thì user tê liệt, không biết bắt đầu từ đâu.</span></div>
+    </div>
+    <div class="arw">→</div>
+    <div class="step gap">
+      <div class="n">3</div>
+      <div class="sc"><b>conviction · cho lý do để nhắn</b><span>thiếu: một dòng "vì sao là người này" ngay cạnh mỗi khách. Vd "xem pricing 2 lần, founder SaaS 20 người, đúng ICP của bạn". Đây là thứ tạo can đảm bấm nút gửi.</span></div>
+    </div>
+    <div class="arw">→</div>
+    <div class="step gap">
+      <div class="n">4</div>
+      <div class="sc"><b>draft · soạn không generic</b><span>thiếu: hook từ post gần nhất của khách, nhiều giọng để chọn, đúng định dạng từng kênh (DM LinkedIn khác reply X). Copy AI nghe template thì không ai dám gửi, đứt cả vòng.</span></div>
+    </div>
+    <div class="arw">→</div>
+    <div class="step gap">
+      <div class="n">5</div>
+      <div class="sc"><b>act tastefully · nhắn duyên, không creepy</b><span>thiếu: gợi ý kênh phù hợp (DM riêng, comment công khai, hay email) và cách nói tế nhị. Làm sai ở đây là quay lại nỗi sợ creepy và hại brand. Đây là cầu nối giữa nhánh value và nhánh trust.</span></div>
+    </div>
+    <div class="arw">→</div>
+    <div class="step gap">
+      <div class="n">6</div>
+      <div class="sc"><b>learn · vòng phản hồi</b><span>thiếu: theo dõi gửi đi → ai trả lời → ra cuộc gặp. Không có vòng này thì không thành thói quen, không học được, và không có số để chứng minh ROI. Đây chính là cây cầu sang mục 5 (KPI).</span></div>
+    </div>
+  </div>
+  <p class="lead" style="margin-top:14px"><b>Điểm chốt cho timing:</b> giá trị lớn nhất là báo ngay khoảnh khắc một khách intent cao được nhận diện, để founder đánh khi còn nóng. Nhắn sau 3 ngày thì đã nguội. Cân nhắc một "hot visitor alert" real time thay vì để user tự vào dashboard xem.</p>
+
+  <!-- ===================== KPI ===================== -->
+  <h2><span class="tag">5</span> bộ KPI beam nên show cho growth marketer</h2>
+  <p class="lead">Vòng lặp ở mục 4 đẻ ra đúng những con số mà growth marketer cần để justify trả tiền. Đi từ volume xuống tới doanh thu, càng xuống càng thuyết phục.</p>
+  <table>
+    <thead><tr><th>tầng</th><th>KPI cụ thể</th><th>vì sao quan trọng</th></tr></thead>
+    <tbody>
+      <tr><td><b>volume</b></td><td>số khách nhận diện / tháng</td><td>chứng minh beam đang chạy, nhưng một mình nó vô nghĩa</td></tr>
+      <tr><td><b>quality</b></td><td>số khách intent cao (ICP match + hành vi)</td><td>tách tín hiệu khỏi noise, đây mới là con số đáng tiền</td></tr>
+      <tr><td><b>action</b></td><td>số outreach đã gửi, % khách được nhắn</td><td>đo xem user có thực sự dùng beam để hành động không</td></tr>
+      <tr><td><b>result</b></td><td>reply rate, số hội thoại, số cuộc gặp đặt được</td><td>bằng chứng beam ra kết quả thật, không chỉ là tên</td></tr>
+      <tr><td><b>money</b></td><td>pipeline / doanh thu gán cho beam, chi phí mỗi lead nóng</td><td>chén thánh: nối thẳng beam với tiền, mở đường định giá theo kết quả</td></tr>
+      <tr><td><b>wedge metric</b></td><td>reply rate outreach từ khách đã ghé site vs cold outbound</td><td>con số sát thủ: khách đã thể hiện intent nên tỉ lệ trả lời phải vượt xa cold. Đây là câu chuyện bán hàng mạnh nhất của beam</td></tr>
+    </tbody>
+  </table>
+
+  <div class="footer">
+    Hai sơ đồ này là khung giả thuyết dựa trên product + thị trường. Bước tiếp theo nên validate bằng số thật trong PostHog (phễu onboarding) và 5 tới 10 buổi phỏng vấn user vừa bỏ giữa chừng.
+  </div>
+
+</div>
+</body>
+</html>
