@@ -6,7 +6,9 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
     default: "Blog — Beam",
-    template: "%s — Beam Blog",
+    // Short suffix keeps post <title> under ~60 chars for SERP display; the
+    // per-post meta_title still owns the leading text.
+    template: "%s — Beam",
   },
   description:
     "Guides on website visitor identification, retargeting, and turning anonymous traffic into pipeline.",
