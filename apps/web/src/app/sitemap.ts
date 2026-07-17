@@ -1,11 +1,16 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL, fetchPublishedPosts } from "@/lib/blog-fetch";
 
-// Dynamic: reflects the current published set (no-store fetch).
+// Dynamic: reflects the current published set (no-store fetch), so a freshly
+// published post appears in the sitemap immediately — Google picks it up on the
+// next sitemap recrawl with no manual "request indexing" needed.
 export const dynamic = "force-dynamic";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const posts = await fetchPublishedPosts(200);
+  // 100 is the blog API's max page size (?limit is capped at 100). Asking for
+  // more returns HTTP 422, which would drop every post from the sitemap. Revisit
+  // with pagination if the published-post count ever approaches 100.
+  const posts = await fetchPublishedPosts(100);
 
   const staticRoutes: MetadataRoute.Sitemap = [
     { url: `${SITE_URL}/`, changeFrequency: "weekly", priority: 1 },

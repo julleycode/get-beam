@@ -23,7 +23,11 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 
   const canonical = post.canonical_url || `${SITE_URL}/blog/${post.slug}`;
   const description = post.meta_description || post.excerpt || undefined;
-  const images = post.og_image_url ? [{ url: post.og_image_url }] : undefined;
+  // Fall back to the site's default social card so every post has an OG image
+  // (a card-less link previews poorly and the twitter summary_large_image needs
+  // an image to render). Posts can still override via og_image_url/cover.
+  const ogImage =
+    post.og_image_url || post.cover_image_url || `${SITE_URL}/beam/social-share.png`;
 
   return {
     title: post.meta_title || post.title,
@@ -34,7 +38,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
       title: post.meta_title || post.title,
       description,
       url: canonical,
-      images,
+      images: [{ url: ogImage }],
       publishedTime: post.published_at || undefined,
       authors: [post.author_name],
     },
@@ -42,7 +46,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
       card: "summary_large_image",
       title: post.meta_title || post.title,
       description,
-      images: post.og_image_url ? [post.og_image_url] : undefined,
+      images: [ogImage],
     },
   };
 }
@@ -94,7 +98,7 @@ export default async function BlogPostPage({ params }: Params) {
     datePublished: post.published_at || undefined,
     dateModified: post.published_at || undefined,
     author: { "@type": "Person", name: post.author_name },
-    image: post.og_image_url || post.cover_image_url || undefined,
+    image: post.og_image_url || post.cover_image_url || `${SITE_URL}/beam/social-share.png`,
     mainEntityOfPage: { "@type": "WebPage", "@id": canonical },
     url: canonical,
   };

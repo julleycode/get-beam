@@ -47,8 +47,10 @@ export default function middleware(req: NextRequest, ev: NextFetchEvent) {
 
 export const config = {
   matcher: [
-    // Skip Next.js internals and all static files
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    // Skip Next.js internals and all static files. `xml`/`txt` matter: without
+    // them, Clerk protects /sitemap.xml and /robots.txt (they aren't public
+    // routes) and returns 404 to crawlers — SEO metadata routes must stay open.
+    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest|xml|txt)).*)",
     // Always run for API routes
     "/(api|trpc)(.*)",
   ],
