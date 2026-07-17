@@ -51,6 +51,31 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   };
 }
 
+// Pull an FAQ section ("## Frequently asked questions", ### question / answer)
+// out of the body so it can be emitted as FAQPage structured data — the format
+// AI answer engines and Google's FAQ rich result quote most.
+function extractFaq(md: string): { q: string; a: string }[] {
+  const section = md.match(
+    /##\s+Frequently asked questions\s*([\s\S]*?)(?=\n##\s|$)/i
+  );
+  if (!section) return [];
+  // Lead with "\n" so the first "### " is always a split boundary (the section
+  // regex may have consumed the newline before it); slice(1) drops the preamble.
+  return `\n${section[1]}`
+    .split(/\n###\s+/)
+    .slice(1)
+    .map((part) => {
+      const nl = part.indexOf("\n");
+      const q = (nl === -1 ? part : part.slice(0, nl)).trim();
+      const a = (nl === -1 ? "" : part.slice(nl + 1))
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // markdown links → text
+        .replace(/\*\*|__|`/g, "")
+        .trim();
+      return { q, a };
+    })
+    .filter((f) => f.q && f.a);
+}
+
 function formatDate(iso: string | null): string {
   if (!iso) return "";
   return new Date(iso).toLocaleDateString("en-US", {
@@ -72,11 +97,25 @@ export default async function BlogPostPage({ params }: Params) {
     description: post.meta_description || post.excerpt || undefined,
     datePublished: post.published_at || undefined,
     dateModified: post.published_at || undefined,
-    author: { "@type": "Organization", name: post.author_name },
+    author: { "@type": "Person", name: post.author_name },
     image: post.og_image_url || post.cover_image_url || `${SITE_URL}/beam/social-share.png`,
     mainEntityOfPage: { "@type": "WebPage", "@id": canonical },
     url: canonical,
   };
+
+  const faqs = extractFaq(post.body_markdown);
+  const faqLd =
+    faqs.length > 0
+      ? {
+          "@context": "https://schema.org",
+          "@type": "FAQPage",
+          mainEntity: faqs.map((f) => ({
+            "@type": "Question",
+            name: f.q,
+            acceptedAnswer: { "@type": "Answer", text: f.a },
+          })),
+        }
+      : null;
 
   return (
     <article className="rounded-2xl border border-[rgba(43,37,48,0.06)] bg-white p-6 sm:p-10">
@@ -85,6 +124,12 @@ export default async function BlogPostPage({ params }: Params) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
+      {faqLd && (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(faqLd) }}
+        />
+      )}
 
       <a href="/blog" className="text-sm text-muted-foreground hover:text-foreground">
         ← All posts

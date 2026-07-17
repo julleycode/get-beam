@@ -46,6 +46,7 @@ export function PostForm({
   onSubmit,
 }: PostFormProps) {
   const [title, setTitle] = useState(initial?.title ?? "");
+  const [authorName, setAuthorName] = useState(initial?.author_name ?? "");
   const [slug, setSlug] = useState(initial?.slug ?? "");
   const [excerpt, setExcerpt] = useState(initial?.excerpt ?? "");
   const [body, setBody] = useState(initial?.body_markdown ?? "");
@@ -111,6 +112,8 @@ export function PostForm({
       .filter(Boolean);
     onSubmit({
       title: title.trim(),
+      // Omit when blank so a partial update keeps the existing author.
+      author_name: authorName.trim() || undefined,
       slug: slug.trim() || undefined,
       excerpt: excerpt.trim() || null,
       body_markdown: body,
@@ -137,6 +140,15 @@ export function PostForm({
             aria-invalid={titleError}
           />
           {titleError && <p className="text-xs text-red-600">Title is required.</p>}
+        </Field>
+
+        <Field label="Author" htmlFor="author" hint="Shown as the byline. Use a real person for E-E-A-T, not a brand.">
+          <Input
+            id="author"
+            value={authorName}
+            onChange={(e) => setAuthorName(e.target.value)}
+            placeholder="Julley Thai"
+          />
         </Field>
 
         <Field
