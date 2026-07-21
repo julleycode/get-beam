@@ -128,3 +128,179 @@ class TestAiAsk:
             headers=_auth(ai_setup["token"]),
         )
         assert resp.status_code == 422, resp.text
+
+
+def _script_loop(monkeypatch, responses: list[dict]) -> list[dict]:
+    """Patch the Gemini transport seam with scripted responses; capture deep
+    copies of each request body so tests can inspect the functionResponse the
+    loop actually built (i.e. prove the tool handlers hit the test DB)."""
+    import json as jsonlib
+
+    from apps.api.services import gemini_client
+
+    bodies: list[dict] = []
+
+    async def fake_post(body, model, *, client=None):
+        bodies.append(jsonlib.loads(jsonlib.dumps(body)))
+        return responses[min(len(bodies) - 1, len(responses) - 1)]
+
+    monkeypatch.setattr(gemini_client, "_post_generate", fake_post)
+    return bodies
+
+
+def _call_stats(site_id: str) -> dict:
+    return {
+        "candidates": [
+            {
+                "content": {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "functionCall": {
+                                "name": "get_site_stats",
+                                "args": {"site_id": site_id},
+                            }
+                        }
+                    ],
+                }
+            }
+        ],
+        "usageMetadata": {"totalTokenCount": 10},
+    }
+
+
+def _text(answer: str) -> dict:
+    return {
+        "candidates": [{"content": {"role": "model", "parts": [{"text": answer}]}}],
+        "usageMetadata": {"totalTokenCount": 10},
+    }
+
+
+class TestAiAskAgentic:
+    """The tool-loop path added by the light-agentic upgrade."""
+
+    @pytest.mark.asyncio
+    async def test_tool_call_reads_workspace_through_request_session(
+        self, test_client, ai_setup, monkeypatch
+    ):
+        bodies = _script_loop(
+            monkeypatch,
+            [
+                _call_stats(ai_setup["site_id"]),
+                _text("You have 0 visitors so far — install the pixel first."),
+            ],
+        )
+
+        resp = await test_client.post(
+            "/api/v1/ai/ask",
+            json={
+                "question": "How many visitors do I have?",
+                "site_id": ai_setup["site_id"],
+            },
+            headers=_auth(ai_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        assert "visitors" in resp.json()["answer"]
+
+        # The seed context carries the site_id the model needs for tool calls.
+        assert f"site_id={ai_setup['site_id']}" in bodies[0]["contents"][0]["parts"][0]["text"]
+        # The handler really ran against the seeded test DB.
+        fr = bodies[1]["contents"][2]["parts"][0]["functionResponse"]
+        assert fr["name"] == "get_site_stats"
+        assert '"total_visitors": 0' in fr["response"]["data"]
+        assert '"segments": 0' in fr["response"]["data"]
+
+    @pytest.mark.asyncio
+    async def test_tool_cannot_read_another_tenants_site(
+        self, test_client, ai_setup, monkeypatch
+    ):
+        # A DIFFERENT user asks; the model (maliciously or steered) requests
+        # the first user's site_id — the tool must answer "site not found".
+        other_token = await _signup(
+            test_client, f"other-agent-{uuidlib.uuid4().hex[:8]}@test.com"
+        )
+        bodies = _script_loop(
+            monkeypatch,
+            [_call_stats(ai_setup["site_id"]), _text("I could not find that site.")],
+        )
+
+        resp = await test_client.post(
+            "/api/v1/ai/ask",
+            json={"question": "Show stats for that site"},
+            headers=_auth(other_token),
+        )
+        assert resp.status_code == 200, resp.text
+        fr = bodies[1]["contents"][2]["parts"][0]["functionResponse"]
+        assert fr["response"]["data"] == '{"error": "site not found"}'
+
+    @pytest.mark.asyncio
+    async def test_loop_failure_falls_back_to_single_shot(
+        self, test_client, ai_setup, monkeypatch
+    ):
+        from apps.api.services.gemini_client import GeminiError
+
+        async def boom_loop(*args, **kwargs):
+            raise GeminiError("loop down")
+
+        async def fake_generate(prompt, **kwargs):
+            assert "WORKSPACE DATA" in prompt
+            return "Fallback answer."
+
+        monkeypatch.setattr("apps.api.routers.ai.gemini_agent_loop", boom_loop)
+        monkeypatch.setattr("apps.api.routers.ai.gemini_generate", fake_generate)
+
+        resp = await test_client.post(
+            "/api/v1/ai/ask",
+            json={"question": "anything", "site_id": ai_setup["site_id"]},
+            headers=_auth(ai_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["answer"] == "Fallback answer."
+
+    @pytest.mark.asyncio
+    async def test_flag_off_uses_legacy_path_only(
+        self, test_client, ai_setup, monkeypatch
+    ):
+        from apps.api.config import settings
+
+        monkeypatch.setattr(settings, "ai_ask_tools_enabled", False)
+        called = {"loop": False}
+
+        async def loop_marker(*args, **kwargs):
+            called["loop"] = True
+            return "agentic"
+
+        async def fake_generate(prompt, **kwargs):
+            return "Legacy."
+
+        monkeypatch.setattr("apps.api.routers.ai.gemini_agent_loop", loop_marker)
+        monkeypatch.setattr("apps.api.routers.ai.gemini_generate", fake_generate)
+
+        resp = await test_client.post(
+            "/api/v1/ai/ask",
+            json={"question": "anything"},
+            headers=_auth(ai_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["answer"] == "Legacy."
+        assert called["loop"] is False
+
+    @pytest.mark.asyncio
+    async def test_mock_mode_answers_via_real_handlers(
+        self, test_client, ai_setup, monkeypatch
+    ):
+        # MOCK_EXTERNAL_APIS exercises the loop keylessly: the first tool
+        # (list_sites) runs for real against the request DB session.
+        from apps.api.config import settings
+
+        monkeypatch.setattr(settings, "mock_external_apis", True)
+
+        resp = await test_client.post(
+            "/api/v1/ai/ask",
+            json={"question": "What is my workspace status?"},
+            headers=_auth(ai_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        answer = resp.json()["answer"]
+        assert answer.startswith("MOCK ANSWER")
+        assert "list_sites" in answer
