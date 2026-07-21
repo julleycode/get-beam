@@ -128,6 +128,17 @@ async def ingest_events(
         if await is_datacenter_ip(ip_address):
             return Response(status_code=204)
 
+    # Proxy / VPN / Tor / hosting traffic = automated scrapers hiding behind a
+    # real-looking UA and an ASN the datacenter org-token net misses (e.g. Sprious).
+    # IPinfo Privacy Detection flags these regardless of reverse-DNS, so a no-PTR
+    # commercial proxy is caught WITHOUT dropping mobile CGNAT humans (never flagged
+    # proxy) or Apple Private Relay users (relay is not a drop signal). Same silent
+    # 204, cached 7d + fail-open as the datacenter check above.
+    if _settings.block_proxy_vpn_traffic:
+        from apps.api.services.company_resolver import check_ip_privacy, is_proxy_or_vpn
+        if is_proxy_or_vpn(await check_ip_privacy(ip_address)):
+            return Response(status_code=204)
+
     # Client Hints extraction (best-effort)
     ch_ua = request.headers.get("sec-ch-ua", "")
     ch_platform = request.headers.get("sec-ch-ua-platform", "").strip('"')

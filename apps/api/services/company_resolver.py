@@ -218,6 +218,26 @@ def is_ip_suspicious(privacy: dict | None) -> bool:
     return any(privacy.get(k, False) for k in ("vpn", "proxy", "tor", "relay", "hosting"))
 
 
+# Ingest DROP signal: proxy / VPN / Tor / hosting — but NOT `relay`. Apple Private
+# Relay and Cloudflare WARP set relay=True yet front REAL humans, so relay alone
+# must never drop an event (mirrors the CDN/relay carve-out in classify_org_kind).
+# This is the narrower cousin of is_ip_suspicious, which DOES count relay and is
+# used only to *skip paid identity resolution*, never to discard traffic.
+_INGEST_DROP_PRIVACY_FLAGS = ("vpn", "proxy", "tor", "hosting")
+
+
+def is_proxy_or_vpn(privacy: dict | None) -> bool:
+    """True if IPinfo flags the IP as proxy / VPN / Tor / hosting (relay excluded).
+
+    Drives the ingest proxy drop: catches no-PTR commercial proxies (Sprious-style
+    scrapers) and VPN egress that hide behind a real-looking UA and an ASN the
+    org-token net misses — without dropping mobile CGNAT humans (never flagged
+    proxy) or Private Relay users (relay, deliberately not counted here)."""
+    if not privacy:
+        return False
+    return any(privacy.get(k, False) for k in _INGEST_DROP_PRIVACY_FLAGS)
+
+
 # Cloud COMPUTE providers — these host servers, not consumer eyeballs. CDN/relay
 # orgs (Cloudflare, Fastly, Akamai, Gcore) are deliberately EXCLUDED because they
 # front real human traffic via Apple Private Relay / Cloudflare WARP.
@@ -241,6 +261,10 @@ _DATACENTER_ORG_TOKENS = (
     "hostroyale", "as207990 ",        # HostRoyale — bulletproof/cheap hosting
     "as3356 ",                          # Level 3 / Lumen transit core — proxy/SWG/scanner egress
     "facebook", "as32934 ",            # Facebook AS — link-preview crawler, never an eyeball
+    # 2026-07-21: commercial proxy / scraper networks seen hitting getbeam.fyi as
+    # fake "US visitors". Never a real eyeball. Name-token fallback to the ASN set
+    # above (org strings drift; ASN is primary). Sprious PTR = static.sprious.com.
+    "sprious", "rayobyte", "blazing seo", "oxylabs", "logicweb", "oculus networks",
 )
 
 # ── ASN-based classification (primary signal; the org-name tokens above are fallback) ──
@@ -260,6 +284,10 @@ _DATACENTER_ASNS: frozenset[int] = frozenset({
     16265, 30633, 9009, 60068, 212238,                    # Leaseweb x2, M247, Datacamp/CDN77 x2
     207990, 8100, 40676, 46475, 53667, 36352, 63023, 54825,  # HostRoyale, QuadraNet, Psychz, Limestone, BuyVM, ColoCrossing, GTHost, Equinix Metal
     136787,  # PacketHub S.A. — VPN/proxy egress (NordVPN family); caught leaking as "eyeball" 2026-06-30
+    # 2026-07-21: commercial proxy / scraper / cheap-hosting ASNs caught hitting
+    # getbeam.fyi as fake "US visitors" (pv=1, intent~9-10). IPinfo's privacy
+    # detection returns NOTHING for these, so the ASN is the only robust signal.
+    64267, 396319, 64286, 398781,  # Sprious LLC, Oxylabs, LogicWeb, Oculus Networks
 })
 
 # CDN / edge / privacy-relay ASNs. NOT dropped at ingest — they front REAL humans via

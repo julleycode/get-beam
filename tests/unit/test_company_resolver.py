@@ -7,6 +7,7 @@ from apps.api.services import company_resolver
 from apps.api.services.company_resolver import (
     _extract_domain,
     is_datacenter_ip,
+    is_proxy_or_vpn,
     resolve_company_from_ip,
 )
 
@@ -179,6 +180,11 @@ class TestClassifyOrgKind:
         "AS3356 Level 3 Parent, LLC",                 # name-token "as3356 "
         "AS32934 Facebook, Inc.",                     # crawler
         "AS8075 Microsoft Corporation",               # via NAME token (ASN deliberately excluded)
+        "AS64267 Sprious LLC",                        # proxy-scraper net (ASN 64267 + name)
+        "AS396319 Oxylabs",                           # proxy net (ASN 396319 + name)
+        "AS64286 LogicWeb Inc.",                      # cheap hosting (ASN 64286)
+        "AS398781 OCULUS NETWORKS INC",               # hosting/proxy (ASN 398781)
+        "AS20001 Charter, host reassigned to Sprious",  # NAME-token catch when ASN is a residential parent
     ])
     def test_datacenter(self, org):
         assert company_resolver.classify_org_kind(org) == "datacenter"
@@ -205,6 +211,31 @@ class TestClassifyOrgKind:
     ])
     def test_eyeball(self, org):
         assert company_resolver.classify_org_kind(org) == "eyeball"
+
+
+class TestIsProxyOrVpn:
+    """is_proxy_or_vpn drives the ingest proxy drop — proxy/VPN/Tor/hosting drop,
+    but relay (Apple Private Relay / Cloudflare WARP = real humans) must NOT."""
+
+    @pytest.mark.parametrize("flag", ["proxy", "vpn", "tor", "hosting"])
+    def test_dropped_flags(self, flag):
+        assert is_proxy_or_vpn({flag: True}) is True
+
+    def test_relay_only_not_dropped(self):
+        # Apple Private Relay: relay=True, everything else False → real human, keep.
+        assert is_proxy_or_vpn(
+            {"vpn": False, "proxy": False, "tor": False, "relay": True, "hosting": False}
+        ) is False
+
+    def test_clean_ip_not_dropped(self):
+        assert is_proxy_or_vpn(
+            {"vpn": False, "proxy": False, "tor": False, "relay": False, "hosting": False}
+        ) is False
+
+    @pytest.mark.parametrize("privacy", [None, {}])
+    def test_missing_privacy_not_dropped(self, privacy):
+        # check_ip_privacy returns None when disabled/failed → fail-open (keep event).
+        assert is_proxy_or_vpn(privacy) is False
 
 
 class TestIpinfoFabricationGuard:
