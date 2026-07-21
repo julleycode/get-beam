@@ -51,3 +51,4 @@ apps/web/public/beam/launch.src.mp4
 .claude/worktrees/
 .env.*
 **/.env
+.vibecode-backup*/
