@@ -105,8 +105,13 @@
     framer:      'site settings → custom code → head',
     wix:         'settings → custom code → add to the &lt;head&gt;',
     squarespace: 'settings → advanced → code injection → header',
+    nextjs:      'app/layout.tsx (App Router) or pages/_document.tsx, inside &lt;head&gt;',
+    custom:      'paste it just before the closing &lt;/head&gt; tag',
     unknown:     'paste it just before the closing &lt;/head&gt; tag',
   };
+
+  const PLATFORM_LABEL = { nextjs: 'next.js', custom: 'custom / other' };
+  const PLATFORM_CHIPS = ['webflow', 'shopify', 'wordpress', 'wix', 'squarespace', 'framer', 'nextjs', 'custom'];
 
   // ── Real Beam API wiring ─────────────────────────────────────────────
   const BEAM_API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
@@ -223,12 +228,30 @@
         if (det && det.platform && det.platform !== 'unknown') ob.state.platform = det.platform;
         else ob.state.platform = ob.state.platform || '';
       } catch (e) { /* keep whatever we have */ }
-      const plat = ob.state.platform || 'webflow';
+      const plat = ob.state.platform;
+      const showPlatformChips = () => {
+        const cc = ob.controls(`<div class="ob-chips">${PLATFORM_CHIPS.map(o => `<button class="ob-chip" data-p="${o}">${PLATFORM_LABEL[o] || o}</button>`).join('')}</div>`);
+        cc.querySelectorAll('[data-p]').forEach(b => b.addEventListener('click', () => {
+          ob.state.platform = b.dataset.p; ob.answer(PLATFORM_LABEL[b.dataset.p] || b.dataset.p, 'install');
+        }));
+      };
+      if (!plat) {
+        // Detection came back empty — be honest and ask instead of guessing.
+        await ob.bot(`found you — your site is up:`, { cls: 'rich', delay: 400 });
+        await ob.bot(`
+          <div class="ob-rows">
+            <div class="ob-row"><span class="k">site</span><span class="v">${hostName}</span></div>
+            <div class="ob-row"><span class="k">status</span><span class="v"><span class="ob-pill green"><span class="pdot"></span> reachable</span></span></div>
+          </div>`, { cls: 'rich card', typing: false });
+        await ob.bot(`i couldn't auto-detect what it's built on. pick your platform and i'll give you the right install steps:`);
+        showPlatformChips();
+        return;
+      }
       await ob.bot(`found you, and i can tell what you're built on:`, { cls: 'rich', delay: 400 });
       await ob.bot(`
         <div class="ob-rows">
           <div class="ob-row"><span class="k">site</span><span class="v">${hostName}</span></div>
-          <div class="ob-row"><span class="k">platform</span><span class="v"><span class="ob-pill"><span class="pdot"></span> ${plat}</span></span></div>
+          <div class="ob-row"><span class="k">platform</span><span class="v"><span class="ob-pill"><span class="pdot"></span> ${PLATFORM_LABEL[plat] || plat}</span></span></div>
           <div class="ob-row"><span class="k">status</span><span class="v"><span class="ob-pill green"><span class="pdot"></span> reachable</span></span></div>
         </div>`, { cls: 'rich card', typing: false });
       await ob.bot(`ready for your snippet?`);
@@ -238,11 +261,7 @@
       c.querySelector('[data-go]').addEventListener('click', () => ob.answer('yes, show me', 'install'));
       c.querySelector('[data-wrong]').addEventListener('click', () => {
         ob.clearControls(); ob.user('actually, wrong platform');
-        const opts = ['webflow', 'shopify', 'wordpress', 'wix', 'squarespace', 'framer'];
-        const cc = ob.controls(`<div class="ob-chips">${opts.map(o => `<button class="ob-chip" data-p="${o}">${o}</button>`).join('')}</div>`);
-        cc.querySelectorAll('[data-p]').forEach(b => b.addEventListener('click', () => {
-          ob.state.platform = b.dataset.p; ob.answer(b.dataset.p, 'install');
-        }));
+        showPlatformChips();
       });
     },
 
@@ -250,7 +269,7 @@
     async install(ob) {
       const plat = ob.state.platform || 'unknown';
       const instr = PLATFORM_INSTALL[plat] || PLATFORM_INSTALL.unknown;
-      const platLabel = plat === 'unknown' ? 'your site' : plat;
+      const platLabel = (plat === 'unknown' || plat === 'custom') ? 'your site' : (PLATFORM_LABEL[plat] || plat);
       await ob.bot(`copy this and paste it into your site's &lt;head&gt;. for <b>${platLabel}</b>: ${instr}.`);
       await ob.bot(`
         <div class="ob-code">
@@ -394,7 +413,7 @@
         await ob.bot(`drop your work email and i'll pull your full profile — name, company, and socials.`);
       } else {
         await ob.bot(`couldn't identify you this time — and here's the honest reason worth knowing: beam resolves <b>US visitors</b> today. if you're browsing from outside the US (a lot of early traffic is), that's expected, not a miss.`, { delay: 300 });
-        await ob.bot(`on US company traffic, our 7-layer waterfall catches ~60-80%. drop a work email and i'll pull a real profile.`);
+        await ob.bot(`on US company traffic, our 7-layer waterfall catches ~40-70%. drop a work email and i'll pull a real profile.`);
       }
 
       if (!id || !id.matched || id.level === 'device') {
@@ -527,7 +546,7 @@
       }
 
       const beats = [
-        { say: `every US visitor that lands, i identify. 7 layers. 60-80% match rate.`, card: '' },
+        { say: `every US visitor that lands, i identify. 7 layers. 40-70% match rate.`, card: '' },
         { say: `your number depends on how much of your traffic is US — once you connect your site, beam shows your <b>traffic-fit</b> up front, so you know it on day one.`, card: '' },
         { say: `then i find their socials.`, card: socialCard },
         { say: `then i draft a reply. personalized. in your voice.`, card: '' },
