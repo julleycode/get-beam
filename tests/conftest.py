@@ -26,6 +26,10 @@ from cryptography.fernet import Fernet as _Fernet  # noqa: E402
 
 os.environ.setdefault("ENCRYPTION_KEY", _Fernet.generate_key().decode())
 os.environ.setdefault("TOKEN_ENCRYPTION_KEY", _Fernet.generate_key().decode())
+# Never let a real Gemini key (e.g. from ../../.env) leak into tests — the
+# agentic /ai/ask path would silently hit the live API before its fallback.
+# Env vars beat dotenv in pydantic-settings, so an empty value forces mocks.
+os.environ.setdefault("GEMINI_API_KEY", "")
 
 
 @pytest_asyncio.fixture

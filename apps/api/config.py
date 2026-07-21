@@ -80,6 +80,17 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""  # legacy — replaced by Gemini (see gemini_api_key)
     gemini_api_key: str = ""  # Google Gemini — deep research (Google Search grounding) + segmentation/campaigns
     gemini_model: str = "gemini-2.5-flash"  # free tier + grounding; 3.x needs billing
+
+    # ─── Gemini JSON self-correction + tool loop (see services/gemini_client.py) ───
+    # Retry-with-feedback when a JSON response fails to parse/validate
+    # (segmentation, campaign planning). 2 repairs = max 3 model calls.
+    gemini_json_repair_attempts: int = 2
+    gemini_tool_loop_max_iterations: int = 5      # hard cap on model calls per loop
+    gemini_tool_loop_token_budget: int = 60000    # cumulative totalTokenCount across loop calls
+    gemini_tool_loop_timeout_s: float = 60.0      # wall clock; past this the next call is forced final
+    gemini_tool_output_max_chars: int = 8000      # per-tool-result serialization cap
+    ai_ask_tools_enabled: bool = True             # /ai/ask agentic path (falls back to single-shot on error/off)
+    campaign_planner_tools_enabled: bool = False  # planner fetches recent_content/accounts via tools (opt-in)
     openrouter_api_key: str = ""  # OpenRouter.ai — single key for 100+ models
     default_ai_model: str = "deepseek/deepseek-v4-flash"  # PAID (~$0.00008/reply) — uses OpenRouter credit, avoids free-tier 429. Falls back to :free chain then Gemini.
     resend_api_key: str = ""  # deprecated — use SendGrid
@@ -115,6 +126,15 @@ class Settings(BaseSettings):
     # provider (Azure/AWS/GCP/DO/OVH/…) — server/bot traffic, never real eyeballs.
     # Cached + fail-open: an IPinfo error never blocks a real visitor's events.
     block_datacenter_traffic: bool = True
+
+    # When true, also drop ingest events whose client IP is flagged by IPinfo's
+    # Privacy Detection as proxy / VPN / Tor / hosting — the "no-PTR proxy" traffic
+    # (Sprious-style scrapers, commercial proxies, VPN egress) that hides behind a
+    # real-looking UA and a datacenter ASN the org-token net misses. `relay` is
+    # deliberately NOT a drop signal (Apple Private Relay / Cloudflare WARP front
+    # real humans). Needs ipinfo_token; cached 7d + fail-open, so a lookup error
+    # never blocks a real visitor.
+    block_proxy_vpn_traffic: bool = True
 
     # MaxMind GeoLite2-ASN: a FREE, unlimited, offline IP→ASN database. When
     # maxmind_asn_db_path points at a GeoLite2-ASN.mmdb, datacenter detection uses
