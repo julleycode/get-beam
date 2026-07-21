@@ -5,9 +5,9 @@ import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
-from apps.api.agents.prompt_safety import extract_json, sanitize_profiles, wrap_untrusted
+from apps.api.agents.prompt_safety import sanitize_profiles, wrap_untrusted
 from apps.api.services.content_reader import build_recent_content
-from apps.api.services.gemini_client import gemini_generate
+from apps.api.services.gemini_client import gemini_generate_json
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.segment import Segment, SegmentMember
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
@@ -121,6 +121,16 @@ async def build_visitor_profiles(
     return profiles
 
 
+def _validate_segmentation(parsed: dict) -> str | None:
+    """Shape check driving the JSON repair retry (None = usable)."""
+    segments = parsed.get("segments")
+    if not isinstance(segments, list):
+        return 'top-level "segments" must be a JSON array'
+    if any(not isinstance(s, dict) for s in segments):
+        return 'every entry in "segments" must be a JSON object'
+    return None
+
+
 async def run_segmentation(
     db: AsyncSession,
     site_id: str,
@@ -148,8 +158,9 @@ async def run_segmentation(
             "GEMINI_API_KEY is not configured — cannot run segmentation"
         )
 
-    text = await gemini_generate(prompt, max_output_tokens=4096)
-    result = extract_json(text)
+    result = await gemini_generate_json(
+        prompt, max_output_tokens=4096, validate=_validate_segmentation
+    )
 
     # Only visitor ids from the input batch may become members — the model
     # can hallucinate ids (segment_members has no FK), and a poisoned profile
