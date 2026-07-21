@@ -30,7 +30,7 @@ BROWSER_HEADERS = {
 
 
 class PlatformResult(TypedDict):
-    platform: str  # shopify | wordpress | wix | squarespace | webflow | unknown
+    platform: str  # shopify | wordpress | wix | squarespace | webflow | nextjs | framer | unknown
     confidence: float  # 0.0 - 1.0
     has_gtm: bool
     gtm_id: str | None
@@ -99,6 +99,30 @@ def _detect_webflow(html: str, headers: dict[str, str]) -> float:
     if "assets.website-files.com" in html or "assets-global.website-files.com" in html:
         score += 0.2
     if "webflow" in headers.get("server", "").lower():
+        score += 0.2
+    return min(score, 1.0)
+
+
+def _detect_nextjs(html: str, headers: dict[str, str]) -> float:
+    score = 0.0
+    if "__NEXT_DATA__" in html:
+        score += 0.5
+    if "/_next/static" in html:
+        score += 0.4
+    if 'id="__next"' in html:
+        score += 0.2
+    if headers.get("x-powered-by", "").lower().startswith("next.js"):
+        score += 0.3
+    return min(score, 1.0)
+
+
+def _detect_framer(html: str, headers: dict[str, str]) -> float:
+    score = 0.0
+    if re.search(r'<meta\s+name="generator"\s+content="Framer', html, re.IGNORECASE):
+        score += 0.5
+    if "framerusercontent.com" in html:
+        score += 0.4
+    if "events.framer.com" in html:
         score += 0.2
     return min(score, 1.0)
 
@@ -182,6 +206,8 @@ async def detect_platform(url: str) -> PlatformResult:
         "wix": _detect_wix(html, headers),
         "squarespace": _detect_squarespace(html, headers),
         "webflow": _detect_webflow(html, headers),
+        "nextjs": _detect_nextjs(html, headers),
+        "framer": _detect_framer(html, headers),
     }
 
     # Pick highest score

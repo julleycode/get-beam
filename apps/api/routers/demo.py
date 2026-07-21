@@ -64,7 +64,7 @@ async def demo_detect_platform(request: Request, body: DetectBody) -> dict:
     try:
         r = await detect_platform(body.url)
         return {
-            "platform": r["platform"],        # shopify|wordpress|wix|squarespace|webflow|unknown
+            "platform": r["platform"],        # shopify|wordpress|wix|squarespace|webflow|nextjs|framer|unknown
             "confidence": r["confidence"],
             "has_gtm": r["has_gtm"],
             "gtm_id": r["gtm_id"],
