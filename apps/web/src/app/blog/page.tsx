@@ -6,7 +6,10 @@ import { PostList } from "@/components/blog/post-list";
 export const dynamic = "force-dynamic";
 
 export default async function BlogIndexPage() {
-  const posts = await fetchPublishedPosts();
+  // Fetch up to the API max (100) so every published post is linked from the
+  // index. The default 50 left later posts orphaned from the index HTML, which
+  // leaves Google with "Discovered - currently not indexed".
+  const posts = await fetchPublishedPosts(100);
 
   return (
     <div>

@@ -89,6 +89,20 @@ export default async function BlogPostPage({ params }: Params) {
   const post = await fetchPublishedPost(params.slug);
   if (!post) notFound();
 
+  // Internal links out to sibling posts. Without a post→post link each post is
+  // orphaned ("Referring page: None detected"), so Google leaves it
+  // "Discovered - currently not indexed". Prefer same-tag siblings, backfill
+  // with recent, dedupe and drop self.
+  const primaryTag = post.tags?.[0];
+  const [byTag, recent] = await Promise.all([
+    primaryTag ? fetchPublishedPosts(8, primaryTag) : Promise.resolve([]),
+    fetchPublishedPosts(8),
+  ]);
+  const related = [...byTag, ...recent]
+    .filter((p) => p.slug !== post.slug)
+    .filter((p, i, arr) => arr.findIndex((x) => x.slug === p.slug) === i)
+    .slice(0, 4);
+
   const canonical = post.canonical_url || `${SITE_URL}/blog/${post.slug}`;
   const jsonLd = {
     "@context": "https://schema.org",
@@ -182,6 +196,31 @@ export default async function BlogPostPage({ params }: Params) {
       <div className="mt-8">
         <Markdown>{post.body_markdown}</Markdown>
       </div>
+
+      {related.length > 0 && (
+        <aside className="mt-12 border-t border-[rgba(43,37,48,0.08)] pt-8">
+          <h2 className="font-serif text-2xl font-semibold tracking-tight">
+            Related posts
+          </h2>
+          <ul className="mt-4 grid gap-3 sm:grid-cols-2">
+            {related.map((p) => (
+              <li key={p.slug}>
+                <a
+                  href={`/blog/${p.slug}`}
+                  className="block h-full rounded-xl border border-[rgba(43,37,48,0.08)] p-4 transition-colors hover:border-[rgba(43,37,48,0.2)]"
+                >
+                  <span className="block font-medium leading-snug">{p.title}</span>
+                  {p.excerpt && (
+                    <span className="mt-1 block text-sm text-muted-foreground">
+                      {p.excerpt}
+                    </span>
+                  )}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </aside>
+      )}
     </article>
   );
 }
