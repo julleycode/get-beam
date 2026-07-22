@@ -333,7 +333,7 @@ phase-plan-writing agent): `process/features/evallayer/active/evallayer_22-07-26
 | 1 — Data model + classifier | 🔨 CODE DONE (EXECUTE + EVL complete; 3/4 gates GREEN; live-DB migration up/down/up = KNOWN-GAP, Docker unavailable — not ✅ VERIFIED until that gate is closed, see phase report) |
 | 2 — Ingest wiring | 🔨 CODE DONE (EXECUTE + EVL complete; Gate: CONDITIONAL accepted; full unit baseline GREEN 725/2-skipped, +9, 0 regressions; classifier 24/24; static safety review confirmed all 3 declared safety properties. 2 KNOWN-GAPS open — Docker integration tests (5 cases, collect-clean, unrun) + AC5 latency benchmark (no harness, backlog stub written) — not ✅ VERIFIED until both close, see phase report) |
 | 3 — Read API + dashboard tab | 🔨 CODE DONE (EXECUTE + independent EVL complete; FE compile + unit-regression + static-safety-review all GREEN; Docker integration (10 cases) + Playwright e2e = KNOWN-GAPS, env-gated — not ✅ VERIFIED until both close, see phase report) |
-| 4 — IP/rDNS verification | ⏳ PLANNED (stub only) |
+| 4 — IP/rDNS verification | 🔨 CODE DONE (EXECUTE + independent EVL complete; unit 10/10, hot-path grep=0, Anthropic structural ceiling confirmed, full regression 735/2 no drop — 1 Docker-gated integration Known-Gap open, not ✅ VERIFIED until closed, see phase report) |
 | 5 — Company resolution → outreach feed | ⏳ PLANNED (stub only — RE-RESEARCH REQUIRED before PLAN) |
 | 6 — Aggregation + GEO/AEO analytics | ⏳ PLANNED (stub only) |
 | 7 — Outreach-exclusion guardrail | ⏳ PLANNED (stub only — elevated priority, release gate for Phase 5) |
@@ -467,22 +467,32 @@ the program.
 - Supporting context files loaded this session: `evallayer_SPEC_22-07-26.md` (full), RESEARCH
   synthesis brief (7-agent fan-out output), `process/context/all-context.md`,
   `process/development-protocols/phase-programs.md`, `process/development-protocols/plan-lifecycle.md`
-- Next step for a fresh agent: read this umbrella plan in full. Phase 0 is shipped, Phases 1-3 are
-  all 🔨 CODE DONE (see each phase's report for its open Known-Gaps). Start fresh work at Phase 4
-  (IP/rDNS verification) — its entry gate (Phase 2 exit: agent visits persisted) is satisfied; Phase
-  4 is parallel-safe with Phase 3 (disjoint blast radius), and Phase 3 is now done anyway.
-- Current phase: Phase 4 (IP/rDNS verification).
-- Next action: invoke `vc-agent-strategy-compare` for Phase 4 RESEARCH kickoff, then spawn
-  vc-research-agent for Phase 4.
-- Execute-agent start instruction: NOT YET ELIGIBLE for Phase 4 — no validate-contract written yet
-  for Phase 4. Phases 1-3 EXECUTE are all complete; do not re-spawn execute-agent for any of them
-  (their Known-Gaps are backlog/EVL-confirmed residuals, not open EXECUTE tasks).
+- Next step for a fresh agent: read this umbrella plan in full. Phase 0 is shipped, Phases 1-4 are
+  all 🔨 CODE DONE (see each phase's report for its open Known-Gaps). Start fresh work at Phase 5
+  (Company resolution → outreach feed) — its entry gate requires BOTH Phase 3 AND Phase 4 exits
+  (both are code-done) AND Phase 7's guardrail test existing/passing (Phase 7 has not started —
+  Phase 5 is NOT yet eligible to reach VERIFIED even once its own code is done, per Join Conditions
+  and Resolved Open Question 10).
+- Current phase: Phase 5 (Company resolution → outreach feed). **MANDATORY-FRESH RESEARCH
+  required** — the original program-kickoff RESEARCH fan-out's `read:identity` sub-agent returned
+  placeholder/test output, so agent→company enrichment-waterfall mechanics are under-researched
+  and NOT resumable from existing findings. Do not skip or abbreviate RESEARCH for this phase.
+  Phase 5 also structurally depends on Phase 7's outreach-exclusion guardrail (SPEC Resolved Open
+  Question 10) — Phase 7 is a release-gate for Phase 5, not merely a parallel track; recommend
+  starting Phase 7's RESEARCH alongside or ahead of Phase 5's.
+- Next action: invoke `vc-agent-strategy-compare` for Phase 5 RESEARCH kickoff, then spawn
+  vc-research-agent for Phase 5 with an explicit instruction to do a full fresh pass on the
+  enrichment-waterfall / company-resolution mechanics (do not reuse the placeholder findings).
+- Execute-agent start instruction: NOT YET ELIGIBLE for Phase 5 — no RESEARCH/INNOVATE/PLAN/PVL
+  done yet for Phase 5 (stub-only). Phases 1-4 EXECUTE are all complete; do not re-spawn
+  execute-agent for any of them (their Known-Gaps are backlog/EVL-confirmed residuals, not open
+  EXECUTE tasks).
 
 ---
 
 ## Current Execution State
 
-Last updated: 22-07-26 (UPDATE PROCESS closeout of Phase 3)
+Last updated: 22-07-26 (UPDATE PROCESS closeout of Phase 4)
 Completed phases:
 - Phase 0 (Discoverability) — ✅ COMPLETE, shipped pre-program (`5ae5bd7`, archived `7e0d625`),
   folded into this program as a satisfied foundation deliverable
@@ -526,23 +536,47 @@ Completed phases:
   (AC7) is a backlog test-building stub, not a blocker. Not classified ✅ VERIFIED until both Docker
   gaps close; same environment-gap pattern as Phase 1/Phase 2. Report:
   `phase-03-read-api-dashboard_REPORT_22-07-26.md`.
-Current phase: Phase 4 (IP/rDNS verification) — Phase 2's exit gate (agent visits persisted;
-AC1-AC5 designed and unit-proven) is satisfied; Phase 4 is parallel-safe with Phase 3 (disjoint
-blast radius: verification service vs API/dashboard read surface) and Phase 3 is now code-done
-anyway
+- Phase 4 (IP/rDNS verification) — 🔨 CODE DONE (all 7 inner-loop steps run; EXECUTE + independent
+  EVL both complete). Gate: PASS at PVL (2 mechanical/test-coverage gaps found and fixed in-plan:
+  added a Fully-Automated mocked-`AsyncSession` unit test for the sweep's fail-open isolation
+  property, closing a Docker-only vacuous-green risk; removed `load_ip_ranges()`'s module-level
+  cache to eliminate a cross-test-isolation bug). EVL confirmation run (independent re-run, not
+  relying on execute-agent's internal claim) GREEN on all runnable gates: unit `test_agent_verification.py`
+  10/10 pass; hot-path import check `grep -c agent_verification apps/api/routers/events.py` = 0
+  (AC5/OQ2 — verification never reachable from the ingest hot path); Anthropic structural ceiling
+  confirmed (`find apps/api/data -iname "*anthropic*"` → no results — no dataset entry exists, not
+  an incidental omission); full unit regression 735 passed/2 skipped (Phase 3 baseline 725/2, +10,
+  0 regressions); both backlog notes confirmed present on disk. 1 gate KNOWN-GAP: Docker-gated
+  `test_agent_verification_sweep.py` integration test is collect-clean but unrun (no responsive
+  Docker in this sandbox at either EXECUTE or EVL time) — does not block VERIFIED per SPEC AC8
+  note; close command: `docker compose -f infra/docker-compose.yml up -d postgres redis &&
+  .venv/bin/python -m pytest tests/integration/test_agent_verification_sweep.py -m integration -q`.
+  Not classified ✅ VERIFIED until that gap closes; same environment-gap pattern as Phase 1/2/3.
+  Report: `phase-04-ip-verification_REPORT_22-07-26.md`.
+Current phase: Phase 5 (Company resolution → outreach feed) — Phase 3 AND Phase 4 exit gates are
+both satisfied (code-done), BUT Phase 5's own exit gate additionally requires Phase 7's guardrail
+test to exist/pass (SPEC Resolved Open Question 10 — Phase 7 is a release-gate for Phase 5, not a
+mere parallel track). **MANDATORY-FRESH RESEARCH required for Phase 5**: the original
+program-kickoff RESEARCH fan-out's `read:identity` sub-agent returned placeholder/test output, so
+agent→company enrichment-waterfall mechanics are under-researched and NOT resumable from existing
+findings — do not skip or abbreviate RESEARCH for this phase. Recommend starting Phase 7's
+RESEARCH alongside or ahead of Phase 5's, since Phase 5 cannot reach VERIFIED without it.
 Current phase status: not started
 Current phase EVL: n/a (not yet reached)
 Current phase report: n/a (not yet written)
-Next phase: Phase 4 (IP/rDNS verification), loop step RESEARCH (pending) — spawn vc-research-agent
-Current loop step: RESEARCH (pending for Phase 4)
+Next phase: Phase 5 (Company resolution → outreach feed), loop step RESEARCH (pending, MANDATORY
+FRESH pass) — spawn vc-research-agent. Recommend also kicking off Phase 7 RESEARCH in parallel
+(disjoint blast radius: company-resolution/enrichment vs. campaign/segment targeting guardrail).
+Current loop step: RESEARCH (pending for Phase 5)
 Validate-contract status: Phase 1 — written 22-07-26, Gate: PASS (`generated-by: inner-pvl:
 phase-1`). Phase 2 — written 22-07-26, Gate: CONDITIONAL, accepted (`generated-by: inner-pvl:
-phase-2`). Phase 3 — written 22-07-26, Gate: PASS (`generated-by: inner-pvl: phase-3`). Phases 4-7
-have no validate-contract yet — stub-only. Phase 0 was shipped with VALIDATE explicitly skipped,
-per its archived plan.
-Program Net Gate: PENDING (3 of 8 phases code-done — 1 open Known-Gap on Phase 1, 2 open Known-Gaps
-on Phase 2, 2 open Known-Gaps on Phase 3; 5 phases not yet started)
-Accumulated Known-Gaps carried forward (none block progression to Phase 4 — all are
+phase-2`). Phase 3 — written 22-07-26, Gate: PASS (`generated-by: inner-pvl: phase-3`). Phase 4 —
+written 22-07-26, Gate: PASS (`generated-by: inner-pvl: phase-4`). Phases 5-7 have no
+validate-contract yet — stub-only. Phase 0 was shipped with VALIDATE explicitly skipped, per its
+archived plan.
+Program Net Gate: PENDING (4 of 8 phases code-done — 1 open Known-Gap on Phase 1, 2 open Known-Gaps
+on Phase 2, 2 open Known-Gaps on Phase 3, 1 open Known-Gap on Phase 4; 4 phases not yet started)
+Accumulated Known-Gaps carried forward (none block progression to Phase 5 — all are
 environment/tooling gaps, not design defects):
 - Phase 1: `agent_visits` migration never applied to a real Postgres instance (Docker-gated)
 - Phase 2: 5 `TestAgentDetection` integration cases unrun (Docker-gated); AC5 ingest-latency
@@ -550,9 +584,11 @@ environment/tooling gaps, not design defects):
 - Phase 3: 10 `test_agents_api.py` integration cases unrun (Docker-gated); Playwright e2e
   (`apps/web/e2e/agents.spec.ts`) unrun (needs dev server); badge Agent-Probe judgment deferred
   (backlog test-building stub, not scriptable)
+- Phase 4: `test_agent_verification_sweep.py` integration test unrun (Docker-gated); live vendor
+  range refresh + rDNS tier remain out of scope (2 backlog notes already written)
 Latest validator run: this UPDATE PROCESS session — see Verification Evidence run below for exit
 codes (validate-agent-parity, validate-context-discovery, validate-plan-inventory, validate-phase-
-stub for phase-03, validate-umbrella-artifact for this file)
+stub for phase-04, validate-umbrella-artifact for this file)
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any

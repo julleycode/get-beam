@@ -125,3 +125,58 @@ VALIDATE) — same environment condition already logged for Phase 1/Phase 2, not
 checklist step (Step D added with exact test-function names), (2) `AgentVisit` has no
 `agent_visit_id` column — detail route must query by the inherited `id` PK with UUID
 parse-then-404, not a nonexistent business-id field (A2 amended).
+
+---
+
+## Phase 4
+
+Plan: `process/features/evallayer/active/evallayer_22-07-26/phase-04-ip-verification_PLAN_22-07-26.md`
+
+Blast radius (confirmed real at PVL 2026-07-22, no collisions with Phase 1, Phase 2, or Phase 3's
+entries above — Phase 4 EXTENDS two Phase-2-owned files, which is expected: Phase 4 depends on
+Phase 2's output and no file is claimed "new/owned" by two phases):
+
+- `apps/api/services/agent_verification.py` (new)
+- `apps/api/services/agent_visit_persistence.py` (extend — Phase 2 owns creation, Phase 4 adds
+  `upgrade_verification_method`)
+- `apps/api/jobs/scheduler.py` (extend — new `_agent_verification_sweep_job`, job id
+  `agent_verification_sweep`, confirmed non-colliding with 8 existing job ids)
+- `apps/api/config.py` (extend — Phase 2 owns creation of `agent_detection_enabled`, Phase 4 adds
+  `agent_verification_sweep_interval_minutes`)
+- `apps/api/data/agent_ip_ranges/openai.json`, `perplexity.json` (new; no `anthropic.json` —
+  structural ceiling)
+- `apps/api/data/agent_ip_ranges/mock/openai.json`, `mock/perplexity.json` (new)
+- `tests/unit/test_agent_verification.py` (new, 7 scenarios)
+- `tests/integration/test_agent_verification_sweep.py` (new, Docker known-gap)
+
+No overlap with Phase 1 (`agent_visit.py`, migration, `agent_classifier.py`, `main.py`,
+`test_agent_classifier.py`) or Phase 3 (`agents.py`, `schemas/agents.py`, `dashboard/agents/*`,
+`layout.tsx`, `api.ts`/`api-types.ts`, `status-badge.tsx`) — none touched this phase.
+
+status: PVL PASS (2026-07-22) — validate-contract written, `generated-by: inner-pvl: phase-4`.
+Gate: PASS. 2 mechanical/test-coverage gaps found and fixed in-plan during VALIDATE (not deferred,
+not accepted-as-CONCERN): (1) `run_verification_sweep`'s per-row fail-open isolation was proven
+ONLY by the Docker-gated Hybrid integration test — a vacuous-green risk; added a Fully-Automated
+unit test using a mocked `AsyncSession` (no Docker needed) so this property now has real automated
+coverage; (2) `load_ip_ranges()`'s "module-level in-process cache is acceptable" language risked
+test-isolation bugs (a cached result from one unit test's `mock_external_apis` value leaking into
+another) — resolved by removing caching entirely (Resolved Design Decision 11: read fresh every
+call; files are tiny, sweep runs at most every 15 min). One environment Known-Gap remains, same
+pattern as Phase 1/2/3: the Docker-gated sweep-vs-real-DB integration test is collect-clean but
+unrun in this sandbox (no Docker) — does not block VERIFIED per SPEC AC8 note. Phase classified
+ready for EXECUTE; not yet CODE DONE or VERIFIED (no code written yet — PVL only).
+
+status: DONE — EXECUTE + independent EVL both complete 2026-07-22. All checklist Steps A–F
+implemented as specified, no deviation. EVL confirmation run (independent of execute-agent's
+internal claim) re-verified: unit 10/10 pass; hot-path import check `events.py`=0 (AC5/OQ2 hot
+path untouched); Anthropic structural ceiling confirmed (no `anthropic.json` on disk anywhere
+under `apps/api/data`); full unit regression 735 passed / 2 skipped (baseline 725/2 → +10, no
+drop); both backlog notes confirmed present on disk. 1 Known-Gap remains open (environment/tooling,
+not a design defect, same pattern as Phase 1/2/3): Docker-gated `test_agent_verification_sweep.py`
+integration test is collect-clean but unrun (no Docker in this sandbox) — does not block VERIFIED
+per SPEC AC8 note; close command: `docker compose -f infra/docker-compose.yml up -d postgres redis
+&& .venv/bin/python -m pytest tests/integration/test_agent_verification_sweep.py -m integration -q`.
+Files created: `agent_verification.py`, 4 data JSONs, `test_agent_verification.py`,
+`test_agent_verification_sweep.py`; edited: `agent_visit_persistence.py`, `scheduler.py`,
+`config.py`. Phase classified 🔨 CODE DONE (not ✅ VERIFIED) pending closure of the one Docker gap.
+Not committed this session (vc-git-manager next).
