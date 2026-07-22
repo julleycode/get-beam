@@ -32,6 +32,7 @@ from apps.api.schemas.visitors import (
     VisitorOut,
     VisitorStatsResponse,
 )
+from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 from apps.api.services.billing import check_usage_allowed, increment_usage
 from apps.api.services.conviction import build_conviction
 from apps.api.services.enricher import Enricher
@@ -491,7 +492,13 @@ async def get_visitor_detail(
     site = await _verify_site_access(db, site_id, user)
 
     result = await db.execute(
-        select(Visitor).where(Visitor.site_id == site_id, Visitor.visitor_id == visitor_id)
+        select(Visitor).where(
+            Visitor.site_id == site_id,
+            Visitor.visitor_id == visitor_id,
+            # AC2 (GUARD #2): a synthetic agent-derived row must never render in
+            # the human visitor UI even if its id were somehow guessed/enumerated.
+            human_only_visitor_filter(),
+        )
     )
     visitor = result.scalar_one_or_none()
     if not visitor:

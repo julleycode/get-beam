@@ -324,6 +324,7 @@ async def _resolve_companies(db: AsyncSession, site_id: str) -> None:
     """Resolve company domains from IP for visitors missing company_domain."""
     try:
         from apps.api.services.company_resolver import resolve_company_cached
+        from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 
         # Get visitors with IP but no company_domain (limit 20 per run to avoid slowdowns)
         result = await db.execute(
@@ -332,6 +333,10 @@ async def _resolve_companies(db: AsyncSession, site_id: str) -> None:
                 Visitor.ip_address.isnot(None),
                 Visitor.ip_address != "",
                 (Visitor.company_domain.is_(None)) | (Visitor.company_domain == ""),
+                # AC2 (GUARD #2): the synthetic agent-derived rows are resolved
+                # only by the company-resolution sweep — never by this
+                # uncoordinated 2nd aggregator pass.
+                human_only_visitor_filter(),
             ).limit(20)
         )
         visitors = result.scalars().all()

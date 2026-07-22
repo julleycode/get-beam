@@ -8,6 +8,7 @@ from apps.api.agents.segmenter import build_visitor_profiles, run_segmentation
 from apps.api.models.database import async_session
 from apps.api.models.site import Site
 from apps.api.models.visitor import Visitor
+from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 from apps.api.services.celery_app import celery_app
 
 logger = structlog.get_logger()
@@ -40,6 +41,9 @@ async def _check_triggers() -> dict:
                     Visitor.site_id == site.site_id,
                     Visitor.enrichment_status == "enriched",
                     Visitor.segmented == False,  # noqa: E712
+                    # AC2 (GUARD #2): agent-origin rows never enter a
+                    # segment → campaign.
+                    human_only_visitor_filter(),
                 )
             )
             new_enriched_count = count_result.scalar() or 0
@@ -60,6 +64,8 @@ async def _run_segmentation_for_site(db, site: Site) -> None:
             # next hourly tick doesn't re-pull the same top-50 and re-bill Gemini,
             # and genuinely-new lower-intent visitors past row 50 aren't starved.
             Visitor.segmented == False,  # noqa: E712 — SQLAlchemy needs ==
+            # AC2 (GUARD #2): agent-origin rows never enter a segment → campaign.
+            human_only_visitor_filter(),
         ).order_by(Visitor.intent_score.desc()).limit(50)
     )
     visitors = list(result.scalars().all())

@@ -17,6 +17,7 @@ from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.known_contact import KnownContact
 from apps.api.models.site import Site
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
+from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 from apps.api.services.billing import check_usage_allowed
 from apps.api.services.known_hash import email_hash
 from apps.api.services.osint_scanner import run_osint_scan
@@ -90,7 +91,11 @@ async def _build_visitor_filters(
     country). Date bounds: *_to is EXCLUSIVE — the frontend sends the start of
     the day AFTER the chosen end date so the whole end day is included.
     """
-    filters: list = []
+    # AC2 (GUARD #2): every human-facing visitor query excludes synthetic
+    # agent-derived rows. Applied here at the shared choke point so BOTH the list
+    # endpoint and the country-facet endpoint inherit it (they both call this
+    # helper), covering plan sites D1 and D6.
+    filters: list = [human_only_visitor_filter()]
     if identity_status:
         filters.append(Visitor.identity_status == identity_status)
     if enrichment_status:
@@ -164,7 +169,9 @@ async def _compute_visitor_stat_counts(db: AsyncSession, site_id: str) -> dict[s
                 .label("eligible_for_resolution"),
             )
             .select_from(Visitor)
-            .where(Visitor.site_id == site_id)
+            # AC2 (GUARD #2): exclude synthetic agent-derived rows from every
+            # conditional-aggregate count (all 5 inherit this per-site WHERE).
+            .where(Visitor.site_id == site_id, human_only_visitor_filter())
         )
     ).one()
 

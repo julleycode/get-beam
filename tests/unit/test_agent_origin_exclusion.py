@@ -26,15 +26,21 @@ red for every person-level provider. Verified by reasoning + the PVL-confirmed
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import apps.api.main  # noqa: F401 — registers ALL ORM models so a REAL
+#                        IdentifiedVisitor can be constructed (mapper config needs
+#                        every related model, e.g. User→Draft, imported first).
+from apps.api.models.visitor import IdentifiedVisitor
 from apps.api.services.identity_classification import (
     COMPANY_LEVEL_PROVIDERS,
     PERSON_LEVEL_PROVIDERS,
     is_emailable_identity,
 )
+from apps.api.services.identity_resolver import IdentityResolver
 
 pytestmark = pytest.mark.unit
 
@@ -159,6 +165,43 @@ async def test_csv_exporter_excludes_agent_origin():
 
     # Excluded at the guard: the agent-origin record never reaches the export list.
     assert visitors == []
+
+
+# ---------------------------------------------------------------------------
+# Phase 05 D5/D6 (BINDING) — AC10 override holds against a REAL row created by
+# the actual company-resolution INSERT path (not a hand-built mock). This drives
+# the real IdentityResolver._save_identified with the agent-origin marker set —
+# the same code the Phase 05 sweep uses — and proves the persisted row it builds
+# is non-emailable even for a PERSON_LEVEL provider.
+# ---------------------------------------------------------------------------
+
+
+async def test_ac10_real_sweep_created_row_is_non_emailable():
+    added: list = []
+
+    db = MagicMock()
+    db.add = lambda o: added.append(o)
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+    db.execute = AsyncMock(return_value=MagicMock())
+
+    resolver = IdentityResolver(db, redis_client=None)
+    # The sweep sets this before calling _save_identified (GUARD #1, atomic).
+    resolver._active_source_agent_visit_id = "real-agent-visit-id"
+
+    visitor = SimpleNamespace(
+        visitor_id="agent:real-agent-visit-id", site_id="site-1", fingerprint=None
+    )
+    # rb2b is PERSON_LEVEL — absent the marker this WOULD be emailable, so the
+    # exclusion proves the AC10 marker override, not the company-level filter.
+    row = await resolver._save_identified(visitor, {"full_name": "Jane"}, "rb2b")
+
+    assert isinstance(row, IdentifiedVisitor)
+    assert row is added[0]
+    # The REAL row carries the marker written at INSERT time …
+    assert row.source_agent_visit_id == "real-agent-visit-id"
+    # … and is therefore NEVER an outreach target (SPEC AC10 / Phase 7 guard).
+    assert is_emailable_identity(row.resolution_provider, row.source_agent_visit_id) is False
 
 
 # ---------------------------------------------------------------------------

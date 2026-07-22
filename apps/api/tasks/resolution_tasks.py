@@ -8,6 +8,7 @@ from sqlalchemy import select
 from apps.api.models.database import async_session
 from apps.api.models.site import Site
 from apps.api.models.visitor import Visitor
+from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 from apps.api.services.auto_drafter import AutoDrafter
 from apps.api.services.billing import check_usage_allowed, increment_usage
 from apps.api.services.celery_app import celery_app
@@ -58,6 +59,10 @@ async def _process_site(db, site_id: str) -> tuple[int, int]:
             Visitor.identity_status == "anonymous",
             Visitor.intent_score >= 40,
             Visitor.do_not_resolve.is_(False),
+            # AC2 (GUARD #2): this Celery-beat task also fires Enricher.enrich_tier1
+            # + AutoDrafter on resolved rows, so exclude synthetic agent-derived
+            # rows explicitly — incidental intent_score=0 protection is not enough.
+            human_only_visitor_filter(),
         ).order_by(Visitor.intent_score.desc()).limit(50)
     )
     visitors = list(result.scalars().all())

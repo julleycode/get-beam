@@ -141,9 +141,17 @@ async def _agent_verification_sweep_job() -> None:
     """
     try:
         from apps.api.services import agent_verification
+        from apps.api.services.agent_company_resolution import (
+            run_company_resolution_sweep,
+        )
 
         async with async_session() as db:
             await agent_verification.run_verification_sweep(db)
+            # EvalLayer Phase 05: 2nd step — resolve eligible agent visits into
+            # company/lead records via the existing waterfall (own fail-open
+            # per-row isolation). Runs after verification so newly ip-verified
+            # rows are eligible in the same sweep.
+            await run_company_resolution_sweep(db)
     except Exception:
         logger.exception("agent_verification_sweep_crashed")
 

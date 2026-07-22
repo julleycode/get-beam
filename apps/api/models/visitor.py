@@ -52,6 +52,14 @@ class Visitor(Base):
     do_not_resolve: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # EvalLayer Phase 05: True for a synthetic Visitor row created by the
+    # agent-company-resolution sweep (visitor_id = f"agent:{agent_visit.id}").
+    # Every human-facing query excludes these via human_only_visitor_filter()
+    # (SPEC AC2) so agent-derived rows never pollute human visitor data, stats,
+    # resolution eligibility, or segmentation.
+    is_agent_derived: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -76,6 +84,13 @@ class IdentifiedVisitor(Base):
     resolution_provider: Mapped[str | None] = mapped_column(String(50))
     confidence_score: Mapped[float | None] = mapped_column(Float)
     do_not_email: Mapped[bool] = mapped_column(default=False)
+    # EvalLayer Phase 05 / Phase 07 guard: the unforgeable agent-origin marker.
+    # Stored as the AgentVisit.id UUID *string* (matches the str | None signature
+    # Phase 7's is_emailable_identity getattr + the C5 tripwire assume). Set
+    # atomically at INSERT time by the agent-company-resolution sweep; NULL for
+    # every human-resolved row. Any row carrying this can NEVER be an outreach
+    # target (SPEC AC10).
+    source_agent_visit_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Phase 05 (encrypt PII at rest) — added nullable, not yet read/written.
     email_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     email_bidx: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)

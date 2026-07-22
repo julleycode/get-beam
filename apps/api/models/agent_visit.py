@@ -38,6 +38,10 @@ class AgentVisit(Base):
     # paths) when appending — no cap is enforced at the schema level here.
     page_paths: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     visit_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    # No FK constraint in Phase 1 (Phase 5 adds the FK once company-resolution
-    # exists) — nullable loose reference only.
+    # Loose nullable reference to companies.id. The FK constraint is enforced at
+    # the DB level (added by EvalLayer Phase 05 migration a1c7e4f92b83,
+    # ondelete='SET NULL'); the house convention keeps FKs at the DB layer rather
+    # than declaring ForeignKey() on the ORM column, so no ORM-level change is
+    # needed here. Set by the agent-company-resolution sweep once an agent visit's
+    # IP resolves to a real company.
     resolved_company_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)

@@ -79,6 +79,10 @@ class IdentityResolver(
             self.redis = redis_client
         # site_id -> bare hostname, for scoping provider queries to one site.
         self._site_domain_cache: dict[str, str | None] = {}
+        # EvalLayer Phase 05 (GUARD #1): agent-origin marker for the in-flight
+        # resolve() call. Set at the top of resolve(); read by _save_identified so
+        # the marker lands in the same INSERT as the IdentifiedVisitor row.
+        self._active_source_agent_visit_id: str | None = None
 
     async def _site_domain(self, site_id: str) -> str | None:
         """Bare hostname for a site's URL (e.g. 'grade.coach'), used to scope a
@@ -379,7 +383,9 @@ class IdentityResolver(
 
     # ──────────────────── Main Waterfall ────────────────────
 
-    async def resolve(self, visitor: Visitor) -> IdentifiedVisitor | None:
+    async def resolve(
+        self, visitor: Visitor, source_agent_visit_id: str | None = None
+    ) -> IdentifiedVisitor | None:
         """Identity resolution with parallel provider execution.
 
         Flow:
@@ -388,7 +394,26 @@ class IdentityResolver(
         1-2. IP→Company (parallel): PDL + IPinfo
         3.  Hunter (domain → employee emails)
         4.  Apollo (domain → contact)
+
+        ``source_agent_visit_id`` (EvalLayer Phase 05, GUARD #1): when the
+        agent-company-resolution sweep resolves a synthetic per-agent-visit
+        Visitor, it passes the originating AgentVisit.id string here. The value
+        is threaded — via ``self._active_source_agent_visit_id`` — to the single
+        ``IdentifiedVisitor(...)`` constructor in ``_save_identified`` so the
+        unforgeable agent-origin marker is written in the SAME INSERT+COMMIT that
+        creates the row (no deferred UPDATE, no window). Every existing (human)
+        caller omits it → ``None`` → byte-identical behavior. Using instance state
+        rather than threading the kwarg through every intermediate method keeps
+        the change contained to this file and, critically, also covers the
+        provider mixins (hunter/apollo/pdl) whose ``_save_identified`` calls would
+        otherwise need editing — closing the atomicity gap on EVERY resolution
+        path, not just the ones inside this module.
         """
+        # GUARD #1: set fresh at the top of every resolve() call. Sequential per
+        # row in the sweep; every human caller passes None and resets it here, so
+        # no value ever leaks between calls.
+        self._active_source_agent_visit_id = source_agent_visit_id
+
         # ── Privacy guard: visitor opted out (GPC/DNT or suppression) ──
         # A visitor who signaled Global Privacy Control / Do Not Track must NEVER
         # be resolved to a real identity, regardless of caller (sweep, manual
@@ -674,14 +699,32 @@ class IdentityResolver(
     # ──────────────────── Save + Log ────────────────────
 
     async def _save_identified(
-        self, visitor: Visitor, data: dict, provider: str
+        self,
+        visitor: Visitor,
+        data: dict,
+        provider: str,
+        source_agent_visit_id: str | None = None,
     ) -> IdentifiedVisitor | None:
         """Persist an IdentifiedVisitor row, handling concurrent-insert races.
 
         Validates email before saving. On UNIQUE constraint violation
         (same site_id + visitor_id already inserted by a concurrent request),
         roll back and return the pre-existing row.
+
+        ``source_agent_visit_id`` (EvalLayer Phase 05, GUARD #1): the agent-origin
+        marker. An explicit argument wins; otherwise it falls back to the value
+        stashed on the resolver by ``resolve()`` for the in-flight call. It is set
+        directly on the ``IdentifiedVisitor(...)`` constructor below so the marker
+        is part of the SAME INSERT+COMMIT that creates the row — there is no
+        window where an unmarked agent-derived row is durable. NULL for the human
+        path (no arg, no active marker).
         """
+        # Resolve the marker: explicit arg beats the in-flight resolve() state.
+        agent_marker = (
+            source_agent_visit_id
+            if source_agent_visit_id is not None
+            else getattr(self, "_active_source_agent_visit_id", None)
+        )
         email = data.get("email")
         if email:
             # Normalize before any persistence: providers return mixed-case
@@ -744,6 +787,8 @@ class IdentityResolver(
             country=data.get("country"),
             resolution_provider=provider,
             confidence_score=data.get("confidence_score"),
+            # GUARD #1: agent-origin marker written atomically with the row.
+            source_agent_visit_id=agent_marker,
         )
         self.db.add(identified)
         visitor.identity_status = "identified"

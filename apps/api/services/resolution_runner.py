@@ -51,12 +51,17 @@ async def run_resolution_for_site(
     Returns counters: processed (attempted), resolved, enriched,
     skipped_plan_limit (eligible but blocked by the monthly plan limit).
     """
+    from apps.api.services.agent_visitor_filters import human_only_visitor_filter
+
     result = await db.execute(
         select(Visitor).where(
             Visitor.site_id == site.site_id,
             Visitor.identity_status == "anonymous",
             Visitor.intent_score >= 40,
             Visitor.do_not_resolve.is_(False),
+            # AC2 (GUARD #2): never re-resolve the synthetic agent-derived rows
+            # (they run through resolve() only via the company-resolution sweep).
+            human_only_visitor_filter(),
         ).order_by(Visitor.intent_score.desc()).limit(max_resolve)
     )
     visitors = list(result.scalars().all())
