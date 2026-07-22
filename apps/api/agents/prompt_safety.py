@@ -82,8 +82,21 @@ def sanitize_profiles(profiles: list[dict]) -> list[dict]:
 
 
 def wrap_untrusted(json_text: str) -> str:
-    """Delimit serialized visitor data as untrusted inside the prompt."""
-    return f"{UNTRUSTED_OPEN}\n{json_text}\n{UNTRUSTED_CLOSE}"
+    """Delimit serialized visitor data as untrusted inside the prompt.
+
+    Strips angle brackets from the payload before fencing it. This function
+    owns the ``<untrusted_visitor_data>`` delimiter, so it must guarantee the
+    payload cannot forge that delimiter and break out — regardless of which
+    fields it contains. Per-field ``clean_text`` only covers ``_TEXT_FIELD_CAPS``;
+    provider-controlled values outside that set (``linkedin_url``,
+    ``twitter_handle``, any future field) and the ``strip_url`` path (which
+    preserves a URL's path verbatim) would otherwise reach the prompt raw.
+    JSON structural characters are ``{}[]",:`` — removing ``<``/``>`` never
+    corrupts the surrounding JSON, only data inside string values, which carry
+    no segmentation signal (same rationale as ``clean_text``). Idempotent with
+    callers that already strip (e.g. ``gemini_client`` tool results)."""
+    safe = json_text.replace("<", " ").replace(">", " ")
+    return f"{UNTRUSTED_OPEN}\n{safe}\n{UNTRUSTED_CLOSE}"
 
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)```", re.DOTALL)
