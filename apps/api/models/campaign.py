@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, DateTime, Integer, Enum, ForeignKey, Index, func
+from sqlalchemy import String, DateTime, Integer, Enum, ForeignKey, Index, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,6 +42,16 @@ class CampaignTouchpoint(Base):
         # Conversion attribution fallback looks up touchpoints by the
         # converting visitor's id (conversion_tracker.attribute_visitor).
         Index("idx_campaign_touchpoints_visitor", "visitor_id"),
+        # Enforces the "never double-send" invariant at the DB layer: the send
+        # loop claims a row per (campaign, visitor, channel) BEFORE dispatching,
+        # so two concurrent /send or /start calls serialize on this constraint
+        # and the loser gets IntegrityError instead of a duplicate email.
+        UniqueConstraint(
+            "campaign_id",
+            "visitor_id",
+            "channel",
+            name="uq_campaign_touchpoints_campaign_visitor_channel",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

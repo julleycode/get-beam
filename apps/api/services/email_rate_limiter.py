@@ -38,3 +38,21 @@ async def check_and_reserve_email(site_id: str) -> bool:
     except Exception as exc:
         logger.warning("email_rate_limiter_failed_open", site_id=site_id, error=str(exc))
         return True
+
+
+async def release_email_reservation(site_id: str) -> None:
+    """Give back a slot reserved by ``check_and_reserve_email`` when the send it
+    was reserved for did not happen — the send failed, or the recipient lost the
+    idempotency race and was skipped. Without this, every failed/skipped send
+    permanently burns an hourly slot. Best-effort: a lost decrement only
+    over-counts slightly, and the counter is clamped so it never goes negative."""
+    try:
+        redis = get_redis()
+        hour = datetime.now(timezone.utc).strftime("%Y%m%d%H")
+        key = f"email_rate:{site_id}:{hour}"
+        remaining = await redis.decr(key)
+        if remaining < 0:
+            # decr on an expired/absent key creates it at -1; drop it.
+            await redis.delete(key)
+    except Exception as exc:
+        logger.warning("email_rate_limiter_release_failed", site_id=site_id, error=str(exc))

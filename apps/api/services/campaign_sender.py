@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
@@ -29,7 +30,10 @@ from apps.api.services.email_providers.gmail_sender import (
     resolve_sender_for_site,
     send_via_gmail,
 )
-from apps.api.services.email_rate_limiter import check_and_reserve_email
+from apps.api.services.email_rate_limiter import (
+    check_and_reserve_email,
+    release_email_reservation,
+)
 from apps.api.services.email_sender import EmailSender
 from apps.api.services.identity_classification import is_emailable_identity
 from apps.api.services.link_decorator import generate_unsubscribe_token
@@ -205,7 +209,10 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
             summary["skipped_suppressed"] += 1
             continue
 
-        # Idempotency: never email the same visitor twice for this campaign step.
+        # Idempotency fast-path: skip visitors already emailed for this campaign.
+        # This is an optimization, NOT the guard — under READ COMMITTED a
+        # concurrent sender's uncommitted row is invisible here, so the real
+        # "never double-send" enforcement is the unique-constraint claim below.
         existing = await db.execute(
             select(CampaignTouchpoint).where(
                 CampaignTouchpoint.campaign_id == campaign.id,
@@ -219,7 +226,8 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
             continue
 
         # Per-site hourly cap — stop sending this visitor (and leave the rest for
-        # a later run) once the cap is hit.
+        # a later run) once the cap is hit. Reserved BEFORE the claim; the slot is
+        # released on every path that reserves but does not actually send.
         if not await check_and_reserve_email(campaign.site_id):
             summary["throttled"] += 1
             continue
@@ -238,9 +246,15 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
             body_tpl, iv.full_name, company_name, sender_name
         ).replace("\n", "<br/>")
 
-        # Create the touchpoint BEFORE sending so its id can ride in the email:
-        # the open pixel (/o/{id}) stamps opened_at, and _tp on decorated links
-        # lets the site pixel stamp clicked_at. Flush assigns the UUID client-side.
+        # Claim the recipient by inserting the touchpoint BEFORE sending. This
+        # doubles as (a) the id carrier for tracking — the open pixel (/o/{id})
+        # stamps opened_at and _tp on decorated links stamps clicked_at — and
+        # (b) the concurrency guard: the unique (campaign, visitor, channel)
+        # constraint means a second concurrent sender's flush raises
+        # IntegrityError instead of producing a duplicate email. Flush (not
+        # commit) assigns the UUID and takes the index lock; a losing racer's
+        # flush blocks here until we commit (→ their IntegrityError) or roll back
+        # (→ they proceed).
         tp_row = CampaignTouchpoint(
             campaign_id=campaign.id,
             visitor_id=vid,
@@ -250,7 +264,16 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
             content={"subject": subject},
         )
         db.add(tp_row)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError:
+            # Another sender already claimed this recipient — do NOT send. Undo
+            # the flush and return the reserved cap slot.
+            await db.rollback()
+            await db.refresh(campaign)
+            await release_email_reservation(campaign.site_id)
+            summary["skipped_already_sent"] += 1
+            continue
 
         # Deterministic click→identity: stamp the recipient's _bid on links to
         # their own site so the click resolves them for free (own-data, no provider).
@@ -302,6 +325,9 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
                 # MissingGreenlet (sync IO on an expired async object).
                 await db.rollback()
                 await db.refresh(campaign)
+                # The send never went out — hand the reserved cap slot back so a
+                # failed recipient doesn't permanently burn an hourly slot.
+                await release_email_reservation(campaign.site_id)
                 summary["failed"] += 1
                 continue
 
