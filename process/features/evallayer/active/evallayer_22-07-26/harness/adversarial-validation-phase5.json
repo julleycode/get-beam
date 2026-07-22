@@ -1,0 +1,34 @@
+{
+  "scenarios": [
+    {
+      "scenario": "Deferred/2nd-batch marker race — an agent-derived IdentifiedVisitor row is committed by _save_identified BEFORE the marker is set, giving a concurrent campaign_sender / csv_exporter / API read a window to email a person-level agent-origin row (D2 violation).",
+      "ruled_out": true,
+      "rationale": "GUARD #1: source_agent_visit_id is set on the IdentifiedVisitor(...) constructor inside _save_identified, so it is part of the SAME INSERT+COMMIT that creates the row. Threaded via resolve()'s instance state, covering every resolution path including the hunter/apollo/pdl mixins. Unit test asserts the marker is on the inserted row and that no UPDATE targeting the field is issued after commit."
+    },
+    {
+      "scenario": "Agent-derived synthetic Visitor pollutes human surfaces (list, stats, resolution eligibility, segmentation, aggregation, detail view, Celery enrich/draft task).",
+      "ruled_out": true,
+      "rationale": "GUARD #2: all 7 enumerated sites filter Visitor.is_agent_derived.is_(False) via the shared human_only_visitor_filter(); per-site compiled-SQL tests + a parametrized source tripwire across all 7 files prove the exclusion is present at each site. Defense-in-depth: the synthetic row's intent_score stays 0, below the intent>=40 eligibility gate."
+    },
+    {
+      "scenario": "Field rename silently disables the AC10 guard (attacker or careless refactor renames source_agent_visit_id in one place).",
+      "ruled_out": true,
+      "rationale": "Literal-field-name tripwires: Phase 7's C5 plus Phase 5's own parametrized tripwire assert the literal 'source_agent_visit_id' persists across model + resolver + sweep files; a rename fails the suite loudly."
+    },
+    {
+      "scenario": "Vendor/datacenter agent IP resolves and identifies the AI vendor as 'the company', creating junk leads.",
+      "ruled_out": true,
+      "rationale": "resolve()'s own is_ip_suspicious/datacenter gate skips vendor/datacenter IPs (by design). No allowlist carve-out; only real company-network IPs resolve. Documented data-quality caveat, not a safety issue."
+    },
+    {
+      "scenario": "Cross-contamination via _save_identified email-dedup merge — a real human visitor inherits an agent-origin non-emailable marker (or the reverse) when a company-level provider returns the same employee email for both.",
+      "ruled_out": false,
+      "rationale": "ACCEPTED RESIDUAL (safe-direction, backlog-tracked). Errs toward exclusion (a real human may become incorrectly non-emailable = lead loss) NEVER toward emailing an agent. Out of this phase's blast radius (would touch _save_identified email-dedup logic). Tracked: backlog/phase-05-identity-merge-collision_NOTE_22-07-26.md — NEW PLAN REQUIRED."
+    },
+    {
+      "scenario": "AgentVisit rollup staleness — resolved_company_id sticks forever once set, so later visits from a different company/IP on the same rollup row never re-resolve (stale attribution).",
+      "ruled_out": false,
+      "rationale": "ACCEPTED RESIDUAL (data-quality, not safety; backlog-tracked). No outreach-exclusion impact. Tracked: backlog/phase-05-rollup-staleness_NOTE_22-07-26.md — NEW PLAN REQUIRED."
+    }
+  ]
+}

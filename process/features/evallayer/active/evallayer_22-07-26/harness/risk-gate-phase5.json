@@ -1,0 +1,6 @@
+{
+  "riskClass": "schema/data migration AND permission/trust-boundary logic (outreach-exclusion) — dual-classed",
+  "workDescription": "EvalLayer Phase 05 — agent-visit IP resolves via the existing identity waterfall through a synthetic Visitor row into the human company/lead + outreach pipeline; every agent-derived IdentifiedVisitor row is marked source_agent_visit_id atomically (GUARD #1) so Phase 7's is_emailable_identity makes it non-emailable, and 7 human-data query sites exclude agent-derived rows (GUARD #2 / SPEC AC2).",
+  "approver": "session (autonomous /goal execution, per validate-contract Gate: PASS)",
+  "mustStopBeforeFinalize": true
+}

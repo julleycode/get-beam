@@ -1,0 +1,40 @@
+{
+  "snippets": [
+    {
+      "file": "apps/api/services/identity_resolver.py",
+      "lines": "382-420, 676-772",
+      "description": "GUARD #1: resolve() gains optional source_agent_visit_id kwarg, stashed on self._active_source_agent_visit_id at the top of every call; _save_identified reads it and sets source_agent_visit_id directly on the IdentifiedVisitor(...) constructor — marker written in the SAME INSERT+COMMIT as the row (no deferred UPDATE, no window). Human callers omit the kwarg -> None -> byte-identical behavior. Instance-state threading also covers the hunter/apollo/pdl provider mixins without editing them.",
+      "content": "self._active_source_agent_visit_id = source_agent_visit_id  # top of resolve(); IdentifiedVisitor(..., source_agent_visit_id=agent_marker) in _save_identified"
+    },
+    {
+      "file": "apps/api/services/agent_company_resolution.py",
+      "lines": "1-170",
+      "description": "New sweep service. Eligibility: resolved_company_id IS NULL AND ip_address IS NOT NULL. Per-row: idempotent synthetic Visitor (is_agent_derived=True), resolve(visitor, source_agent_visit_id=str(av.id)), _upsert_company, set resolved_company_id. Per-row fail-open try/except.",
+      "content": "identified = await resolver.resolve(visitor, source_agent_visit_id=str(agent_visit.id))"
+    },
+    {
+      "file": "apps/api/services/agent_visitor_filters.py",
+      "lines": "1-25",
+      "description": "GUARD #2 shared predicate human_only_visitor_filter() -> Visitor.is_agent_derived.is_(False). Single choke point imported by all 7 exclusion sites.",
+      "content": "return Visitor.is_agent_derived.is_(False)"
+    },
+    {
+      "file": "apps/api/routers/visitors_helpers.py",
+      "lines": "70-96, 135-168",
+      "description": "AC2 sites 1+6: _build_visitor_filters seeds the human-only predicate (covers list_visitors query+count AND country-facet); _compute_visitor_stat_counts adds it to the per-site WHERE (all 5 aggregates inherit).",
+      "content": "filters: list = [human_only_visitor_filter()]  /  .where(Visitor.site_id == site_id, human_only_visitor_filter())"
+    },
+    {
+      "file": "apps/api/services/resolution_runner.py + apps/api/tasks/resolution_tasks.py + apps/api/tasks/segmentation_tasks.py + apps/api/services/visitor_aggregator.py + apps/api/routers/visitors.py",
+      "lines": "resolution_runner:55, resolution_tasks:_process_site, segmentation_tasks:both, visitor_aggregator:_resolve_companies, visitors:get_visitor_detail",
+      "description": "AC2 sites 3,4,5,7 + get_visitor_detail — each eligibility/detail query gains human_only_visitor_filter(); D7 (resolution_tasks._process_site) is the 7th site PVL added (live Celery-beat task firing Enricher+AutoDrafter).",
+      "content": "select(Visitor).where(..., human_only_visitor_filter())"
+    },
+    {
+      "file": "apps/api/migrations/versions/a1c7e4f92b83_add_company_resolution_fields.py",
+      "lines": "1-70",
+      "description": "down_revision=d11b39a6c843. visitors.is_agent_derived (bool not null server_default false), identified_visitors.source_agent_visit_id (varchar null), FK agent_visits.resolved_company_id -> companies.id ondelete SET NULL (house convention).",
+      "content": "op.create_foreign_key('fk_agent_visits_resolved_company_id', 'agent_visits', 'companies', ['resolved_company_id'], ['id'], ondelete='SET NULL')"
+    }
+  ]
+}

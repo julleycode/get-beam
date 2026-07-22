@@ -1,0 +1,64 @@
+{
+  "steps": [
+    {
+      "step": "AC9 — qualifying agent visit creates a Company/lead via the existing pipeline; contactable identity is the resolved company/lead, never the AgentVisit record",
+      "command": ".venv/bin/python -m pytest tests/unit/test_agent_company_resolution.py -m unit -q",
+      "result": "PASS",
+      "notes": "25 passed; test_sweep_creates_company_and_threads_marker asserts _upsert_company called + resolved_company_id set + resolve returns lead@acme.com not the AgentVisit"
+    },
+    {
+      "step": "D2 GUARD #1 atomicity — source_agent_visit_id set on the IdentifiedVisitor at INSERT time, no deferred UPDATE",
+      "command": ".venv/bin/python -m pytest tests/unit/test_agent_company_resolution.py::test_guard1_marker_set_atomically_in_save_identified -m unit -q",
+      "result": "PASS",
+      "notes": "asserts inserted row.source_agent_visit_id == marker AND no UPDATE targeting source_agent_visit_id executed after the insert"
+    },
+    {
+      "step": "AC2 GUARD #2 — all 7 human-data query sites exclude agent-derived rows (compiled SQL carries is_agent_derived) + source tripwire on all 7 files",
+      "command": ".venv/bin/python -m pytest tests/unit/test_agent_company_resolution.py -m unit -q -k ac2",
+      "result": "PASS",
+      "notes": "per-site compiled-SQL assertions for stat_counts, resolution_runner, segmentation, resolution_tasks._process_site, visitor_aggregator, shared router filter; parametrized human_only_visitor_filter tripwire across all 7 files"
+    },
+    {
+      "step": "OQ4 — synthetic visitor_id debits the shared per-site daily budget + 30-day no-retry (no separate bucket)",
+      "command": ".venv/bin/python -m pytest tests/unit/test_agent_company_resolution.py -m unit -q -k 'recency or budget'",
+      "result": "PASS",
+      "notes": "was_recently_attempted and check_daily_budget both invoked with the synthetic (site_id, agent:<id>)"
+    },
+    {
+      "step": "AC14 — sweep runs fully offline under MOCK_EXTERNAL_APIS=true",
+      "command": "MOCK_EXTERNAL_APIS=true .venv/bin/python -m pytest tests/unit/test_agent_company_resolution.py -m unit -q",
+      "result": "PASS",
+      "notes": "25 passed under mock mode; sweep makes no external call of its own"
+    },
+    {
+      "step": "AC10 (D5/D6 BINDING) — a REAL row built by the actual _save_identified path with the marker is non-emailable; Phase 7 C5 tripwire stays green",
+      "command": ".venv/bin/python -m pytest tests/unit/test_agent_origin_exclusion.py -m unit -q",
+      "result": "PASS",
+      "notes": "18 passed (17 prior + new test_ac10_real_sweep_created_row_is_non_emailable); is_emailable_identity('rb2b', marker) is False"
+    },
+    {
+      "step": "Full regression vs 752/2 baseline",
+      "command": ".venv/bin/python -m pytest tests/unit -q",
+      "result": "PASS",
+      "notes": "778 passed, 2 skipped, 0 regressions (752 baseline + 26 new: 25 new-file + 1 AC10 real-row)"
+    },
+    {
+      "step": "Migration revision chain valid offline (single head, correct down_revision)",
+      "command": "cd apps/api && alembic heads / alembic history",
+      "result": "PASS",
+      "notes": "single head a1c7e4f92b83; down_revision d11b39a6c843; no branch/multiple heads"
+    },
+    {
+      "step": "Migration apply/rollback against a live Postgres",
+      "command": "docker compose -f infra/docker-compose.yml up -d postgres redis; cd apps/api; alembic upgrade head; alembic downgrade -1; alembic upgrade head",
+      "result": "SKIP",
+      "notes": "KNOWN-GAP — no disposable Postgres in this sandbox (same environment gap as Phases 1-4). Offline history+heads is the closest available proxy; documented, not silently dropped."
+    },
+    {
+      "step": "Full sweep integration round-trip against a live Postgres",
+      "command": "docker compose -f infra/docker-compose.yml up -d postgres redis; MOCK_EXTERNAL_APIS=true pytest tests/integration/... -m integration -q",
+      "result": "SKIP",
+      "notes": "KNOWN-GAP — Docker unavailable; end-to-end FK/unique-constraint/commit round-trip beyond mocked-session unit coverage remains unproven. Backlog-noted."
+    }
+  ]
+}

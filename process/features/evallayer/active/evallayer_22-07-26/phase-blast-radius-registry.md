@@ -235,3 +235,100 @@ would flip C1 red for every `PERSON_LEVEL_PROVIDERS` value). No Docker known-gap
 in this phase's own proof — Phase 5 Contract (D1-D6) is now BINDING and must be honored/re-verified
 before Phase 5 may be marked VERIFIED. Not committed this session (vc-git-manager next). Report:
 `phase-07-outreach-exclusion_REPORT_22-07-26.md`.
+
+---
+
+## Phase 5
+
+Plan: `process/features/evallayer/active/evallayer_22-07-26/phase-05-company-resolution_PLAN_22-07-26.md`
+
+Blast radius (confirmed real at PVL 2026-07-22 via fresh reads of live code — no collisions with
+Phase 1, 2, 3, 4, or 7's entries above; none of those phases touch any file below):
+
+- `apps/api/migrations/versions/` (new migration, `down_revision = "d11b39a6c843"` — Phase 1's head,
+  confirmed via `alembic heads`)
+- `apps/api/models/visitor.py` (modify — add `Visitor.is_agent_derived`, `IdentifiedVisitor.source_agent_visit_id`)
+- `apps/api/models/agent_visit.py` (modify — FK constraint on `resolved_company_id`, stale-docstring update)
+- `apps/api/services/agent_company_resolution.py` (new)
+- `apps/api/services/agent_visitor_filters.py` (new)
+- `apps/api/services/identity_resolver.py` (modify — VALIDATE amendment, closes GUARD #1 atomicity
+  gap: optional `source_agent_visit_id` kwarg on `resolve()`/`_save_identified()`, default `None`)
+- `apps/api/jobs/scheduler.py` (modify — extend `_agent_verification_sweep_job`, 2nd step in the same
+  try block Phase 4 already owns; no new job id)
+- `apps/api/routers/visitors.py` (modify — 3 of the 7 AC2 exclusion sites: `list_visitors`,
+  country-facet, `get_visitor_detail`)
+- `apps/api/routers/visitors_helpers.py` (modify — `_compute_visitor_stat_counts`)
+- `apps/api/services/resolution_runner.py` (modify — `run_resolution_for_site` eligibility query)
+- `apps/api/tasks/segmentation_tasks.py` (modify — `_check_triggers`, `_run_segmentation_for_site`)
+- `apps/api/services/visitor_aggregator.py` (modify — `_resolve_companies`)
+- `apps/api/tasks/resolution_tasks.py` (modify — VALIDATE-added 7th AC2 exclusion site,
+  `_process_site` eligibility query)
+- `tests/unit/test_agent_company_resolution.py` (new)
+- `tests/unit/test_agent_origin_exclusion.py` (extend — AC10 real-row re-run, Phase 7 D5/D6 BINDING obligation)
+
+No overlap with Phase 1 (`agent_visit.py` schema fields only — Phase 5 adds a FK on an
+already-existing column, not a new column; `agent_classifier.py`, `main.py` import line,
+`test_agent_classifier.py`), Phase 2 (`events.py`, `agent_visit_persistence.py`, `config.py`), Phase
+3 (`agents.py`, `schemas/agents.py`, `dashboard/agents/*`, `layout.tsx`, `api.ts`/`api-types.ts`,
+`status-badge.tsx`), or Phase 4 (`agent_verification.py`, `agent_ip_ranges/*` data files) — none of
+those phases touch any file this phase modifies. **Intentional Phase-7-contract fulfillment (not a
+collision):** Phase 5 adds `IdentifiedVisitor.source_agent_visit_id` — exactly the forward-binding
+dependency Phase 7's D1-D6 contract named. Phase 7's own files
+(`identity_classification.py`, `campaign_sender.py`, `campaigns.py`, `csv_exporter.py`,
+`test_agent_origin_exclusion.py`) are NOT touched by Phase 5 except the one explicitly-anticipated
+extension: `tests/unit/test_agent_origin_exclusion.py` gains the AC10 real-row re-run test, which is
+Phase 7's own D5/D6 obligation being fulfilled by Phase 5, not an unplanned edit.
+
+status: PVL PASS (2026-07-22) — validate-contract written, `generated-by: inner-pvl: phase-5`.
+Gate: PASS. 2 mandatory FAILs found via `vc-security`
+STRIDE scan and resolved in-plan this same PVL cycle (not deferred, not accepted-as-CONCERN): (1) GUARD #1 atomicity —
+the original design ("call `resolve()` UNMODIFIED, set the marker via a separate UPDATE after
+`resolve()` returns") left a real, mechanically-confirmed window where a freshly committed,
+un-marked, potentially person-level `IdentifiedVisitor` row was durable and visible to any other DB
+connection — the "deferred/2nd-batch marker" failure mode. Fixed by threading an optional
+`source_agent_visit_id` kwarg through `resolve()`/`_save_identified()` in `identity_resolver.py`,
+set at INSERT time (zero behavior change for existing human callers). (2) GUARD #2 completeness —
+found a 7th, previously unenumerated AC2 exclusion site (`apps/api/tasks/resolution_tasks.py::_process_site`,
+a live Celery-beat-scheduled task with the same eligibility shape as the already-fixed
+`resolution_runner.py`); added `human_only_visitor_filter()` there too. 2 non-blocking Known Gaps
+accepted, both safe-direction (never an outreach leak): (a) identity-merge collision via
+`_save_identified`'s pre-existing email-dedup path (a real human lead could inherit an agent-origin
+marker via email collision — lead-loss, not a safety violation); (b) `AgentVisit` rollup staleness
+(the model is confirmed to be an aggregate rollup per `(site_id, vendor, product_or_ua_token)`, not
+per-visit — `resolved_company_id` sticks forever once set even as the underlying IP changes on later
+visits). Both backlog-noted (excluded from the CONCERN/FAIL count per the Known-Gap exclusion rule):
+`process/features/evallayer/backlog/phase-05-identity-merge-collision_NOTE_22-07-26.md`,
+`process/features/evallayer/backlog/phase-05-rollup-staleness_NOTE_22-07-26.md`. Phase classified
+ready for EXECUTE (validate-contract Gate: PASS); not yet CODE DONE or VERIFIED (no
+code written yet — PVL only).
+
+status: DONE — EXECUTE complete 2026-07-22. All checklist Steps B→C→D→E implemented; migration
+a1c7e4f92b83 created (single head, down_revision d11b39a6c843, valid offline). Exit gates green:
+AC10 suite 18 passed (incl. new real-row re-run test_ac10_real_sweep_created_row_is_non_emailable),
+Phase-5 suite 25 passed, full regression 778 passed/2 skipped (0 regressions vs 752/2 baseline),
+AC14 mock-mode 25 passed. GUARD #1 marker atomic (set in the same INSERT as the IdentifiedVisitor
+row); GUARD #2 all 7 AC2 sites wired via the shared `human_only_visitor_filter()`. 2 within-blast-radius
+deviations recorded in the plan's ## Deviations (DEV-1 instance-state marker threading keeps changes
+inside identity_resolver.py and also covers the hunter/apollo/pdl mixins; DEV-2 AC2 D1+D6-facet via the
+shared `_build_visitor_filters` helper — validate-contract-sanctioned). Docker known-gaps (migration
+apply/rollback + integration sweep round-trip) unrun — no disposable Postgres in sandbox. High-risk
+evidence pack written (harness/*-phase5.json, incl. adversarial-validation-phase5.json). Independent
+EVL (vc-tester re-run) + commit still pending. Not committed this session.
+
+status: DONE — independent EVL confirmation run (vc-tester, not relying on execute-agent's internal
+claim) GREEN on all Fully-Automated gates: AC10 suite 18/18 (incl. real-row re-run
+`test_ac10_real_sweep_created_row_is_non_emailable`), Phase-5 suite 25/25, full regression 778
+passed/2 skipped (baseline 752/2, +26, 0 regressions), AC14 mock-mode 25/25. Static review confirmed:
+GUARD #1 marker atomic with NO instance-state leak across calls (`self._active_source_agent_visit_id`
+reset unconditionally at the top of every `resolve()` — human callers get a cleared value); GUARD #2
+all 7 AC2 sites wired via `human_only_visitor_filter()`; no agent-email path exists. **Phase 7 D1-D6
+contract FULFILLED**: `IdentifiedVisitor.source_agent_visit_id` exists with the exact literal name,
+Phase 7's `getattr(...)` tripwire is now live (not a no-op); no PERSON_LEVEL provider ever assigned to
+an agent-resolved row; no 4th bypass path introduced; `test_agent_origin_exclusion.py` re-run against
+a real Phase-5-created row is green. 2 Docker known-gaps (migration apply/rollback, integration sweep)
+remain open — no disposable Postgres in this sandbox; close commands documented in the phase report.
+2 pre-existing safe-direction backlog residuals carried forward unchanged (identity-merge collision,
+rollup staleness — both NEW PLAN REQUIRED, neither touched this phase per plan E4). Phase classified
+🔨 CODE DONE (not ✅ VERIFIED — the two Docker known-gaps are real, undischarged gaps on this phase's
+own highest-risk-class surface: schema migration + live sweep). Report:
+`phase-05-company-resolution_REPORT_22-07-26.md`. Not committed this session (`vc-git-manager` next).
