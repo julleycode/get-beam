@@ -76,7 +76,10 @@ async def _get_segment_visitors(
         # Never export a company-level guess (hunter/apollo) — it's a random
         # employee at the visitor's company, not the visitor; pushing it to ad
         # audiences / CRM spams someone who never visited.
-        if not is_emailable_identity(identified.resolution_provider):
+        if not is_emailable_identity(
+            identified.resolution_provider,
+            getattr(identified, "source_agent_visit_id", None),
+        ):
             continue
 
         # Compliance: never export contacts on the privacy suppression list

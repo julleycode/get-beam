@@ -722,7 +722,9 @@ async def _resolve_linkedin_targets(
             if iv.do_not_email:
                 skipped_no_linkedin += 1
                 continue
-            if not is_emailable_identity(iv.resolution_provider):
+            if not is_emailable_identity(
+                iv.resolution_provider, getattr(iv, "source_agent_visit_id", None)
+            ):
                 skipped_no_linkedin += 1
                 continue
             if iv.email and await is_email_suppressed(db, iv.email, "do_not_email"):

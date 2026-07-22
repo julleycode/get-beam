@@ -53,14 +53,29 @@ def identity_level(provider: str | None) -> str | None:
     return None
 
 
-def is_emailable_identity(provider: str | None) -> bool:
+def is_emailable_identity(
+    provider: str | None, source_agent_visit_id: str | None = None
+) -> bool:
     """Whether an identity may be emailed / exported to ad+CRM / alerted as THE
     visitor.
 
-    True ONLY for person-level providers. Company-level guesses (hunter/apollo
-    return a random employee at the visitor's company, not the visitor) AND any
-    unclassified provider are refused — contacting them spams someone who never
-    visited the site (CAN-SPAM / reputation / trust risk). A new provider must be
-    added to PERSON_LEVEL_PROVIDERS explicitly to become emailable.
+    AC10 guardrail (highest-priority business safety constraint): an
+    agent-classified record — one carrying a ``source_agent_visit_id`` marker —
+    can NEVER be an outreach target, regardless of its ``provider``. Agents are
+    never emailed; only human/company contacts reached through the existing
+    consent/suppression/approval gates may be contacted. This override is checked
+    FIRST and unconditionally, so it holds even if such a record were ever
+    (incorrectly) tagged with a person-level provider — genuine defense in depth.
+
+    Otherwise: True ONLY for person-level providers. Company-level guesses
+    (hunter/apollo return a random employee at the visitor's company, not the
+    visitor) AND any unclassified provider are refused — contacting them spams
+    someone who never visited the site (CAN-SPAM / reputation / trust risk). A new
+    provider must be added to PERSON_LEVEL_PROVIDERS explicitly to become
+    emailable.
     """
+    # AC10 override: agent-origin records are never outreach targets, no matter
+    # what provider they carry. Checked first, unconditionally.
+    if source_agent_visit_id is not None:
+        return False
     return identity_level(provider) == "person"
