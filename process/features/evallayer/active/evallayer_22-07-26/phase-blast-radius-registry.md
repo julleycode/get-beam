@@ -180,3 +180,58 @@ Files created: `agent_verification.py`, 4 data JSONs, `test_agent_verification.p
 `test_agent_verification_sweep.py`; edited: `agent_visit_persistence.py`, `scheduler.py`,
 `config.py`. Phase classified 🔨 CODE DONE (not ✅ VERIFIED) pending closure of the one Docker gap.
 Not committed this session (vc-git-manager next).
+
+---
+
+## Phase 7
+
+Plan: `process/features/evallayer/active/evallayer_22-07-26/phase-07-outreach-exclusion_PLAN_22-07-26.md`
+
+Blast radius (confirmed real at PVL 2026-07-22 via fresh `grep -n` against real code — no
+collisions with Phase 1, Phase 2, Phase 3, or Phase 4's entries above; none of those phases touch
+any file below):
+
+- `apps/api/services/identity_classification.py` (modify — extend `is_emailable_identity`)
+- `apps/api/services/campaign_sender.py` (modify — line 202 call-site wiring)
+- `apps/api/routers/campaigns.py` (modify — line 725, `_resolve_linkedin_targets` call-site wiring)
+- `apps/api/services/csv_exporter.py` (modify — line 79 call-site wiring)
+- `tests/unit/test_agent_origin_exclusion.py` (new — regression test file, C1–C5, no Docker)
+
+No schema/migration file in this phase's blast radius. No overlap with Phase 5's declared blast
+radius either — Phase 5 has not run RESEARCH yet (its own blast radius is still `TBD`, candidates
+only: `company_resolver.py` + an unconfirmed enrichment/lead-creation service). **Intentional
+concern-level (not file-level) overlap flagged with Phase 5:** the instant Phase 5 adds
+`IdentifiedVisitor.source_agent_visit_id` (its own job, not this phase's), this phase's guard
+activates automatically via the `getattr(..., "source_agent_visit_id", None)` wiring landed here.
+This is a forward-binding dependency captured as a written contract (D1–D6 in the Phase 7 plan),
+not a shared-file collision — Phase 5's exit gate is required to re-run
+`tests/unit/test_agent_origin_exclusion.py` (including the new C5 literal-field-name tripwire)
+against real Phase-5-created rows before Phase 5 may be marked ✅ VERIFIED.
+
+status: PVL PASS (2026-07-22) — validate-contract written, `generated-by: inner-pvl: phase-7`. Gate:
+PASS. 1 plan update applied during VALIDATE (not deferred, not accepted-as-CONCERN): a `vc-security`
+STRIDE scan found the guard is fail-open-by-rename (a future field-name rename anywhere would
+silently reopen the outreach hole since `getattr` just returns `None` again) — closed by adding
+Step C5, a Fully-Automated literal-string tripwire test with zero Docker/import dependency, plus a
+new D6 forward-contract line requiring Phase 5 to keep C5 green. AC10's core test
+(`test_agent_origin_overrides_person_level`) was confirmed genuinely non-vacuous at PVL time: the
+current unmodified `is_emailable_identity` signature accepts only one positional argument, so
+calling the planned 2-arg form today raises `TypeError` — a real red state, not just a documented
+one. 3 Known-Gaps accepted as non-blocking, none touching the AC10 core proof: (1) skip-counter
+miscategorization (agent-origin skips share a counter with company-level skips — cosmetic,
+observability-only); (2) D4 "no future 4th bypass path" remains a written contract, not a centrally
+code-enforced chokepoint (accepted as an intentional scope-limited residual); (3) real-row
+re-verification against actual Phase-5 data is inherently deferred until Phase 5 exists (already a
+binding requirement on Phase 5's own exit gate, D5/D6 — not an open gap in this phase's own proof).
+status: DONE — EXECUTE + independent EVL both complete 2026-07-22. All checklist Steps A→B→C
+(C1-C5)→Phase-5-Contract implemented exactly per validate-contract, no deviation. EVL confirmation
+run (independent `vc-tester` re-run, not relying on execute-agent's internal claim) GREEN: AC10 gate
+`test_agent_origin_exclusion.py` 17/17; full unit regression 752 passed/2 skipped (baseline 735 +
+17, 0 regressions); adjacent `test_outbound_identity_gate.py` 18/18 (no breakage); non-vacuity
+confirmed by independent code inspection (override is the first, unconditional statement — deletion
+would flip C1 red for every `PERSON_LEVEL_PROVIDERS` value). No Docker known-gap in this phase
+(unlike Phases 1-4) — all gates Fully-Automated. Phase classified **✅ VERIFIED**. The only residual
+(D5, real-Phase-5-row re-verification) is a forward dependency on Phase 5's own exit gate, not a gap
+in this phase's own proof — Phase 5 Contract (D1-D6) is now BINDING and must be honored/re-verified
+before Phase 5 may be marked VERIFIED. Not committed this session (vc-git-manager next). Report:
+`phase-07-outreach-exclusion_REPORT_22-07-26.md`.

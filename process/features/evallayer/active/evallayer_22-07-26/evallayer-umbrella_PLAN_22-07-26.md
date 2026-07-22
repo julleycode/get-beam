@@ -334,9 +334,9 @@ phase-plan-writing agent): `process/features/evallayer/active/evallayer_22-07-26
 | 2 — Ingest wiring | 🔨 CODE DONE (EXECUTE + EVL complete; Gate: CONDITIONAL accepted; full unit baseline GREEN 725/2-skipped, +9, 0 regressions; classifier 24/24; static safety review confirmed all 3 declared safety properties. 2 KNOWN-GAPS open — Docker integration tests (5 cases, collect-clean, unrun) + AC5 latency benchmark (no harness, backlog stub written) — not ✅ VERIFIED until both close, see phase report) |
 | 3 — Read API + dashboard tab | 🔨 CODE DONE (EXECUTE + independent EVL complete; FE compile + unit-regression + static-safety-review all GREEN; Docker integration (10 cases) + Playwright e2e = KNOWN-GAPS, env-gated — not ✅ VERIFIED until both close, see phase report) |
 | 4 — IP/rDNS verification | 🔨 CODE DONE (EXECUTE + independent EVL complete; unit 10/10, hot-path grep=0, Anthropic structural ceiling confirmed, full regression 735/2 no drop — 1 Docker-gated integration Known-Gap open, not ✅ VERIFIED until closed, see phase report) |
-| 5 — Company resolution → outreach feed | ⏳ PLANNED (stub only — RE-RESEARCH REQUIRED before PLAN) |
+| 5 — Company resolution → outreach feed | ⏳ PLANNED (stub only — RE-RESEARCH REQUIRED before PLAN; Phase 7's D1-D6 contract now BINDING) |
 | 6 — Aggregation + GEO/AEO analytics | ⏳ PLANNED (stub only) |
-| 7 — Outreach-exclusion guardrail | ⏳ PLANNED (stub only — elevated priority, release gate for Phase 5) |
+| 7 — Outreach-exclusion guardrail | ✅ VERIFIED (EXECUTE + independent EVL complete 2026-07-22; AC10 gate 17/17, full regression 752/2 (0 regressions), no Docker known-gap; released as the program's release-gate test for Phase 5 — see phase report + registry) |
 
 Status values: ⏳ PLANNED | 🔨 CODE DONE | 🧪 TESTING | ✅ VERIFIED | 🚧 BLOCKED | ✅ COMPLETE
 
@@ -459,41 +459,62 @@ the program.
 ## Resume and Execution Handoff
 
 - Selected plan file path: `process/features/evallayer/active/evallayer_22-07-26/evallayer-umbrella_PLAN_22-07-26.md`
-- Last completed phase: Phase 1 (Data model + classifier) — 🔨 CODE DONE, all 7 inner-loop steps
-  run, EVL-confirmed, 1 recorded Known-Gap (live-DB migration cycle). See
-  `phase-01-data-model-classifier_REPORT_22-07-26.md`.
-- Validate-contract status: Phase 1 written (Gate: PASS). Phases 2-7 pending (stub-only,
-  placeholder).
-- Supporting context files loaded this session: `evallayer_SPEC_22-07-26.md` (full), RESEARCH
-  synthesis brief (7-agent fan-out output), `process/context/all-context.md`,
-  `process/development-protocols/phase-programs.md`, `process/development-protocols/plan-lifecycle.md`
+- Last completed phase: Phase 7 (Outreach-exclusion guardrail) — **✅ VERIFIED**, all 7 inner-loop
+  steps run, EVL-confirmed independently, no Docker known-gap. See
+  `phase-07-outreach-exclusion_REPORT_22-07-26.md`.
+- Validate-contract status: Phases 1, 3, 4, 7 written (Gate: PASS). Phase 2 written (Gate:
+  CONDITIONAL, accepted). Phases 5-6 pending (stub-only, placeholder).
+- Supporting context files loaded this session: `evallayer_SPEC_22-07-26.md` (AC10 section),
+  `phase-07-outreach-exclusion_PLAN_22-07-26.md` + `_REPORT_`, `process/context/all-context.md`,
+  `process/development-protocols/phase-programs.md`
 - Next step for a fresh agent: read this umbrella plan in full. Phase 0 is shipped, Phases 1-4 are
-  all 🔨 CODE DONE (see each phase's report for its open Known-Gaps). Start fresh work at Phase 5
-  (Company resolution → outreach feed) — its entry gate requires BOTH Phase 3 AND Phase 4 exits
-  (both are code-done) AND Phase 7's guardrail test existing/passing (Phase 7 has not started —
-  Phase 5 is NOT yet eligible to reach VERIFIED even once its own code is done, per Join Conditions
-  and Resolved Open Question 10).
+  all 🔨 CODE DONE (see each phase's report for its open Known-Gaps), Phase 7 is ✅ VERIFIED. Start
+  fresh work at Phase 5 (Company resolution → outreach feed) — its Join Conditions are now ALL
+  satisfied: Phase 3 + Phase 4 exits (code-done) AND Phase 7's guardrail test (✅ VERIFIED) — SPEC
+  Resolved Open Question 10 is closed. Phase 5's exit gate must still re-run
+  `test_agent_origin_exclusion.py` against its own real rows per the binding D1-D6 contract before
+  Phase 5 itself can be marked VERIFIED.
 - Current phase: Phase 5 (Company resolution → outreach feed). **MANDATORY-FRESH RESEARCH
   required** — the original program-kickoff RESEARCH fan-out's `read:identity` sub-agent returned
   placeholder/test output, so agent→company enrichment-waterfall mechanics are under-researched
   and NOT resumable from existing findings. Do not skip or abbreviate RESEARCH for this phase.
-  Phase 5 also structurally depends on Phase 7's outreach-exclusion guardrail (SPEC Resolved Open
-  Question 10) — Phase 7 is a release-gate for Phase 5, not merely a parallel track; recommend
-  starting Phase 7's RESEARCH alongside or ahead of Phase 5's.
+  Phase 5's design must honor Phase 7's binding D1-D6 contract (exact field name
+  `source_agent_visit_id`, no PERSON_LEVEL provider on agent-resolved rows, no 4th bypass path,
+  re-run the guardrail test at Phase 5's own exit gate).
 - Next action: invoke `vc-agent-strategy-compare` for Phase 5 RESEARCH kickoff, then spawn
   vc-research-agent for Phase 5 with an explicit instruction to do a full fresh pass on the
-  enrichment-waterfall / company-resolution mechanics (do not reuse the placeholder findings).
+  enrichment-waterfall / company-resolution mechanics (do not reuse the placeholder findings) and
+  to read the Phase 7 report's D1-D6 contract before proposing any design.
 - Execute-agent start instruction: NOT YET ELIGIBLE for Phase 5 — no RESEARCH/INNOVATE/PLAN/PVL
-  done yet for Phase 5 (stub-only). Phases 1-4 EXECUTE are all complete; do not re-spawn
-  execute-agent for any of them (their Known-Gaps are backlog/EVL-confirmed residuals, not open
-  EXECUTE tasks).
+  done yet for Phase 5 (stub-only). Phases 1-4 EXECUTE are all complete; Phase 7 EXECUTE is complete
+  and VERIFIED; do not re-spawn execute-agent for any of them (their Known-Gaps, where present, are
+  backlog/EVL-confirmed residuals, not open EXECUTE tasks).
 
 ---
 
 ## Current Execution State
 
-Last updated: 22-07-26 (UPDATE PROCESS closeout of Phase 4)
+Last updated: 22-07-26 (UPDATE PROCESS closeout of Phase 7)
 Completed phases:
+- Phase 7 (Outreach-exclusion guardrail) — **✅ VERIFIED** (all 7 inner-loop steps run; EXECUTE +
+  independent EVL both complete). Gate: PASS at PVL (1 plan update applied: C5 literal-field-name
+  tripwire test, closing a `vc-security` STRIDE tampering-risk finding). EVL confirmation run
+  (independent `vc-tester` re-run, not relying on execute-agent's internal claim) GREEN: AC10 gate
+  `test_agent_origin_exclusion.py` 17/17 (all 5 test groups, incl. C5 tripwire); full unit
+  regression 752 passed/2 skipped (baseline 735 + 17, 0 regressions); adjacent
+  `test_outbound_identity_gate.py` 18/18 (no breakage); non-vacuity confirmed by independent code
+  inspection (the `source_agent_visit_id` override is the first, unconditional statement in
+  `is_emailable_identity` — physically deleting it flips C1 red for every `PERSON_LEVEL_PROVIDERS`
+  value). **No Docker known-gap in this phase** (unlike Phases 1-4) — every gate is Fully-Automated.
+  Only residual: D5 (real-Phase-5-row re-verification) is a FORWARD dependency on Phase 5's own
+  exit gate, not a gap in this phase's own proof. **Phase 5 Contract (D1-D6) is now BINDING**:
+  Phase 5 must add `IdentifiedVisitor.source_agent_visit_id` (exact literal name), never assign a
+  PERSON_LEVEL provider to an agent-resolved row, introduce no 4th bypass path, and re-run
+  `test_agent_origin_exclusion.py` (incl. C5) against real Phase-5-created rows before Phase 5 may
+  be marked VERIFIED. Two accepted non-blocking Known-Gaps (not backlog artifacts — see report):
+  skip-counter miscategorization (observability-only) and D4 centralization (written contract, not
+  a code-enforced chokepoint). Report: `phase-07-outreach-exclusion_REPORT_22-07-26.md`. Not
+  committed this session (`vc-git-manager` next).
 - Phase 0 (Discoverability) — ✅ COMPLETE, shipped pre-program (`5ae5bd7`, archived `7e0d625`),
   folded into this program as a satisfied foundation deliverable
 - Phase 1 (Data model + classifier) — 🔨 CODE DONE (all 7 inner-loop steps run; EXECUTE + independent
@@ -554,28 +575,35 @@ Completed phases:
   Not classified ✅ VERIFIED until that gap closes; same environment-gap pattern as Phase 1/2/3.
   Report: `phase-04-ip-verification_REPORT_22-07-26.md`.
 Current phase: Phase 5 (Company resolution → outreach feed) — Phase 3 AND Phase 4 exit gates are
-both satisfied (code-done), BUT Phase 5's own exit gate additionally requires Phase 7's guardrail
-test to exist/pass (SPEC Resolved Open Question 10 — Phase 7 is a release-gate for Phase 5, not a
-mere parallel track). **MANDATORY-FRESH RESEARCH required for Phase 5**: the original
-program-kickoff RESEARCH fan-out's `read:identity` sub-agent returned placeholder/test output, so
-agent→company enrichment-waterfall mechanics are under-researched and NOT resumable from existing
-findings — do not skip or abbreviate RESEARCH for this phase. Recommend starting Phase 7's
-RESEARCH alongside or ahead of Phase 5's, since Phase 5 cannot reach VERIFIED without it.
+both satisfied (code-done); Phase 7's guardrail test now **✅ VERIFIED**, so Phase 5's Join
+Condition on Phase 7 is fully satisfied (SPEC Resolved Open Question 10 is closed). **Flags for
+Phase 5:** (a) **MANDATORY-FRESH RESEARCH required** — the original program-kickoff RESEARCH
+fan-out's `read:identity` sub-agent returned placeholder/test output, so agent→company
+enrichment-waterfall mechanics are under-researched and NOT resumable from existing findings — do
+not skip or abbreviate RESEARCH for this phase; (b) **Phase 7's D1-D6 contract is now BINDING on
+Phase 5's design** — add `IdentifiedVisitor.source_agent_visit_id` (exact literal field name),
+never assign a `PERSON_LEVEL_PROVIDERS` value to an agent-resolved row, introduce no 4th
+send/export bypass path, and re-run `tests/unit/test_agent_origin_exclusion.py` (incl. the C5
+tripwire) against REAL Phase-5-created rows before Phase 5 may be marked ✅ VERIFIED; (c) Phase 5
+depends on Phase 3 + Phase 4 (both code-done) and Phase 7 (now VERIFIED) — all Join Conditions for
+Phase 5 are satisfied; nothing further blocks starting RESEARCH.
 Current phase status: not started
 Current phase EVL: n/a (not yet reached)
 Current phase report: n/a (not yet written)
 Next phase: Phase 5 (Company resolution → outreach feed), loop step RESEARCH (pending, MANDATORY
-FRESH pass) — spawn vc-research-agent. Recommend also kicking off Phase 7 RESEARCH in parallel
-(disjoint blast radius: company-resolution/enrichment vs. campaign/segment targeting guardrail).
+FRESH pass) — spawn vc-research-agent. Remaining after Phase 5: Phase 6 (Aggregation + GEO/AEO
+analytics) — Phase 3 + Phase 4 exits already satisfied, parallel-safe with Phase 5 (disjoint blast
+radius).
 Current loop step: RESEARCH (pending for Phase 5)
 Validate-contract status: Phase 1 — written 22-07-26, Gate: PASS (`generated-by: inner-pvl:
 phase-1`). Phase 2 — written 22-07-26, Gate: CONDITIONAL, accepted (`generated-by: inner-pvl:
 phase-2`). Phase 3 — written 22-07-26, Gate: PASS (`generated-by: inner-pvl: phase-3`). Phase 4 —
-written 22-07-26, Gate: PASS (`generated-by: inner-pvl: phase-4`). Phases 5-7 have no
-validate-contract yet — stub-only. Phase 0 was shipped with VALIDATE explicitly skipped, per its
-archived plan.
-Program Net Gate: PENDING (4 of 8 phases code-done — 1 open Known-Gap on Phase 1, 2 open Known-Gaps
-on Phase 2, 2 open Known-Gaps on Phase 3, 1 open Known-Gap on Phase 4; 4 phases not yet started)
+written 22-07-26, Gate: PASS (`generated-by: inner-pvl: phase-4`). Phase 7 — written 22-07-26, Gate:
+PASS (`generated-by: inner-pvl: phase-7`). Phases 5-6 have no validate-contract yet — stub-only.
+Phase 0 was shipped with VALIDATE explicitly skipped, per its archived plan.
+Program Net Gate: PENDING (5 of 8 phases code-done or better — 1 open Known-Gap on Phase 1, 2 open
+Known-Gaps on Phase 2, 2 open Known-Gaps on Phase 3, 1 open Known-Gap on Phase 4, 0 open Known-Gaps
+on Phase 7 (✅ VERIFIED); 2 phases not yet started)
 Accumulated Known-Gaps carried forward (none block progression to Phase 5 — all are
 environment/tooling gaps, not design defects):
 - Phase 1: `agent_visits` migration never applied to a real Postgres instance (Docker-gated)
@@ -586,9 +614,13 @@ environment/tooling gaps, not design defects):
   (backlog test-building stub, not scriptable)
 - Phase 4: `test_agent_verification_sweep.py` integration test unrun (Docker-gated); live vendor
   range refresh + rDNS tier remain out of scope (2 backlog notes already written)
+- Phase 7: none blocking — D5 (real-Phase-5-row re-verification) is a forward dependency on Phase
+  5's own exit gate, not an open gap in Phase 7's own proof; 2 accepted non-blocking residuals
+  (skip-counter miscategorization, D4 centralization) documented in the phase report, not backlog
+  artifacts
 Latest validator run: this UPDATE PROCESS session — see Verification Evidence run below for exit
 codes (validate-agent-parity, validate-context-discovery, validate-plan-inventory, validate-phase-
-stub for phase-04, validate-umbrella-artifact for this file)
+stub for phase-07, validate-umbrella-artifact for this file)
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any
