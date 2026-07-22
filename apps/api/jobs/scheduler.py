@@ -132,6 +132,22 @@ async def _outcome_digest_job() -> None:
         logger.exception("outcome_digest_crashed")
 
 
+async def _agent_verification_sweep_job() -> None:
+    """Periodic job: upgrade eligible ua-only agent visits to ip-verified.
+
+    run_verification_sweep opens its own row iteration with per-row fail-open
+    isolation; this wrapper opens the session and swallows any top-level crash.
+    Never touches the ingest hot path (SPEC AC5 / Resolved Open Question 2).
+    """
+    try:
+        from apps.api.services import agent_verification
+
+        async with async_session() as db:
+            await agent_verification.run_verification_sweep(db)
+    except Exception:
+        logger.exception("agent_verification_sweep_crashed")
+
+
 def start_scheduler() -> None:
     """Start the background scheduler. Call once at app startup."""
     scheduler.add_job(
@@ -168,6 +184,13 @@ def start_scheduler() -> None:
         "interval",
         hours=settings.retention_purge_interval_hours,
         id="retention_purge",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _agent_verification_sweep_job,
+        "interval",
+        minutes=settings.agent_verification_sweep_interval_minutes,
+        id="agent_verification_sweep",
         replace_existing=True,
     )
     if settings.changelog_sync_enabled:

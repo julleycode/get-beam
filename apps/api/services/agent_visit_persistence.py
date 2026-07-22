@@ -13,7 +13,7 @@ human visitor data.
 from datetime import datetime, timezone
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -110,6 +110,31 @@ async def persist_agent_visit(
             site_id=site_id,
             vendor=classification.vendor,
             error=str(exc),
+        )
+        await db.rollback()
+        return None
+
+
+async def upgrade_verification_method(db: AsyncSession, id, method: str) -> None:
+    """Upgrade one ``agent_visits`` row's ``verification_method`` by primary key.
+
+    Called by the Phase 4 verification sweep (``agent_verification`` service)
+    after a CIDR match, never on the ingest hot path. Fail-open: on any error,
+    roll back, log keys-only (``id``/``method`` — NEVER ip/UA/PII), and swallow;
+    the caller treats the upgrade as best-effort.
+    """
+    try:
+        await db.execute(
+            update(AgentVisit)
+            .where(AgentVisit.id == id)
+            .values(verification_method=method)
+        )
+        await db.commit()
+    except Exception:
+        logger.exception(
+            "agent_visit_verification_upgrade_failed",
+            id=str(id),
+            method=method,
         )
         await db.rollback()
         return None
