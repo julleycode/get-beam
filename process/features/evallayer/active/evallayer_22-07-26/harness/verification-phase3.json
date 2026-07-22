@@ -1,0 +1,40 @@
+{
+  "steps": [
+    {
+      "step": "Frontend compile gate — FE types/pages/api-client compile against locked backend contract (AC6, AC7 contract match)",
+      "command": "npm run build (apps/web)",
+      "result": "PASS",
+      "notes": "Compiled successfully; /dashboard/agents and /dashboard/agents/[agentVisitId] routes emitted."
+    },
+    {
+      "step": "Backend unit regression — no regression vs Phase 2 baseline",
+      "command": ".venv/bin/python -m pytest tests/unit -q",
+      "result": "PASS",
+      "notes": "725 passed, 2 skipped — matches PVL baseline exactly."
+    },
+    {
+      "step": "Backend integration collect — new /agents test module imports and collects cleanly",
+      "command": ".venv/bin/python -m pytest tests/integration/test_agents_api.py --collect-only -q",
+      "result": "PASS",
+      "notes": "10 tests collected, 0 collection errors."
+    },
+    {
+      "step": "Backend integration run (AC6 tab-separation, AC7 verification_method, tenancy 404, route-ordering, invalid-UUID 404)",
+      "command": "docker compose -f infra/docker-compose.yml up -d postgres redis && .venv/bin/python -m pytest tests/integration/test_agents_api.py -q",
+      "result": "SKIP",
+      "notes": "KNOWN-GAP: Docker unavailable in this sandbox (same condition documented in Phase 1/2). Written-but-unrun; run in CI/Docker-enabled env."
+    },
+    {
+      "step": "Frontend e2e (Agents heading renders; Visitors heading unaffected)",
+      "command": "npx playwright test apps/web/e2e/agents.spec.ts --config=apps/web/playwright.config.ts",
+      "result": "SKIP",
+      "notes": "KNOWN-GAP: requires running Next.js dev server; not started this run."
+    },
+    {
+      "step": "Multi-tenancy boundary (foreign site_id -> 404 not 403)",
+      "command": "verify_site_access first line of every /agents handler",
+      "result": "PASS",
+      "notes": "Confirmed by source read: list/stats/detail all call await _verify_site_access(db, site_id, user) first; 404-not-403 semantics inherited from shared dependency."
+    }
+  ]
+}

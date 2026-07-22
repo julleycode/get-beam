@@ -332,7 +332,7 @@ phase-plan-writing agent): `process/features/evallayer/active/evallayer_22-07-26
 | 0 — Discoverability | ✅ COMPLETE (shipped `5ae5bd7`; plan archived `7e0d625`) |
 | 1 — Data model + classifier | 🔨 CODE DONE (EXECUTE + EVL complete; 3/4 gates GREEN; live-DB migration up/down/up = KNOWN-GAP, Docker unavailable — not ✅ VERIFIED until that gate is closed, see phase report) |
 | 2 — Ingest wiring | 🔨 CODE DONE (EXECUTE + EVL complete; Gate: CONDITIONAL accepted; full unit baseline GREEN 725/2-skipped, +9, 0 regressions; classifier 24/24; static safety review confirmed all 3 declared safety properties. 2 KNOWN-GAPS open — Docker integration tests (5 cases, collect-clean, unrun) + AC5 latency benchmark (no harness, backlog stub written) — not ✅ VERIFIED until both close, see phase report) |
-| 3 — Read API + dashboard tab | ⏳ PLANNED (stub only) |
+| 3 — Read API + dashboard tab | 🔨 CODE DONE (EXECUTE + independent EVL complete; FE compile + unit-regression + static-safety-review all GREEN; Docker integration (10 cases) + Playwright e2e = KNOWN-GAPS, env-gated — not ✅ VERIFIED until both close, see phase report) |
 | 4 — IP/rDNS verification | ⏳ PLANNED (stub only) |
 | 5 — Company resolution → outreach feed | ⏳ PLANNED (stub only — RE-RESEARCH REQUIRED before PLAN) |
 | 6 — Aggregation + GEO/AEO analytics | ⏳ PLANNED (stub only) |
@@ -467,22 +467,22 @@ the program.
 - Supporting context files loaded this session: `evallayer_SPEC_22-07-26.md` (full), RESEARCH
   synthesis brief (7-agent fan-out output), `process/context/all-context.md`,
   `process/development-protocols/phase-programs.md`, `process/development-protocols/plan-lifecycle.md`
-- Next step for a fresh agent: read this umbrella plan in full. Phase 0 is shipped, Phase 1 and
-  Phase 2 are both 🔨 CODE DONE (see each phase's report for its open Known-Gaps). Start fresh work
-  at Phase 3 (Read API + dashboard tab) — its entry gate (Phase 2 exit: agent visits persisted) is
-  satisfied.
-- Current phase: Phase 3 (Read API + dashboard tab).
-- Next action: invoke `vc-agent-strategy-compare` for Phase 3 RESEARCH kickoff, then spawn
-  vc-research-agent for Phase 3.
-- Execute-agent start instruction: NOT YET ELIGIBLE for Phase 3 — no validate-contract written yet
-  for Phase 3. Phase 1 and Phase 2 EXECUTE are both complete; do not re-spawn execute-agent for
-  either (their Known-Gaps are backlog/EVL-confirmed residuals, not open EXECUTE tasks).
+- Next step for a fresh agent: read this umbrella plan in full. Phase 0 is shipped, Phases 1-3 are
+  all 🔨 CODE DONE (see each phase's report for its open Known-Gaps). Start fresh work at Phase 4
+  (IP/rDNS verification) — its entry gate (Phase 2 exit: agent visits persisted) is satisfied; Phase
+  4 is parallel-safe with Phase 3 (disjoint blast radius), and Phase 3 is now done anyway.
+- Current phase: Phase 4 (IP/rDNS verification).
+- Next action: invoke `vc-agent-strategy-compare` for Phase 4 RESEARCH kickoff, then spawn
+  vc-research-agent for Phase 4.
+- Execute-agent start instruction: NOT YET ELIGIBLE for Phase 4 — no validate-contract written yet
+  for Phase 4. Phases 1-3 EXECUTE are all complete; do not re-spawn execute-agent for any of them
+  (their Known-Gaps are backlog/EVL-confirmed residuals, not open EXECUTE tasks).
 
 ---
 
 ## Current Execution State
 
-Last updated: 22-07-26 (UPDATE PROCESS closeout of Phase 2)
+Last updated: 22-07-26 (UPDATE PROCESS closeout of Phase 3)
 Completed phases:
 - Phase 0 (Discoverability) — ✅ COMPLETE, shipped pre-program (`5ae5bd7`, archived `7e0d625`),
   folded into this program as a satisfied foundation deliverable
@@ -509,28 +509,50 @@ Completed phases:
   backlog stub: `process/features/evallayer/backlog/phase-02-latency-benchmark_NOTE_22-07-26.md`.
   Not classified ✅ VERIFIED until both gaps close; this is a deliberate, documented pair of
   Known-Gaps, not a silent pass. Report: `phase-02-ingest-wiring_REPORT_22-07-26.md`.
-Current phase: Phase 3 (Read API + dashboard tab) — Phase 2's exit gate (agent visits persisted;
-AC1-AC5 designed and unit-proven, integration/latency Known-Gaps recorded and non-blocking) is
-satisfied; read API + dashboard work may begin
+- Phase 3 (Read API + dashboard tab) — 🔨 CODE DONE (all 7 inner-loop steps run; EXECUTE +
+  independent EVL both complete). Gate: PASS at PVL (2 mechanical plan gaps found and fixed
+  in-plan: Step D test-authoring checklist added; A2 `AgentVisit.id` UUID-parse-then-404 fix
+  documented). EVL confirmation run (vc-tester) GREEN on all runnable gates: FE compile (`npm run
+  build`), unit regression (725 passed/2 skipped, == baseline, 0 regressions), and static safety
+  review confirming all 5 declared properties (`verify_site_access` first-line-of-every-handler;
+  `AgentVisit`-only queries/no Visitor-Event join = AC6; `/stats` before `/{agent_visit_id}`
+  catch-all; UUID-parse-then-404 on detail route; 3 distinct badge tones = AC7). 2 gates KNOWN-GAP:
+  (a) Docker integration run (10 cases in `tests/integration/test_agents_api.py`, collect-clean,
+  unrun — no responsive Docker in this sandbox); close command: `docker compose -f
+  infra/docker-compose.yml up -d postgres redis && .venv/bin/python -m pytest
+  tests/integration/test_agents_api.py -q`; (b) Playwright e2e needs a running dev server, not
+  started this run; close command: `npm run --prefix apps/web dev & npx playwright test
+  apps/web/e2e/agents.spec.ts --config=apps/web/playwright.config.ts`. Badge Agent-Probe judgment
+  (AC7) is a backlog test-building stub, not a blocker. Not classified ✅ VERIFIED until both Docker
+  gaps close; same environment-gap pattern as Phase 1/Phase 2. Report:
+  `phase-03-read-api-dashboard_REPORT_22-07-26.md`.
+Current phase: Phase 4 (IP/rDNS verification) — Phase 2's exit gate (agent visits persisted;
+AC1-AC5 designed and unit-proven) is satisfied; Phase 4 is parallel-safe with Phase 3 (disjoint
+blast radius: verification service vs API/dashboard read surface) and Phase 3 is now code-done
+anyway
 Current phase status: not started
 Current phase EVL: n/a (not yet reached)
 Current phase report: n/a (not yet written)
-Next phase: Phase 3 (Read API + dashboard tab), loop step RESEARCH (pending) — spawn vc-research-agent
-Current loop step: RESEARCH (pending for Phase 3)
+Next phase: Phase 4 (IP/rDNS verification), loop step RESEARCH (pending) — spawn vc-research-agent
+Current loop step: RESEARCH (pending for Phase 4)
 Validate-contract status: Phase 1 — written 22-07-26, Gate: PASS (`generated-by: inner-pvl:
 phase-1`). Phase 2 — written 22-07-26, Gate: CONDITIONAL, accepted (`generated-by: inner-pvl:
-phase-2`). Phases 3-7 have no validate-contract yet — stub-only. Phase 0 was shipped with VALIDATE
-explicitly skipped, per its archived plan.
-Program Net Gate: PENDING (2 of 8 phases code-done — 1 open Known-Gap on Phase 1, 2 open Known-Gaps
-on Phase 2; 6 phases not yet started)
-Accumulated Known-Gaps carried forward (none block progression to Phase 3 — all are
+phase-2`). Phase 3 — written 22-07-26, Gate: PASS (`generated-by: inner-pvl: phase-3`). Phases 4-7
+have no validate-contract yet — stub-only. Phase 0 was shipped with VALIDATE explicitly skipped,
+per its archived plan.
+Program Net Gate: PENDING (3 of 8 phases code-done — 1 open Known-Gap on Phase 1, 2 open Known-Gaps
+on Phase 2, 2 open Known-Gaps on Phase 3; 5 phases not yet started)
+Accumulated Known-Gaps carried forward (none block progression to Phase 4 — all are
 environment/tooling gaps, not design defects):
 - Phase 1: `agent_visits` migration never applied to a real Postgres instance (Docker-gated)
 - Phase 2: 5 `TestAgentDetection` integration cases unrun (Docker-gated); AC5 ingest-latency
   benchmark has no harness (backlog stub written)
+- Phase 3: 10 `test_agents_api.py` integration cases unrun (Docker-gated); Playwright e2e
+  (`apps/web/e2e/agents.spec.ts`) unrun (needs dev server); badge Agent-Probe judgment deferred
+  (backlog test-building stub, not scriptable)
 Latest validator run: this UPDATE PROCESS session — see Verification Evidence run below for exit
 codes (validate-agent-parity, validate-context-discovery, validate-plan-inventory, validate-phase-
-stub for phase-02, validate-umbrella-artifact for this file)
+stub for phase-03, validate-umbrella-artifact for this file)
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any

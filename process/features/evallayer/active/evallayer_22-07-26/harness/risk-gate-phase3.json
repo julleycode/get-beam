@@ -1,0 +1,6 @@
+{
+  "riskClass": "public-api",
+  "workDescription": "Phase 03 — net-new read-only /api/v1/agents API (list/detail/stats) + read-only Agents dashboard tab. No auth/billing/schema-migration/destructive surface; additive public API contract change only.",
+  "approver": "vc-execute-agent (autonomous /goal execution)",
+  "mustStopBeforeFinalize": true
+}
