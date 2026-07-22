@@ -1,0 +1,34 @@
+{
+  "steps": [
+    {
+      "step": "Classifier unit tests (recognized vendors, drop-only tokens, AC13 exclusion, empty/None UA)",
+      "command": "PYTHONPATH=. .venv/bin/python -m pytest tests/unit/test_agent_classifier.py -m unit -q",
+      "result": "PASS",
+      "notes": "24 passed in 0.02s"
+    },
+    {
+      "step": "Registration/import smoke — AgentVisit reachable on Base.metadata via apps.api.main import chain",
+      "command": "PYTHONPATH=. .venv/bin/python -c \"import apps.api.main; from apps.api.models.database import Base; assert 'agent_visits' in Base.metadata.tables\"",
+      "result": "PASS",
+      "notes": "OK: agent_visits registered"
+    },
+    {
+      "step": "Migration chains to a single head with no fork (offline structural check)",
+      "command": "PYTHONPATH=. .venv/bin/python -m alembic -c apps/api/alembic.ini heads",
+      "result": "PASS",
+      "notes": "Single head d11b39a6c843, chained after b8f3c1d92a47; alembic loaded the script successfully (upgrade/downgrade parse, imports resolve)"
+    },
+    {
+      "step": "Regression — full unit suite",
+      "command": "PYTHONPATH=. .venv/bin/python -m pytest tests/unit/ -q",
+      "result": "PASS",
+      "notes": "716 passed, 2 skipped (pre-existing), 1 pre-existing warning in test_optout (unrelated)"
+    },
+    {
+      "step": "Migration apply/rollback/re-apply cycle (up / down -1 / up) against live Postgres",
+      "command": "docker compose -f infra/docker-compose.yml up -d postgres; PYTHONPATH=. .venv/bin/python -m alembic -c apps/api/alembic.ini upgrade head; PYTHONPATH=. .venv/bin/python -m alembic -c apps/api/alembic.ini downgrade -1; PYTHONPATH=. .venv/bin/python -m alembic -c apps/api/alembic.ini upgrade head",
+      "result": "SKIP",
+      "notes": "KNOWN-GAP: Docker daemon unavailable in this execution environment (docker info timed out; docker-unavailable). Not faked. Must be confirmed by the independent EVL vc-tester run once Postgres is available. Offline structural checks (single head, script loads) passed as a partial substitute."
+    }
+  ]
+}

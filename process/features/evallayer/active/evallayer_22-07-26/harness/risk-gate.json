@@ -1,0 +1,6 @@
+{
+  "riskClass": "schema/migration",
+  "workDescription": "add agent_visits table (net-new agent-visit surface) + migration d11b39a6c843, plus pure agent_classifier.py service",
+  "approver": "vc-execute-agent (EvalLayer Phase 01, autonomous /goal)",
+  "mustStopBeforeFinalize": true
+}

@@ -1,0 +1,28 @@
+{
+  "snippets": [
+    {
+      "file": "apps/api/migrations/versions/b8f3c1d92a47_touchpoint_unique_campaign_visitor_channel.py",
+      "lines": "22-23",
+      "description": "Confirmed current Alembic head at EXECUTE time: revision = 'b8f3c1d92a47' (newest by mtime, nothing chains after it)",
+      "content": "revision: str = \"b8f3c1d92a47\"\ndown_revision: Union[str, None] = \"a2e6c9b4d1f8\""
+    },
+    {
+      "file": "apps/api/migrations/versions/d11b39a6c843_add_agent_visits_table.py",
+      "lines": "23-56",
+      "description": "New migration upgrade()/downgrade() bodies — creates agent_visits with 2 indexes + unique constraint; downgrade drops constraint, both indexes, then table",
+      "content": "down_revision = 'b8f3c1d92a47'; upgrade() create_table agent_visits + idx_agent_visits_vendor + idx_agent_visits_site_last_seen + uq_agent_visits_site_vendor_token; downgrade() reverses in dependency-safe order"
+    },
+    {
+      "file": "apps/api/models/agent_visit.py",
+      "lines": "11-44",
+      "description": "AgentVisit model — inherits id/created_at/updated_at from Base; page_paths typed Mapped[list[str]] JSONB mirroring visitor.py:29 / segment.py:22; resolved_company_id nullable with NO FK",
+      "content": "class AgentVisit(Base): __tablename__ = 'agent_visits'; page_paths: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)"
+    },
+    {
+      "file": "apps/api/main.py",
+      "lines": "32",
+      "description": "Model registration import (additive, mirrors line 31 outcome import comment style)",
+      "content": "from apps.api.models.agent_visit import AgentVisit  # noqa: F401 — register for create_all"
+    }
+  ]
+}
