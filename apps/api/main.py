@@ -29,6 +29,7 @@ from apps.api.models.api_usage import ApiUsageLog  # noqa: F401 — register for
 from apps.api.models.crm_connection import CrmConnection  # noqa: F401 — register for create_all
 from apps.api.models.changelog_entry import ChangelogEntry  # noqa: F401 — register for create_all
 from apps.api.models.outcome import ConversionGoal, CampaignClick, Conversion  # noqa: F401 — register for create_all
+from apps.api.models.agent_visit import AgentVisit  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
