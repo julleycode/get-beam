@@ -23,7 +23,7 @@ from apps.api.services.crm.base import (
     _http_retry,
     sanitize_error,
 )
-from apps.api.services.url_guard import is_safe_public_url
+from apps.api.services.url_guard import is_safe_public_url, pinned_client
 
 logger = structlog.get_logger()
 
@@ -39,7 +39,10 @@ class GenericWebhookConnector(CRMConnector):
     @_http_retry
     async def _post(self, webhook_url: str, secret: str, payload: dict) -> int:
         body = json.dumps(payload).encode()
-        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+        # pinned_client resolves + validates the host and connects to that exact
+        # IP, so a DNS-rebinding record cannot redirect the connect to an
+        # internal address after is_safe_public_url passed at check time.
+        async with pinned_client(timeout=HTTP_TIMEOUT) as client:
             resp = await client.post(
                 webhook_url,
                 content=body,
