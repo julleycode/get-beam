@@ -20,6 +20,7 @@ import {
   Menu,
   HelpCircle,
   Gift,
+  Bot,
 } from "lucide-react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { api } from "@/lib/api";
@@ -49,6 +50,7 @@ type NavItem = {
 const EASYTRACK_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard, tour: "overview" },
   { href: "/dashboard/visitors", label: "Visitors", icon: Users, tour: "visitors" },
+  { href: "/dashboard/agents", label: "Agents", icon: Bot, tour: "agents" },
   { href: "/dashboard/segments", label: "Segments", icon: Layers, tour: "segments" },
   { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone, tour: "campaigns" },
   { href: "/dashboard/connectors", label: "Connectors", icon: Plug, tour: "connectors" },

@@ -293,6 +293,40 @@ export interface VisitorCountry {
   count: number;
 }
 
+// Agent traffic (SPEC D1 — AI-agent visits, structurally separate from human
+// Visitor data). Field names are snake_case on the wire, matching AgentOut /
+// AgentDetailOut in apps/api/schemas/agents.py exactly (no camelCase mapping).
+export interface Agent {
+  id: string;
+  site_id: string;
+  vendor: string;
+  product_or_ua_token: string;
+  // "ua-only" | "ip-verified" | "rdns-verified"
+  verification_method: string;
+  last_seen_at: string;
+  visit_count: number;
+}
+
+export interface AgentDetail extends Agent {
+  first_seen_at: string;
+  ip_address: string | null;
+  page_paths: string[];
+  resolved_company_id: string | null;
+}
+
+export interface AgentListResponse {
+  agents: Agent[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface AgentStatsResponse {
+  total_visits: number;
+  distinct_vendors: number;
+  by_vendor: Record<string, number>;
+}
+
 export interface Segment {
   id: string;
   site_id: string;

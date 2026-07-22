@@ -34,7 +34,7 @@ from apps.api.routers import events, visitors, segments, campaigns, exports, sit
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
 from apps.api.routers import known_contacts, costs, ai, dashboard, crm, changelog, click, open_pixel
-from apps.api.routers import email_sender_oauth, outcomes, referrals
+from apps.api.routers import email_sender_oauth, outcomes, referrals, agents
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
 from slowapi import _rate_limit_exceeded_handler
@@ -186,6 +186,7 @@ app.include_router(events.router, prefix="/api/v1/events", tags=["events"])
 app.include_router(sites.router, prefix="/api/v1/sites", tags=["sites"])
 app.include_router(known_contacts.router, prefix="/api/v1/sites", tags=["known-contacts"])
 app.include_router(visitors.router, prefix="/api/v1/visitors", tags=["visitors"])
+app.include_router(agents.router, prefix="/api/v1/agents", tags=["agents"])
 app.include_router(costs.router, prefix="/api/v1/costs", tags=["costs"])
 app.include_router(ai.router, prefix="/api/v1/ai", tags=["ai"])
 app.include_router(dashboard.router, prefix="/api/v1/dashboard", tags=["dashboard"])

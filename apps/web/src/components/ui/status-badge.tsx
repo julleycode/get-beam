@@ -35,6 +35,10 @@ const STATUS_TONE: Record<string, Tone> = {
   unresolvable: "neutral",
   valid: "success",
   invalid: "destructive",
+  // agents / agent-visit verification method
+  "ua-only": "neutral",
+  "ip-verified": "info",
+  "rdns-verified": "success",
 };
 
 export function StatusBadge({

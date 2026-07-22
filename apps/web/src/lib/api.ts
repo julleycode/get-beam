@@ -19,6 +19,9 @@ import type {
   VisitorDetail,
   VisitorListResponse,
   VisitorCountry,
+  AgentDetail,
+  AgentListResponse,
+  AgentStatsResponse,
   SegmentListResponse,
   Campaign,
   CampaignListResponse,
@@ -440,6 +443,40 @@ class ApiClient {
 
   async getVisitorStats(siteId: string) {
     return this.request<SiteStats>(`/api/v1/visitors/${siteId}/stats`);
+  }
+
+  // Agents (AI-agent traffic — SPEC D1, structurally separate from Visitors)
+  async listAgents(
+    siteId: string,
+    params: {
+      page?: number;
+      page_size?: number;
+      vendor?: string;
+      verification_method?: string;
+    } = {}
+  ) {
+    const query = new URLSearchParams();
+    if (params.page) query.set("page", String(params.page));
+    if (params.page_size) query.set("page_size", String(params.page_size));
+    if (params.vendor) query.set("vendor", params.vendor);
+    if (params.verification_method)
+      query.set("verification_method", params.verification_method);
+
+    return this.request<AgentListResponse>(
+      `/api/v1/agents/${siteId}?${query.toString()}`
+    );
+  }
+
+  async getAgent(siteId: string, agentVisitId: string) {
+    return this.request<AgentDetail>(
+      `/api/v1/agents/${siteId}/${agentVisitId}`
+    );
+  }
+
+  async getAgentStats(siteId: string) {
+    return this.request<AgentStatsResponse>(
+      `/api/v1/agents/${siteId}/stats`
+    );
   }
 
   async getBrowserBreakdown(siteId: string, windowDays = 30) {
@@ -1483,6 +1520,10 @@ export type {
   OsintScan,
   VisitorListResponse,
   VisitorCountry,
+  Agent,
+  AgentDetail,
+  AgentListResponse,
+  AgentStatsResponse,
   Segment,
   SegmentListResponse,
   Campaign,
