@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.models.database import get_db, async_session
 from apps.api.models.event import Event
 from apps.api.schemas.events import EventBatch
+from apps.api.services.agent_classifier import classify_agent
+from apps.api.services.agent_visit_persistence import persist_agent_visit
 from apps.api.services.bot_filter import is_bot
 from apps.api.services.link_decorator import decode_bid
 from apps.api.services.rate_limiter import limiter
@@ -73,8 +75,20 @@ async def ingest_events(
     # Extract user-agent from request header for bot detection
     request_ua = request.headers.get("user-agent", "")
 
-    # Bot filtering — silently discard bot traffic (return 204, don't error)
-    if is_bot(request_ua):
+    from apps.api.config import settings as _settings
+
+    # EvalLayer: recognize known AI-agent UAs (OpenAI/Anthropic/Perplexity/
+    # ByteSpider) so they're classified + persisted as agent visits instead of
+    # dropped by is_bot() below. Gated OFF by default — when off, classification
+    # is None and the ingest path is byte-identical to pre-EvalLayer behavior.
+    classification = (
+        classify_agent(request_ua) if _settings.agent_detection_enabled else None
+    )
+
+    # Bot filtering — silently discard bot traffic (return 204, don't error).
+    # A recognized AI-agent UA (classification is not None) skips this drop even
+    # if it also matches _BOT_PATTERN (e.g. "gptbot"), so it can be classified.
+    if classification is None and is_bot(request_ua):
         return Response(status_code=204)
 
     try:
@@ -118,11 +132,22 @@ async def ingest_events(
 
     ip_address = _extract_ip(request)
 
+    # EvalLayer agent branch — HARD return. A recognized AI-agent visit is
+    # persisted to agent_visits and answered with 204 BEFORE any human-path code
+    # runs. It MUST NOT fall through to the datacenter/proxy-VPN drops, Client
+    # Hints, GeoIP, the Event insert, signal/conversion processing, or the
+    # background aggregation (SPEC AC2 — human tables never polluted; AC4 — agent
+    # traffic is never re-dropped by the datacenter/proxy filters). Only the first
+    # event's page_path in a multi-event batch is recorded this phase.
+    if classification is not None:
+        agent_path = batch.events[0].page_path if batch.events else None
+        await persist_agent_visit(db, batch.site_id, classification, ip_address, agent_path)
+        return Response(status_code=204)
+
     # Datacenter / cloud-compute traffic = bots (Azure/AWS/GCP server scanners,
     # AI-agent browsers that spoof a real Chrome UA and slip past is_bot above).
     # Drop silently like the UA filter. Cached + fail-open: a lookup error never
     # blocks a real visitor's events.
-    from apps.api.config import settings as _settings
     if _settings.block_datacenter_traffic:
         from apps.api.services.company_resolver import is_datacenter_ip
         if await is_datacenter_ip(ip_address):

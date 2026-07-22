@@ -136,6 +136,15 @@ class Settings(BaseSettings):
     # never blocks a real visitor.
     block_proxy_vpn_traffic: bool = True
 
+    # When true, recognized AI-agent traffic (OpenAI/Anthropic/Perplexity/
+    # ByteSpider UAs, per agent_classifier.classify_agent) is classified and
+    # persisted to the agent_visits rollup table instead of being silently
+    # dropped by is_bot(). Gates BOTH classification and persistence on the
+    # ingest hot path. Defaults OFF until the agent_visits migration is confirmed
+    # applied in prod — with the flag off, ingest behavior is byte-identical to
+    # pre-EvalLayer (recognized agent UAs fall through to the is_bot() drop).
+    agent_detection_enabled: bool = False
+
     # MaxMind GeoLite2-ASN: a FREE, unlimited, offline IP→ASN database. When
     # maxmind_asn_db_path points at a GeoLite2-ASN.mmdb, datacenter detection uses
     # it (sub-ms local lookup, no per-IP IPinfo call) and only falls back to IPinfo

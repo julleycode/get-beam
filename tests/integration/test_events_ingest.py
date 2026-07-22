@@ -237,3 +237,197 @@ class TestEmailCaptureSource:
             )
         ).scalar_one()
         assert row.source == "form"
+
+
+class TestAgentDetection:
+    """EvalLayer Phase 2 — classify-then-branch agent-visit persistence.
+
+    All cases require MOCK_EXTERNAL_APIS=true. AC1/AC2/AC4 monkeypatch
+    settings.agent_detection_enabled=True on the imported singleton (events.py
+    binds the same instance via `from apps.api.config import settings`).
+    """
+
+    _GPTBOT_UA = "Mozilla/5.0 (compatible; GPTBot/1.0; +https://openai.com/gptbot)"
+
+    @staticmethod
+    def _enable(monkeypatch, value=True):
+        from apps.api.config import settings
+        monkeypatch.setattr(settings, "agent_detection_enabled", value)
+
+    @pytest.mark.asyncio
+    async def test_ac1_gptbot_persists_agent_visit(self, test_client, test_site_id, test_db, monkeypatch):
+        """AC1: GPTBot UA + flag ON → one agent_visits row (vendor=openai) + 204."""
+        from apps.api.models.agent_visit import AgentVisit
+
+        self._enable(monkeypatch)
+        payload = {
+            "site_id": test_site_id,
+            "visitor_id": "agent-visitor-ac1",
+            "events": [{
+                "type": "pageview",
+                "url": "https://test-ingest.example.com/pricing",
+                "page_path": "/pricing",
+                "ts": "2026-05-27T00:00:00",
+            }],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={"Content-Type": "application/json", "User-Agent": self._GPTBOT_UA},
+        )
+        assert resp.status_code == 204, resp.text
+        rows = (
+            await test_db.execute(
+                select(AgentVisit).where(AgentVisit.site_id == test_site_id)
+            )
+        ).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].vendor == "openai"
+        assert rows[0].product_or_ua_token == "gptbot"
+        assert rows[0].verification_method == "ua-only"
+        assert rows[0].visit_count == 1
+        assert rows[0].page_paths == ["/pricing"]
+
+    @pytest.mark.asyncio
+    async def test_ac2_agent_batch_creates_no_human_rows(self, test_client, test_site_id, test_db, monkeypatch):
+        """AC2: agent-only batch → zero new Visitor/Event rows for the site."""
+        from apps.api.models.event import Event
+        from apps.api.models.visitor import Visitor
+
+        self._enable(monkeypatch)
+
+        async def _count(model):
+            return len((
+                await test_db.execute(select(model).where(model.site_id == test_site_id))
+            ).scalars().all())
+
+        events_before = await _count(Event)
+        visitors_before = await _count(Visitor)
+
+        payload = {
+            "site_id": test_site_id,
+            "visitor_id": "agent-visitor-ac2",
+            "events": [{
+                "type": "pageview",
+                "url": "https://test-ingest.example.com/",
+                "page_path": "/",
+                "ts": "2026-05-27T00:00:00",
+            }],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={"Content-Type": "application/json", "User-Agent": self._GPTBOT_UA},
+        )
+        assert resp.status_code == 204, resp.text
+        assert await _count(Event) == events_before
+        assert await _count(Visitor) == visitors_before
+
+    @pytest.mark.asyncio
+    async def test_ac3_googlebot_creates_no_agent_visit(self, test_client, test_site_id, test_db, monkeypatch):
+        """AC3: Googlebot → 204-dropped, NO agent_visits row (even with flag ON)."""
+        from apps.api.models.agent_visit import AgentVisit
+
+        self._enable(monkeypatch)
+        payload = {
+            "site_id": test_site_id,
+            "visitor_id": "googlebot-visitor",
+            "events": [{
+                "type": "pageview",
+                "url": "https://test-ingest.example.com/",
+                "page_path": "/",
+                "ts": "2026-05-27T00:00:00",
+            }],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "Googlebot/2.1 (+http://www.google.com/bot.html)",
+            },
+        )
+        assert resp.status_code == 204, resp.text
+        rows = (
+            await test_db.execute(
+                select(AgentVisit).where(AgentVisit.vendor == "googlebot")
+            )
+        ).scalars().all()
+        assert rows == []
+
+    @pytest.mark.asyncio
+    async def test_ac4_datacenter_flagged_ip_still_persists(self, test_client, test_site_id, test_db, monkeypatch):
+        """AC4: GPTBot + datacenter-flagged IP → visit still persists.
+
+        The agent branch hard-returns BEFORE the datacenter check, so the
+        monkeypatched is_datacenter_ip=True is never consulted for this request.
+        """
+        from apps.api.models.agent_visit import AgentVisit
+
+        self._enable(monkeypatch)
+
+        async def _always_datacenter(_ip):
+            return True
+
+        monkeypatch.setattr(
+            "apps.api.services.company_resolver.is_datacenter_ip", _always_datacenter
+        )
+
+        payload = {
+            "site_id": test_site_id,
+            "visitor_id": "agent-visitor-ac4",
+            "events": [{
+                "type": "pageview",
+                "url": "https://test-ingest.example.com/docs",
+                "page_path": "/docs",
+                "ts": "2026-05-27T00:00:00",
+            }],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": self._GPTBOT_UA,
+                "X-Forwarded-For": "203.0.113.7",
+            },
+        )
+        assert resp.status_code == 204, resp.text
+        rows = (
+            await test_db.execute(
+                select(AgentVisit).where(
+                    AgentVisit.site_id == test_site_id,
+                    AgentVisit.product_or_ua_token == "gptbot",
+                )
+            )
+        ).scalars().all()
+        assert len(rows) == 1
+
+    @pytest.mark.asyncio
+    async def test_flag_off_gptbot_dropped_no_agent_visit(self, test_client, test_site_id, test_db):
+        """flag-OFF (default): GPTBot dropped via is_bot(), 0 agent_visits rows."""
+        from apps.api.models.agent_visit import AgentVisit
+
+        # Do NOT enable the flag — exercise byte-identical pre-Phase-2 behavior.
+        payload = {
+            "site_id": test_site_id,
+            "visitor_id": "agent-visitor-off",
+            "events": [{
+                "type": "pageview",
+                "url": "https://test-ingest.example.com/",
+                "page_path": "/",
+                "ts": "2026-05-27T00:00:00",
+            }],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={"Content-Type": "application/json", "User-Agent": self._GPTBOT_UA},
+        )
+        assert resp.status_code == 204, resp.text
+        rows = (
+            await test_db.execute(
+                select(AgentVisit).where(AgentVisit.product_or_ua_token == "gptbot")
+            )
+        ).scalars().all()
+        assert rows == []
