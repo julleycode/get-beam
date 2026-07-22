@@ -29,6 +29,7 @@ if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
     "/sign-up(.*)",
     "/pricing(.*)",
     "/blog(.*)",    // public marketing blog (SEO). /dashboard/blog stays protected.
+    "/.well-known/(.*)",  // public agent-discovery manifests (ai-plugin.json)
   ]);
   handler = clerkMiddleware((auth: () => { protect: () => void }, request: NextRequest) => {
     if (!isPublicRoute(request)) {

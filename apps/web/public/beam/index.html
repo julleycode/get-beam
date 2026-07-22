@@ -22,6 +22,7 @@
 <meta name="author" content="beam" />
 <meta property="og:site_name" content="beam" />
 <meta property="og:locale" content="en_US" />
+<!-- JSON-LD offers below mirror pricing/page.tsx PLANS + billing.py — update by hand when tiers change (no build-time injection; JSON forbids inline comments) -->
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
@@ -31,12 +32,11 @@
   "description": "See who visits your site. Identify anonymous visitors, enrich their profiles, and reach out on their turf with AI-powered retargeting.",
   "applicationCategory": "BusinessApplication",
   "operatingSystem": "Web",
-  "offers": {
-    "@type": "Offer",
-    "price": "0",
-    "priceCurrency": "USD",
-    "description": "Free to start — no credit card required"
-  },
+  "offers": [
+    { "@type": "Offer", "name": "Free", "price": "0", "priceCurrency": "USD", "availability": "https://schema.org/InStock", "description": "Free to start — no credit card required" },
+    { "@type": "Offer", "name": "Pro", "price": "19", "priceCurrency": "USD", "availability": "https://schema.org/InStock", "description": "Pro — 50 identified visitors/mo" },
+    { "@type": "Offer", "name": "Max", "price": "49", "priceCurrency": "USD", "availability": "https://schema.org/InStock", "description": "Max — unlimited identified visitors" }
+  ],
   "creator": {
     "@type": "Organization",
     "name": "beam",
