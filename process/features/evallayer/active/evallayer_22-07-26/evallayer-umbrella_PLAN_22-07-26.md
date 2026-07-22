@@ -331,7 +331,7 @@ phase-plan-writing agent): `process/features/evallayer/active/evallayer_22-07-26
 |---|---|
 | 0 — Discoverability | ✅ COMPLETE (shipped `5ae5bd7`; plan archived `7e0d625`) |
 | 1 — Data model + classifier | 🔨 CODE DONE (EXECUTE + EVL complete; 3/4 gates GREEN; live-DB migration up/down/up = KNOWN-GAP, Docker unavailable — not ✅ VERIFIED until that gate is closed, see phase report) |
-| 2 — Ingest wiring | ⏳ PLANNED (stub only) |
+| 2 — Ingest wiring | 🔨 CODE DONE (EXECUTE + EVL complete; Gate: CONDITIONAL accepted; full unit baseline GREEN 725/2-skipped, +9, 0 regressions; classifier 24/24; static safety review confirmed all 3 declared safety properties. 2 KNOWN-GAPS open — Docker integration tests (5 cases, collect-clean, unrun) + AC5 latency benchmark (no harness, backlog stub written) — not ✅ VERIFIED until both close, see phase report) |
 | 3 — Read API + dashboard tab | ⏳ PLANNED (stub only) |
 | 4 — IP/rDNS verification | ⏳ PLANNED (stub only) |
 | 5 — Company resolution → outreach feed | ⏳ PLANNED (stub only — RE-RESEARCH REQUIRED before PLAN) |
@@ -467,21 +467,22 @@ the program.
 - Supporting context files loaded this session: `evallayer_SPEC_22-07-26.md` (full), RESEARCH
   synthesis brief (7-agent fan-out output), `process/context/all-context.md`,
   `process/development-protocols/phase-programs.md`, `process/development-protocols/plan-lifecycle.md`
-- Next step for a fresh agent: read this umbrella plan in full. Phase 0 is already shipped and
-  Phase 1 is code-done (see phase report for the one open Known-Gap). Start fresh work at Phase 2
-  (Ingest wiring) — its entry gate (Phase 1 exit: classifier + schema shipped) is satisfied.
-- Current phase: Phase 2 (Ingest wiring).
-- Next action: invoke `vc-agent-strategy-compare` for Phase 2 RESEARCH kickoff, then spawn
-  vc-research-agent for Phase 2.
-- Execute-agent start instruction: NOT YET ELIGIBLE for Phase 2 — no validate-contract written yet
-  for Phase 2. Phase 1 EXECUTE is complete; do not re-spawn execute-agent for Phase 1 (its Known-Gap
-  is a backlog/EVL-confirmed residual, not an open EXECUTE task).
+- Next step for a fresh agent: read this umbrella plan in full. Phase 0 is shipped, Phase 1 and
+  Phase 2 are both 🔨 CODE DONE (see each phase's report for its open Known-Gaps). Start fresh work
+  at Phase 3 (Read API + dashboard tab) — its entry gate (Phase 2 exit: agent visits persisted) is
+  satisfied.
+- Current phase: Phase 3 (Read API + dashboard tab).
+- Next action: invoke `vc-agent-strategy-compare` for Phase 3 RESEARCH kickoff, then spawn
+  vc-research-agent for Phase 3.
+- Execute-agent start instruction: NOT YET ELIGIBLE for Phase 3 — no validate-contract written yet
+  for Phase 3. Phase 1 and Phase 2 EXECUTE are both complete; do not re-spawn execute-agent for
+  either (their Known-Gaps are backlog/EVL-confirmed residuals, not open EXECUTE tasks).
 
 ---
 
 ## Current Execution State
 
-Last updated: 22-07-26 (UPDATE PROCESS closeout of Phase 1)
+Last updated: 22-07-26 (UPDATE PROCESS closeout of Phase 2)
 Completed phases:
 - Phase 0 (Discoverability) — ✅ COMPLETE, shipped pre-program (`5ae5bd7`, archived `7e0d625`),
   folded into this program as a satisfied foundation deliverable
@@ -494,20 +495,42 @@ Completed phases:
   because the schema/migration gate — the phase's highest-risk-class gate — has not actually run
   live; this is a deliberate, documented Known-Gap, not a silent pass. Report:
   `phase-01-data-model-classifier_REPORT_22-07-26.md`.
-Current phase: Phase 2 (Ingest wiring) — Phase 1's exit gate (classifier + schema shipped) is
-satisfied; ingest wiring may begin
+- Phase 2 (Ingest wiring) — 🔨 CODE DONE (all 7 inner-loop steps run; EXECUTE + independent EVL both
+  complete). Gate: CONDITIONAL, accepted this session (autonomous). Full unit baseline GREEN (725
+  passed, 2 skipped — Phase 1 baseline 716, +9, 0 regressions); classifier 24/24; static safety
+  review (independent vc-tester, in lieu of a live Docker run) confirmed all 3 declared safety
+  properties: (1) agent branch hard-returns before the `Event` insert (AC2), (2) flag-off is
+  byte-identical to pre-Phase-2 behavior (AC3/regression-safe), (3) `persist_agent_visit` is
+  fail-open (logs keys-only, rolls back, never raises). 2 gates KNOWN-GAP: (a) 5
+  `TestAgentDetection` integration cases (AC1-AC4 + flag-OFF) are collect-clean but unrun — no
+  responsive Docker in this sandbox at either EXECUTE or EVL time; close command:
+  `MOCK_EXTERNAL_APIS=true .venv/bin/python -m pytest tests/integration/test_events_ingest.py -k
+  "agent or datacenter" -m integration -q`; (b) AC5 (ingest latency benchmark) has no harness yet —
+  backlog stub: `process/features/evallayer/backlog/phase-02-latency-benchmark_NOTE_22-07-26.md`.
+  Not classified ✅ VERIFIED until both gaps close; this is a deliberate, documented pair of
+  Known-Gaps, not a silent pass. Report: `phase-02-ingest-wiring_REPORT_22-07-26.md`.
+Current phase: Phase 3 (Read API + dashboard tab) — Phase 2's exit gate (agent visits persisted;
+AC1-AC5 designed and unit-proven, integration/latency Known-Gaps recorded and non-blocking) is
+satisfied; read API + dashboard work may begin
 Current phase status: not started
 Current phase EVL: n/a (not yet reached)
 Current phase report: n/a (not yet written)
-Next phase: Phase 2 (Ingest wiring), loop step RESEARCH (pending) — spawn vc-research-agent
-Current loop step: RESEARCH (pending for Phase 2)
+Next phase: Phase 3 (Read API + dashboard tab), loop step RESEARCH (pending) — spawn vc-research-agent
+Current loop step: RESEARCH (pending for Phase 3)
 Validate-contract status: Phase 1 — written 22-07-26, Gate: PASS (`generated-by: inner-pvl:
-phase-1`). Phases 2-7 have no validate-contract yet — stub-only. Phase 0 was shipped with VALIDATE
+phase-1`). Phase 2 — written 22-07-26, Gate: CONDITIONAL, accepted (`generated-by: inner-pvl:
+phase-2`). Phases 3-7 have no validate-contract yet — stub-only. Phase 0 was shipped with VALIDATE
 explicitly skipped, per its archived plan.
-Program Net Gate: PENDING (1 of 8 phases code-done with 1 open Known-Gap; 7 phases not yet started)
+Program Net Gate: PENDING (2 of 8 phases code-done — 1 open Known-Gap on Phase 1, 2 open Known-Gaps
+on Phase 2; 6 phases not yet started)
+Accumulated Known-Gaps carried forward (none block progression to Phase 3 — all are
+environment/tooling gaps, not design defects):
+- Phase 1: `agent_visits` migration never applied to a real Postgres instance (Docker-gated)
+- Phase 2: 5 `TestAgentDetection` integration cases unrun (Docker-gated); AC5 ingest-latency
+  benchmark has no harness (backlog stub written)
 Latest validator run: this UPDATE PROCESS session — see Verification Evidence run below for exit
 codes (validate-agent-parity, validate-context-discovery, validate-plan-inventory, validate-phase-
-stub for phase-01, validate-umbrella-artifact for this file)
+stub for phase-02, validate-umbrella-artifact for this file)
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any

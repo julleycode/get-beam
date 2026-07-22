@@ -39,3 +39,40 @@ regression 716 passed/2 skipped/no regression); live-DB migration up/down/up cyc
 KNOWN-GAP (Docker unavailable in sandbox at both EXECUTE and EVL time) — close-the-gap command
 recorded in the phase report. Phase classified 🔨 CODE DONE (not ✅ VERIFIED) in the umbrella
 pending that gap.
+
+---
+
+## Phase 2
+
+Plan: `process/features/evallayer/active/evallayer_22-07-26/phase-02-ingest-wiring_PLAN_22-07-26.md`
+
+Blast radius (confirmed real, no collisions with any other phase — verified 2026-07-22 at PVL
+against Phase 1's DONE entry above and Phase 3's planned blast radius, both disjoint from the
+files below):
+
+- `apps/api/routers/events.py` (modified — ingest hot path restructure)
+- `apps/api/services/agent_visit_persistence.py` (new)
+- `apps/api/config.py` (modified — new `agent_detection_enabled` flag)
+- `tests/unit/test_agent_visit_persistence.py` (new)
+- `tests/integration/test_events_ingest.py` (modified — extended)
+
+No overlap with Phase 1 (`agent_visit.py`, migration, `agent_classifier.py`, `main.py`,
+`test_agent_classifier.py` — all consumed read-only here) or Phase 3 (`agents.py`,
+`schemas/agents.py`, `dashboard/agents/*`, `layout.tsx`, `api.ts`/`api-types.ts` — none touched
+this phase).
+
+status: DONE — EXECUTE + independent EVL both complete 2026-07-22. Gate: CONDITIONAL (accepted,
+session/autonomous). EXECUTE shipped all 5 blast-radius files as claimed; EVL confirmed full unit
+baseline GREEN (725 passed, 2 skipped — Phase 1 baseline was 716, +9, 0 regressions; classifier
+24/24) and, in lieu of a live Docker run, a static safety review confirming all 3 declared safety
+properties (agent branch hard-returns before the Event insert; flag-off is byte-identical to
+pre-Phase-2 behavior; `persist_agent_visit` is fail-open — logs keys-only, rolls back, never
+raises). Two Known-Gaps remain open and are NOT blockers to this DONE annotation (both
+environment/tooling gaps, not design defects): (1) the 5 `TestAgentDetection` integration cases
+(AC1-AC4 + flag-OFF) are collect-clean but unrun — no responsive Docker daemon in this sandbox at
+either EXECUTE or EVL time; close command: `MOCK_EXTERNAL_APIS=true .venv/bin/python -m pytest
+tests/integration/test_events_ingest.py -k "agent or datacenter" -m integration -q`; (2) AC5
+(ingest latency benchmark) has no harness yet — backlog stub:
+`process/features/evallayer/backlog/phase-02-latency-benchmark_NOTE_22-07-26.md`. Phase classified
+🔨 CODE DONE (not ✅ VERIFIED) in the umbrella pending closure of both gaps. See phase plan's
+Validate Contract and phase report for full findings.
