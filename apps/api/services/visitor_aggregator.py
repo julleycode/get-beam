@@ -7,6 +7,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.visitor import Visitor
+from apps.api.services.ai_referral import classify_ai_source
 
 logger = structlog.get_logger()
 
@@ -164,6 +165,7 @@ async def _upsert_visitor(
     country_code: str | None,
     device_type: str | None,
     ip_address: str | None,
+    first_touch_referrer: str | None = None,
     do_not_resolve: bool = False,
 ) -> None:
     """Upsert a single visitor row into the visitors table."""
@@ -185,6 +187,11 @@ async def _upsert_visitor(
     first_seen = _strip_tz(first_seen)
     last_seen = _strip_tz(last_seen)
 
+    # ADDITIVE ATTRIBUTION METADATA ONLY. ai_source labels the AI answer engine
+    # that referred a HUMAN click; it never sets source_agent_visit_id and never
+    # gates emailability. AI-referred humans stay ordinary emailable visits.
+    ai_source = classify_ai_source(first_touch_referrer)
+
     stmt = pg_insert(Visitor).values(
         site_id=site_id,
         visitor_id=visitor_id,
@@ -196,6 +203,8 @@ async def _upsert_visitor(
         max_scroll_depth=max_scroll_depth,
         pages_visited=pages_visited or [],
         top_referrer=top_referrer or None,
+        first_touch_referrer=first_touch_referrer or None,
+        ai_source=ai_source,
         utm_source=utm_source or None,
         utm_medium=utm_medium or None,
         country_code=country_code or None,
@@ -213,6 +222,11 @@ async def _upsert_visitor(
             "avg_time_on_page": avg_time_on_page,
             "max_scroll_depth": text("GREATEST(visitors.max_scroll_depth, :new_scroll)").bindparams(new_scroll=max_scroll_depth),
             "pages_visited": pages_visited or [],
+            # SET (not increment) — full-recompute contract. first_touch_referrer
+            # and its derived ai_source are recomputed from the entry pageview
+            # each run. Both stay attribution-only (never source_agent_visit_id).
+            "first_touch_referrer": first_touch_referrer or None,
+            "ai_source": ai_source,
             "ip_address": ip_address or Visitor.ip_address,
             "intent_score": intent,
             # Sticky opt-out: once true it stays true, even if a later recompute
@@ -277,6 +291,7 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
             COALESCE(AVG(time_on_page) FILTER (WHERE time_on_page > 0), 0) AS avg_time_on_page,
             ARRAY_AGG(DISTINCT url) FILTER (WHERE event_type = 'pageview' AND url != '') AS pages_visited,
             MAX(referrer) FILTER (WHERE referrer != '') AS top_referrer,
+            (ARRAY_AGG(referrer ORDER BY created_at ASC) FILTER (WHERE event_type = 'pageview' AND referrer != ''))[1] AS first_touch_referrer,
             MAX(utm_source) FILTER (WHERE utm_source != '') AS utm_source,
             MAX(utm_medium) FILTER (WHERE utm_medium != '') AS utm_medium,
             MAX(country_code) FILTER (WHERE country_code != '') AS country_code,
@@ -292,8 +307,8 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
         (
             visitor_id, first_seen, last_seen, total_pageviews,
             total_sessions, max_scroll_depth, avg_time_on_page, pages_visited,
-            top_referrer, utm_source, utm_medium, country_code, device_type,
-            latest_ip, do_not_resolve,
+            top_referrer, first_touch_referrer, utm_source, utm_medium,
+            country_code, device_type, latest_ip, do_not_resolve,
         ) = row
 
         await _upsert_visitor(
@@ -307,6 +322,7 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
             pages_visited or [],
             top_referrer, utm_source, utm_medium, country_code, device_type,
             latest_ip,
+            first_touch_referrer=first_touch_referrer,
             do_not_resolve=bool(do_not_resolve),
         )
         count += 1

@@ -20,6 +20,10 @@ class VisitorOut(BaseModel):
     utm_medium: str | None
     country_code: str | None
     device_type: str | None
+    # AI answer-engine that referred this human click (chatgpt/perplexity/…).
+    # Additive attribution only — never affects emailability. VisitorDetailOut
+    # inherits it. None = not AI-referred (direct/search/social/own-domain).
+    ai_source: str | None = None
     intent_score: float
     identity_status: str
     enrichment_status: str
@@ -96,6 +100,14 @@ class VisitorCountryOut(BaseModel):
     site's visitors came from it (GeoIP-derived country_code on Visitor)."""
 
     country_code: str
+    count: int
+
+
+class VisitorAiSourceOut(BaseModel):
+    """One row of the Source (AI-referral) filter dropdown: an AI answer-engine
+    label and how many of this site's visitors arrived via it."""
+
+    ai_source: str
     count: int
 
 

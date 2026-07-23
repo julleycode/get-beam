@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { aiSourceLabel } from "@/lib/ai-sources";
 import { SlidersHorizontal, SearchX, Target } from "lucide-react";
 import { TableSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
@@ -76,6 +77,9 @@ export default function VisitorsPage() {
   const [visitorType, setVisitorType] = useState("all");
   // "all" | "known" | "unknown" — match against the owner's known-contacts list.
   const [knownFilter, setKnownFilter] = useState("all");
+  // "all" | "__any__" | a concrete ai_source label — AI-referral Source facet.
+  // Attribution-only; never affects emailability.
+  const [source, setSource] = useState("all");
 
   // Filters shared by the list AND the country facet, so the dropdown counts
   // reflect the same predicates as the rows. The country filter is NOT in here
@@ -110,7 +114,7 @@ export default function VisitorsPage() {
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: [
       "visitors", siteId, page, filter, sortBy,
-      firstFrom, firstTo, lastFrom, lastTo, country, visitorType, knownFilter,
+      firstFrom, firstTo, lastFrom, lastTo, country, visitorType, knownFilter, source,
     ],
     queryFn: () =>
       api.listVisitors(siteId, {
@@ -118,6 +122,7 @@ export default function VisitorsPage() {
         page,
         page_size: 50,
         country: country === "all" ? undefined : country,
+        ai_source: source === "all" ? undefined : source,
         sort_by: sortBy,
       }),
     enabled: !!siteId,
@@ -128,6 +133,19 @@ export default function VisitorsPage() {
   const { data: countries } = useQuery({
     queryKey: ["visitor-countries", siteId, facetParams],
     queryFn: () => api.getVisitorCountries(siteId, facetParams),
+    enabled: !!siteId,
+  });
+
+  // AI-referral Source options (with counts) — faceted like countries. Kept out
+  // of facetParams so the facet doesn't self-constrain; country still constrains
+  // it (cross-facet) via the explicit pass-through.
+  const { data: aiSources } = useQuery({
+    queryKey: ["visitor-ai-sources", siteId, facetParams, country],
+    queryFn: () =>
+      api.getVisitorAiSources(siteId, {
+        ...facetParams,
+        country: country === "all" ? undefined : country,
+      }),
     enabled: !!siteId,
   });
 
@@ -142,11 +160,25 @@ export default function VisitorsPage() {
     return list;
   })();
 
+  // Keep the selected source visible even if faceted counts dropped it to zero.
+  const sourceOptions = (() => {
+    const list = aiSources ?? [];
+    if (
+      source !== "all" &&
+      source !== "__any__" &&
+      !list.some((s) => s.ai_source === source)
+    ) {
+      return [...list, { ai_source: source, count: 0 }];
+    }
+    return list;
+  })();
+
   const hasFilters =
     filter !== "all" ||
     country !== "all" ||
     visitorType !== "all" ||
     knownFilter !== "all" ||
+    source !== "all" ||
     !!(firstFrom || firstTo || lastFrom || lastTo);
 
   function clearFilters() {
@@ -154,6 +186,7 @@ export default function VisitorsPage() {
     setCountry("all");
     setVisitorType("all");
     setKnownFilter("all");
+    setSource("all");
     setFirstFrom("");
     setFirstTo("");
     setLastFrom("");
@@ -491,6 +524,28 @@ export default function VisitorsPage() {
               </SelectContent>
             </Select>
           </div>
+          <div className="flex flex-col gap-1">
+            <label
+              className="text-xs font-medium text-muted-foreground"
+              title="Which AI answer engine referred this visitor (ChatGPT, Perplexity, …). Attribution only."
+            >
+              Source
+            </label>
+            <Select value={source} onValueChange={(v) => { setSource(v); setPage(1); }}>
+              <SelectTrigger className="h-9 w-[170px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All sources</SelectItem>
+                <SelectItem value="__any__">Any AI referral</SelectItem>
+                {sourceOptions.map((s) => (
+                  <SelectItem key={s.ai_source} value={s.ai_source}>
+                    {aiSourceLabel(s.ai_source)} ({s.count})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           {hasFilters && (
             <Button variant="ghost" size="sm" onClick={clearFilters}>
               Clear filters
@@ -590,6 +645,14 @@ export default function VisitorsPage() {
                           title={`Returning — ${v.total_sessions} visits Beam has seen (not your CRM)`}
                         >
                           Returning
+                        </span>
+                      )}
+                      {v.ai_source && (
+                        <span
+                          className="shrink-0 rounded bg-info-muted px-1.5 py-0.5 text-[10px] font-medium text-info"
+                          title={`Arrived via ${aiSourceLabel(v.ai_source)} — clicked an AI answer-engine citation`}
+                        >
+                          via {aiSourceLabel(v.ai_source)}
                         </span>
                       )}
                       {v.is_known && (

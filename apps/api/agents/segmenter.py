@@ -91,6 +91,12 @@ async def build_visitor_profiles(
             "pages_visited": v.pages_visited,
             "device_type": v.device_type,
             "country_code": v.country_code,
+            # AI-referral attribution signal (chatgpt/perplexity/…), so Gemini can
+            # carve an "Arrived via ChatGPT" segment. Signal, NOT a bypass:
+            # segmentation still only runs on ENRICHED visitors (prior resolution
+            # required) and there is NO intent-score boost in v1. ai_source never
+            # affects emailability — these stay ordinary emailable humans.
+            "ai_source": v.ai_source,
         }
         identified = id_map.get(v.visitor_id)
         if identified:

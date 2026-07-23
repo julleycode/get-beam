@@ -76,6 +76,7 @@ async def _build_visitor_filters(
     country: str | None = None,
     visitor_type: str | None = None,
     known: bool | None = None,
+    ai_source: str | None = None,
     first_seen_from: datetime | None = None,
     first_seen_to: datetime | None = None,
     last_seen_from: datetime | None = None,
@@ -102,6 +103,13 @@ async def _build_visitor_filters(
         filters.append(Visitor.enrichment_status == enrichment_status)
     if country:
         filters.append(Visitor.country_code == country)
+    # AI-referral Source facet. A concrete label filters to that engine; the
+    # "__any__" sentinel means "any AI-referred visitor" (ai_source IS NOT NULL).
+    # Attribution-only — this filter never affects emailability.
+    if ai_source == "__any__":
+        filters.append(Visitor.ai_source.isnot(None))
+    elif ai_source:
+        filters.append(Visitor.ai_source == ai_source)
     # "new" = seen in a single session; "returning" = came back (2+ sessions).
     # total_sessions is the lifetime session count (gap > 30 min) and is always
     # >= 1, so "new" is effectively == 1. This is Beam's own visit signal, NOT a

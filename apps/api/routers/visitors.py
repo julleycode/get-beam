@@ -26,6 +26,7 @@ from apps.api.routers.visitors_helpers import (
 )
 from apps.api.schemas.visitors import (
     ManualIdentifyRequest,
+    VisitorAiSourceOut,
     VisitorCountryOut,
     VisitorDetailOut,
     VisitorListResponse,
@@ -61,6 +62,7 @@ async def list_visitors(
     country: str | None = Query(None, max_length=5),
     visitor_type: str | None = None,  # "new" | "returning" — by session count
     known: bool | None = None,  # match against the owner's known-contacts list
+    ai_source: str | None = None,  # AI-referral label, or "__any__" for any AI source
     first_seen_from: datetime | None = None,
     first_seen_to: datetime | None = None,
     last_seen_from: datetime | None = None,
@@ -86,6 +88,7 @@ async def list_visitors(
         country=country,
         visitor_type=visitor_type,
         known=known,
+        ai_source=ai_source,
         first_seen_from=first_seen_from,
         first_seen_to=first_seen_to,
         last_seen_from=last_seen_from,
@@ -233,6 +236,59 @@ async def list_visitor_countries(
     stmt = stmt.group_by(Visitor.country_code).order_by(func.count().desc())
     rows = await db.execute(stmt)
     return [VisitorCountryOut(country_code=r.country_code, count=r.count) for r in rows]
+
+
+@router.get("/{site_id}/ai-sources", response_model=list[VisitorAiSourceOut])
+async def list_visitor_ai_sources(
+    site_id: str,
+    identity_status: str | None = None,
+    enrichment_status: str | None = None,
+    country: str | None = Query(None, max_length=5),
+    visitor_type: str | None = None,
+    known: bool | None = None,
+    first_seen_from: datetime | None = None,
+    first_seen_to: datetime | None = None,
+    last_seen_from: datetime | None = None,
+    last_seen_to: datetime | None = None,
+    min_intent: float | None = None,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[VisitorAiSourceOut]:
+    """Distinct AI answer-engine sources for this site's visitors, with counts,
+    ordered by count desc. Feeds the Source filter dropdown on the Visitors page.
+
+    Faceted exactly like the country facet: honours every other active filter but
+    NOT the ai_source predicate itself (a facet must not constrain its own
+    counts). ``ai_source IS NOT NULL`` excludes non-AI-referred visitors, and
+    ``human_only_visitor_filter()`` (inherited at the _build_visitor_filters choke
+    point) excludes synthetic agent-derived rows. Attribution-only surface —
+    never touches emailability. Defined before /{visitor_id} so "ai-sources"
+    isn't swallowed as a visitor id."""
+    await _verify_site_access(db, site_id, user)
+    filters = await _build_visitor_filters(
+        db,
+        site_id,
+        identity_status=identity_status,
+        enrichment_status=enrichment_status,
+        country=country,
+        visitor_type=visitor_type,
+        known=known,
+        ai_source=None,  # faceted: don't constrain the facet by itself
+        first_seen_from=first_seen_from,
+        first_seen_to=first_seen_to,
+        last_seen_from=last_seen_from,
+        last_seen_to=last_seen_to,
+        min_intent=min_intent,
+    )
+    stmt = (
+        select(Visitor.ai_source, func.count().label("count"))
+        .where(Visitor.site_id == site_id, Visitor.ai_source.isnot(None))
+    )
+    for predicate in filters:
+        stmt = stmt.where(predicate)
+    stmt = stmt.group_by(Visitor.ai_source).order_by(func.count().desc())
+    rows = await db.execute(stmt)
+    return [VisitorAiSourceOut(ai_source=r.ai_source, count=r.count) for r in rows]
 
 
 @router.get("/{site_id}/stats", response_model=VisitorStatsResponse)

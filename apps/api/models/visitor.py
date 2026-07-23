@@ -14,6 +14,7 @@ class Visitor(Base):
         Index("idx_visitors_site_intent", "site_id", "intent_score"),
         Index("idx_visitors_identity_status", "site_id", "identity_status"),
         Index("idx_visitors_site_enrichment", "site_id", "enrichment_status"),
+        Index("idx_visitors_site_ai_source", "site_id", "ai_source"),
         Index("uq_visitors_site_visitor", "site_id", "visitor_id", unique=True),
     )
 
@@ -28,6 +29,14 @@ class Visitor(Base):
     max_scroll_depth: Mapped[int] = mapped_column(Integer, default=0)
     pages_visited: Mapped[list[str]] = mapped_column(JSONB, default=list)
     top_referrer: Mapped[str | None] = mapped_column(String(500))
+    # Chronologically-first pageview referrer (true first-touch). top_referrer is
+    # MAX(referrer) = lexicographic, unusable for attribution — this is the real
+    # entry referrer, set by the aggregator's ARRAY_AGG(... ORDER BY created_at).
+    first_touch_referrer: Mapped[str | None] = mapped_column(String(500))
+    # AI answer-engine attribution label derived from first_touch_referrer via
+    # classify_ai_source(). ADDITIVE ATTRIBUTION METADATA ONLY — never sets
+    # source_agent_visit_id, never gates emailability or any guardrail.
+    ai_source: Mapped[str | None] = mapped_column(String(30))
     utm_source: Mapped[str | None] = mapped_column(String(200))
     utm_medium: Mapped[str | None] = mapped_column(String(200))
     country_code: Mapped[str | None] = mapped_column(String(5))

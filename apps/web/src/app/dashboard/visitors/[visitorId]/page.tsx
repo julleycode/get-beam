@@ -19,6 +19,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { api, OsintAccount, SocialPost, VisitorDetail } from "@/lib/api";
+import { aiSourceLabel } from "@/lib/ai-sources";
 import { cn } from "@/lib/utils";
 import { CardGridSkeleton, PageHeaderSkeleton, StatGridSkeleton } from "@/components/skeletons";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -444,6 +445,14 @@ export default function VisitorDetailPage() {
               {isCompanyLevel && (
                 <StatusBadge status="company" label="Company-level" tone="warning" />
               )}
+              {visitor.ai_source && (
+                <span
+                  className="rounded-full bg-info-muted px-2.5 py-0.5 text-xs font-medium text-info"
+                  title={`Arrived via ${aiSourceLabel(visitor.ai_source)} — clicked an AI answer-engine citation`}
+                >
+                  via {aiSourceLabel(visitor.ai_source)}
+                </span>
+              )}
             </div>
 
             <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -785,6 +794,7 @@ export default function VisitorDetailPage() {
               <InfoRow label="Device">{visitor.device_type || "Unknown"}</InfoRow>
               <InfoRow label="Country">{visitor.country_code || "Unknown"}</InfoRow>
               {visitor.top_referrer && <InfoRow label="Referrer">{visitor.top_referrer}</InfoRow>}
+              {visitor.ai_source && <InfoRow label="Arrived via">{aiSourceLabel(visitor.ai_source)}</InfoRow>}
               {visitor.utm_source && <InfoRow label="Source">{visitor.utm_source}</InfoRow>}
             </div>
           </CollapsibleSection>

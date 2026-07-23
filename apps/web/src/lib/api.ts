@@ -19,9 +19,11 @@ import type {
   VisitorDetail,
   VisitorListResponse,
   VisitorCountry,
+  VisitorAiSource,
   AgentDetail,
   AgentListResponse,
   AgentStatsResponse,
+  AgentAnalytics,
   SegmentListResponse,
   Campaign,
   CampaignListResponse,
@@ -371,6 +373,7 @@ class ApiClient {
       country?: string;
       visitor_type?: string; // "new" | "returning" (by session count)
       known?: boolean; // true = in the owner's known-contacts list
+      ai_source?: string; // AI-referral label, or "__any__" for any AI source
       // Date bounds as "YYYY-MM-DD". *_to is exclusive — pass the day AFTER the
       // chosen end date (see nextDay() on the Visitors page) to include it.
       first_seen_from?: string;
@@ -389,6 +392,7 @@ class ApiClient {
     if (params.country) query.set("country", params.country);
     if (params.visitor_type) query.set("visitor_type", params.visitor_type);
     if (params.known !== undefined) query.set("known", String(params.known));
+    if (params.ai_source) query.set("ai_source", params.ai_source);
     if (params.first_seen_from) query.set("first_seen_from", params.first_seen_from);
     if (params.first_seen_to) query.set("first_seen_to", params.first_seen_to);
     if (params.last_seen_from) query.set("last_seen_from", params.last_seen_from);
@@ -435,6 +439,42 @@ class ApiClient {
     );
   }
 
+  // AI-referral sources (with counts) for this site's visitors — populates the
+  // Source filter dropdown. Faceted like countries: pass the other active filters
+  // so each count reflects what the list would show (the ai_source filter itself
+  // is deliberately excluded server-side). Attribution-only surface.
+  async getVisitorAiSources(
+    siteId: string,
+    params: {
+      identity_status?: string;
+      enrichment_status?: string;
+      country?: string;
+      visitor_type?: string;
+      known?: boolean;
+      first_seen_from?: string;
+      first_seen_to?: string;
+      last_seen_from?: string;
+      last_seen_to?: string;
+      min_intent?: number;
+    } = {}
+  ) {
+    const query = new URLSearchParams();
+    if (params.identity_status) query.set("identity_status", params.identity_status);
+    if (params.enrichment_status) query.set("enrichment_status", params.enrichment_status);
+    if (params.country) query.set("country", params.country);
+    if (params.visitor_type) query.set("visitor_type", params.visitor_type);
+    if (params.known !== undefined) query.set("known", String(params.known));
+    if (params.first_seen_from) query.set("first_seen_from", params.first_seen_from);
+    if (params.first_seen_to) query.set("first_seen_to", params.first_seen_to);
+    if (params.last_seen_from) query.set("last_seen_from", params.last_seen_from);
+    if (params.last_seen_to) query.set("last_seen_to", params.last_seen_to);
+    if (params.min_intent !== undefined) query.set("min_intent", String(params.min_intent));
+    const qs = query.toString();
+    return this.request<VisitorAiSource[]>(
+      `/api/v1/visitors/${siteId}/ai-sources${qs ? `?${qs}` : ""}`
+    );
+  }
+
   async getVisitor(siteId: string, visitorId: string) {
     return this.request<VisitorDetail>(
       `/api/v1/visitors/${siteId}/${visitorId}`
@@ -476,6 +516,12 @@ class ApiClient {
   async getAgentStats(siteId: string) {
     return this.request<AgentStatsResponse>(
       `/api/v1/agents/${siteId}/stats`
+    );
+  }
+
+  async getAgentAnalytics(siteId: string) {
+    return this.request<AgentAnalytics>(
+      `/api/v1/agents/${siteId}/analytics`
     );
   }
 
@@ -1520,10 +1566,13 @@ export type {
   OsintScan,
   VisitorListResponse,
   VisitorCountry,
+  VisitorAiSource,
   Agent,
   AgentDetail,
   AgentListResponse,
   AgentStatsResponse,
+  AgentAnalytics,
+  TopPageEntry,
   Segment,
   SegmentListResponse,
   Campaign,

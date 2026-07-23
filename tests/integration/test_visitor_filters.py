@@ -75,16 +75,23 @@ async def filter_setup(test_client, test_db):
     # counts (total_sessions: 1 = new, >1 = returning).
     test_db.add(_visitor(site_id, "v-us-enriched",
         country_code="US", first_seen=datetime(2026, 6, 1), last_seen=datetime(2026, 6, 5),
-        identity_status="identified", enrichment_status="enriched", total_sessions=1))
+        identity_status="identified", enrichment_status="enriched", total_sessions=1,
+        ai_source="chatgpt"))
     test_db.add(_visitor(site_id, "v-vn-mid",
         country_code="VN", first_seen=datetime(2026, 6, 10), last_seen=datetime(2026, 6, 12),
-        total_sessions=3))
+        total_sessions=3, ai_source="perplexity"))
     test_db.add(_visitor(site_id, "v-us-late",
         country_code="US", first_seen=datetime(2026, 6, 20), last_seen=datetime(2026, 6, 21),
-        total_sessions=2))
+        total_sessions=2, ai_source="chatgpt"))
     test_db.add(_visitor(site_id, "v-nocountry",
         country_code=None, first_seen=datetime(2026, 6, 15), last_seen=datetime(2026, 6, 15),
         total_sessions=1))
+    # An agent-derived synthetic row carrying an ai_source — must be EXCLUDED from
+    # every human-facing surface (list + facet), proving human_only_visitor_filter
+    # still applies to the AI-referral facet (AC-F1).
+    test_db.add(_visitor(site_id, "v-agent-derived",
+        country_code="US", first_seen=datetime(2026, 6, 18), last_seen=datetime(2026, 6, 18),
+        total_sessions=1, ai_source="chatgpt", is_agent_derived=True))
     # v-us-enriched has an identified email so known-contacts matching has a target.
     test_db.add(IdentifiedVisitor(
         site_id=site_id, visitor_id="v-us-enriched", email="jane@acme.com",
@@ -217,6 +224,57 @@ class TestVisitorFilters:
         assert resp.status_code == 200, resp.text
         counts = {r["country_code"]: r["count"] for r in resp.json()}
         assert counts == {"US": 2, "VN": 1}
+
+    @pytest.mark.asyncio
+    async def test_ai_sources_facet(self, test_client, filter_setup):
+        """AC-F1: /ai-sources returns faceted counts, excludes NULL ai_source AND
+        the agent-derived synthetic row (human_only_visitor_filter)."""
+        resp = await test_client.get(
+            f"/api/v1/visitors/{filter_setup['site_id']}/ai-sources",
+            headers=_auth(filter_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        rows = resp.json()
+        counts = {r["ai_source"]: r["count"] for r in rows}
+        # chatgpt: v-us-enriched + v-us-late (v-agent-derived EXCLUDED). perplexity: v-vn-mid.
+        assert counts == {"chatgpt": 2, "perplexity": 1}
+        assert rows[0]["ai_source"] == "chatgpt"  # ordered by count desc
+
+    @pytest.mark.asyncio
+    async def test_ai_sources_facet_honors_other_filters(self, test_client, filter_setup):
+        """AC-F1: the facet honours other active filters (country=VN → only perplexity)."""
+        resp = await test_client.get(
+            f"/api/v1/visitors/{filter_setup['site_id']}/ai-sources?country=VN",
+            headers=_auth(filter_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        counts = {r["ai_source"]: r["count"] for r in resp.json()}
+        assert counts == {"perplexity": 1}
+
+    @pytest.mark.asyncio
+    async def test_ai_source_list_filter(self, test_client, filter_setup):
+        """AC-F2: ?ai_source=chatgpt filters the list and total matches (excludes
+        the agent-derived row)."""
+        resp = await test_client.get(
+            f"/api/v1/visitors/{filter_setup['site_id']}?ai_source=chatgpt",
+            headers=_auth(filter_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert _ids(body) == {"v-us-enriched", "v-us-late"}
+        assert body["total"] == 2
+
+    @pytest.mark.asyncio
+    async def test_ai_source_any_sentinel(self, test_client, filter_setup):
+        """AC-F2: ?ai_source=__any__ returns every AI-referred human (not agent)."""
+        resp = await test_client.get(
+            f"/api/v1/visitors/{filter_setup['site_id']}?ai_source=__any__",
+            headers=_auth(filter_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert _ids(body) == {"v-us-enriched", "v-us-late", "v-vn-mid"}
+        assert body["total"] == 3
 
 
 @pytest_asyncio.fixture

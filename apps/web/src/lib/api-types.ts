@@ -186,6 +186,9 @@ export interface Visitor {
   utm_medium: string | null;
   country_code: string | null;
   device_type: string | null;
+  // AI answer-engine that referred this human click (chatgpt/perplexity/…).
+  // Additive attribution only — never affects emailability.
+  ai_source?: string | null;
   intent_score: number;
   identity_status: string;
   enrichment_status: string;
@@ -293,6 +296,11 @@ export interface VisitorCountry {
   count: number;
 }
 
+export interface VisitorAiSource {
+  ai_source: string;
+  count: number;
+}
+
 // Agent traffic (SPEC D1 — AI-agent visits, structurally separate from human
 // Visitor data). Field names are snake_case on the wire, matching AgentOut /
 // AgentDetailOut in apps/api/schemas/agents.py exactly (no camelCase mapping).
@@ -325,6 +333,19 @@ export interface AgentStatsResponse {
   total_visits: number;
   distinct_vendors: number;
   by_vendor: Record<string, number>;
+}
+
+// Read-only GEO/AEO analytics snapshot — matches AgentAnalyticsResponse /
+// TopPageEntry in apps/api/schemas/agents.py field-for-field (snake_case wire).
+export interface TopPageEntry {
+  path: string;
+  count: number;
+}
+
+export interface AgentAnalytics {
+  by_vendor: Record<string, number>;
+  top_pages: TopPageEntry[];
+  by_verification: Record<string, number>;
 }
 
 export interface Segment {
