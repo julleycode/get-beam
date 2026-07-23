@@ -54,3 +54,6 @@ class AgentAnalyticsResponse(BaseModel):
     by_vendor: dict[str, int]
     top_pages: list[TopPageEntry]
     by_verification: dict[str, int]
+    # Handoff Detection H2 (AC-H2-4): count of fetch↔click handoff links for the
+    # site — how many agent fetches were correlated to a human AI-referral click.
+    handoff_links_count: int

@@ -19,6 +19,7 @@ from apps.api.schemas.agents import (
 from apps.api.services.agent_aggregator import (
     aggregate_agent_analytics,
     fetch_agent_visit_rows,
+    fetch_handoff_links_count,
 )
 
 logger = structlog.get_logger()
@@ -120,7 +121,8 @@ async def get_agent_analytics(
     await _verify_site_access(db, site_id, user)
 
     rows = await fetch_agent_visit_rows(db, site_id)
-    result = aggregate_agent_analytics(rows)
+    handoff_links_count = await fetch_handoff_links_count(db, site_id)
+    result = aggregate_agent_analytics(rows, handoff_links_count)
     return AgentAnalyticsResponse(**result)
 
 

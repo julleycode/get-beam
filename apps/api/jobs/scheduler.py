@@ -166,6 +166,25 @@ async def _agent_verification_sweep_job() -> None:
         logger.exception("agent_verification_sweep_crashed")
 
 
+async def _handoff_correlation_sweep_job() -> None:
+    """Periodic job: link recent on-demand agent fetches to human AI-referral clicks.
+
+    run_handoff_correlation_sweep opens its own per-row fail-open iteration; this
+    wrapper opens the session and swallows any top-level crash. Never touches the
+    ingest hot path (SPEC Constraint 4). Handoff Detection H2 — its own job, NOT
+    chained into _agent_verification_sweep_job.
+    """
+    try:
+        from apps.api.services.agent_handoff_correlation import (
+            run_handoff_correlation_sweep,
+        )
+
+        async with async_session() as db:
+            await run_handoff_correlation_sweep(db)
+    except Exception:
+        logger.exception("handoff_correlation_sweep_crashed")
+
+
 def start_scheduler() -> None:
     """Start the background scheduler. Call once at app startup."""
     scheduler.add_job(
@@ -209,6 +228,13 @@ def start_scheduler() -> None:
         "interval",
         minutes=settings.agent_verification_sweep_interval_minutes,
         id="agent_verification_sweep",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _handoff_correlation_sweep_job,
+        "interval",
+        minutes=settings.handoff_correlation_sweep_interval_minutes,
+        id="handoff_correlation_sweep",
         replace_existing=True,
     )
     if settings.changelog_sync_enabled:

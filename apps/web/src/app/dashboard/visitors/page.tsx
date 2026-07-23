@@ -655,6 +655,14 @@ export default function VisitorsPage() {
                           via {aiSourceLabel(v.ai_source)}
                         </span>
                       )}
+                      {v.handoff_confidence && (
+                        <span
+                          className="shrink-0 rounded bg-info-muted px-1.5 py-0.5 text-[10px] font-medium text-info"
+                          title={`Likely the human behind recent AI-agent research — ${v.handoff_confidence} confidence. Correlated signal, not a certainty.`}
+                        >
+                          AI research
+                        </span>
+                      )}
                       {v.is_known && (
                         <span
                           className="shrink-0 rounded bg-success-muted px-1.5 py-0.5 text-[10px] font-medium text-success"

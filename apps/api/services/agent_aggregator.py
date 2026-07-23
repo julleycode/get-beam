@@ -8,9 +8,10 @@ fetch (``fetch_agent_visit_rows``) is separated from the pure aggregation
 """
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.models.agent_handoff_link import AgentHandoffLink
 from apps.api.models.agent_visit import AgentVisit
 
 logger = structlog.get_logger()
@@ -44,10 +45,30 @@ async def fetch_agent_visit_rows(db: AsyncSession, site_id: str) -> list[dict]:
     return rows
 
 
-def aggregate_agent_analytics(rows: list[dict], top_n: int = 10) -> dict:
+async def fetch_handoff_links_count(db: AsyncSession, site_id: str) -> int:
+    """Count fetch↔click handoff links for a site (Handoff Detection H2, AC-H2-4).
+
+    Sibling DB-fetch to ``fetch_agent_visit_rows`` — keeps the DB read out of the
+    pure ``aggregate_agent_analytics``. SELECTs ONLY from ``agent_handoff_links``
+    filtered by ``site_id`` — no join, no ``Visitor``/``Event`` reference.
+    """
+    query = select(func.count()).select_from(AgentHandoffLink).where(
+        AgentHandoffLink.site_id == site_id
+    )
+    result = await db.execute(query)
+    return int(result.scalar() or 0)
+
+
+def aggregate_agent_analytics(
+    rows: list[dict], handoff_links_count: int, top_n: int = 10
+) -> dict:
     """Pure aggregation over agent-visit rows — no DB, no I/O, unit-testable.
 
-    Returns a dict with three fields:
+    ``handoff_links_count`` is passed in by the caller (fetched via the sibling
+    ``fetch_handoff_links_count`` DB read) and echoed into the result dict,
+    keeping this function's pure/no-DB contract intact.
+
+    Returns a dict with four fields:
     - ``by_vendor``: sum of ``visit_count`` grouped by ``vendor``.
     - ``top_pages``: for each distinct path in any row's ``page_paths``, the sum
       of ``visit_count`` of every row containing it; sorted descending by count
@@ -92,4 +113,5 @@ def aggregate_agent_analytics(rows: list[dict], top_n: int = 10) -> dict:
         "by_vendor": by_vendor,
         "top_pages": top_pages,
         "by_verification": by_verification,
+        "handoff_links_count": handoff_links_count,
     }

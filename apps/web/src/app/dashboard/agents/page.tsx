@@ -162,6 +162,16 @@ function AgentAnalyticsCards({ siteId }: { siteId: string }) {
               ))}
             </div>
           )}
+          {/* Handoff Detection H2: agent fetches correlated to a human click. */}
+          <div
+            className="mt-3 border-t pt-3 text-xs text-muted-foreground"
+            title="Agent fetches Beam correlated to a human AI-referral click on the same page (probabilistic)."
+          >
+            Human handoffs detected:{" "}
+            <span className="font-mono tabular-nums text-foreground">
+              {data.handoff_links_count}
+            </span>
+          </div>
         </CardContent>
       </Card>
     </div>

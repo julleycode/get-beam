@@ -356,6 +356,7 @@ class Settings(BaseSettings):
     sync_interval_minutes: int = 60
     resolution_sweep_interval_minutes: int = 30  # APScheduler identity-resolution sweep cadence
     agent_verification_sweep_interval_minutes: int = 15  # APScheduler agent IP-verification sweep cadence
+    handoff_correlation_sweep_interval_minutes: int = 10  # APScheduler fetch↔click handoff correlation sweep cadence (H2)
     # Data retention (GDPR data minimization / privacy-policy 90-day promise):
     # raw events older than this are auto-purged. Enriched profiles are kept.
     event_retention_days: int = 90

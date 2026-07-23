@@ -181,6 +181,31 @@ async def list_visitors(
                     v.is_known = True
                     v.known_source = known_src[h]
 
+    # Handoff Detection H2: flag which of this page's visitors have a fetch↔click
+    # handoff link, for a list-row pill. One query for the whole page (not N) —
+    # prefer the strongest confidence when a visitor has multiple links.
+    if vids:
+        from apps.api.models.agent_handoff_link import AgentHandoffLink
+
+        handoff_rows = await db.execute(
+            select(
+                AgentHandoffLink.visitor_id,
+                AgentHandoffLink.confidence,
+            ).where(
+                AgentHandoffLink.site_id == site_id,
+                AgentHandoffLink.visitor_id.in_(vids),
+            )
+        )
+        handoff_map: dict[str, str] = {}
+        for r in handoff_rows:
+            # "high" beats "medium" if a visitor has more than one link.
+            if handoff_map.get(r.visitor_id) == "high":
+                continue
+            handoff_map[r.visitor_id] = r.confidence
+        for v in visitors:
+            if v.visitor_id in handoff_map:
+                v.handoff_confidence = handoff_map[v.visitor_id]
+
     for v in visitors:
         v.conviction = build_conviction(v.model_dump())
 
@@ -632,6 +657,36 @@ async def get_visitor_detail(
     )
     data["auto_draft_count"] = draft_count_result.scalar() or 0
     data["conviction"] = build_conviction(data)
+
+    # Handoff Detection H2 (AC-H2-1/4): surface the latest fetch↔click handoff link
+    # for this visitor, if any. Read-only, additive — PROBABILISTIC attribution, and
+    # NEVER a factor in emailability (separate write path from source_agent_visit_id).
+    from apps.api.models.agent_fetch_event import AgentFetchEvent
+    from apps.api.models.agent_handoff_link import AgentHandoffLink
+
+    handoff_result = await db.execute(
+        select(AgentHandoffLink, AgentFetchEvent)
+        .join(
+            AgentFetchEvent,
+            AgentFetchEvent.id == AgentHandoffLink.agent_fetch_event_id,
+        )
+        .where(
+            AgentHandoffLink.site_id == site_id,
+            AgentHandoffLink.visitor_id == visitor_id,
+        )
+        .order_by(AgentHandoffLink.created_at.desc())
+        .limit(1)
+    )
+    handoff_row = handoff_result.first()
+    if handoff_row is not None:
+        link, fetch_event = handoff_row
+        data.update({
+            "handoff_vendor": fetch_event.vendor,
+            "handoff_confidence": link.confidence,
+            "handoff_delta_seconds": link.delta_seconds,
+            "handoff_matched_page": link.matched_page,
+            "handoff_fetch_at": fetch_event.created_at,
+        })
 
     return VisitorDetailOut(**data)
 

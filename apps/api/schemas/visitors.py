@@ -42,6 +42,10 @@ class VisitorOut(BaseModel):
     # One-line "why this person matters" — derived from behaviour (+ enrichment
     # on the detail view). None when there's no signal worth surfacing.
     conviction: str | None = None
+    # Handoff Detection H2: confidence of the strongest fetch↔click handoff link
+    # for this visitor ("high"/"medium"), or None when no link exists. List-row
+    # pill only — PROBABILISTIC, never affects emailability.
+    handoff_confidence: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -71,6 +75,16 @@ class VisitorDetailOut(VisitorOut):
     resolution_providers_tried: list[str] | None = None
     resolution_skip_reason: str | None = None  # below_intent_threshold | no_ip_address | recently_attempted | daily_budget_exhausted | monthly_plan_limit_reached | privacy_opt_out | awaiting_next_run
     coverage_note: str | None = None  # set for 'unresolvable' visitors the US-only provider stack structurally can't match (e.g. non-US residential)
+    # Handoff Detection H2 (SPEC AC-H2-1/4): the latest fetch↔click handoff link
+    # for this visitor, if any. PROBABILISTIC attribution only — an AI agent
+    # fetched this page shortly before the visit. Never a certainty assertion, and
+    # NEVER affects emailability (separate write path from source_agent_visit_id).
+    # All None = no handoff link.
+    handoff_vendor: str | None = None
+    handoff_confidence: str | None = None  # "high" | "medium" (low is never written)
+    handoff_delta_seconds: int | None = None
+    handoff_matched_page: str | None = None
+    handoff_fetch_at: datetime | None = None
 
 
 class VisitorStatsResponse(BaseModel):

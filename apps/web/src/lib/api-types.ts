@@ -200,6 +200,9 @@ export interface Visitor {
   is_known?: boolean;
   known_source?: string | null;
   conviction?: string | null;
+  // Handoff Detection H2: strongest fetch↔click handoff link confidence
+  // ("high"/"medium"), or null/undefined when none. PROBABILISTIC list-row pill.
+  handoff_confidence?: string | null;
 }
 
 export interface VisitorDetail extends Visitor {
@@ -226,6 +229,14 @@ export interface VisitorDetail extends Visitor {
     osint_scan?: OsintScan;
     social_resolution?: SocialResolution;
   } | null;
+  // Handoff Detection H2: latest fetch↔click handoff link for this visitor, if
+  // any. PROBABILISTIC attribution only (an AI agent fetched this page shortly
+  // before the visit) — never a certainty assertion, never affects emailability.
+  handoff_vendor?: string | null;
+  handoff_confidence?: string | null; // "high" | "medium"
+  handoff_delta_seconds?: number | null;
+  handoff_matched_page?: string | null;
+  handoff_fetch_at?: string | null;
 }
 
 export interface SocialResolution {
@@ -346,6 +357,8 @@ export interface AgentAnalytics {
   by_vendor: Record<string, number>;
   top_pages: TopPageEntry[];
   by_verification: Record<string, number>;
+  // Handoff Detection H2: agent fetches correlated to a human AI-referral click.
+  handoff_links_count: number;
 }
 
 export interface Segment {

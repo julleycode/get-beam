@@ -177,6 +177,30 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
+// Handoff Detection H2: friendly label for a fetch-side agent vendor.
+const HANDOFF_VENDOR_LABELS: Record<string, string> = {
+  openai: "ChatGPT",
+  anthropic: "Claude",
+  perplexity: "Perplexity",
+};
+
+function handoffVendorLabel(vendor: string): string {
+  return HANDOFF_VENDOR_LABELS[vendor] ?? vendor;
+}
+
+// PROBABILISTIC copy only (AC-H2-4) — a correlated signal, never a certainty.
+// Deliberately hedged: "likely", "may indicate", "confidence" qualifier.
+function handoffCopy(visitor: VisitorDetail): string {
+  const vendor = handoffVendorLabel(visitor.handoff_vendor ?? "");
+  const secs = visitor.handoff_delta_seconds ?? 0;
+  const mins = Math.max(1, Math.round(secs / 60));
+  return (
+    `${vendor} fetched this page about ${mins} min before this visit — ` +
+    `${visitor.handoff_confidence} confidence this human may be the person behind that AI research. ` +
+    `Correlated signal, not a certainty.`
+  );
+}
+
 function CompletenessBar({ value }: { value: number }) {
   const pct = Math.round(value * 100);
   const color = pct >= 80 ? "bg-success" : pct >= 50 ? "bg-warning" : "bg-primary";
@@ -451,6 +475,15 @@ export default function VisitorDetailPage() {
                   title={`Arrived via ${aiSourceLabel(visitor.ai_source)} — clicked an AI answer-engine citation`}
                 >
                   via {aiSourceLabel(visitor.ai_source)}
+                </span>
+              )}
+              {visitor.handoff_vendor && visitor.handoff_confidence && (
+                <span
+                  className="rounded-full bg-info-muted px-2.5 py-0.5 text-xs font-medium text-info"
+                  title={handoffCopy(visitor)}
+                >
+                  {handoffVendorLabel(visitor.handoff_vendor)} fetch ·{" "}
+                  {visitor.handoff_confidence} confidence
                 </span>
               )}
             </div>
@@ -795,6 +828,9 @@ export default function VisitorDetailPage() {
               <InfoRow label="Country">{visitor.country_code || "Unknown"}</InfoRow>
               {visitor.top_referrer && <InfoRow label="Referrer">{visitor.top_referrer}</InfoRow>}
               {visitor.ai_source && <InfoRow label="Arrived via">{aiSourceLabel(visitor.ai_source)}</InfoRow>}
+              {visitor.handoff_vendor && visitor.handoff_confidence && (
+                <InfoRow label="AI research signal">{handoffCopy(visitor)}</InfoRow>
+              )}
               {visitor.utm_source && <InfoRow label="Source">{visitor.utm_source}</InfoRow>}
             </div>
           </CollapsibleSection>
