@@ -114,18 +114,47 @@ after re-reading H2's diff (per umbrella Pre-PVL Conflict Resolution).
 
 Plan: `process/features/evallayer/active/handoff_23-07-26/phase-03-intent-signals_PLAN_23-07-26.md`
 
-Blast radius (planned, not yet executed):
+Blast radius (PVL-confirmed 24-07-26, not yet executed):
 
-- new intent-signal service (location TBD by INNOVATE)
-- `apps/api/jobs/scheduler.py` — **shared with Phase 2; Phase 3 must additively append after
-  re-reading Phase 2's actual diff (reassign classification, see umbrella Pre-PVL Conflict
-  Resolution)**
-- `apps/api/services/hot_alert.py` (reused, not modified)
-- `apps/api/routers/` (new or extended endpoint)
-- `apps/web/src/app/dashboard/` (widget additions)
+- `apps/api/services/agent_intent_signals.py` (new — locked name, confirmed at PVL)
+- `apps/api/services/hot_alert.py` (add `maybe_send_intent_alert` sibling function; existing
+  `maybe_send_hot_alert` untouched — confirmed via full re-read)
+- `apps/api/services/agent_aggregator.py` (new sibling DB-fetch fn
+  `fetch_recent_ai_researched_companies` + extended `aggregate_agent_analytics` echo param —
+  corrected at PVL to preserve the function's pure/no-DB contract, mirrors H2's identical
+  Section-D correction)
+- `apps/api/schemas/agents.py` (add `RecentAiResearchEntry`, extend `AgentAnalyticsResponse`)
+- `apps/api/config.py` (1 new setting: `intent_signal_sweep_interval_minutes`)
+- `apps/api/jobs/scheduler.py` — **shared with Phase 2 (DONE); Phase 3 registers additively AFTER
+  H2's `handoff_correlation_sweep` job — re-confirmed live at PVL: still exact lines 233-236, no
+  drift since H2's EVL. Reassign classification unchanged.**
+- `apps/web/src/lib/api-types.ts` (extend `AgentAnalytics`, add `RecentAiResearchEntry`)
+- `apps/web/src/app/dashboard/agents/page.tsx` (new card/section: "Appeared after AI research")
 - `tests/unit/test_intent_alerts.py` (new)
+- No new migration, no new table, no schema change — on-read design only (confirmed at PVL).
 
-status: (no field — not yet executed)
+status: DONE — executed 24-07-26; all 9 files modified within blast radius; unit gates green (924 passed incl. 24 new + 1 updated aggregator shape test), FE build exit 0; Docker-gated live sweep remains a known-gap (integration test written + collect-clean). Two within-blast-radius deviations recorded in the phase report (vendor+multiplier params on `maybe_send_intent_alert`; separate `intent_alert:spike:` dedup key).
+
+PVL confirmation (24-07-26): blast radius above re-verified against live source at VALIDATE time
+(all listed files/lines confirmed to exist and match plan text; `scheduler.py` insertion point
+re-confirmed at exact lines 233-236, zero drift since H2's EVL). 2 CONCERNs found and fixed in
+plan text this pass — HTML-escaping gap in alert copy (E-B1), pure-function contract violation in
+company-correlation design (E-D1, corrected to a sibling DB-fetch function + named the
+`company_graph` join as the primary candidate) — plus 1 Docker-gated Hybrid known-gap (live
+scheduler sweep -> email delivery). Confirmed disjoint from Phase 1 (H1, DONE) and Phase 4 (H4,
+not started); `scheduler.py` sharing with Phase 2 (H2, DONE) unchanged from umbrella's `reassign`
+classification — H2 registered first, H3 appends after. Gate: CONDITIONAL (2 CONCERNs fixed in
+plan text; 1 Docker-gated Hybrid residual — see
+`handoff-program-docker-verification-gaps_NOTE_23-07-26.md`).
+
+EVL confirmation (24-07-26, UPDATE PROCESS): independent re-run of gate commands GREEN on all
+H3-owned gates (24/24 unit tests, FE build exit 0). `git diff --stat` on the 9-file blast radius
+confirmed zero drift from the plan. One foreign, out-of-blast-radius failure found during the
+full-suite re-run (`test_pixel.py::test_source_under_20kb`, caused by the concurrent
+`first-party-capture_24-07-26` session's `apps/pixel/src/tracker.js` change) — not an H3 defect,
+no action taken. Still disjoint from H1 (DONE) and H2 (DONE); `scheduler.py` sharing with H2
+unchanged — H2's job registered first, H3 appended after, confirmed at both PVL and EVL. No
+overlap with H4 (not started).
 
 ---
 

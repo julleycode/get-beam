@@ -313,7 +313,7 @@ During /goal execution of a phase program:
 | 0 — Pre-program (plan creation) | ✅ COMPLETE |
 | 01 — Fetch events + tiering (H1) | 🔨 CODE DONE (Docker gaps) |
 | 02 — Handoff correlation (H2) | 🔨 CODE DONE (Docker gaps) |
-| 03 — Intent signals (H3) | ⏳ PLANNED |
+| 03 — Intent signals (H3) | 🔨 CODE DONE (Docker gaps) |
 | 04 — Watermark feasibility (H4) | ⏳ PLANNED |
 
 Status values: ⏳ PLANNED | 🔨 CODE DONE | 🧪 TESTING | ✅ VERIFIED | 🚧 BLOCKED | ✅ COMPLETE
@@ -427,7 +427,7 @@ cd /Users/apple/getbeam && python -m pytest tests/unit/ tests/integration/ -q
 
 ## Current Execution State
 
-Last updated: 24-07-26
+Last updated: 24-07-26 (H3 UPDATE PROCESS)
 Completed phases: Phase 0 (Planning), Phase 1 — Fetch events + tiering (H1) — CODE DONE, EVL-confirmed
   green on all fully-automated gates; 2 Hybrid gates (Alembic upgrade/downgrade cycle, E7 live
   retention purge) remain Docker-gated known-gaps, tracked in
@@ -439,22 +439,36 @@ Completed phases: Phase 0 (Planning), Phase 1 — Fetch events + tiering (H1) �
   click-through — "human behind the agent" resolved at high/medium confidence, emailable status
   untouched in both directions. 1 Docker-gated Hybrid gap (live sweep + migration cycle) remains as
   known-gap, tracked in the same backlog note (H2 rows).
-Current phase: Phase 3 — Intent signals (H3)
-Current loop step: RESEARCH (pending)
+  Phase 3 — Intent signals (H3) — CODE DONE, EVL-confirmed green on all H3-owned Fully-Automated
+  gates (24/24 unit + FE build exit 0; 9-file blast radius matches plan with zero drift). No new
+  migration/table this phase (on-read design). 1 Docker-gated Hybrid gap (live sweep -> email
+  delivery) remains as known-gap, tracked in the same backlog note (H3 rows). One EVL-time
+  observation: a foreign, out-of-blast-radius test failure
+  (`test_pixel.py::test_source_under_20kb`) was found during the full-suite re-run, caused by the
+  concurrent `first-party-capture_24-07-26` session's `apps/pixel/src/tracker.js` change — not an
+  H3 defect, no action taken on it here.
+Current phase: Phase 4 — Watermark feasibility (H4)
+Current loop step: RESEARCH (pending) — probe prep. **H4 is MANUAL-FIRST**: the live-provider
+  probe (`needs-live-provider` cost-class) requires explicit double opt-in from the founder before
+  any dispatch — this is a hard-stop class per the Program Goal Charter and Stable Program Goal,
+  never auto-run under `/goal`. RESEARCH/INNOVATE/PLAN-SUPPLEMENT/PVL for H4 may still proceed
+  normally up to the point of the actual probe dispatch.
 Validate-contract status: Phase 1 written (Gate: CONDITIONAL, pre-accepted Docker-gated residuals);
-  Phase 2 written (Gate: CONDITIONAL, pre-accepted Docker-gated residual); Phase 3 not yet written
-Program Net Gate: PENDING (2 of 4 phases code-done)
+  Phase 2 written (Gate: CONDITIONAL, pre-accepted Docker-gated residual); Phase 3 written (Gate:
+  CONDITIONAL, 2 CONCERNs fixed in plan text, 1 Docker-gated residual); Phase 4 not yet written
+Program Net Gate: PENDING (3 of 4 phases code-done; program is effectively 3/4 code-complete —
+  H4 is the only remaining phase, and it is gated on user participation, not autonomous execution)
 Latest validator run: 24-07-26 — see this UPDATE PROCESS closeout
 Cross-program note: Phase 1's migration (`c4e8f1a9d2b7`) has three foreign/downstream migrations
   chained onto it (`f8a2c1d9b3e7`, `a3e9f1c7d2b5` — visitors-identity "owned-data-layer" program;
   `e2a4c7f81b93` — this program's own H2 migration). Chain confirmed linear single head, no fork —
   but the visitors-identity program's live-apply remains blocked on this program's migrations being
-  committed. Prioritize the H1+H2 execution commit.
-Scheduler coordination note: H2's correlation-sweep job is registered in `apps/api/jobs/scheduler.py`
-  (own `add_job(...)` call, additive). Per the umbrella's Pre-PVL Conflict Resolution (`reassign`
-  classification), H3's Phase 3 INNOVATE/PLAN-SUPPLEMENT step MUST re-read the live diff to
-  `scheduler.py` before adding its own spike-detector job registration — append additively, never
-  edit H2's registration block.
+  committed. Prioritize the H1+H2+H3 execution commit (H3 adds no migration, so this doesn't change
+  the migration chain, but source files remain uncommitted).
+Scheduler coordination note: H2's correlation-sweep job and H3's intent-signal sweep job are both
+  registered in `apps/api/jobs/scheduler.py`, additive, H3 after H2 — confirmed zero drift at H3's
+  PVL and EVL passes. H4 has no scheduler job (manual probe only) — no further coordination needed
+  in this file for the remainder of the program.
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any
