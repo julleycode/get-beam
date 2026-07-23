@@ -540,22 +540,57 @@ cd apps/api && ../../.venv/bin/alembic upgrade head   # against disposable integ
 
 ## Phase Loop Progress
 
-- [ ] Phase 1 — Durable company graph + cross-tenant full-profile reuse
+- [x] Phase 1 — Durable company graph + cross-tenant full-profile reuse
   - [x] Step 1: RESEARCH (this plan's grounded facts are the initial research; re-confirm `alembic heads` + `BeamIdentityNode` current columns at EXECUTE time — VALIDATE independently re-confirmed both on 23-07-26)
   - [x] Step 2: INNOVATE (n/a — approach already decided, see task header)
   - [x] Step 3: PLAN-SUPPLEMENT (n/a — RESEARCH re-confirmation at VALIDATE surfaced no drift for Phase 1)
   - [x] Step 4: PVL (validate-contract — Gate: PASS, 23-07-26)
-  - [ ] Step 5: EXECUTE
-  - [ ] Step 6: EVL
-  - [ ] Step 7: UPDATE PROCESS
-- [ ] Phase 2 — SendGrid open/click → identity_signals
+  - [x] Step 5: EXECUTE (commit `54cf384` — migration `f8a2c1d9b3e7`, code-complete)
+  - [x] Step 6: EVL (unit gates green — see Closeout below; Hybrid/integration lane deferred, Docker-gated)
+  - [x] Step 7: UPDATE PROCESS — archived; context updated; committed
+- [x] Phase 2 — SendGrid open/click → identity_signals
   - [x] Step 1: RESEARCH (re-confirm SendGrid payload shape via vc-docs-seeker before EXECUTE — see Known Gap; VALIDATE additionally found and resolved the custom_args/site_id gap, checklist items 11-15)
   - [x] Step 2: INNOVATE (n/a — approach already decided)
   - [x] Step 3: PLAN-SUPPLEMENT (VALIDATE applied a plan-fix supplement directly — see Phase 2 Additional Checklist Items)
   - [x] Step 4: PVL (validate-contract — Gate: PASS, 23-07-26)
-  - [ ] Step 5: EXECUTE
-  - [ ] Step 6: EVL
-  - [ ] Step 7: UPDATE PROCESS
+  - [x] Step 5: EXECUTE (commit `94852a9` — migration `a3e9f1c7d2b5`, code-complete)
+  - [x] Step 6: EVL (unit gates green — see Closeout below; Hybrid/integration lane + SendGrid live-payload known-gap deferred)
+  - [x] Step 7: UPDATE PROCESS — archived; context updated; committed
+
+---
+
+## Closeout (UPDATE PROCESS, 23-07-26)
+
+**Classification: WITH_GAPS — code-complete + unit-verified. Kept in `active/` (not archived to
+`completed/`) pending Docker-gated integration/migration-apply verification.**
+
+Rationale for keeping active rather than archiving: per the vacuous-green ban, AC2b, AC3
+(persistence half), AC8, and the identity_signals persistence gate all have their proving test
+tier as Hybrid (needs real Postgres) — those gates have never actually run. The plan is CODE DONE,
+not VERIFIED per this plan's own `## Phase Completion Rules`. Archiving now would misrepresent an
+unrun Hybrid gate as closed. See the Docker-verification gap note (linked below) for the exact
+close sequence to run once a disposable Postgres+Redis instance is available.
+
+**Commits:**
+- `54cf384` — `feat(identity): durable company_graph + cross-tenant full-profile reuse` (Phase 1)
+- `94852a9` — `feat(identity): identity_signals corroborating edges from SendGrid open/click` (Phase 2)
+- `24a0dcd` — `process(visitors-identity): owned-data-layer plan + validate-contract`
+
+**EVL (independent orchestrator confirmation run, 23-07-26):**
+- `.venv/bin/python -m pytest tests/unit -q` → **875 passed, 2 skipped** (full `tests/unit/` collection, no marker filter)
+- `.venv/bin/python -m pytest tests/unit -m unit -q` → 319 passed, 2 skipped, 556 deselected (marker-scoped subset; baseline at VALIDATE was 270 passed/2 skipped/554 deselected)
+- `.venv/bin/python -m pytest tests/unit/test_agent_origin_exclusion.py -q` → **18 passed** (regression baseline held, file unmodified)
+- Corroborating-only invariant (`corroborate_identity()` never creates/upgrades `IdentifiedVisitor`) — grep-verified: `apps/api/services/identity_signals.py` imports `IdentifiedVisitor`/`Visitor` for read-only SELECTs only (write-gate + join lookups), no write path imported. Matches the structural invariant required by AC5 and the plan's hard safety constraint.
+- Both flags (`company_graph_enabled`, `identity_signals_enabled`) confirmed `False` (default) in `apps/api/config.py` — no real-environment behavior change shipped.
+- **Deferred (Docker-gated, not run this session):** `tests/integration/test_company_graph_persistence.py`, `tests/integration/test_identity_signals_persistence.py`, `alembic upgrade head` against a disposable container. See `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`.
+- **Known-gaps (accepted at VALIDATE, unchanged):** SendGrid live open/click payload shape + `custom_args` echo shape unverified against a real payload (Agent-Probe, docs-seeker route not yet run); account-level SendGrid tracking-settings override behavior (needs-live-provider, not probed per policy).
+
+**Docker-verification gap note:** `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`
+
+**Next action to promote to VERIFIED / archive:** run the close sequence in the gap note against a
+disposable Postgres+Redis, confirm the two Hybrid persistence tests and the migration
+apply/downgrade/apply round-trip, then re-open UPDATE PROCESS to move this task folder to
+`completed/`.
 
 ---
 

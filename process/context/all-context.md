@@ -1,6 +1,6 @@
 # Beam - All Context
 
-Last updated: 2026-07-21
+Last updated: 2026-07-23
 
 This file is the root context entrypoint for the repo.
 
@@ -197,11 +197,15 @@ structurally separate from human Visitor/Event data, never as a targetable outre
 - `apps/api/services/agent_aggregator.py` — read-only vendor/page/verification-method analytics,
   `GET /api/v1/agents/{site_id}/analytics`
 - Feature flag: `agent_detection_enabled` in `apps/api/config.py` — **defaults OFF**
-- 3 migrations pending live-apply (Docker-gated, never run against a real Postgres in the sandbox
-  that built this): `d11b39a6c843` (agent_visits table), `a1c7e4f92b83` (Phase 5
-  visitor.is_agent_derived / IdentifiedVisitor.source_agent_visit_id), and the AI-referral
-  migration below (`b3f9a1d2c7e5`) — apply all three in order before enabling
-  `agent_detection_enabled` in any real environment
+- 6 migrations pending live-apply, in order (Docker-gated, never run against a real Postgres in
+  the sandbox that built this — chain verified by reading each file's `revision`/`down_revision`
+  header on 23-07-26): `d11b39a6c843` (agent_visits table) → `a1c7e4f92b83` (Phase 5
+  visitor.is_agent_derived / IdentifiedVisitor.source_agent_visit_id) → `b3f9a1d2c7e5` (AI-referral,
+  see below) → `c4e8f1a9d2b7` (Handoff Detection Phase H1, agent_fetch_events) → `f8a2c1d9b3e7`
+  (company_graph, owned-data-layer Phase 1) → `a3e9f1c7d2b5` (identity_signals, owned-data-layer
+  Phase 2 — current head). Apply all six in order before enabling `agent_detection_enabled`,
+  `company_graph_enabled`, or `identity_signals_enabled` in any real environment. Re-confirm via
+  `alembic heads` before applying — other work may advance the head further.
 - Docker/live-integration known-gaps consolidated in
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`
 
@@ -217,6 +221,44 @@ dashboard; fed into the segmenter as a signal (not a bypass). Safety: `ai_source
 metadata on a separate write path from `source_agent_visit_id` — `is_emailable_identity` never
 reads it, and AI-referred humans stay fully emailable (the opposite guarantee from EvalLayer's
 agent-exclusion guardrail — these are real humans, not agents).
+
+## Owned Identity Data Layer (v1, shipped 23-07-26 — code-complete, WITH_GAPS)
+
+Makes every paid/free identity+company lookup a permanent, cross-tenant asset instead of a
+transient cache hit, and adds a strictly corroborating (never identity-creating) signal source
+from existing outbound email engagement:
+
+- `apps/api/models/company_graph.py` — `CompanyGraphNode`, durable cross-tenant company-from-IP
+  store (ip/domain/company_name/source/confidence, unique on `(ip, source)`). Write-through on
+  every successful free-rDNS resolve (and, when enabled, paid PDL/IPinfo hits) via
+  `apps/api/services/company_resolver.py`; read-time staleness re-validation (default 75-day
+  window), no cron. `_graph_node_by_email` in `identity_resolver.py` now returns full profile
+  fields (was name-only). Same cross-tenant posture as `beam_identity_graph`.
+- `apps/api/models/identity_signal.py` — `IdentitySignal`, one row per SendGrid open/click
+  engagement event (PII ciphertext + blind index, same pattern as `beam_identity_graph` — never
+  plaintext email). `apps/api/services/identity_signals.py`: `record_signal()` (4 write gates —
+  datacenter IP, proxy/VPN, suppression list, `do_not_resolve` sticky), `decay_confidence()` (pure,
+  computed at read time), `corroborate_identity()` (join-only helper — **structurally cannot**
+  create or upgrade an `IdentifiedVisitor`; the module imports zero `IdentifiedVisitor` write path,
+  only read-only SELECTs for the write gates). `apps/api/routers/webhooks.py` SendGrid handler
+  gained a new `open`/`click` branch, structurally separate from the existing
+  `_SUPPRESS_EVENTS` branch (bounce/dropped/spamreport unchanged, regression-tested).
+  `apps/api/services/email_sender.py` gained an optional `custom_args` param (SendGrid echoes it
+  back on webhook events so `webhooks.py` can attribute a signal to `site_id`/`visitor_id`) plus
+  always-on explicit `tracking_settings`; `campaign_sender.py` passes `custom_args` at its
+  identified-visitor send call site.
+- Feature flags: `company_graph_enabled`, `identity_signals_enabled` in `apps/api/config.py` —
+  both **default OFF** (`company_graph_staleness_days` default `75`); flipping either to `True` in
+  a real environment is an explicit human, post-migration-live-apply operator action, matching the
+  `agent_detection_enabled` precedent.
+- Status 23-07-26: code-complete, unit-verified (875/875 `tests/unit` passed, regression
+  `test_agent_origin_exclusion.py` 18 passed), Hybrid persistence tests + live migration apply
+  **not yet run** (Docker-gated). See
+  `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`
+  and `process/features/visitors-identity/active/owned-data-layer_23-07-26/`.
+- Known-gap: SendGrid live open/click payload shape + `custom_args` echo shape unverified against
+  a real payload (Agent-Probe tier); account-level SendGrid tracking-settings override behavior
+  needs-live-provider, not probed per policy.
 
 ## Key Patterns and Conventions
 
@@ -261,9 +303,12 @@ agent-exclusion guardrail — these are real humans, not agents).
 - Legacy `plan/` folder (11 dated pre-harness plans) is read-only history — migrate still-relevant items into `process/features/*/backlog/` opportunistically
 - e2e coverage gaps: billing + exports (see `tests/all-tests.md` Known Gaps)
 - Docs drift: `PRODUCT_ROADMAP.md` + `README.md` still say Claude/`claude-sonnet-4` for segmentation — code runs Gemini (see AI Layer)
-- EvalLayer + AI-referral: `agent_detection_enabled` defaults OFF; 3 migrations pending live-apply
-  (`d11b39a6c843`, `a1c7e4f92b83`, `b3f9a1d2c7e5`) — see AI-Agent-Traffic Layer section above and
-  `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`
+- EvalLayer + AI-referral + owned-data-layer: `agent_detection_enabled`, `company_graph_enabled`,
+  `identity_signals_enabled` all default OFF; 6 migrations pending live-apply
+  (`d11b39a6c843` → `a1c7e4f92b83` → `b3f9a1d2c7e5` → `c4e8f1a9d2b7` → `f8a2c1d9b3e7` →
+  `a3e9f1c7d2b5`) — see AI-Agent-Traffic Layer + Owned Identity Data Layer sections above,
+  `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`, and
+  `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`
 - Successor program planned: "Handoff Detection" (human-behind-the-agent correlation) — not yet
   scaffolded on disk; see `evallayer-umbrella_PLAN_22-07-26.md` §Program-Level Closeout
 
