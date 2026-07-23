@@ -13,7 +13,9 @@ metadata:
 
 **Date:** 22-07-26
 **Complexity:** COMPLEX
-**Status:** ⏳ PLANNED
+**Status:** 🔨 CODE-COMPLETE (PENDING DOCKER GATE CLOSURE) — all 8 phases shipped 23-07-26; see
+§Program-Level Closeout below. Kept in `active/`, not archived, until Phases 1-6's Docker/e2e
+Known-Gaps close.
 
 - Program type: PHASE PROGRAM (8 phases, 0–7, foundation + expansion tiers, gated joins)
 - Date: 22-07-26
@@ -335,7 +337,7 @@ phase-plan-writing agent): `process/features/evallayer/active/evallayer_22-07-26
 | 3 — Read API + dashboard tab | 🔨 CODE DONE (EXECUTE + independent EVL complete; FE compile + unit-regression + static-safety-review all GREEN; Docker integration (10 cases) + Playwright e2e = KNOWN-GAPS, env-gated — not ✅ VERIFIED until both close, see phase report) |
 | 4 — IP/rDNS verification | 🔨 CODE DONE (EXECUTE + independent EVL complete; unit 10/10, hot-path grep=0, Anthropic structural ceiling confirmed, full regression 735/2 no drop — 1 Docker-gated integration Known-Gap open, not ✅ VERIFIED until closed, see phase report) |
 | 5 — Company resolution → outreach feed | 🔨 CODE DONE (EXECUTE + independent EVL complete; AC10 18/18, Phase-5 suite 25/25, full regression 778/2 (0 regressions vs 752/2); Phase 7 D1-D6 contract FULFILLED; 2 Docker known-gaps open (migration apply/rollback, integration sweep) — not ✅ VERIFIED until closed, see phase report) |
-| 6 — Aggregation + GEO/AEO analytics | ⏳ PLANNED (stub only) — **now the FINAL remaining phase** |
+| 6 — Aggregation + GEO/AEO analytics | 🔨 CODE DONE (EXECUTE + independent EVL complete 2026-07-23; 11/11 unit + 824/2 full regression + FE build all GREEN; 2 Docker/e2e Known-Gaps carried, non-blocking — see phase report) — **program's LAST phase; program is now code-complete** |
 | 7 — Outreach-exclusion guardrail | ✅ VERIFIED (EXECUTE + independent EVL complete 2026-07-22; AC10 gate 17/17, full regression 752/2 (0 regressions), no Docker known-gap; released as the program's release-gate test for Phase 5 — see phase report + registry) |
 
 Status values: ⏳ PLANNED | 🔨 CODE DONE | 🧪 TESTING | ✅ VERIFIED | 🚧 BLOCKED | ✅ COMPLETE
@@ -468,27 +470,82 @@ the program.
 - Supporting context files loaded this session: `evallayer_SPEC_22-07-26.md`,
   `phase-05-company-resolution_PLAN_22-07-26.md` + `_REPORT_`, `phase-blast-radius-registry.md`,
   `process/context/all-context.md`, `process/development-protocols/phase-programs.md`
-- Next step for a fresh agent: read this umbrella plan in full. Phases 0, 1-5, 7 are all
-  shipped/code-done-or-better (see each phase's report for its open Known-Gaps). Phase 6
-  (Aggregation + GEO/AEO analytics) is now the **only remaining phase** — Phase 3 + Phase 4 exits
-  (both code-done) are its only dependencies and both are already satisfied. Start fresh work at
-  Phase 6 with a full RESEARCH pass (stub-only today, no prior RESEARCH/INNOVATE/PLAN done).
-- Current phase: Phase 6 (Aggregation + GEO/AEO analytics) — the FINAL phase of the program.
-  Join Conditions (Phase 3 + Phase 4, both code-done) are fully satisfied; nothing blocks starting
-  RESEARCH.
-- Next action: invoke `vc-agent-strategy-compare` for Phase 6 RESEARCH kickoff, then spawn
-  vc-research-agent for Phase 6 to do a full fresh pass on the aggregation/analytics mechanics
-  (`visitor_aggregator.py`, `tasks/aggregation_tasks.py`, existing dashboard widget patterns) before
-  proposing any design.
-- Execute-agent start instruction: NOT YET ELIGIBLE for Phase 6 — no RESEARCH/INNOVATE/PLAN/PVL
-  done yet (stub-only). Phases 1-5 and 7 EXECUTE are all complete; do not re-spawn execute-agent for
-  any of them (their Known-Gaps are backlog/EVL-confirmed residuals, not open EXECUTE tasks).
+- **Program is code-complete.** All 8 phases (0-7) have shipped: Phase 0 ✅ COMPLETE, Phase 7
+  ✅ VERIFIED, Phases 1-6 🔨 CODE DONE (each with 1-2 environment-only Docker/e2e Known-Gaps,
+  consolidated in `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`).
+- Next step for a fresh agent: read this umbrella plan's §Program-Level Closeout section first. Do
+  NOT re-spawn execute-agent for any of the 8 phases — their Known-Gaps are backlog/EVL-confirmed
+  environment residuals, not open EXECUTE tasks. Two paths forward: (1) run the consolidated
+  backlog note's close-all sequence against a live Postgres/Redis to promote Phases 1-6 to
+  ✅ VERIFIED; (2) scaffold the successor **Handoff Detection** program in a new feature folder.
+- Current phase: none — program complete.
+- Next action: `vc-generate-phase-program` (or manual scaffold) for the **Handoff Detection**
+  successor program in a new feature folder, OR run the Docker close-all sequence if live infra
+  becomes available first.
+- Execute-agent start instruction: NOT ELIGIBLE for any phase in this program — all 8 have
+  completed EXECUTE. A future execute-agent spawn only makes sense against the new Handoff
+  Detection program's own phase plans, or against a dedicated NEW PLAN closing one of the
+  standalone backlog items (latency benchmark, identity-merge collision, rollup staleness).
+
+---
+
+## Program-Level Closeout (23-07-26 — UPDATE PROCESS, Phase 6 + whole program)
+
+**Program status: CODE-COMPLETE.** All 8 phases have shipped code. Phase 0 ✅ COMPLETE
+(pre-program), Phase 7 ✅ VERIFIED (zero Docker known-gap), Phases 1-6 🔨 CODE DONE (each has 1-2
+environment-only Docker/e2e known-gaps, zero design defects). No phase remains ⏳ PLANNED or
+🚧 BLOCKED.
+
+**What "code-complete" means here, precisely:** every SPEC AC1-14 has a Fully-Automated or Hybrid
+proving gate; every Fully-Automated gate is green; the only outstanding gates are Hybrid gates
+that require a live Postgres/Redis/dev-server the sandbox never had access to. This is the same
+disposition every phase in this program reached — not a program-level shortcut invented at
+closeout.
+
+**Consolidated known-gaps (all Docker/live-environment, not design defects):** tracked in the new
+backlog note `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`
+(written this session) with one close-all command sequence covering every phase's residual gate in
+a single pass, plus 2 pre-existing standalone backlog items (`phase-02-latency-benchmark_NOTE`,
+identity-merge-collision/rollup-staleness notes from Phase 5) that need dedicated NEW PLANs, not
+just an infra run.
+
+**Bonus work shipped this same session (outside the 8-phase scope, same commit window):**
+**AI-Referral Attribution v1** — `apps/api/services/ai_referral.py` classifier (chatgpt, perplexity,
+gemini, copilot, claude, you, grok, deepseek, mistral — excludes in-SERP google/bing by design);
+`Visitor.first_touch_referrer` (fixed a lexicographic-MAX bug, now true chronological first-touch)
++ `Visitor.ai_source` (migration `b3f9a1d2c7e5`); "Arrived via" badge/pill/facet on the Visitors
+dashboard; `ai_source` fed into the segmenter as a signal. Safety-reviewed: `ai_source` is
+attribution metadata only, on a separate write path from `source_agent_visit_id`;
+`is_emailable_identity` never reads it; AI-referred humans stay fully emailable (this is the
+opposite of the EvalLayer guardrail — these are real humans, not agents). Commit `a5ab596`. This
+is NOT part of the EvalLayer SPEC's 14 acceptance criteria and is tracked here only because it
+shares this session's commit window and touches adjacent visitor-attribution surface.
+
+**Archival decision: KEEP `evallayer_22-07-26/` IN `active/` — do NOT archive yet.** Rationale: the
+program is code-complete but genuinely unverified at the Docker/live-integration tier across 6 of
+8 phases (Phases 1-6). Archiving now would bury an open, real verification gap under `completed/`
+where it is less visible. Re-evaluate archival once the consolidated backlog note's close-all
+sequence has been run against a live Postgres/Redis and each phase is promoted 🔨 CODE DONE →
+✅ VERIFIED (or the user explicitly accepts the Docker gaps as permanent Known-Gaps and asks for
+archival anyway).
+
+**Successor program:** **Handoff Detection** (human-behind-the-agent) is being scaffolded next, in
+a new feature folder (not appended to `evallayer/`, since EvalLayer's own scoped goal — the 8-phase
+SPEC — is fully code-complete). Planned shape: H1 `agent_fetch_events` per-hit table + on-demand-
+vs-index token tiers → H2 handoff correlation (`agent_handoff_links`, on-demand fetch ↔ AI-referral
+click — NEVER touching `source_agent_visit_id`) → H3 intent signals/alerts → H4 citation-watermark
+live probe. Grounded in fresh research: OpenAI/Anthropic/Perplexity document distinct on-demand
+fetcher UAs separate from their indexing crawlers; no competitor currently correlates an on-demand
+agent fetch with a subsequent human click-through from that agent's answer. This program directly
+builds on both EvalLayer's agent-classification substrate (Phase 1-4) and this session's
+AI-referral attribution work (the human-side half of the correlation).
 
 ---
 
 ## Current Execution State
 
-Last updated: 22-07-26 (UPDATE PROCESS closeout of Phase 5)
+Last updated: 23-07-26 (UPDATE PROCESS closeout of Phase 6 — FINAL phase — and the whole 8-phase
+program)
 Completed phases:
 - Phase 5 (Company resolution → outreach feed) — **🔨 CODE DONE** (all 7 inner-loop steps run;
   EXECUTE + independent EVL both complete). Gate: PASS at PVL (2 mandatory FAILs found via
@@ -598,30 +655,48 @@ Completed phases:
   .venv/bin/python -m pytest tests/integration/test_agent_verification_sweep.py -m integration -q`.
   Not classified ✅ VERIFIED until that gap closes; same environment-gap pattern as Phase 1/2/3.
   Report: `phase-04-ip-verification_REPORT_22-07-26.md`.
-Current phase: Phase 6 (Aggregation + GEO/AEO analytics) — the **FINAL** remaining phase of the
-8-phase program. Join Conditions (Phase 3 + Phase 4, both code-done) are fully satisfied; nothing
-blocks starting a full RESEARCH pass. No RESEARCH/INNOVATE/PLAN/PVL done yet for this phase
-(stub-only).
-Current phase status: not started
-Current phase EVL: n/a (not yet reached)
-Current phase report: n/a (not yet written)
-Next phase: Phase 6 (Aggregation + GEO/AEO analytics), loop step RESEARCH (pending, full fresh pass)
-— spawn vc-research-agent. This is the LAST phase — once Phase 6 reaches ✅ VERIFIED (or 🔨 CODE
-DONE with only environment-gated Known-Gaps, matching the established program pattern), the program
-is feature-complete pending closure of accumulated Docker known-gaps across all phases.
-Current loop step: RESEARCH (pending for Phase 6)
+- Phase 6 (Aggregation + GEO/AEO analytics) — **🔨 CODE DONE** (all 7 inner-loop steps run; EXECUTE +
+  independent EVL both complete 2026-07-23). Gate: PASS at PVL (1 plan update applied: Step C3
+  Fully-Automated route-registration-order test, closing the Step B2 route-ordering trap with a
+  real automated gate instead of Hybrid-only inference). EVL confirmation run (independent,
+  re-run this UPDATE PROCESS session, not relying on execute-agent's internal claim) GREEN: unit
+  aggregator suite 11/11 (`by_vendor`/`top_pages`/`by_verification` correctness + edge cases + AC2
+  isolation + route-order); full unit regression 824 passed/2 skipped (baseline 778, +11 Phase 6,
+  +35 same-session AI-referral bonus, 0 regressions); FE build (`npm run build`) clean. 2 gates
+  KNOWN-GAP (no disposable Postgres/dev-server in this sandbox): (a) `/analytics` endpoint
+  integration test; (b) dashboard card Playwright e2e. Both consolidated into
+  `phase-06-daily-timeseries` sibling backlog note
+  `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md` alongside
+  every other phase's Docker residual. Not classified ✅ VERIFIED until both Docker/e2e gaps close
+  — same environment-gap pattern as every prior phase. This is the **FINAL phase of the 8-phase
+  program.** Report: `phase-06-aggregation-analytics_REPORT_22-07-26.md`. Committed: `5fb52ac`
+  (feat) + `a3e16ed` (process).
+Current phase: **NONE — the 8-phase program is complete.** Program Status Table shows Phase 0
+✅ COMPLETE, Phase 7 ✅ VERIFIED, Phases 1-6 🔨 CODE DONE. No phase remains ⏳ PLANNED or 🚧 BLOCKED.
+Current phase status: PROGRAM COMPLETE (code-complete; 6 of 8 phases pending Docker gate closure
+to reach ✅ VERIFIED — see §Program-Level Closeout above)
+Current phase EVL: n/a — all 8 phases have completed their own EVL pass
+Current phase report: n/a — see per-phase report table under §Durable Report Destinations; all 8
+written (Phase 0's is the archived pre-program plan's own evidence table)
+Next phase: **None within this program.** Successor program: **Handoff Detection** (new feature
+folder, not yet scaffolded on disk — see §Program-Level Closeout for shape). Separately: run the
+consolidated backlog note's close-all sequence against a live Postgres/Redis to promote Phases 1-6
+from 🔨 CODE DONE to ✅ VERIFIED whenever Docker infra becomes available.
+Current loop step: PROGRAM COMPLETE (no active loop step — all 8 phases have reached their Step 7)
 Validate-contract status: Phase 1 — written 22-07-26, Gate: PASS (`generated-by: inner-pvl:
 phase-1`). Phase 2 — written 22-07-26, Gate: CONDITIONAL, accepted (`generated-by: inner-pvl:
 phase-2`). Phase 3 — written 22-07-26, Gate: PASS (`generated-by: inner-pvl: phase-3`). Phase 4 —
 written 22-07-26, Gate: PASS (`generated-by: inner-pvl: phase-4`). Phase 5 — written 22-07-26, Gate:
-PASS (`generated-by: inner-pvl: phase-5`). Phase 7 — written 22-07-26, Gate: PASS (`generated-by:
-inner-pvl: phase-7`). Phase 6 has no validate-contract yet — stub-only. Phase 0 was shipped with
-VALIDATE explicitly skipped, per its archived plan.
-Program Net Gate: PENDING (6 of 8 phases code-done or better — 1 open Known-Gap on Phase 1, 2 open
-Known-Gaps on Phase 2, 2 open Known-Gaps on Phase 3, 1 open Known-Gap on Phase 4, 2 open Known-Gaps
-on Phase 5, 0 open Known-Gaps on Phase 7 (✅ VERIFIED); 1 phase not yet started)
-Accumulated Known-Gaps carried forward (none block progression to Phase 6 — all are
-environment/tooling gaps, not design defects):
+PASS (`generated-by: inner-pvl: phase-5`). Phase 6 — written 22-07-26, Gate: PASS (`generated-by:
+inner-pvl: phase-6`). Phase 7 — written 22-07-26, Gate: PASS (`generated-by: inner-pvl: phase-7`).
+Phase 0 was shipped with VALIDATE explicitly skipped, per its archived plan. All 8 phases now have
+either a written validate-contract or a documented VALIDATE-skip reason.
+Program Net Gate: CODE-COMPLETE, PENDING-VERIFICATION (8 of 8 phases shipped; Phase 0 COMPLETE,
+Phase 7 VERIFIED with 0 known-gaps, Phases 1-6 CODE DONE with 1-2 Docker/e2e known-gaps each — none
+are design defects, all tracked in the consolidated backlog note)
+Accumulated Known-Gaps carried forward (none blocked the program from reaching code-complete — all
+are environment/tooling gaps, not design defects; consolidated into
+`process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`):
 - Phase 1: `agent_visits` migration never applied to a real Postgres instance (Docker-gated)
 - Phase 2: 5 `TestAgentDetection` integration cases unrun (Docker-gated); AC5 ingest-latency
   benchmark has no harness (backlog stub written)
@@ -636,9 +711,12 @@ environment/tooling gaps, not design defects):
 - Phase 7: none blocking — D5 (real-Phase-5-row re-verification) DISCHARGED by Phase 5's EVL; 2
   accepted non-blocking residuals (skip-counter miscategorization, D4 centralization) documented in
   the phase report, not backlog artifacts
-Latest validator run: this UPDATE PROCESS session — see Verification Evidence run below for exit
-codes (validate-agent-parity, validate-context-discovery, validate-plan-inventory, validate-phase-
-stub for phase-05, validate-umbrella-artifact for this file)
+- Phase 6: `/analytics` endpoint integration test unrun (Docker-gated); dashboard card Playwright
+  e2e unrun (needs dev server) — both consolidated into the program-wide backlog note alongside
+  every other phase's residual
+Latest validator run: this UPDATE PROCESS session (23-07-26) — see Verification Evidence run below
+for exit codes (validate-agent-parity, validate-context-discovery, validate-plan-inventory,
+validate-phase-stub for phase-06, validate-umbrella-artifact for this file)
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any

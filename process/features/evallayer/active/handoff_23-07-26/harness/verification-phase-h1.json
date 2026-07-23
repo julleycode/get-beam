@@ -1,0 +1,47 @@
+{
+  "phase": "handoff-h1-fetch-events-tiering",
+  "steps": [
+    {
+      "step": "New unit suite for tiering + per-hit persistence + fail-open",
+      "command": ".venv/bin/python -m pytest tests/unit/test_agent_fetch_events.py -m unit -q",
+      "result": "PASS",
+      "notes": "15 passed (all 10 tokens tiered, completeness tripwire, per-hit insert columns, empty-ip coercion, fail-open isolation, retention config)"
+    },
+    {
+      "step": "Classifier regression (zero-regression constraint)",
+      "command": ".venv/bin/python -m pytest tests/unit/test_agent_classifier.py -m unit -q",
+      "result": "PASS",
+      "notes": "24 passed, unmodified"
+    },
+    {
+      "step": "Full unit suite regression",
+      "command": ".venv/bin/python -m pytest tests/unit -q",
+      "result": "PASS",
+      "notes": "839 passed, 2 skipped (824 baseline + 15 new = 839; pre-existing test_optout warning unrelated)"
+    },
+    {
+      "step": "Model registration smoke",
+      "command": ".venv/bin/python -c 'import apps.api.main; ...Base.metadata.tables'",
+      "result": "PASS",
+      "notes": "agent_fetch_events registered with all 10 columns + both indexes"
+    },
+    {
+      "step": "Alembic single-head re-check before migration write (E1)",
+      "command": "cd apps/api && python -m alembic heads",
+      "result": "PASS",
+      "notes": "Confirmed single head b3f9a1d2c7e5 at write time; down_revision correct. A parallel owned-data-layer agent later chained f8a2c1d9b3e7 onto c4e8f1a9d2b7 — linear chain, no divergent head."
+    },
+    {
+      "step": "Alembic upgrade/downgrade cycle against live Postgres",
+      "command": "cd apps/api && python -m alembic upgrade head && python -m alembic downgrade -1 && python -m alembic upgrade head",
+      "result": "SKIP",
+      "notes": "Docker unavailable in sandbox (docker ps hung/timed out). Docker-gated known-gap, pre-accepted at VALIDATE. Tracked in handoff-program-docker-verification-gaps_NOTE_23-07-26.md."
+    },
+    {
+      "step": "E7 retention-purge integration test (agent_fetch_events)",
+      "command": ".venv/bin/python -m pytest tests/integration/test_retention_purge.py -k agent_fetch_events -m integration -q",
+      "result": "SKIP",
+      "notes": "Written and collects cleanly (2 cases). Requires live Postgres — Docker-gated known-gap, pre-accepted at VALIDATE."
+    }
+  ]
+}

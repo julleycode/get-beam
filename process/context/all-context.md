@@ -86,6 +86,10 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
 - `billing` — Gumroad MoR billing, plans/quotas, BYOK keys
 - `marketing-site` — public site: landing, blog, changelog, SEO (content sources in `marketing/`)
 - `pixel` — tracking pixel, event ingest, consent, bot filtering
+- `evallayer` — AI-agent traffic detection (agent_classifier, `/agents` API + dashboard tab, IP/rDNS
+  verification, agent→company outreach-safe resolution, GEO/AEO analytics, outreach-exclusion
+  guardrail); 8-phase program, code-complete 23-07-26, pending Docker-gate closure — see
+  `process/features/evallayer/active/evallayer_22-07-26/evallayer-umbrella_PLAN_22-07-26.md`
 
 ## Context Group Lifecycle
 
@@ -154,7 +158,7 @@ getbeam/
 
 - **Frontend:** Next.js 14.2 (App Router) + React 18, Tailwind CSS + shadcn/ui + Radix, TanStack Query 5, react-hook-form + zod, Recharts, Clerk 5 (auth) + legacy JWT signup/login endpoints
 - **Backend:** Python 3.11 (Dockerfile `python:3.11-slim`; type hints use 3.11-safe syntax only), FastAPI, SQLAlchemy 2 async + asyncpg, Alembic migrations, Celery 5 (redis broker) + APScheduler, structlog
-- **Data:** PostgreSQL 16 (primary), ClickHouse 24 (events), Redis 7 (cache/queue/rate limits)
+- **Data:** PostgreSQL 16 (primary — events ingest also lands in Postgres, e.g. `agent_visits`), Redis 7 (cache/queue/rate limits). `apps/api/services/clickhouse_client.py` + `CLICKHOUSE_*` config exist but have zero callers anywhere in `apps/api` (confirmed 23-07-26) — vestigial/unused, not the live events store.
 - **AI:** Google Gemini 2.5 Flash via raw httpx REST (`apps/api/services/gemini_client.py`). NOT Anthropic — `anthropic_api_key` is legacy; the only Claude call left is the public demo draft fallback in `routers/demo.py`. OpenRouter is the paid fallback for social replies.
 - **Email:** SendGrid (Resend deprecated) + optional Connect-Gmail OAuth send
 - **Identity/enrichment providers:** RB2B, Leadpipe, Capturify, People Data Labs, ipinfo, Hunter, Apollo, Proxycurl, TwitterAPI.io — all waterfall-gated, budget-capped, toggleable via env
@@ -173,6 +177,46 @@ All AI flows through `apps/api/services/gemini_client.py`:
 Consumers: `agents/segmenter.py` + `agents/campaign_planner.py` (JSON repair), `routers/ai.py` `/ai/ask` (tool loop, falls back to single-shot; flag `AI_ASK_TOOLS_ENABLED`), `agents/workspace_tools.py` (tool registry). Planner tool loop exists but is OFF (`CAMPAIGN_PLANNER_TOOLS_ENABLED=false`, path untested with live model).
 
 **Prompt-injection defense is mandatory:** any visitor-derived text entering a prompt goes through `agents/prompt_safety.py` (`sanitize_profiles` / `clean_text` / `wrap_untrusted`). `clean_text` strips `<>` so the `<untrusted_visitor_data>` fence is unforgeable. Never bypass it.
+
+## AI-Agent-Traffic Layer (EvalLayer, shipped 23-07-26 — code-complete, see `process/features/evallayer/`)
+
+Detects AI-agent visits (GPTBot, PerplexityBot, ClaudeBot, etc.) at ingest and keeps them
+structurally separate from human Visitor/Event data, never as a targetable outreach contact:
+
+- `apps/api/services/agent_classifier.py` — UA-pattern classifier, drop-vs-classify token split
+- `apps/api/models/agent_visit.py` — dedicated `agent_visits` rollup table (one row per
+  site/vendor/token tuple), never joined with `Visitor`/`Event`
+- `apps/api/services/agent_verification.py` — OpenAI/Perplexity published IP-range confidence
+  upgrade (ua-only → ip-verified); Anthropic stays UA-only by structural design (no published
+  ranges)
+- `apps/api/services/agent_company_resolution.py` — resolves a qualifying agent visit's IP to a
+  real company via the existing `identity_resolver.py` waterfall, creating an ordinary human/company
+  lead — the agent record itself is never contactable (`IdentifiedVisitor.source_agent_visit_id`
+  hard-excludes it from `is_emailable_identity` — this is the program's highest-priority guardrail,
+  regression-tested in `tests/unit/test_agent_origin_exclusion.py`)
+- `apps/api/services/agent_aggregator.py` — read-only vendor/page/verification-method analytics,
+  `GET /api/v1/agents/{site_id}/analytics`
+- Feature flag: `agent_detection_enabled` in `apps/api/config.py` — **defaults OFF**
+- 3 migrations pending live-apply (Docker-gated, never run against a real Postgres in the sandbox
+  that built this): `d11b39a6c843` (agent_visits table), `a1c7e4f92b83` (Phase 5
+  visitor.is_agent_derived / IdentifiedVisitor.source_agent_visit_id), and the AI-referral
+  migration below (`b3f9a1d2c7e5`) — apply all three in order before enabling
+  `agent_detection_enabled` in any real environment
+- Docker/live-integration known-gaps consolidated in
+  `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`
+
+## AI-Referral Attribution (v1, shipped 23-07-26)
+
+Classifies human visitors who arrived via a link from an AI answer/chat surface (ChatGPT,
+Perplexity, Gemini, Copilot, Claude, You.com, Grok, DeepSeek, Mistral — explicitly excludes
+in-SERP Google/Bing, a known coverage limit): `apps/api/services/ai_referral.py`
+(`classify_ai_source`, pure). Adds `Visitor.first_touch_referrer` (fixed a pre-existing
+lexicographic-MAX bug — now true chronological first touch) and `Visitor.ai_source` (migration
+`b3f9a1d2c7e5`, pending live-apply). Surfaced as an "Arrived via" badge/pill/facet on the Visitors
+dashboard; fed into the segmenter as a signal (not a bypass). Safety: `ai_source` is attribution
+metadata on a separate write path from `source_agent_visit_id` — `is_emailable_identity` never
+reads it, and AI-referred humans stay fully emailable (the opposite guarantee from EvalLayer's
+agent-exclusion guardrail — these are real humans, not agents).
 
 ## Key Patterns and Conventions
 
@@ -217,6 +261,11 @@ Consumers: `agents/segmenter.py` + `agents/campaign_planner.py` (JSON repair), `
 - Legacy `plan/` folder (11 dated pre-harness plans) is read-only history — migrate still-relevant items into `process/features/*/backlog/` opportunistically
 - e2e coverage gaps: billing + exports (see `tests/all-tests.md` Known Gaps)
 - Docs drift: `PRODUCT_ROADMAP.md` + `README.md` still say Claude/`claude-sonnet-4` for segmentation — code runs Gemini (see AI Layer)
+- EvalLayer + AI-referral: `agent_detection_enabled` defaults OFF; 3 migrations pending live-apply
+  (`d11b39a6c843`, `a1c7e4f92b83`, `b3f9a1d2c7e5`) — see AI-Agent-Traffic Layer section above and
+  `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`
+- Successor program planned: "Handoff Detection" (human-behind-the-agent correlation) — not yet
+  scaffolded on disk; see `evallayer-umbrella_PLAN_22-07-26.md` §Program-Level Closeout
 
 ## Scan Metadata
 

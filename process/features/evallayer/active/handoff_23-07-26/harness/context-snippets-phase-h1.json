@@ -1,0 +1,24 @@
+{
+  "phase": "handoff-h1-fetch-events-tiering",
+  "riskClass": "schema/data migration (additive-only)",
+  "snippets": [
+    {
+      "file": "apps/api/migrations/versions/c4e8f1a9d2b7_add_agent_fetch_events_table.py",
+      "lines": "23-52",
+      "description": "Additive-only migration: create_table('agent_fetch_events') + 2 indexes; down_revision='b3f9a1d2c7e5' (single head re-confirmed at EXECUTE via `python -m alembic heads`); reversible downgrade drops indexes then table. Zero changes to any existing table.",
+      "content": "op.create_table('agent_fetch_events', id/created_at/updated_at + site_id/vendor/raw_ua_token/tier/page_path/ip_address/verification_method); create_index idx_agent_fetch_events_site_created, idx_agent_fetch_events_site_path_tier_created"
+    },
+    {
+      "file": "apps/api/models/agent_fetch_event.py",
+      "lines": "26-44",
+      "description": "New AgentFetchEvent(Base) — id/created_at/updated_at from Base; no ORM ForeignKey on site_id (house convention). Structurally separate from Visitor/Event.",
+      "content": "class AgentFetchEvent(Base): __tablename__='agent_fetch_events'"
+    },
+    {
+      "file": "apps/api/routers/events.py",
+      "lines": "142-152",
+      "description": "One additive fail-open call inside the existing agent branch (gated by agent_detection_enabled + classification is not None), after persist_agent_visit and before the 204 return. No new synchronous external call.",
+      "content": "tier = classify_tier(classification.product_or_ua_token); await persist_agent_fetch_event(db, batch.site_id, classification, tier, ip_address, agent_path)"
+    }
+  ]
+}

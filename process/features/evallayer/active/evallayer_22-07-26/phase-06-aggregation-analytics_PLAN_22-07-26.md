@@ -13,7 +13,7 @@ metadata:
 
 **Program:** evallayer
 **Umbrella plan:** process/features/evallayer/active/evallayer_22-07-26/evallayer-umbrella_PLAN_22-07-26.md
-**Phase status:** ⏳ PLANNED (design locked — supplement 22-07-26)
+**Phase status:** 🔨 CODE DONE (EXECUTE + independent EVL complete 2026-07-23; 2 Docker/e2e Known-Gaps carried, program-precedent, non-blocking — see report)
 **Report destination:** process/features/evallayer/active/evallayer_22-07-26/phase-06-aggregation-analytics_REPORT_22-07-26.md
 
 ---
@@ -214,9 +214,14 @@ Orchestrator reads this before deciding which subagent to spawn next. The canoni
 - [x] 3. PLAN-SUPPLEMENT — plan-agent: existing phase plan updated with exact locked design
       (this supplement, 22-07-26)
 - [x] 4. PVL — vc-validate-agent: full V1-V7; validate-contract written per `.claude/skills/vc-validate-findings/references/example-validate-output.md` — Gate: PASS (2026-07-22)
-- [ ] 5. EXECUTE — all checklist items done; per-section test gates run and green
-- [ ] 6. EVL — all EVL gates green; follow-up stubs registered; EVL HANDOFF SUMMARY written
-- [ ] 7. UPDATE PROCESS — phase report written, umbrella state updated, commit done
+- [x] 5. EXECUTE — all checklist items done; per-section test gates run and green (commit `5fb52ac`)
+- [x] 6. EVL — all EVL gates green (independently re-confirmed at UPDATE PROCESS: 11/11 aggregator
+      unit, 824/2 full regression, FE build clean); 2 Hybrid gates KNOWN-GAP (Docker Postgres,
+      Playwright dev server — see consolidated backlog note); EVL HANDOFF SUMMARY: gates_green,
+      known_gaps=[docker-integration, playwright-e2e], follow_up_stubs=[program-docker-verification-gaps_NOTE_23-07-26.md]
+- [x] 7. UPDATE PROCESS — phase report written
+      (`phase-06-aggregation-analytics_REPORT_22-07-26.md`), umbrella state updated, plan/context
+      reconciliation done; commit deferred to a later `vc-git-manager` pass per user instruction
 
 **Validate-contract required before execute.** Regression risk against human-data isolation
 guardrail (AC2) — VALIDATE may never be skipped for this phase.

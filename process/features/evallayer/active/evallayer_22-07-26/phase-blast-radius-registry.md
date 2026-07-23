@@ -387,3 +387,29 @@ program (1/2/3/4/5), does not block PASS, does not block VERIFIED per program pr
 the FINAL phase of the evallayer program; whole-program AC2/AC10 regression posture reconfirmed
 intact (Phase 6 reads Phase 1/2/4's data structurally, never writes to Visitor/Event, never touches
 Phase 5/7's outreach-exclusion surfaces).
+
+status: DONE — EXECUTE + independent EVL both complete 2026-07-23. All checklist Steps A-D
+implemented exactly per validate-contract, no deviation. Files shipped as claimed:
+`agent_aggregator.py` (new, 95 lines), `agents.py`/`schemas/agents.py` extended additively,
+`api-types.ts`/`api.ts`/`page.tsx` extended additively, `test_agent_aggregator.py` (new, 11 tests).
+EVL confirmation run (independent, re-run this UPDATE PROCESS session, not relying on
+execute-agent's internal claim) GREEN: unit aggregator suite 11/11; full unit regression 824
+passed/2 skipped (baseline 778 + Phase 6's 11 + the same-session AI-referral bonus's 35, 0
+regressions); FE build (`npm run build`) clean. AC2 isolation and route-ordering (C3) assertions
+both pass mechanically (compiled-SQL substring check + import-time route-list order check). 2
+gates KNOWN-GAP (no disposable Postgres/dev-server in this sandbox): (a) `/analytics` endpoint
+integration test — close command: `docker compose -f infra/docker-compose.yml up -d postgres
+redis && .venv/bin/python -m pytest tests/integration/test_agents_api.py -k analytics -m
+integration -q`; (b) dashboard card Playwright e2e — close command: `npm run --prefix apps/web dev
+& npx playwright test apps/web/e2e/agents.spec.ts --config=apps/web/playwright.config.ts`. Both
+gaps consolidated into
+`process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md` alongside
+every other phase's Docker-gated residual. Phase classified 🔨 CODE DONE (not ✅ VERIFIED) pending
+closure of the 2 Docker/e2e gaps — same environment-gap pattern as Phases 1-5. Committed:
+`5fb52ac` (feat) + `a3e16ed` (process). Report:
+`phase-06-aggregation-analytics_REPORT_22-07-26.md`. **This is the final phase entry in this
+registry — the EvalLayer 8-phase program is now code-complete (Phase 0 shipped, Phases 1-6 CODE
+DONE, Phase 7 VERIFIED). See umbrella plan §Program-Level Closeout for the full program
+disposition.**
+
+---
