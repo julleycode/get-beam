@@ -38,3 +38,19 @@ class AgentStatsResponse(BaseModel):
     total_visits: int
     distinct_vendors: int
     by_vendor: dict[str, int]
+
+
+class TopPageEntry(BaseModel):
+    path: str
+    count: int
+
+
+class AgentAnalyticsResponse(BaseModel):
+    """Read-only GEO/AEO analytics snapshot over AgentVisit rows (SPEC AC11).
+
+    Built from the dict returned by ``aggregate_agent_analytics`` — plain
+    BaseModel (not from_attributes), not projected directly from an ORM row."""
+
+    by_vendor: dict[str, int]
+    top_pages: list[TopPageEntry]
+    by_verification: dict[str, int]

@@ -10,10 +10,15 @@ from apps.api.models.agent_visit import AgentVisit
 from apps.api.models.database import get_db
 from apps.api.models.user import User
 from apps.api.schemas.agents import (
+    AgentAnalyticsResponse,
     AgentDetailOut,
     AgentListResponse,
     AgentOut,
     AgentStatsResponse,
+)
+from apps.api.services.agent_aggregator import (
+    aggregate_agent_analytics,
+    fetch_agent_visit_rows,
 )
 
 logger = structlog.get_logger()
@@ -97,6 +102,26 @@ async def get_agent_stats(
         distinct_vendors=len(by_vendor),
         by_vendor=by_vendor,
     )
+
+
+@router.get("/{site_id}/analytics", response_model=AgentAnalyticsResponse)
+async def get_agent_analytics(
+    site_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AgentAnalyticsResponse:
+    """Read-only GEO/AEO analytics snapshot for a site: per-vendor visit counts,
+    top read pages, and verification-method split (SPEC AC11).
+
+    Isolated from human data (SPEC AC2) — reads ONLY agent_visits, never
+    Visitor/Event. MUST be registered before the /{agent_visit_id} detail route:
+    FastAPI matches routes in registration order and "analytics" would otherwise
+    be swallowed by the path-param catch-all (same sharp edge as /stats)."""
+    await _verify_site_access(db, site_id, user)
+
+    rows = await fetch_agent_visit_rows(db, site_id)
+    result = aggregate_agent_analytics(rows)
+    return AgentAnalyticsResponse(**result)
 
 
 @router.get("/{site_id}/{agent_visit_id}", response_model=AgentDetailOut)

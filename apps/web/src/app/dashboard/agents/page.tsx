@@ -14,6 +14,12 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
   Table,
   TableBody,
   TableCell,
@@ -33,6 +39,132 @@ const VERIFICATION_LABEL: Record<string, string> = {
 function VerificationBadge({ method }: { method: string }) {
   return (
     <StatusBadge status={method} label={VERIFICATION_LABEL[method] ?? method} />
+  );
+}
+
+// Stable palette color by index so the stacked vendor bar's segments stay
+// distinguishable (mirrors the traffic-fit-card GEO_PALETTE pattern).
+const VENDOR_PALETTE = [
+  "#6366f1",
+  "#06b6d4",
+  "#f97316",
+  "#a855f7",
+  "#f43f5e",
+  "#14b8a6",
+  "#22c55e",
+  "#eab308",
+];
+const vendorColor = (i: number) => VENDOR_PALETTE[i % VENDOR_PALETTE.length];
+
+// Fixed GEO/AEO analytics cards (SPEC AC11) — a read-only snapshot below the
+// Phase 3 KPI row. NOT draggable, no localStorage, no time-window toggle.
+function AgentAnalyticsCards({ siteId }: { siteId: string }) {
+  const { data, isError } = useQuery({
+    queryKey: ["agent-analytics", siteId],
+    queryFn: () => api.getAgentAnalytics(siteId),
+    enabled: !!siteId,
+  });
+
+  if (isError || !data) return null;
+
+  const vendorEntries = Object.entries(data.by_vendor).sort(
+    (a, b) => b[1] - a[1]
+  );
+  const vendorTotal = vendorEntries.reduce((sum, [, n]) => sum + n, 0);
+  const verificationEntries = Object.entries(data.by_verification).sort(
+    (a, b) => b[1] - a[1]
+  );
+
+  if (vendorTotal === 0 && data.top_pages.length === 0) return null;
+
+  return (
+    <div className="mb-6 grid gap-4 md:grid-cols-2">
+      {/* Vendor breakdown — hand-rolled 100%-stacked bar (traffic-fit pattern). */}
+      <Card className="h-full">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Agent vendors</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {vendorTotal > 0 ? (
+            <>
+              <div className="flex h-8 w-full rounded-md bg-secondary">
+                {vendorEntries.map(([vendor, count], i) => (
+                  <div
+                    key={vendor}
+                    className="group relative h-full min-w-[3px] cursor-default border-r border-background/60 transition-opacity first:rounded-l-md last:border-r-0 hover:opacity-90"
+                    style={{
+                      width: `${Math.round((count / vendorTotal) * 100)}%`,
+                      backgroundColor: vendorColor(i),
+                    }}
+                  >
+                    <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1.5 hidden -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-2.5 py-1.5 text-xs shadow-md group-hover:block">
+                      <div className="font-medium">{vendor}</div>
+                      <div className="mt-0.5 text-muted-foreground">
+                        {count} visit{count !== 1 ? "s" : ""}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <ul className="mt-3 space-y-1 border-t pt-3 text-sm">
+                {vendorEntries.map(([vendor, count], i) => (
+                  <li key={vendor} className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-sm"
+                      style={{ backgroundColor: vendorColor(i) }}
+                      aria-hidden="true"
+                    />
+                    <span className="min-w-0 flex-1 truncate">{vendor}</span>
+                    <span className="font-mono tabular-nums text-muted-foreground">
+                      {count}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="text-xs text-muted-foreground">No vendor data yet.</p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Page-read trends — ranked list of the most-read paths. */}
+      <Card className="h-full">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Most-read pages</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {data.top_pages.length > 0 ? (
+            <ul className="space-y-1 text-sm">
+              {data.top_pages.map((p) => (
+                <li key={p.path} className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs">
+                    {p.path}
+                  </span>
+                  <span className="font-mono tabular-nums text-muted-foreground">
+                    {p.count}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">No page reads yet.</p>
+          )}
+          {verificationEntries.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t pt-3 text-xs text-muted-foreground">
+              {verificationEntries.map(([method, count]) => (
+                <span key={method}>
+                  {VERIFICATION_LABEL[method] ?? method}:{" "}
+                  <span className="font-mono tabular-nums text-foreground">
+                    {count}
+                  </span>
+                </span>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
@@ -92,6 +224,8 @@ export default function AgentsPage() {
           </div>
         </div>
       )}
+
+      {siteId && <AgentAnalyticsCards siteId={siteId} />}
 
       {!siteId ? (
         <p className="text-muted-foreground">Select a site to view agent visits.</p>
