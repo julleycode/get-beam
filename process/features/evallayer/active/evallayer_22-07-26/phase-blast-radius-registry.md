@@ -332,3 +332,58 @@ rollup staleness — both NEW PLAN REQUIRED, neither touched this phase per plan
 🔨 CODE DONE (not ✅ VERIFIED — the two Docker known-gaps are real, undischarged gaps on this phase's
 own highest-risk-class surface: schema migration + live sweep). Report:
 `phase-05-company-resolution_REPORT_22-07-26.md`. Not committed this session (`vc-git-manager` next).
+
+---
+
+## Phase 6
+
+Plan: `process/features/evallayer/active/evallayer_22-07-26/phase-06-aggregation-analytics_PLAN_22-07-26.md`
+
+Blast radius (confirmed real at PVL 2026-07-22 via fresh reads of live code — no collisions with
+Phase 1, 2, 3, 4, 5, or 7's entries above):
+
+- `apps/api/services/agent_aggregator.py` (new)
+- `apps/api/routers/agents.py` (extend — Phase 3 owns file, Phase 6 adds one additive endpoint;
+  confirmed real insertion point directly after the existing `/stats` handler at line 100, before
+  the `/{agent_visit_id}` catch-all at line 102)
+- `apps/api/schemas/agents.py` (extend — Phase 3 owns file, Phase 6 appends 2 new schema classes;
+  confirmed no name collision with existing `AgentOut`/`AgentDetailOut`/`AgentListResponse`/
+  `AgentStatsResponse`)
+- `apps/web/src/lib/api-types.ts` (extend — Phase 3 owns file, Phase 6 appends 2 new interfaces)
+- `apps/web/src/lib/api.ts` (extend — Phase 3 owns file, Phase 6 appends 1 new client method
+  mirroring the existing `getAgentStats` pattern at line 476)
+- `apps/web/src/app/dashboard/agents/page.tsx` (extend — Phase 3 owns file, Phase 6 appends 3
+  fixed cards below the existing KPI row; existing `stats` query/table untouched)
+- `tests/unit/test_agent_aggregator.py` (new)
+- `process/features/evallayer/backlog/phase-06-daily-timeseries_NOTE_22-07-26.md` (already created
+  during PLAN-SUPPLEMENT — confirmed present on disk)
+
+No overlap with Phase 1 (`agent_visit.py` MODEL is read-only reference here, never modified —
+Phase 6 only reads `vendor`/`visit_count`/`page_paths`/`verification_method` columns that already
+exist), Phase 2 (`events.py`, `agent_visit_persistence.py`, `config.py` — none touched), Phase 4
+(`agent_verification.py`, IP-range data files, `scheduler.py` extension — none touched; Phase 6
+only reads the `verification_method` field Phase 4 populates), Phase 5 (`visitor.py`,
+`agent_company_resolution.py`, `identity_resolver.py`, `routers/visitors.py` and friends — none
+touched), or Phase 7 (`identity_classification.py`, `campaign_sender.py`, `campaigns.py`,
+`csv_exporter.py`, `test_agent_origin_exclusion.py` — none touched). Phase 6 extends 4 files
+Phase 3 created (`agents.py`, `schemas/agents.py`, `api.ts`, `api-types.ts`, `page.tsx`) purely
+additively — same accepted "extend, don't collide" pattern already used by Phase 4/5 extending
+Phase 2's files. No new table, no migration, no Celery/scheduler task — computed on-the-fly per
+request.
+
+status: PVL PASS (2026-07-22) — validate-contract written, `generated-by: inner-pvl: phase-6`.
+Gate: PASS. 1 plan update applied in-plan during VALIDATE (not deferred, not accepted-as-CONCERN):
+route-registration order (the Step B2 trap — `/analytics` must be registered before the
+`/{agent_visit_id}` catch-all) previously had ONLY Hybrid (Docker-gated) proof; added Step C3, a
+Fully-Automated import-time route-list-order assertion with zero Docker/DB dependency, closing the
+single highest-named risk in this phase with a real automated gate instead of a Hybrid-only
+inference. AC2 isolation (compiled-SQL substring check, Step C2) and AC11 correctness (Step C1)
+confirmed mechanically feasible against the real `AgentVisit` model and existing `timeseries.py`
+pure-split precedent — no design gaps found. No schema/migration/Celery scope creep confirmed —
+matches the plan's on-the-fly, additive-only claim. Known environment gaps (Docker Postgres,
+Playwright dev server unavailable in this sandbox) carried forward for the 2 Hybrid gates
+(`/analytics` endpoint e2e, dashboard card render e2e) — same pattern as every prior phase in this
+program (1/2/3/4/5), does not block PASS, does not block VERIFIED per program precedent. This is
+the FINAL phase of the evallayer program; whole-program AC2/AC10 regression posture reconfirmed
+intact (Phase 6 reads Phase 1/2/4's data structurally, never writes to Visitor/Event, never touches
+Phase 5/7's outreach-exclusion surfaces).
