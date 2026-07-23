@@ -1,0 +1,40 @@
+{
+  "steps": [
+    {
+      "step": "New H2 unit tests (correlation + emailability separation + aggregator count)",
+      "command": ".venv/bin/python -m pytest tests/unit/test_handoff_correlation.py tests/unit/test_handoff_emailability_separation.py tests/unit/test_agent_aggregator.py -q",
+      "result": "PASS",
+      "notes": "35 passed. Covers AC-H2-1/2/3/5, confidence formula incl. Perplexity cap + no-low-writes, tie-break, cross-site exclusion."
+    },
+    {
+      "step": "AC-H2-3 hard gate — emailability separation both directions + absence-tripwire",
+      "command": ".venv/bin/python -m pytest tests/unit/test_handoff_emailability_separation.py -v",
+      "result": "PASS",
+      "notes": "Real IdentifiedVisitor + real AgentHandoffLink pair (non-vacuous); model has no source_agent_visit_id column; absence-tripwire green on both new H2 files."
+    },
+    {
+      "step": "Full unit regression",
+      "command": ".venv/bin/python -m pytest tests/unit -q",
+      "result": "PASS",
+      "notes": "899 passed, 2 skipped, 0 failures. No regression vs baseline; the contract's noted 2 foreign failures were not present this run."
+    },
+    {
+      "step": "ORM registration smoke",
+      "command": "python -c 'import apps.api.main; agent_handoff_links in Base.metadata.tables'",
+      "result": "PASS",
+      "notes": "agent_handoff_links registered: True."
+    },
+    {
+      "step": "FE build",
+      "command": "cd apps/web && npm run build",
+      "result": "PASS",
+      "notes": "Compiled all routes incl. visitors, visitors/[visitorId], agents. No TS errors from new types/components."
+    },
+    {
+      "step": "Live DB round-trip + Alembic migration up/down cycle",
+      "command": "alembic upgrade head && downgrade -1 && upgrade head; pytest tests/integration/test_handoff_correlation_integration.py -m integration -q",
+      "result": "SKIP",
+      "notes": "KNOWN-GAP (Hybrid, Docker-gated) — Docker daemon unresponsive in sandbox. Integration test written + collect-clean (2 tests). Tracked in handoff-program-docker-verification-gaps_NOTE_23-07-26.md. Same precedent as H1."
+    }
+  ]
+}

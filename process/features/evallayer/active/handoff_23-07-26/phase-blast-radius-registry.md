@@ -58,19 +58,55 @@ confirmed linear single-head, no conflict. Still disjoint from H2/H3/H4.
 
 Plan: `process/features/evallayer/active/handoff_23-07-26/phase-02-handoff-correlation_PLAN_23-07-26.md`
 
-Blast radius (planned, not yet executed):
+Blast radius (PVL-confirmed 23-07-26, not yet executed):
 
 - `apps/api/models/agent_handoff_link.py` (new)
-- `apps/api/migrations/versions/<hash>_add_agent_handoff_links_table.py` (new)
-- new correlation-sweep service (location TBD by INNOVATE)
+- `apps/api/migrations/versions/<hash>_add_agent_handoff_links_table.py` (new; `down_revision`
+  corrected at PVL from stale `c4e8f1a9d2b7` to VALIDATE-confirmed live head `a3e9f1c7d2b5` —
+  re-verify with `alembic heads` again immediately before EXECUTE writes the file)
+- `apps/api/services/agent_handoff_correlation.py` (new — locked name, confirmed)
+- `apps/api/config.py` (1 new setting: `handoff_correlation_sweep_interval_minutes`)
 - `apps/api/jobs/scheduler.py` — **shared with Phase 3; Phase 2 registers first (reassign
-  classification, see umbrella Pre-PVL Conflict Resolution)**
-- `apps/api/routers/` (extended or new visitor-detail read endpoint)
-- `apps/web/src/app/dashboard/visitors/` (badge component)
-- `apps/web/src/app/dashboard/agents/page.tsx` (surfacing addition)
+  classification, see umbrella Pre-PVL Conflict Resolution) — unchanged at PVL, still `reassign`**
+- `apps/api/schemas/visitors.py` (5 new nullable fields on `VisitorDetailOut`)
+- `apps/api/routers/visitors.py` (additive data-merge in `get_visitor_detail`, confirmed
+  ~line 541-636 matches live source, no drift)
+- `apps/api/schemas/agents.py` (1 new field on `AgentAnalyticsResponse`)
+- `apps/api/services/agent_aggregator.py` (new sibling DB-fetch fn + extended pure-aggregation
+  signature — locked at PVL, see plan LOCKED Decision 11)
+- `apps/web/src/lib/api-types.ts` (extend `VisitorDetail` + `AgentAnalytics` interfaces — exact
+  names confirmed at PVL)
+- `apps/web/src/app/dashboard/visitors/[visitorId]/page.tsx` (badge, confirmed ~line 448/797)
+- `apps/web/src/app/dashboard/visitors/page.tsx` (list-row pill, confirmed ~line 650)
+- `apps/web/src/app/dashboard/agents/page.tsx` (analytics card, confirmed ~line 70-139 region)
 - `tests/unit/test_handoff_correlation.py`, `tests/unit/test_handoff_emailability_separation.py` (new)
+- `tests/unit/test_agent_aggregator.py` (extended — corrects SPEC's imprecise citation of a
+  non-existent `tests/unit/test_agents_api.py`)
 
-status: (no field — not yet executed)
+status: DONE — EXECUTE complete 24-07-26; migration hash resolved to `e2a4c7f81b93`,
+down_revision re-verified live as `a3e9f1c7d2b5` (single head at EXECUTE, unchanged since PVL).
+Within-blast-radius additions (documented in phase report ## Plan Deviations): (1) one extra
+nullable `handoff_confidence` field on `VisitorOut` (list schema) + a single bulk list-query in
+`list_visitors` + TS `Visitor` interface field, to wire the D6 list-row pill (the plan required the
+pill but scoped the field only to VisitorDetailOut); (2) added `fetch_site_id` param + site check to
+`correlate_fetch_to_clicks` as AC-H2-5 defense-in-depth (makes cross-site exclusion unit-testable
+without a DB). 35 new/affected unit gates green; full unit suite 899 passed / 0 failures; FE build
+green; 1 Docker-gated Hybrid gap (live sweep + migration cycle) remains as known-gap.
+
+PVL confirmation (23-07-26): blast radius re-verified against live source at VALIDATE time (all
+listed files/lines confirmed to exist and match plan text). Migration head corrected
+(`a3e9f1c7d2b5`, single head, no fork). Confirmed disjoint from Phase 1 (H1, DONE) and Phase 4
+(H4, not started); `scheduler.py` sharing with Phase 3 (H3) unchanged from umbrella's `reassign`
+classification — Phase 2 still registers first. Gate: CONDITIONAL (1 Docker-gated Hybrid residual
+only — live sweep + migration cycle — see `handoff-program-docker-verification-gaps_NOTE_23-07-26.md`).
+
+EVL confirmation (24-07-26, UPDATE PROCESS): independent re-run of gate commands GREEN (21/21
+target + 899/0 full regression + FE build). `agent_handoff_links` registration + indexes confirmed
+present. Migration head confirmed single (`e2a4c7f81b93`, unchanged since EXECUTE). AC-H2-3
+confirmed via zero-diff structural check + zero-reference tripwire + zero outreach-table joins.
+Dashboard badge copy confirmed probabilistic. Still disjoint from H1 (DONE) and H4 (not started);
+`scheduler.py` sharing with H3 unchanged — H2's job registered first, H3 must additively append
+after re-reading H2's diff (per umbrella Pre-PVL Conflict Resolution).
 
 ---
 

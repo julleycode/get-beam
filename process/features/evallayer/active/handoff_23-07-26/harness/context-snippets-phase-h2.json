@@ -1,0 +1,28 @@
+{
+  "snippets": [
+    {
+      "file": "apps/api/models/agent_handoff_link.py",
+      "lines": "1-70",
+      "description": "New AgentHandoffLink model — no source_agent_visit_id column; UNIQUE(agent_fetch_event_id); no ForeignKey (house convention).",
+      "content": "class AgentHandoffLink(Base): site_id/visitor_id/agent_fetch_event_id(unique)/confidence/method/delta_seconds/matched_page"
+    },
+    {
+      "file": "apps/api/migrations/versions/e2a4c7f81b93_add_agent_handoff_links_table.py",
+      "lines": "1-60",
+      "description": "Additive-only migration; down_revision=a3e9f1c7d2b5 re-verified live via `alembic heads` at EXECUTE (single head).",
+      "content": "op.create_table('agent_handoff_links', ...); create 2 indexes; unique constraint; clean downgrade drops all."
+    },
+    {
+      "file": "apps/api/services/agent_handoff_correlation.py",
+      "lines": "1-230",
+      "description": "Correlation sweep — high/medium write policy, Perplexity cap, site_id scoping (AC-H2-5), fail-open per row. Never references the emailability marker or guard.",
+      "content": "run_handoff_correlation_sweep / correlate_fetch_to_clicks / _compute_confidence"
+    },
+    {
+      "file": "apps/api/services/identity_classification.py",
+      "lines": "is_emailable_identity (unchanged)",
+      "description": "Emailability guard UNCHANGED by this phase — never queries agent_handoff_links; computed from (provider, source_agent_visit_id) only.",
+      "content": "is_emailable_identity(provider, source_agent_visit_id=None) — no new branch added"
+    }
+  ]
+}

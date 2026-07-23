@@ -312,7 +312,7 @@ During /goal execution of a phase program:
 |---|---|
 | 0 — Pre-program (plan creation) | ✅ COMPLETE |
 | 01 — Fetch events + tiering (H1) | 🔨 CODE DONE (Docker gaps) |
-| 02 — Handoff correlation (H2) | ⏳ PLANNED |
+| 02 — Handoff correlation (H2) | 🔨 CODE DONE (Docker gaps) |
 | 03 — Intent signals (H3) | ⏳ PLANNED |
 | 04 — Watermark feasibility (H4) | ⏳ PLANNED |
 
@@ -427,21 +427,34 @@ cd /Users/apple/getbeam && python -m pytest tests/unit/ tests/integration/ -q
 
 ## Current Execution State
 
-Last updated: 23-07-26
+Last updated: 24-07-26
 Completed phases: Phase 0 (Planning), Phase 1 — Fetch events + tiering (H1) — CODE DONE, EVL-confirmed
   green on all fully-automated gates; 2 Hybrid gates (Alembic upgrade/downgrade cycle, E7 live
   retention purge) remain Docker-gated known-gaps, tracked in
-  `backlog/handoff-program-docker-verification-gaps_NOTE_23-07-26.md`
-Current phase: Phase 2 — Handoff correlation + dashboard (H2)
+  `backlog/handoff-program-docker-verification-gaps_NOTE_23-07-26.md`.
+  Phase 2 — Handoff correlation + dashboard (H2) — CODE DONE, EVL-confirmed green (21/21 target,
+  899/0 full regression, FE build, registration+indexes, single migration head `e2a4c7f81b93`,
+  AC-H2-3 confirmed via zero-diff + zero-reference tripwire + zero outreach joins, probabilistic
+  badge copy confirmed). Core capability now code-complete: on-demand AI fetch links to the human's
+  click-through — "human behind the agent" resolved at high/medium confidence, emailable status
+  untouched in both directions. 1 Docker-gated Hybrid gap (live sweep + migration cycle) remains as
+  known-gap, tracked in the same backlog note (H2 rows).
+Current phase: Phase 3 — Intent signals (H3)
 Current loop step: RESEARCH (pending)
 Validate-contract status: Phase 1 written (Gate: CONDITIONAL, pre-accepted Docker-gated residuals);
-  Phase 2 not yet written
-Program Net Gate: PENDING (1 of 4 phases code-done)
-Latest validator run: 23-07-26 — see UPDATE PROCESS closeout for this cycle
-Cross-program note: Phase 1's migration (`c4e8f1a9d2b7`) has two foreign migrations
-  (`f8a2c1d9b3e7`, `a3e9f1c7d2b5` — visitors-identity "owned-data-layer" program) chained onto it in
-  a parallel session. Chain confirmed linear, no conflict — but that program's live-apply is now
-  blocked on this phase's migration being committed. Prioritize the H1 execution commit.
+  Phase 2 written (Gate: CONDITIONAL, pre-accepted Docker-gated residual); Phase 3 not yet written
+Program Net Gate: PENDING (2 of 4 phases code-done)
+Latest validator run: 24-07-26 — see this UPDATE PROCESS closeout
+Cross-program note: Phase 1's migration (`c4e8f1a9d2b7`) has three foreign/downstream migrations
+  chained onto it (`f8a2c1d9b3e7`, `a3e9f1c7d2b5` — visitors-identity "owned-data-layer" program;
+  `e2a4c7f81b93` — this program's own H2 migration). Chain confirmed linear single head, no fork —
+  but the visitors-identity program's live-apply remains blocked on this program's migrations being
+  committed. Prioritize the H1+H2 execution commit.
+Scheduler coordination note: H2's correlation-sweep job is registered in `apps/api/jobs/scheduler.py`
+  (own `add_job(...)` call, additive). Per the umbrella's Pre-PVL Conflict Resolution (`reassign`
+  classification), H3's Phase 3 INNOVATE/PLAN-SUPPLEMENT step MUST re-read the live diff to
+  `scheduler.py` before adding its own spike-detector job registration — append additively, never
+  edit H2's registration block.
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any

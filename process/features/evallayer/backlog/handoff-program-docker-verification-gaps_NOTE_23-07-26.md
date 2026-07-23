@@ -35,6 +35,12 @@ cd apps/api && .venv/bin/python -m alembic upgrade head
 
 # H1 — retention-purge extension for agent_fetch_events (mirrors existing purge test pattern)
 .venv/bin/python -m pytest tests/integration/test_retention_purge.py -k agent_fetch_events -m integration -q
+
+# H2 — new agent_handoff_links table, live round-trip (structural check already passed offline
+# via `alembic heads`, confirmed single head a3e9f1c7d2b5, at VALIDATE 23-07-26)
+
+# H2 — correlation sweep against real Postgres with real agent_fetch_events + events rows
+.venv/bin/python -m pytest tests/integration -k handoff_correlation -m integration -q
 ```
 
 ## Per-phase gap inventory
@@ -43,6 +49,8 @@ cd apps/api && .venv/bin/python -m alembic upgrade head
 |---|---|---|---|
 | H1 | Alembic migration cycle (upgrade/downgrade against live Postgres) never run | Migration correctness (additive-only, new table) | `alembic upgrade head && downgrade -1 && upgrade head` |
 | H1 | `test_purges_old_agent_fetch_events` (E7, mirrors `test_retention_purge.py`) never run | D2 retention-purge extension actually deletes old rows / keeps recent ones | `pytest tests/integration/test_retention_purge.py -k agent_fetch_events -m integration -q` |
+| H2 | Alembic migration cycle (upgrade/downgrade against live Postgres) never run for `agent_handoff_links` | Migration correctness (additive-only, new table); `down_revision` corrected at PVL to `a3e9f1c7d2b5` | `alembic upgrade head && downgrade -1 && upgrade head` |
+| H2 | Correlation sweep integration round-trip (E7) never run against a real DB | AC-H2-1 (live-integration confidence — the Fully-Automated unit suite proves logic correctness on synthetic fixtures, not real-Postgres query-planner behavior) | `pytest tests/integration/test_handoff_correlation_integration.py -m integration -q` (file written at EXECUTE, collect-clean) |
 
 ## SPEC criteria that ARE fully met (Fully-Automated gate green, no Docker dependency)
 
@@ -50,11 +58,19 @@ AC-H1-1 (per-hit capture), AC-H1-2 (tier classification, incl. completeness trip
 (ingest hot-path fail-open isolation), and the retention config default (E5) are all green today
 via `tests/unit/test_agent_fetch_events.py` — Docker-free.
 
+AC-H2-1 (link creation + confidence formula + no-low-writes policy), AC-H2-2 (window/vendor
+exclusion), AC-H2-3 (emailability separation — program's highest-priority gate), AC-H2-5
+(cross-site exclusion), and AC-H2-4's API half are all green today via
+`tests/unit/test_handoff_correlation.py`, `tests/unit/test_handoff_emailability_separation.py`,
+and `tests/unit/test_agent_aggregator.py` — all Docker-free. Only the live-integration confidence
+half of AC-H2-1 (real Postgres round-trip) and the migration cycle remain gated here.
+
 ## Next action
 
 Not scheduled — requires a disposable Postgres instance not available in the current sandbox
-(`docker ps` timed out during this VALIDATE pass). When infra becomes available, run the two
-close commands above and mark H1 ✅ VERIFIED in the umbrella plan's Program Status Table. Append
-H2/H3/H4 rows here as their own PVL passes surface further Docker-gated gaps (H2's AC-H2-3
-emailability regression is expected to be Fully-Automated / Docker-free per its own plan — verify
-at H2 PVL time and do not assume it needs this note).
+(`docker ps` produced no output during both the H1 and H2 VALIDATE passes). When infra becomes
+available, run the close commands above and mark H1 and H2 ✅ VERIFIED in the umbrella plan's
+Program Status Table. H2's AC-H2-3 emailability regression is confirmed Fully-Automated /
+Docker-free as predicted — it does NOT need this note; only H2's live-sweep integration and
+migration cycle do. Append H3/H4 rows here as their own PVL passes surface further Docker-gated
+gaps.

@@ -1,0 +1,6 @@
+{
+  "riskClass": "schema/data migration + permission/trust-boundary (emailability-adjacent)",
+  "workDescription": "Handoff Detection H2 — new agent_handoff_links table + Alembic migration (additive-only), fetch↔click correlation sweep, additive read-only API/dashboard surfacing. AC-H2-3 (emailability separation) is the program's highest-priority gate.",
+  "approver": "vc-execute-agent (autonomous /goal execution)",
+  "mustStopBeforeFinalize": true
+}
