@@ -353,12 +353,22 @@ export interface TopPageEntry {
   count: number;
 }
 
+export interface RecentAiResearchEntry {
+  company_name: string;
+  domain: string | null;
+  matched_page: string;
+  researched_at: string;
+}
+
 export interface AgentAnalytics {
   by_vendor: Record<string, number>;
   top_pages: TopPageEntry[];
   by_verification: Record<string, number>;
   // Handoff Detection H2: agent fetches correlated to a human AI-referral click.
   handoff_links_count: number;
+  // Handoff Detection H3: companies that appeared shortly after an AI agent
+  // fetched a commercial page. Read-only metadata, never an outreach feed.
+  recent_ai_researched_companies: RecentAiResearchEntry[];
 }
 
 export interface Segment {

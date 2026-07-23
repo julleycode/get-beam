@@ -45,6 +45,17 @@ class TopPageEntry(BaseModel):
     count: int
 
 
+class RecentAiResearchEntry(BaseModel):
+    """A company that appeared shortly after an AI agent fetched a commercial page
+    (Handoff Detection H3, AC-H3-3). Pure read-only metadata — company/site level
+    only, NEVER a person-level claim, NEVER an outreach target."""
+
+    company_name: str
+    domain: str | None = None
+    matched_page: str
+    researched_at: datetime
+
+
 class AgentAnalyticsResponse(BaseModel):
     """Read-only GEO/AEO analytics snapshot over AgentVisit rows (SPEC AC11).
 
@@ -57,3 +68,6 @@ class AgentAnalyticsResponse(BaseModel):
     # Handoff Detection H2 (AC-H2-4): count of fetch↔click handoff links for the
     # site — how many agent fetches were correlated to a human AI-referral click.
     handoff_links_count: int
+    # Handoff Detection H3 (AC-H3-3): companies that appeared shortly after an AI
+    # agent fetched a commercial page. Read-only metadata, never an outreach feed.
+    recent_ai_researched_companies: list[RecentAiResearchEntry] = []

@@ -20,6 +20,7 @@ from apps.api.services.agent_aggregator import (
     aggregate_agent_analytics,
     fetch_agent_visit_rows,
     fetch_handoff_links_count,
+    fetch_recent_ai_researched_companies,
 )
 
 logger = structlog.get_logger()
@@ -122,7 +123,10 @@ async def get_agent_analytics(
 
     rows = await fetch_agent_visit_rows(db, site_id)
     handoff_links_count = await fetch_handoff_links_count(db, site_id)
-    result = aggregate_agent_analytics(rows, handoff_links_count)
+    recent_ai_researched = await fetch_recent_ai_researched_companies(db, site_id)
+    result = aggregate_agent_analytics(
+        rows, handoff_links_count, recent_ai_researched
+    )
     return AgentAnalyticsResponse(**result)
 
 

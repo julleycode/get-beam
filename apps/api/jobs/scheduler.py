@@ -185,6 +185,23 @@ async def _handoff_correlation_sweep_job() -> None:
         logger.exception("handoff_correlation_sweep_crashed")
 
 
+async def _intent_signal_sweep_job() -> None:
+    """Periodic job: live commercial-page intent alerts + spike detection (H3).
+
+    run_intent_signal_sweep opens its own per-(site,page) fail-open iteration;
+    this wrapper opens the session and swallows any top-level crash. Never touches
+    the ingest hot path. Handoff Detection H3 — its own job, additive, registered
+    after H2's _handoff_correlation_sweep_job.
+    """
+    try:
+        from apps.api.services.agent_intent_signals import run_intent_signal_sweep
+
+        async with async_session() as db:
+            await run_intent_signal_sweep(db)
+    except Exception:
+        logger.exception("intent_signal_sweep_crashed")
+
+
 def start_scheduler() -> None:
     """Start the background scheduler. Call once at app startup."""
     scheduler.add_job(
@@ -235,6 +252,13 @@ def start_scheduler() -> None:
         "interval",
         minutes=settings.handoff_correlation_sweep_interval_minutes,
         id="handoff_correlation_sweep",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        _intent_signal_sweep_job,
+        "interval",
+        minutes=settings.intent_signal_sweep_interval_minutes,
+        id="intent_signal_sweep",
         replace_existing=True,
     )
     if settings.changelog_sync_enabled:

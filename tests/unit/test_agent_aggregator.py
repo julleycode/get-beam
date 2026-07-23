@@ -116,6 +116,8 @@ def test_empty_rows_yield_empty_aggregates():
         "top_pages": [],
         "by_verification": {},
         "handoff_links_count": 0,
+        # Handoff Detection H3 (AC-H3-3): additive echoed field, empty by default.
+        "recent_ai_researched_companies": [],
     }
 
 

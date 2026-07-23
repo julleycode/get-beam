@@ -174,6 +174,38 @@ function AgentAnalyticsCards({ siteId }: { siteId: string }) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Handoff Detection H3: companies that appeared shortly after an AI agent
+          fetched a commercial page. Read-only metadata — no action affordances,
+          never a link into campaign/outreach UI. */}
+      <Card className="h-full">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Appeared after AI research</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {data.recent_ai_researched_companies.length > 0 ? (
+            <ul className="space-y-1 text-sm">
+              {data.recent_ai_researched_companies.map((c, i) => (
+                <li
+                  key={`${c.domain ?? c.company_name}-${c.matched_page}-${i}`}
+                  className="flex items-center gap-2"
+                >
+                  <span className="min-w-0 flex-1 truncate">
+                    {c.company_name}
+                  </span>
+                  <span className="min-w-0 max-w-[45%] truncate font-mono text-xs text-muted-foreground">
+                    {c.matched_page}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No AI-researched companies correlated yet.
+            </p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
