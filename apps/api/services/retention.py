@@ -27,6 +27,10 @@ logger = structlog.get_logger()
 # Advisory-lock key keeping the purge single-flight across replicas.
 _PURGE_LOCK_KEY = "beam_retention_purge"
 
+# Separate advisory-lock key for the agent_fetch_events purge (Handoff H1) so it
+# is single-flight independently of the raw-events purge.
+_AGENT_FETCH_PURGE_LOCK_KEY = "beam_agent_fetch_retention_purge"
+
 # Per-batch delete size — bounds how long any single statement holds row locks.
 _PURGE_BATCH_SIZE = 10_000
 
@@ -53,12 +57,12 @@ async def _count_old_events(db: AsyncSession, days: int) -> int:
     return result.scalar() or 0
 
 
-async def _try_acquire_lock(db: AsyncSession) -> bool | None:
+async def _try_acquire_lock(db: AsyncSession, key: str = _PURGE_LOCK_KEY) -> bool | None:
     """True = acquired, False = held elsewhere, None = unsupported (SQLite)."""
     try:
         result = await db.execute(
             text("SELECT pg_try_advisory_lock(hashtext(:key))"),
-            {"key": _PURGE_LOCK_KEY},
+            {"key": key},
         )
         return bool(result.scalar())
     except Exception as exc:
@@ -66,14 +70,32 @@ async def _try_acquire_lock(db: AsyncSession) -> bool | None:
         return None
 
 
-async def _release_lock(db: AsyncSession) -> None:
+async def _release_lock(db: AsyncSession, key: str = _PURGE_LOCK_KEY) -> None:
     try:
         await db.execute(
             text("SELECT pg_advisory_unlock(hashtext(:key))"),
-            {"key": _PURGE_LOCK_KEY},
+            {"key": key},
         )
     except Exception:
         pass
+
+
+async def _agent_fetch_events_table_exists(db: AsyncSession) -> bool:
+    result = await db.execute(
+        text(
+            "SELECT EXISTS (SELECT FROM information_schema.tables "
+            "WHERE table_name = 'agent_fetch_events')"
+        )
+    )
+    return bool(result.scalar())
+
+
+async def _count_old_agent_fetch_events(db: AsyncSession, days: int) -> int:
+    result = await db.execute(
+        text(f"SELECT count(*) FROM agent_fetch_events WHERE created_at < {_CUTOFF_SQL}"),
+        {"days": days},
+    )
+    return result.scalar() or 0
 
 
 async def purge_events_older_than(
@@ -132,3 +154,68 @@ async def purge_events_older_than(
         finally:
             if acquired:
                 await _release_lock(lock_db)
+
+
+# agent_fetch_events.created_at is tz-aware (Base server_default now()), unlike
+# the naive events.created_at, so the cutoff is computed in tz-aware wall time.
+_AGENT_FETCH_CUTOFF_SQL = "now() - make_interval(days => :days)"
+
+
+async def purge_agent_fetch_events_older_than(
+    days: int | None = None,
+    dry_run: bool = False,
+    batch_size: int = _PURGE_BATCH_SIZE,
+) -> dict:
+    """Delete agent_fetch_events older than `days`.
+
+    Default `days` = settings.agent_fetch_event_retention_days. Mirrors
+    purge_events_older_than exactly (own advisory lock, table-exists guard,
+    dry-run counting path, batched delete). Returns the same status-dict shape.
+    """
+    days = settings.agent_fetch_event_retention_days if days is None else days
+
+    async with async_session() as lock_db:
+        acquired = await _try_acquire_lock(lock_db, _AGENT_FETCH_PURGE_LOCK_KEY)
+        if acquired is False:
+            logger.info("agent_fetch_retention_purge_lock_busy")
+            return {"status": "locked", "deleted": 0}
+        try:
+            async with async_session() as db:
+                if not await _agent_fetch_events_table_exists(db):
+                    return {"status": "no_table", "deleted": 0}
+
+                if dry_run:
+                    n = await _count_old_agent_fetch_events(db, days)
+                    logger.info(
+                        "agent_fetch_retention_purge_dry_run", days=days, would_delete=n
+                    )
+                    return {"status": "dry_run", "would_delete": n}
+
+                total = 0
+                while True:
+                    result = await db.execute(
+                        text(
+                            f"""
+                            DELETE FROM agent_fetch_events
+                            WHERE id IN (
+                                SELECT id FROM agent_fetch_events
+                                WHERE created_at < {_AGENT_FETCH_CUTOFF_SQL}
+                                LIMIT :lim
+                            )
+                            """
+                        ),
+                        {"days": days, "lim": batch_size},
+                    )
+                    await db.commit()
+                    deleted = result.rowcount or 0
+                    total += deleted
+                    if deleted < batch_size:
+                        break
+
+                logger.info(
+                    "agent_fetch_retention_purge_complete", days=days, deleted=total
+                )
+                return {"status": "ok", "deleted": total}
+        finally:
+            if acquired:
+                await _release_lock(lock_db, _AGENT_FETCH_PURGE_LOCK_KEY)

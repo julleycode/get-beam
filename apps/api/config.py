@@ -145,6 +145,26 @@ class Settings(BaseSettings):
     # pre-EvalLayer (recognized agent UAs fall through to the is_bot() drop).
     agent_detection_enabled: bool = False
 
+    # ─── Owned identity data layer (durable company graph) ───
+    # When true, every successful free rDNS company resolution is persisted
+    # write-through to the durable cross-tenant company_graph table, and a fresh
+    # (non-stale) row is read before a new rDNS lookup. Defaults OFF until the
+    # company_graph migration is confirmed applied — with the flag off, company
+    # resolution behavior is byte-identical to the Redis-only path (same
+    # precedent as agent_detection_enabled).
+    company_graph_enabled: bool = False
+    # Configurable window (days) before a company_graph row triggers lazy
+    # re-validation at read time (no cron; read-time only).
+    company_graph_staleness_days: int = 75
+
+    # When true, SendGrid open/click engagement events are captured to the
+    # identity_signals corroborating table (all 4 write gates enforced), and
+    # corroborate_identity() may bump confidence on an ALREADY-matched identity.
+    # NEVER creates or upgrades an IdentifiedVisitor on its own. Defaults OFF
+    # until the identity_signals migration is confirmed applied — with the flag
+    # off, the SendGrid webhook behavior is byte-identical to today.
+    identity_signals_enabled: bool = False
+
     # MaxMind GeoLite2-ASN: a FREE, unlimited, offline IP→ASN database. When
     # maxmind_asn_db_path points at a GeoLite2-ASN.mmdb, datacenter detection uses
     # it (sub-ms local lookup, no per-IP IPinfo call) and only falls back to IPinfo
@@ -339,6 +359,9 @@ class Settings(BaseSettings):
     # Data retention (GDPR data minimization / privacy-policy 90-day promise):
     # raw events older than this are auto-purged. Enriched profiles are kept.
     event_retention_days: int = 90
+    # Per-hit agent_fetch_events (Handoff Detection H1) share the same 90-day
+    # retention promise as raw events — purged by the same sweep.
+    agent_fetch_event_retention_days: int = 90
     retention_purge_interval_hours: int = 24  # daily purge sweep
 
     # ─── OSINT account scanner (manual per-visitor; free stacked engines) ───

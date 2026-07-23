@@ -12,8 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.models.database import get_db, async_session
 from apps.api.models.event import Event
 from apps.api.schemas.events import EventBatch
-from apps.api.services.agent_classifier import classify_agent
-from apps.api.services.agent_visit_persistence import persist_agent_visit
+from apps.api.services.agent_classifier import classify_agent, classify_tier
+from apps.api.services.agent_visit_persistence import persist_agent_visit, persist_agent_fetch_event
 from apps.api.services.bot_filter import is_bot
 from apps.api.services.link_decorator import decode_bid
 from apps.api.services.rate_limiter import limiter
@@ -142,6 +142,13 @@ async def ingest_events(
     if classification is not None:
         agent_path = batch.events[0].page_path if batch.events else None
         await persist_agent_visit(db, batch.site_id, classification, ip_address, agent_path)
+        # H1: also capture this hit as its own append-only, tier-tagged fetch
+        # event (isolated fail-open write — a failure here never affects the
+        # rollup above nor the 204 response).
+        tier = classify_tier(classification.product_or_ua_token)
+        await persist_agent_fetch_event(
+            db, batch.site_id, classification, tier, ip_address, agent_path
+        )
         return Response(status_code=204)
 
     # Datacenter / cloud-compute traffic = bots (Azure/AWS/GCP server scanners,

@@ -13,7 +13,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apps.api.config import settings
 from apps.api.models.database import async_session
 from apps.api.services.resolution_runner import run_resolution_sweep
-from apps.api.services.retention import purge_events_older_than
+from apps.api.services.retention import (
+    purge_events_older_than,
+    purge_agent_fetch_events_older_than,
+)
 from apps.api.services.sync import sync_all_accounts
 from apps.api.services import blog_service
 from apps.api.services import changelog_generator
@@ -53,10 +56,11 @@ async def _resolution_sweep_job() -> None:
 
 
 async def _retention_purge_job() -> None:
-    """Periodic job: delete raw events past the retention window.
+    """Periodic job: delete raw events + agent_fetch_events past retention.
 
-    purge_events_older_than handles its own sessions and a Postgres advisory
-    lock (single-flight across replicas). Only raw events are removed.
+    Each purge handles its own sessions and its own Postgres advisory lock
+    (single-flight across replicas). The two purges are independent — a failure
+    in one never blocks the other.
     """
     try:
         result = await purge_events_older_than()
@@ -64,6 +68,12 @@ async def _retention_purge_job() -> None:
             logger.info("retention_purge_job_complete", **result)
     except Exception:
         logger.exception("retention_purge_crashed")
+    try:
+        agent_result = await purge_agent_fetch_events_older_than()
+        if agent_result.get("deleted"):
+            logger.info("agent_fetch_retention_purge_job_complete", **agent_result)
+    except Exception:
+        logger.exception("agent_fetch_retention_purge_crashed")
 
 
 async def _publish_scheduled_blog_job() -> None:

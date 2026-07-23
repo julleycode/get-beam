@@ -32,6 +32,31 @@ _VENDOR_TOKENS: dict[str, frozenset[str]] = {
 # not consumed for validation within Phase 1.
 VERIFICATION_METHODS: tuple[str, ...] = ("ua-only", "ip-verified", "rdns-verified")
 
+# On-demand vs index tier split (Handoff Detection H1). "on-demand" tokens are
+# live-fetch-on-user-query bots — a real human is behind the request right now
+# (the signal every downstream handoff-correlation phase depends on). Everything
+# else in _VENDOR_TOKENS is an "index"/crawler token.
+#
+# Conservative asymmetry: only tokens KNOWN to be user-driven live fetches are
+# on-demand; the default (else-branch) is "index". Mislabeling a crawler as
+# on-demand would fabricate a human-intent signal, so the safe default is index.
+# Notably ``claude-searchbot`` is on-demand (Anthropic's live user-query fetch,
+# analogous to oai-searchbot/perplexity-user) while ``anthropic-ai`` — a distinct
+# token in the same "anthropic" vendor set — is the crawler/index token.
+_ON_DEMAND_TOKENS: frozenset[str] = frozenset({
+    "chatgpt-user", "oai-searchbot", "claude-user", "claude-searchbot", "perplexity-user",
+})
+
+
+def classify_tier(raw_ua_token: str) -> str:
+    """Return "on-demand" or "index" for a known vendor token.
+
+    Total function over the 10 tokens in ``_VENDOR_TOKENS`` — every token has
+    an explicit tier (see the completeness test ``test_tier_map_covers_all_vendor_tokens``).
+    Callers must only pass a token already confirmed non-None by ``classify_agent()``.
+    """
+    return "on-demand" if raw_ua_token in _ON_DEMAND_TOKENS else "index"
+
 
 class AgentClassification(NamedTuple):
     vendor: str

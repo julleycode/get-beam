@@ -13,10 +13,11 @@ human visitor data.
 from datetime import datetime, timezone
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import insert, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.models.agent_fetch_event import AgentFetchEvent
 from apps.api.models.agent_visit import AgentVisit
 from apps.api.services.agent_classifier import AgentClassification
 
@@ -107,6 +108,47 @@ async def persist_agent_visit(
         # guardrail), roll back, and swallow. Never raise into the ingest path.
         logger.warning(
             "agent_visit_persist_failed",
+            site_id=site_id,
+            vendor=classification.vendor,
+            error=str(exc),
+        )
+        await db.rollback()
+        return None
+
+
+async def persist_agent_fetch_event(
+    db: AsyncSession,
+    site_id: str,
+    classification: AgentClassification,
+    tier: str,
+    ip_address: str | None,
+    page_path: str | None,
+) -> None:
+    """Insert one append-only ``agent_fetch_events`` row. Fail-open.
+
+    Isolated from the ``persist_agent_visit`` rollup call — this insert has its
+    own try/except and its own commit, so its failure never affects (and is
+    never affected by) the rollup upsert. Plain ``insert()`` — append-only, no
+    upsert/conflict semantics needed.
+    """
+    try:
+        await db.execute(
+            insert(AgentFetchEvent).values(
+                site_id=site_id,
+                vendor=classification.vendor,
+                raw_ua_token=classification.product_or_ua_token,
+                tier=tier,
+                page_path=page_path,
+                ip_address=ip_address or None,
+                verification_method=classification.verification_method,
+            )
+        )
+        await db.commit()
+    except Exception as exc:
+        # Fail-open: log keys/vendor/site_id only (NO raw UA, NO IP — PII/GDPR
+        # guardrail), roll back, and swallow. Never raise into the ingest path.
+        logger.warning(
+            "agent_fetch_event_persist_failed",
             site_id=site_id,
             vendor=classification.vendor,
             error=str(exc),

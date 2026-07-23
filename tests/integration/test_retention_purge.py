@@ -11,7 +11,7 @@ are visible across both.
 """
 
 import uuid as uuidlib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
@@ -107,3 +107,69 @@ class TestRetentionPurge:
         await patched_retention.purge_events_older_than(days=90)
         await test_db.commit()
         assert await _count(test_db, site_id) == 0
+
+
+def _agent_fetch_event(site_id: str, when: datetime):
+    from apps.api.models.agent_fetch_event import AgentFetchEvent
+
+    return AgentFetchEvent(
+        site_id=site_id,
+        vendor="openai",
+        raw_ua_token="chatgpt-user",
+        tier="on-demand",
+        page_path="/pricing",
+        ip_address="1.2.3.4",
+        verification_method="ua-only",
+        created_at=when,
+    )
+
+
+async def _count_agent_fetch(db, site_id: str) -> int:
+    from apps.api.models.agent_fetch_event import AgentFetchEvent
+
+    return (
+        await db.execute(
+            select(func.count())
+            .select_from(AgentFetchEvent)
+            .where(AgentFetchEvent.site_id == site_id)
+        )
+    ).scalar() or 0
+
+
+class TestAgentFetchEventRetentionPurge:
+    """E7 (VALIDATE-added) — Hybrid, Docker-gated. Proves the D2 purge extension
+    deletes old agent_fetch_events and keeps recent ones. Mirrors
+    test_purges_old_keeps_recent. created_at is tz-aware for this table.
+    """
+
+    @pytest.mark.asyncio
+    async def test_purges_old_agent_fetch_events(self, test_db, patched_retention):
+        site_id = f"aret_{uuidlib.uuid4().hex[:8]}"
+        now = datetime.now(timezone.utc)
+        test_db.add(_agent_fetch_event(site_id, now - timedelta(days=100)))  # old
+        test_db.add(_agent_fetch_event(site_id, now - timedelta(days=100)))  # old
+        test_db.add(_agent_fetch_event(site_id, now - timedelta(days=10)))   # recent
+        await test_db.commit()
+
+        result = await patched_retention.purge_agent_fetch_events_older_than(days=90)
+        assert result["status"] == "ok"
+        assert result["deleted"] >= 2
+
+        await test_db.commit()  # start a fresh read txn
+        assert await _count_agent_fetch(test_db, site_id) == 1  # only recent remains
+
+    @pytest.mark.asyncio
+    async def test_dry_run_deletes_nothing(self, test_db, patched_retention):
+        site_id = f"aret_{uuidlib.uuid4().hex[:8]}"
+        now = datetime.now(timezone.utc)
+        test_db.add(_agent_fetch_event(site_id, now - timedelta(days=200)))
+        await test_db.commit()
+
+        result = await patched_retention.purge_agent_fetch_events_older_than(
+            days=90, dry_run=True
+        )
+        assert result["status"] == "dry_run"
+        assert result["would_delete"] >= 1
+
+        await test_db.commit()
+        assert await _count_agent_fetch(test_db, site_id) == 1  # nothing deleted
