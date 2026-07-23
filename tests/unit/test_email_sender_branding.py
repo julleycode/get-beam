@@ -62,3 +62,35 @@ class TestBrandingInjection:
         assert "Powered by" in html
         assert "utm_campaign=powered_by" in html
         assert html.index("digest body") < html.index("Powered by") < html.index("Unsubscribe")
+
+
+class TestCustomArgsAndTracking:
+    """Owned-data-layer Phase 2: custom_args + tracking_settings forwarding."""
+
+    @pytest.mark.asyncio
+    async def test_custom_args_and_tracking_settings_forwarded(self, captured_payloads):
+        await EmailSender().send(
+            to_email="prospect@example.com",
+            subject="hello",
+            body_html="<p>body</p>",
+            unsubscribe_url="https://api.example.com/unsubscribe?t=x",
+            custom_args={"site_id": "s1", "visitor_id": "v1"},
+        )
+        payload = captured_payloads[0]
+        assert payload["custom_args"] == {"site_id": "s1", "visitor_id": "v1"}
+        assert payload["tracking_settings"]["click_tracking"]["enable"] is True
+        assert payload["tracking_settings"]["open_tracking"]["enable"] is True
+
+    @pytest.mark.asyncio
+    async def test_no_custom_args_omits_key_but_keeps_tracking(self, captured_payloads):
+        """Backward compatible: omitting custom_args leaves the key absent;
+        tracking_settings is always set explicitly regardless."""
+        await EmailSender().send(
+            to_email="prospect@example.com",
+            subject="hello",
+            body_html="<p>body</p>",
+            unsubscribe_url="https://api.example.com/unsubscribe?t=x",
+        )
+        payload = captured_payloads[0]
+        assert "custom_args" not in payload
+        assert payload["tracking_settings"]["open_tracking"]["enable"] is True

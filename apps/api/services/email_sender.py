@@ -53,6 +53,7 @@ class EmailSender:
         unsubscribe_url: str | None = None,
         db: AsyncSession | None = None,
         branding: bool = False,
+        custom_args: dict[str, str] | None = None,
     ) -> dict | None:
         # Suppression check (do_not_email set by unsubscribe + bounce webhook).
         # `db` is optional so purely transactional callers without a session
@@ -84,7 +85,20 @@ class EmailSender:
             "subject": subject,
             "content": [{"type": "text/html", "value": full_html}],
             "headers": {"List-Unsubscribe": f"<{unsubscribe_url}>"},
+            # Explicit tracking_settings so open/click events fire regardless of
+            # account/dashboard defaults (owned-data-layer Phase 2). NOTE: whether
+            # an account-level override can still suppress this is unverified
+            # without a live SendGrid call (needs-live-provider known-gap).
+            "tracking_settings": {
+                "click_tracking": {"enable": True},
+                "open_tracking": {"enable": True},
+            },
         }
+        # custom_args echo back on SendGrid Event Webhook events, letting the
+        # open/click webhook attribute an event to a site_id/visitor_id. Only
+        # campaign (identified-visitor) sends pass them; transactional sends omit.
+        if custom_args:
+            payload["custom_args"] = custom_args
         # Reply-To = the customer's own inbox so a recipient's reply reaches them,
         # not Beam's shared from-address. (The From/DKIM stays Beam until the
         # Connect-Gmail work lands; this is the interim personalization.)

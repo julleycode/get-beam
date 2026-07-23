@@ -317,6 +317,9 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
                     body_html=body_html,
                     from_name=site_name,
                     reply_to=owner_email,
+                    # Echoed back on SendGrid open/click events so the webhook can
+                    # attribute engagement to this (site, visitor) — owned-data-layer.
+                    custom_args={"site_id": campaign.site_id, "visitor_id": vid},
                 )
             except Exception as exc:
                 logger.warning("campaign_email_failed", visitor_id=vid[:8], error=str(exc))
