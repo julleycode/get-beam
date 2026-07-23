@@ -362,7 +362,9 @@ async def _resolve_companies(db: AsyncSession, site_id: str) -> None:
 
         resolved = 0
         for visitor in visitors:
-            domain = await resolve_company_cached(visitor.ip_address)
+            # Pass db so the durable company_graph write-through/read-first can
+            # activate when company_graph_enabled is True (flag off → unchanged).
+            domain = await resolve_company_cached(visitor.ip_address, db=db)
             if domain:
                 visitor.company_domain = domain
                 resolved += 1

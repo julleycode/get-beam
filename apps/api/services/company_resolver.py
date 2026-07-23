@@ -16,9 +16,16 @@ Results are cached in Redis with 30-day TTL to avoid repeated lookups.
 import asyncio
 import re
 import socket
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
 import structlog
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from apps.api.config import settings
+from apps.api.models.company_graph import CompanyGraphNode
 
 logger = structlog.get_logger()
 
@@ -398,12 +405,127 @@ async def is_datacenter_ip(ip: str) -> bool:
     return is_dc
 
 
-async def resolve_company_cached(ip: str) -> str | None:
+# ─── Durable cross-tenant company graph (owned-data-layer, flag-gated) ───
+
+
+@dataclass
+class CompanyGraphReadResult:
+    """A company_graph read hit plus whether the row is past its staleness
+    window (lazy read-time re-validation signal — no cron)."""
+
+    node: CompanyGraphNode
+    needs_revalidation: bool
+
+
+def _company_graph_is_stale(
+    last_verified: datetime | None,
+    staleness_days: int,
+    now: datetime | None = None,
+) -> bool:
+    """Pure staleness check: True when last_verified is older than the window
+    (or missing). Timezone-tolerant so naive server_default timestamps compare
+    correctly."""
+    if last_verified is None:
+        return True
+    now = now or datetime.now(timezone.utc)
+    if last_verified.tzinfo is None:
+        last_verified = last_verified.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return (now - last_verified) > timedelta(days=staleness_days)
+
+
+async def _read_company_graph(
+    db: AsyncSession, ip: str
+) -> CompanyGraphReadResult | None:
+    """Read the highest-confidence company_graph row for an IP, tagged with a
+    staleness flag. Returns None on no row or any error (fail-open)."""
+    if not ip:
+        return None
+    try:
+        row = (
+            await db.execute(
+                select(CompanyGraphNode)
+                .where(CompanyGraphNode.ip == ip)
+                .order_by(CompanyGraphNode.confidence.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+    except Exception as exc:
+        logger.debug("company_graph_read_failed", error=str(exc))
+        return None
+    if row is None:
+        return None
+    stale = _company_graph_is_stale(row.last_verified, settings.company_graph_staleness_days)
+    return CompanyGraphReadResult(node=row, needs_revalidation=stale)
+
+
+async def _write_through_company_graph(
+    db: AsyncSession,
+    ip: str,
+    domain: str | None,
+    company_name: str | None,
+    source: str,
+    confidence: float,
+) -> None:
+    """Upsert a resolved (ip, source) into the durable company_graph. Best-effort:
+    a write failure never breaks the caller's resolution. Logs keys only."""
+    if not ip:
+        return
+    try:
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        stmt = pg_insert(CompanyGraphNode).values(
+            ip=ip,
+            domain=domain,
+            company_name=company_name,
+            source=source,
+            confidence=confidence,
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["ip", "source"],
+            set_={
+                "domain": stmt.excluded.domain,
+                "company_name": stmt.excluded.company_name,
+                "confidence": stmt.excluded.confidence,
+                "last_verified": func.now(),
+                "updated_at": func.now(),
+            },
+        )
+        await db.execute(stmt)
+        await db.commit()
+        logger.info("company_graph_upserted", source=source)
+    except Exception as exc:
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        logger.debug("company_graph_write_failed", error=str(exc))
+
+
+async def resolve_company_cached(
+    ip: str, db: AsyncSession | None = None
+) -> str | None:
     """Resolve IP to company domain with Redis caching (30-day TTL).
 
     Returns cached result if available, otherwise resolves and caches.
     Falls back to uncached resolution if Redis is unavailable.
+
+    ``db`` (owned-data-layer): when provided AND ``company_graph_enabled`` is
+    True, a fresh (non-stale) company_graph row is read first (skipping rDNS),
+    and every successful rDNS resolution is persisted write-through to the
+    durable cross-tenant company_graph. When ``db is None`` OR the flag is off,
+    behavior is byte-identical to the Redis-only path (existing callers pass no
+    db → unchanged).
     """
+    graph_on = db is not None and settings.company_graph_enabled
+
+    # ── Graph read-first (flag-gated): a fresh row short-circuits rDNS ──
+    if graph_on:
+        read = await _read_company_graph(db, ip)
+        if read is not None and not read.needs_revalidation:
+            return read.node.domain
+
     cache_key = f"{CACHE_PREFIX}{ip}"
 
     try:
@@ -421,8 +543,15 @@ async def resolve_company_cached(ip: str) -> str | None:
         # Cache result (store "__none__" for negative results to avoid re-lookups)
         await redis.setex(cache_key, CACHE_TTL, domain or "__none__")
 
+        # Write-through to the durable graph on a successful free rDNS hit.
+        if graph_on and domain:
+            await _write_through_company_graph(db, ip, domain, None, "rdns", 0.5)
+
         return domain
 
     except Exception:
         # Redis unavailable — resolve without caching
-        return await resolve_company_from_ip(ip)
+        domain = await resolve_company_from_ip(ip)
+        if graph_on and domain:
+            await _write_through_company_graph(db, ip, domain, None, "rdns", 0.5)
+        return domain

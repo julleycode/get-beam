@@ -34,6 +34,13 @@ class BeamIdentityNode(Base):
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     email: Mapped[str | None] = mapped_column(String(320))
     full_name: Mapped[str | None] = mapped_column(String(200))
+    # Full-profile cross-tenant reuse (owned-data-layer): geo fields so a
+    # cross-tenant email match can inherit city/region/country, not just name.
+    # Nullable/additive — older rows stay None; _graph_node_by_email backfills
+    # these into a freshly-captured email's identification.
+    city: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    region: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(5), nullable=True)
     # Phase 05 (encrypt PII at rest) — added nullable, not yet read/written.
     email_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     email_bidx: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)

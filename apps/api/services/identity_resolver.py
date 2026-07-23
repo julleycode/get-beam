@@ -311,14 +311,17 @@ class IdentityResolver(
                 # is what fills the name that P3 stopped paying PDL to fetch.
                 node = await self._graph_node_by_email(captured_email)
                 graph_name = node.full_name if node else None
+                # Full-profile cross-tenant reuse (owned-data-layer): inherit the
+                # graph node's geo fields, not just the name. getattr keeps this
+                # safe for nodes/stubs predating the city/region/country columns.
                 return await self._save_identified(
                     visitor,
                     {
                         "email": captured_email,
                         "full_name": graph_name,
-                        "city": None,
-                        "region": None,
-                        "country": None,
+                        "city": getattr(node, "city", None) if node else None,
+                        "region": getattr(node, "region", None) if node else None,
+                        "country": getattr(node, "country", None) if node else None,
                         # Slightly higher when corroborated by the cross-customer graph.
                         "confidence_score": 0.85 if graph_name else 0.80,
                     },
@@ -522,6 +525,15 @@ class IdentityResolver(
             # Store company domain on visitor for future use
             visitor.company_domain = company_domain
             await self.db.commit()
+
+            # Durable company graph write-through for the paid IP→company hit
+            # (owned-data-layer). Flag-gated: byte-identical when off. Best-effort.
+            if settings.company_graph_enabled and visitor.ip_address:
+                from apps.api.services.company_resolver import _write_through_company_graph
+
+                await _write_through_company_graph(
+                    self.db, visitor.ip_address, company_domain, None, "paid_ip", 0.7
+                )
 
             # ── Step 3: Hunter (domain → employee emails) ──
             result = await self._try_hunter_domain(visitor, company_domain)
