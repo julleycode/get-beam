@@ -162,10 +162,26 @@ overlap with H4 (not started).
 
 Plan: `process/features/evallayer/active/handoff_23-07-26/phase-04-watermark-feasibility_PLAN_23-07-26.md`
 
-Blast radius (planned, not yet executed):
+Blast radius (PVL-confirmed 24-07-26, not yet executed):
 
-- `process/features/evallayer/active/handoff_23-07-26/phase-04-watermark-feasibility_FEASIBILITY_{date}.md` (new VERDICT artifact)
-- a Beam-owned test page (location TBD by INNOVATE)
-- no shared-file overlap identified with Phase 1/2/3
+- `apps/web/src/app/pricing-overview/[t]/route.ts` (new — tokenized probe page)
+- `apps/web/src/app/pricing-overview/route.ts` (new — bare-path token mint + redirect)
+- `apps/web/src/middleware.ts` (additive, 1 line — `isPublicRoute` exemption; **no other in-flight
+  phase in this program or the concurrent `first-party-capture_24-07-26` / `pii-at-rest_22-07-26`
+  sessions claims this file** — no shared-file coordination needed)
+- `process/features/evallayer/active/handoff_23-07-26/phase-04-watermark-feasibility_FEASIBILITY_{date}.md` (new VERDICT artifact, dispatch phase only)
+- no shared-file overlap identified with Phase 1/2/3 — H4 is `apps/web`-only (PREP) +
+  program-task-folder-only (VERDICT); H1/H2/H3 are `apps/api`-only plus a few shared
+  `apps/web` dashboard files (`dashboard/agents/page.tsx`, `dashboard/visitors/**`) that H4 never
+  touches
 
-status: (no field — not yet executed)
+status: PVL CONDITIONAL — PREP design LOCKED and validated 24-07-26 (Gate: CONDITIONAL, 1 security
+CONCERN found and fixed in plan text — reflected-XSS on the `[t]` token, mitigated via strict-format
+validation + `notFound()`; 2 named accepted known-gaps, no high-risk-class gap). EXECUTE not yet
+started. Step B (dispatch) remains gated on explicit double opt-in independent of this PVL gate.
+
+PVL confirmation (24-07-26): blast radius above re-verified against live source at VALIDATE time —
+confirmed `apps/web/src/app/pricing-overview/` does not yet exist (no collision), confirmed
+`apps/web/src/middleware.ts` `isPublicRoute` array insertion point via direct read, confirmed
+`apps/web/src/app/llms.txt/route.ts` as the shape precedent. Confirmed disjoint from Phase 1 (H1,
+DONE), Phase 2 (H2, DONE), and Phase 3 (H3, DONE) — no file overlap.
