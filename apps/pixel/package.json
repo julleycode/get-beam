@@ -5,9 +5,12 @@
   "description": "Beam tracking pixel — vanilla JS, zero deps. Source is src/tracker.js; the API serves the minified src/tracker.min.js (must stay <5KB gzipped).",
   "scripts": {
     "build": "npx --yes esbuild@0.24.0 src/tracker.js --minify --target=es2017 --outfile=src/tracker.min.js",
-    "size": "gzip -c src/tracker.min.js | wc -c"
+    "size": "gzip -c src/tracker.min.js | wc -c",
+    "test": "playwright test",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "esbuild": "0.24.0"
   }
 }

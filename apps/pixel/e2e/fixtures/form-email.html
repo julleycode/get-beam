@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Beam pixel harness — email form (baseline AC2 regression)</title>
+  <script>
+    Object.defineProperty(navigator, "webdriver", { get: function () { return false; } });
+  </script>
+  <script src="/src/tracker.js" data-site="test-site" data-api="http://127.0.0.1:8788"></script>
+</head>
+<body>
+  <h1>email form</h1>
+  <!-- Literal name="email" field — the pre-SPEC name/type matcher must capture
+       this via source:"form"/classifier. Baseline regression fixture (AC2). -->
+  <form id="signup-form" action="/subscribe">
+    <input type="email" name="email" id="email" />
+    <button type="submit">Subscribe</button>
+  </form>
+</body>
+</html>

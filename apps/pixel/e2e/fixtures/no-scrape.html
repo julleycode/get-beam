@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Beam pixel harness — no-scrape guardrail (AC8)</title>
+  <script>
+    Object.defineProperty(navigator, "webdriver", { get: function () { return false; } });
+  </script>
+  <script src="/src/tracker.js" data-site="test-site" data-api="http://127.0.0.1:8788"></script>
+</head>
+<body>
+  <h1>no-scrape</h1>
+  <!-- (1) A field pre-populated by site JS BEFORE any visitor interaction, and
+       (2) a hidden field carrying an email. Both would pass looksEmail() but the
+       visitor never touched them this session → ZERO capture events (AC8/G6). -->
+  <form id="f" action="/x">
+    <input type="text" name="username" id="prefilled" />
+    <input type="hidden" name="hemail" id="hidden-email" value="hidden@leak.com" />
+    <button type="submit" id="go">Go</button>
+  </form>
+  <script>
+    // Site injects a value with no interaction event — must never be captured.
+    document.getElementById("prefilled").value = "prefilled@leak.com";
+  </script>
+</body>
+</html>

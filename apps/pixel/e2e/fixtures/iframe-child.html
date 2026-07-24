@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>iframe child (no pixel)</title>
+</head>
+<body>
+  <!-- No pixel here. When embedded cross-origin, the parent's pixel must NOT be
+       able to observe this field (AC7). -->
+  <input type="email" name="email" id="child-email" />
+</body>
+</html>

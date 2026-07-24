@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Beam pixel harness — per-site config (mailto off, AC12)</title>
+  <script>
+    Object.defineProperty(navigator, "webdriver", { get: function () { return false; } });
+  </script>
+  <!-- data-capture-mailto="off" disables ONLY mailto capture. url-param and
+       value-based matching stay active (default on). -->
+  <script src="/src/tracker.js" data-site="test-site" data-api="http://127.0.0.1:8788" data-capture-mailto="off"></script>
+</head>
+<body>
+  <h1>config</h1>
+  <a id="email-us" href="mailto:mailto@off.com">Email us</a>
+  <form id="login-form" action="/login" onsubmit="return false">
+    <input type="text" name="username" id="username" />
+    <button type="submit" id="go">Sign in</button>
+  </form>
+</body>
+</html>

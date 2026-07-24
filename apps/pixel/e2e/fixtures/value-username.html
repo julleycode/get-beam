@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Beam pixel harness — value-based match (login, name="username")</title>
+  <script>
+    Object.defineProperty(navigator, "webdriver", { get: function () { return false; } });
+  </script>
+  <script src="/src/tracker.js" data-site="test-site" data-api="http://127.0.0.1:8788"></script>
+</head>
+<body>
+  <h1>login</h1>
+  <!-- AC1: field named "username" (no "email" substring, type=text) holding a
+       valid email. Only value-based matching can catch this. Login classifier. -->
+  <form id="login-form" action="/login">
+    <input type="text" name="username" id="username" />
+    <input type="password" name="password" id="password" />
+    <button type="submit">Sign in</button>
+  </form>
+</body>
+</html>

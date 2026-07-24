@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Beam pixel harness — open shadow-DOM widget (AC6)</title>
+  <script>
+    Object.defineProperty(navigator, "webdriver", { get: function () { return false; } });
+  </script>
+  <script src="/src/tracker.js" data-site="test-site" data-api="http://127.0.0.1:8788"></script>
+</head>
+<body>
+  <h1>widget</h1>
+  <div id="host"></div>
+  <script>
+    // Same-origin OPEN shadow root holding an email field named "contact" (no
+    // "email" hint → value-based path). `input` is composed:true so it crosses
+    // the open boundary to the document listener; composedPath()[0] recovers the
+    // true inner field.
+    var sr = document.getElementById("host").attachShadow({ mode: "open" });
+    sr.innerHTML = '<input id="semail" type="text" name="contact" />';
+  </script>
+</body>
+</html>

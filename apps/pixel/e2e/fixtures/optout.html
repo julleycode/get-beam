@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Beam pixel harness — OPTOUT guardrail (AC9)</title>
+  <script>
+    Object.defineProperty(navigator, "webdriver", { get: function () { return false; } });
+    // Global Privacy Control ON → the pixel's OPTOUT gate must block EVERY new
+    // capture mechanism (value-match, mailto, url-param, autofill, shadow-DOM):
+    // zero captured emails, zero network calls.
+    Object.defineProperty(navigator, "globalPrivacyControl", { get: function () { return true; } });
+  </script>
+  <script src="/src/tracker.js" data-site="test-site" data-api="http://127.0.0.1:8788"></script>
+</head>
+<body>
+  <h1>optout</h1>
+  <!-- onsubmit=return false: fire the submit event (exercises the capture
+       handler) without navigating away, so a navigation-triggered telemetry
+       flush doesn't muddy the zero-network-call assertion. -->
+  <form id="f" action="/x" onsubmit="return false">
+    <input type="text" name="username" id="username" />
+    <a id="email-us" href="mailto:hello@co.com">Email us</a>
+    <button type="submit" id="go">Go</button>
+  </form>
+  <div id="host"></div>
+  <script>
+    var sr = document.getElementById("host").attachShadow({ mode: "open" });
+    sr.innerHTML = '<input id="semail" type="text" name="contact" />';
+  </script>
+</body>
+</html>

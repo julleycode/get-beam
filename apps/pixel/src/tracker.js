@@ -269,6 +269,10 @@
   // logins/checkouts that never submit a <form>), and window.beamIdentify().
   // Every path is OPTOUT-gated and deduped (same email sent at most once).
   var _sent = {};
+  // Fields the visitor actively interacted with this session (input/change/blur).
+  // The NEW value-based submit scan only reads a field's value if it's here — a
+  // prefilled/hydrated field the visitor never touched is never scraped (G6/AC8).
+  var _touched = (typeof WeakSet!=="undefined")?new WeakSet():null;
   function looksEmail(s){return typeof s==="string"&&s.length>=5&&/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);}
   function captureEmail(raw, source){
     try{
@@ -293,19 +297,70 @@
   function isEmailField(el){
     if(!el||el.nodeName!=="INPUT")return false;
     var t=(el.type||"").toLowerCase();
+    if(t==="hidden")return false; // G6/AC8: hidden values are never visitor-provided
     return t==="email"||/email/i.test((el.name||"")+" "+(el.id||""));
   }
-  document.addEventListener("submit",function(e){
+  // Value-based matcher (SPEC AC1): a field whose *value* is a valid email but
+  // whose name/id/type contains no "email" hint (e.g. name="username" on a login
+  // form). Only text-shaped inputs the visitor can type into — type="hidden" and
+  // non-text controls are structurally excluded (G6: never scrape a value the
+  // visitor didn't provide). Additive to isEmailField, never a replacement.
+  function isTextShapedField(el){
+    if(!el||el.nodeName!=="INPUT")return false;
+    var t=(el.type||"").toLowerCase();
+    return t===""||t==="text"||t==="email"||t==="search";
+  }
+  // True originating element. For an open shadow-DOM widget, event.target is
+  // retargeted to the shadow host; composedPath()[0] is the real inner field
+  // (SPEC AC6). Only pierced when shadow capture is enabled (CAP_SHADOW); a
+  // closed shadow root has an empty composedPath and falls back to e.target.
+  function realTarget(e){try{if(CAP_SHADOW&&e.composedPath){var p=e.composedPath();if(p&&p.length)return p[0];}}catch(_){}return e.target;}
+  function onSubmit(e){
     try{
-      var f=e.target;
+      var f=realTarget(e);
       if(!f||f.nodeName!=="FORM")return;
-      var i=f.querySelector("input[type='email'], input[name*='email'], input[name*='Email']");
-      if(i&&i.value)captureEmail(i.value,emailSource(i));
+      // Fast-path first: literal email-named/typed field (AC2). Excludes
+      // type="hidden" — a hidden field's value is site-injected, never visitor-
+      // provided (G6/AC8), even when its name contains "email".
+      var i=f.querySelector("input[type='email']:not([type='hidden']), input[name*='email']:not([type='hidden']), input[name*='Email']:not([type='hidden'])");
+      if(i&&i.value&&(i.type||"").toLowerCase()!=="hidden")captureEmail(i.value,emailSource(i));
+      // Value-based fallback (AC1): any OTHER text-shaped field holding an email,
+      // but ONLY if the visitor actually touched it this session (G6/AC8 — never
+      // scrape a prefilled/hydrated field). Dedup prevents a double-capture of the
+      // email-named field handled above.
+      var all=f.querySelectorAll("input");
+      for(var k=0;k<all.length;k++){
+        var el=all[k];
+        if(!isEmailField(el)&&isTextShapedField(el)&&_touched&&_touched.has(el)&&looksEmail(el.value))captureEmail(el.value,emailSource(el));
+      }
     }catch(e){}
-  },true);
-  function onFieldDone(e){try{var el=e.target;if(isEmailField(el)&&el.value)captureEmail(el.value,emailSource(el));}catch(e){}}
-  document.addEventListener("blur",onFieldDone,true);   // blur doesn't bubble → capture phase
-  document.addEventListener("change",onFieldDone,true);
+  }
+  function onFieldDone(e){try{
+    var el=realTarget(e);
+    if(_touched&&el)_touched.add(el); // this event IS the interaction on el
+    if(isEmailField(el)&&el.value){captureEmail(el.value,emailSource(el));return;}
+    // Value-based (AC1): text-shaped field whose value looks like an email.
+    if(isTextShapedField(el)&&looksEmail(el.value))captureEmail(el.value,emailSource(el));
+  }catch(e){}}
+  // Autofill (AC5) + open-shadow-DOM typing (AC6): the `input` event is
+  // composed:true, so it both fires on browser autofill (where `change` is
+  // unreliable across WebKit/Firefox — D2) and crosses open shadow boundaries.
+  // G6 (no keystroke logging): ONLY a fully-formed email (looksEmail) is ever
+  // captured — partial/interim keystrokes are a silent no-op, never logged or
+  // queued, and dedup means a value already captured on submit/blur won't refire.
+  function onInputMaybe(e){try{var el=realTarget(e);if(_touched&&el)_touched.add(el);if(isTextShapedField(el)&&el.value&&looksEmail(el.value))captureEmail(el.value,emailSource(el));}catch(e){}}
+  // Attach the email-capture listener set to a document — the main document or a
+  // same-origin iframe's contentDocument (AC7). All capture-phase (blur/submit
+  // don't bubble).
+  function attachCapture(doc){
+    try{
+      doc.addEventListener("submit",onSubmit,true);
+      doc.addEventListener("blur",onFieldDone,true);
+      doc.addEventListener("change",onFieldDone,true);
+      doc.addEventListener("input",onInputMaybe,true);
+    }catch(e){}
+  }
+  attachCapture(document);
   try{window.beamIdentify=function(email){captureEmail(email,"identify");};}catch(e){}
 
   // Conversion signal: site code calls window.beamConvert("purchase",{value:49.99})
@@ -342,6 +397,53 @@
               (CONSENT_MODE === "eu" && isEU());
   var consentDecision = GATED ? (getCookie(CONSENT_KEY) || lsGet(CONSENT_KEY)) : "g";
   if (GATED && consentDecision === "d") OPTOUT = true; // persisted decline
+
+  // --- Per-site capture config (Phase 3, SPEC AC12) ---
+  // The more consent-sensitive mechanisms (mailto, URL-param) are opt-OUT-able
+  // per site. DEFAULT is "on" for every flag so current installs keep their
+  // always-on behavior unchanged (opt-out, not opt-in). Value-based matching,
+  // autofill, and shadow-DOM are lower-sensitivity and stay non-configurable.
+  function capOn(attr){ return script.getAttribute(attr) !== "off"; }
+  var CAP_MAILTO = capOn("data-capture-mailto");
+  var CAP_URLPARAM = capOn("data-capture-url-param");
+  var CAP_SHADOW = capOn("data-capture-shadow-dom");
+  var URLPARAM_NAME = script.getAttribute("data-capture-url-param-name") || "email";
+
+  // URL-param email capture (SPEC AC3/AC4). Placed AFTER GATED/consentDecision
+  // are assigned (Hard Guardrail G7): captureEmail() calls flush() synchronously,
+  // and flush()'s consentBlocked() guard reads GATED/consentDecision — running
+  // this before they're set would bypass the EU consent-hold on GATED sites.
+  // Per Decision D1, no client-side crypto: the raw value is read once and handed
+  // straight to captureEmail() (server dual-writes ciphertext + logs domain only);
+  // never console.log'd, never written to storage, never re-echoed to the URL.
+  (function(){
+    try{
+      if(OPTOUT||!CAP_URLPARAM)return;
+      var pv=new URLSearchParams(window.location.search).get(URLPARAM_NAME);
+      if(pv&&looksEmail(pv))captureEmail(pv,"url_param");
+    }catch(e){}
+  })();
+
+  // Same-origin iframe capture (SPEC AC6/AC7). Attach the same capture listeners
+  // to any iframe whose contentDocument is reachable. A CROSS-origin iframe throws
+  // SecurityError on contentDocument access — caught + no-op'd; that catch IS the
+  // same-origin boundary enforcement (AC7: cross-origin content stays silent), not
+  // a workaround. Re-scans on each iframe `load` for late/replaced frames.
+  function scanIframes(){
+    try{
+      var frames=document.querySelectorAll("iframe");
+      for(var i=0;i<frames.length;i++){
+        (function(fr){
+          function tryAttach(){try{var d=fr.contentDocument;if(d)attachCapture(d);}catch(e){}}
+          tryAttach();
+          try{fr.addEventListener("load",tryAttach);}catch(e){}
+        })(frames[i]);
+      }
+    }catch(e){}
+  }
+  if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",scanIframes);
+  else scanIframes();
+  try{window.addEventListener("load",scanIframes);}catch(e){}
 
   // Referenced by flush() (hoisted). Blocks sending while a gated visitor has
   // not decided yet — the pageview still queues in _rta_q, just isn't flushed.
@@ -423,6 +525,14 @@
       if (clickCount >= 25) return; // bound payload per page
       var el = e.target && e.target.closest ? e.target.closest("a,button") : null;
       if (!el) return;
+      // mailto: click capture (SPEC AC3). The visitor initiated this click, so
+      // it's a real interaction — reuse the same captureEmail() funnel (OPTOUT +
+      // dedup + validate). Address is the part before any "?" query suffix.
+      if (CAP_MAILTO && el.href && el.href.indexOf("mailto:") === 0) {
+        var addr = el.href.slice(7).split("?")[0];
+        try { addr = decodeURIComponent(addr); } catch (e2) {}
+        if (looksEmail(addr)) captureEmail(addr, "mailto_click");
+      }
       clickCount++;
       pushEvent({
         type: "click",

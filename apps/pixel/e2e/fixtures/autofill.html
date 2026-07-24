@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Beam pixel harness — autofill (AC5)</title>
+  <script>
+    Object.defineProperty(navigator, "webdriver", { get: function () { return false; } });
+  </script>
+  <script src="/src/tracker.js" data-site="test-site" data-api="http://127.0.0.1:8788"></script>
+</head>
+<body>
+  <h1>autofill</h1>
+  <!-- Bare email input, no submit button — proves the input/change (autofill)
+       path captures without a form submit, across browser engines. -->
+  <input type="email" name="email" id="email" />
+</body>
+</html>

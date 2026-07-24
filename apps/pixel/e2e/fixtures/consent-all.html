@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Beam pixel harness — GATED consent (data-consent="all")</title>
+  <script>
+    Object.defineProperty(navigator, "webdriver", { get: function () { return false; } });
+  </script>
+  <!-- data-consent="all" → GATED for everyone; events queue but do not flush
+       until the visitor decides (window.beamConsent). Used by the G7 URL-param
+       consent-hold test. -->
+  <script src="/src/tracker.js" data-site="test-site" data-api="http://127.0.0.1:8788" data-consent="all"></script>
+</head>
+<body>
+  <h1>gated</h1>
+</body>
+</html>

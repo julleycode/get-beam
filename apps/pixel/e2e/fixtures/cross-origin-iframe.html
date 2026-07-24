@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Beam pixel harness — cross-origin iframe (AC7)</title>
+  <script>
+    Object.defineProperty(navigator, "webdriver", { get: function () { return false; } });
+  </script>
+  <script src="/src/tracker.js" data-site="test-site" data-api="http://127.0.0.1:8788"></script>
+</head>
+<body>
+  <h1>page with a cross-origin iframe</h1>
+  <!-- Parent page served from 127.0.0.1:8788; the iframe is loaded from
+       localhost:8788 — a DIFFERENT origin (hostname differs). contentDocument
+       access throws SecurityError, so the pixel cannot attach listeners inside.
+       Typing in the child must produce ZERO capture events. -->
+  <iframe id="child" src="http://localhost:8788/e2e/fixtures/iframe-child.html" width="300" height="120"></iframe>
+</body>
+</html>

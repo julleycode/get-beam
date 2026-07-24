@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Beam pixel harness — base</title>
+  <!-- Playwright's chromium reports navigator.webdriver === true, which the
+       tracker uses as a bot short-circuit (tracker.js line 4). Override it to
+       false BEFORE the tracker loads so the harness exercises the real human
+       code path. This override is test-harness-only, never shipped. -->
+  <script>
+    Object.defineProperty(navigator, "webdriver", { get: function () { return false; } });
+  </script>
+  <script src="/src/tracker.js" data-site="test-site" data-api="http://127.0.0.1:8788"></script>
+</head>
+<body>
+  <h1>base fixture</h1>
+</body>
+</html>
