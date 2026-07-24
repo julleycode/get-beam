@@ -19,6 +19,13 @@ The core visitor pipeline: raw pixel events → visitor aggregation + intent sco
 - `apps/api/models/visitor.py` — `Visitor`, `IdentifiedVisitor`; `apps/api/models/enrichment.py` — `EnrichmentProfile`
 - `apps/api/models/beam_identity.py` — `BeamIdentityNode` (cross-tenant identity graph); gained nullable `city`/`region`/`country` (owned-data-layer, 23-07-26)
 - `apps/api/tasks/resolution_tasks.py`, `apps/api/tasks/aggregation_tasks.py` — sweeps
+- `apps/pixel/src/tracker.js` — first-party capture surface: value-based field matcher, mailto
+  click, URL-param, cross-browser autofill, shadow-DOM/same-origin-iframe listeners, per-site
+  `data-capture-*` config (first-party-capture, 24-07-26)
+- `apps/pixel/e2e/` — Playwright harness for `tracker.js` capture logic (own config,
+  chromium/webkit/firefox projects; first automated coverage this file has ever had)
+- `apps/api/models/visitor_email.py` — `VISITOR_EMAIL_SOURCES` enum + `normalize_source()`,
+  backed by migration `a9f2c1e7b4d6` (`ck_visitor_emails_source` CHECK constraint)
 
 ## Related Context
 
@@ -32,6 +39,13 @@ Owned data layer (`company_graph` cross-tenant durable store + `identity_signals
 open/click corroboration) shipped 23-07-26, code-complete + unit-verified, both flags default
 OFF — pending Docker-gated integration/migration verification before archival. See
 `active/owned-data-layer_23-07-26/` and `backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`.
+
+First-party capture expansion (value-based field matching, mailto/URL-param, cross-browser
+autofill, shadow-DOM/same-origin-iframe capture feeding `visitor_emails`) shipped 24-07-26,
+code-complete, 13/15 SPEC ACs fully met — pending 2 environment-only gates (webkit/firefox
+autofill binaries, Phase 3 integration re-confirm) before archival. See
+`active/first-party-capture_24-07-26/` and
+`backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`.
 
 ## Folder Contents
 

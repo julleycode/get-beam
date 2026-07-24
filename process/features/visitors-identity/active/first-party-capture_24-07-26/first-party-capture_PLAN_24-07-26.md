@@ -291,8 +291,59 @@ GUARDRAIL (still enforced, matches SPEC constraint intent): the raw URL param va
 - [x] Phase 3 — Per-site config + source-enum formalization — green (migration offline-validated)
 - [x] VALIDATE (validate-contract written — Gate: PASS, 24-07-26)
 - [x] EXECUTE (all runnable in-scope test gates green — 24-07-26)
-- [ ] EVL confirmation run
-- [ ] UPDATE PROCESS (archive + backlog NOTE for D4 CLEAN/RED policy doc)
+- [x] EVL confirmation run — independently re-ran by vc-tester/orchestrator 24-07-26: chromium e2e
+  11/11 green, backend unit 367 passed / 2 skipped, gate-specific tests 19, full regression 47/47
+  (incl. `test_agent_origin_exclusion.py` 18/18), migration `a9f2c1e7b4d6` offline dry-run
+  re-confirmed (head verified: `a9f2c1e7b4d6`), bundle size 4811B gzipped (<5KB budget), guardrails
+  G6/G7/G8 re-checked structurally (file:line). Two gates could not be independently re-confirmed
+  in this environment (see Closeout below) — DEFERRED, not failed.
+- [x] UPDATE PROCESS (archive + backlog NOTE for D4 CLEAN/RED policy doc)
+
+## Closeout (UPDATE PROCESS, 24-07-26)
+
+**Classification: WITH_GAPS** — code-complete; every Fully-Automated/Hybrid gate that could run in
+this sandbox is green; kept in `active/` (not archived) pending 2 deferred, environment-only gaps.
+
+**Note for future readers — code pre-existed this RIPER pass:** at session start, `tracker.js`,
+`events.py`, `visitor_email.py`, the `apps/pixel/e2e/` harness, and the source-enum migration were
+already present/modified on disk (a prior/parallel session implemented them) — this RIPER flow
+(SPEC → PLAN → VALIDATE → EXECUTE → EVL) formalized, verified, and backed the pre-existing
+implementation with a SPEC, a validated plan, and an independent EVL confirmation run. The plan
+therefore post-dates the code; this is intentional, not a process violation — VALIDATE and EVL both
+ran against the real, already-written implementation rather than a not-yet-written one.
+
+**Commits already landed on main:**
+- `aad64c0` — feat(pixel): first-party email capture (value-matcher, mailto, URL-param, autofill/shadow-DOM/iframe)
+- `68d2e22` — feat(identity): visitor_email source enum + CHECK constraint migration
+- `c3d0e03` — process(visitors-identity): first-party-capture SPEC + plan + validate-contract
+
+**EVL numbers (independent re-run, not execute-agent's internal claim):**
+- `cd apps/pixel && npx playwright test` (chromium project): 11/11 passed
+- `.venv/bin/python -m pytest tests/unit -q`: 367 passed, 2 skipped
+- Gate-specific tests (`-k email_domain_logging`, `-k source_enum`, etc.): 19 passed
+- Full regression: 47/47 passed, including `tests/unit/test_agent_origin_exclusion.py` 18/18 (EvalLayer guardrail, confirms no cross-feature regression)
+- `cd apps/api && ../../.venv/bin/python -m alembic heads`: `a9f2c1e7b4d6 (head)` — offline dry-run (`alembic upgrade head --sql`) re-confirmed working, no live DB touched
+- `cd apps/pixel && npm run size`: 4811B gzipped, under the 5KB budget
+- Guardrails G6 ("DO NOT implement" list), G7 (URL-param consent-hold placement), G8 (n/a — plan only defines G1-G7; re-verified G1-G7 structurally, file:line, all present as coded)
+
+**Deferred (environment gates, not code gaps):**
+1. **AC5 webkit/firefox autofill legs** — `npx playwright install` for webkit/firefox binaries was
+   not cacheable in this sandbox (install exceeds a 120s cap / no cached binaries). Chromium leg
+   (Fully-Automated) is green and proves AC5's core mechanism; webkit/firefox legs remain
+   Hybrid/pending per the plan's own Phase 0 checklist item 7 documented fallback. See backlog NOTE.
+2. **Phase 3 integration re-confirm** (`tests/ -m integration -k "visitor_email or do_not_resolve"`)
+   — EXECUTE ran this green with PG+Redis up; EVL could not independently re-confirm because Docker
+   was down at EVL time (15s health-check cap exceeded). Same Docker-gate posture as the sibling
+   `owned-data-layer` plan. See backlog NOTE.
+
+**Keep-in-active rationale:** per the vacuous-green ban, a plan cannot move CODE DONE → VERIFIED (or
+archive) while any Fully-Automated/Hybrid gate depends on an environment precondition (browser
+binary, live DB) that was never actually exercised in THIS closeout pass. Both residuals here are
+environment-only (not design or code defects) and have a documented, executable close command in
+the companion backlog NOTE — this plan stays in `active/` until those are run for real.
+
+**Backlog note (env-gaps + D4 CLEAN/RED policy doc pointer):** written this session, see
+`process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`.
 
 ### EXECUTE Deviations (within-blast-radius, documented per protocol)
 - **D-E1** AC13 source-enum test authored as dedicated unit file `tests/unit/test_visitor_email_source_enum.py` (6 tests on pure `normalize_source`) instead of extending integration `TestEmailCaptureSource` per Phase 3 item 6. Reason: `normalize_source` is pure/DB-free (plan's own code comment says "unit-testable in the fast lane"); faster lane, matches the `-k source_enum` gate. Integration `TestEmailCaptureSource` retained (storage-path coverage). Within test blast radius — no source/schema deviation.

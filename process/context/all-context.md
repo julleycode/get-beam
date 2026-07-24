@@ -1,6 +1,6 @@
 # Beam - All Context
 
-Last updated: 2026-07-23
+Last updated: 2026-07-24
 
 This file is the root context entrypoint for the repo.
 
@@ -81,7 +81,9 @@ For most substantial tasks:
 
 Feature-scoped plan folders under `process/features/` (each has `active/`, `completed/`, `backlog/` and a `_GUIDE.md` with scope + key files):
 
-- `visitors-identity` — pixel visitors → identity resolution waterfall → enrichment → OSINT
+- `visitors-identity` — pixel visitors → identity resolution waterfall → enrichment → OSINT →
+  first-party capture expansion (value-based field matching, mailto/URL-param, cross-browser
+  autofill, shadow-DOM/same-origin-iframe) feeding the owned identity graph
 - `campaigns-outreach` — AI segmentation, campaign planning, email + social outreach, drafts
 - `billing` — Gumroad MoR billing, plans/quotas, BYOK keys
 - `marketing-site` — public site: landing, blog, changelog, SEO (content sources in `marketing/`)
@@ -197,15 +199,18 @@ structurally separate from human Visitor/Event data, never as a targetable outre
 - `apps/api/services/agent_aggregator.py` — read-only vendor/page/verification-method analytics,
   `GET /api/v1/agents/{site_id}/analytics`
 - Feature flag: `agent_detection_enabled` in `apps/api/config.py` — **defaults OFF**
-- 6 migrations pending live-apply, in order (Docker-gated, never run against a real Postgres in
+- 8 migrations pending live-apply, in order (Docker-gated, never run against a real Postgres in
   the sandbox that built this — chain verified by reading each file's `revision`/`down_revision`
-  header on 23-07-26): `d11b39a6c843` (agent_visits table) → `a1c7e4f92b83` (Phase 5
-  visitor.is_agent_derived / IdentifiedVisitor.source_agent_visit_id) → `b3f9a1d2c7e5` (AI-referral,
-  see below) → `c4e8f1a9d2b7` (Handoff Detection Phase H1, agent_fetch_events) → `f8a2c1d9b3e7`
-  (company_graph, owned-data-layer Phase 1) → `a3e9f1c7d2b5` (identity_signals, owned-data-layer
-  Phase 2 — current head). Apply all six in order before enabling `agent_detection_enabled`,
-  `company_graph_enabled`, or `identity_signals_enabled` in any real environment. Re-confirm via
-  `alembic heads` before applying — other work may advance the head further.
+  header, last re-confirmed live via `alembic heads` on 24-07-26): `d11b39a6c843` (agent_visits
+  table) → `a1c7e4f92b83` (Phase 5 visitor.is_agent_derived / IdentifiedVisitor.source_agent_visit_id)
+  → `b3f9a1d2c7e5` (AI-referral, see below) → `c4e8f1a9d2b7` (Handoff Detection Phase H1,
+  agent_fetch_events) → `f8a2c1d9b3e7` (company_graph, owned-data-layer Phase 1) →
+  `a3e9f1c7d2b5` (identity_signals, owned-data-layer Phase 2) → `e2a4c7f81b93` (Handoff
+  Detection Phase 2, agent_handoff_links) → `a9f2c1e7b4d6` (`ck_visitor_emails_source` CHECK
+  constraint, first-party-capture Phase 3 — current head). Apply all eight in order before enabling
+  `agent_detection_enabled`, `company_graph_enabled`, or `identity_signals_enabled` in any real
+  environment. Re-confirm via `alembic heads` before applying — other work may advance the head
+  further.
 - Docker/live-integration known-gaps consolidated in
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`
 
@@ -260,6 +265,37 @@ from existing outbound email engagement:
   a real payload (Agent-Probe tier); account-level SendGrid tracking-settings override behavior
   needs-live-provider, not probed per policy.
 
+## First-Party Email Capture Expansion (v1, shipped 24-07-26 — code-complete, WITH_GAPS)
+
+Widens `apps/pixel/src/tracker.js`'s CLEAN first-party email capture surface — the raw seed feeding
+`visitor_emails` → the owned identity graph above — without loosening the "visitor must have
+actively engaged this session" rule:
+
+- **Value-based field matcher**: on submit/blur/change, any text-shaped input whose *value* looks
+  like an email is captured even when the field's name/id/type doesn't contain "email" (e.g.
+  `name="username"` login fields) — additive to, not a replacement of, the existing name/type
+  matcher.
+- **mailto: click capture** — reuses the existing click listener, parses `href="mailto:..."`.
+- **URL-param capture** (`?email=`) — reuses the Phase-05 `pii_crypto` dual-write + domain-only
+  logging path unchanged (no new client-side crypto); placed AFTER the tracker's
+  `GATED`/`consentDecision` init block specifically to avoid bypassing the EU consent-hold (a
+  VALIDATE-found ordering hazard, now Hard Guardrail G7).
+- **Cross-browser autofill hardening** + **same-origin shadow-DOM / same-origin-iframe** capture
+  via `composedPath()[0]` and `contentDocument` (wrapped in try/catch on cross-origin
+  `SecurityError` — the enforcement mechanism, not a workaround).
+- **Per-site config**: `data-capture-mailto`/`data-capture-url-param` script-tag attributes
+  (default "on", opt-out not opt-in).
+- **`visitor_emails.source` formalized**: `VISITOR_EMAIL_SOURCES` enum + `normalize_source()` in
+  `apps/api/models/visitor_email.py`, backed by migration `a9f2c1e7b4d6`
+  (`ck_visitor_emails_source` CHECK constraint, additive/superset, offline-validated only).
+- New test infra: `apps/pixel/e2e/` — the first automated Playwright harness `tracker.js` capture
+  logic has ever had (own config, chromium/webkit/firefox projects).
+- Status 24-07-26: code-complete, 13/15 SPEC ACs fully met, 2 partial on environment-only residuals
+  (webkit/firefox autofill legs — binaries not cached; Phase 3 integration lane — Docker down at
+  EVL time, ran green at EXECUTE). See
+  `process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`
+  and `process/features/visitors-identity/active/first-party-capture_24-07-26/`.
+
 ## Key Patterns and Conventions
 
 **Python:** type hints on all functions; async for all I/O; `structlog` only (never `print()`); `httpx` async for external calls (never `requests`); every external call has timeout + retry/backoff + error handling; never swallow exceptions; Pydantic models for every API schema; config via `pydantic-settings` env only — no hardcoded secrets.
@@ -303,12 +339,14 @@ from existing outbound email engagement:
 - Legacy `plan/` folder (11 dated pre-harness plans) is read-only history — migrate still-relevant items into `process/features/*/backlog/` opportunistically
 - e2e coverage gaps: billing + exports (see `tests/all-tests.md` Known Gaps)
 - Docs drift: `PRODUCT_ROADMAP.md` + `README.md` still say Claude/`claude-sonnet-4` for segmentation — code runs Gemini (see AI Layer)
-- EvalLayer + AI-referral + owned-data-layer: `agent_detection_enabled`, `company_graph_enabled`,
-  `identity_signals_enabled` all default OFF; 6 migrations pending live-apply
-  (`d11b39a6c843` → `a1c7e4f92b83` → `b3f9a1d2c7e5` → `c4e8f1a9d2b7` → `f8a2c1d9b3e7` →
-  `a3e9f1c7d2b5`) — see AI-Agent-Traffic Layer + Owned Identity Data Layer sections above,
-  `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`, and
-  `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`
+- EvalLayer + AI-referral + owned-data-layer + first-party-capture: `agent_detection_enabled`,
+  `company_graph_enabled`, `identity_signals_enabled` all default OFF; 8 migrations pending
+  live-apply (`d11b39a6c843` → `a1c7e4f92b83` → `b3f9a1d2c7e5` → `c4e8f1a9d2b7` → `f8a2c1d9b3e7` →
+  `a3e9f1c7d2b5` → `e2a4c7f81b93` → `a9f2c1e7b4d6` — current head, confirmed 24-07-26) — see
+  AI-Agent-Traffic Layer + Owned Identity Data Layer + First-Party Email Capture Expansion
+  sections above, `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`,
+  `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`,
+  and `process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`
 - Successor program planned: "Handoff Detection" (human-behind-the-agent correlation) — not yet
   scaffolded on disk; see `evallayer-umbrella_PLAN_22-07-26.md` §Program-Level Closeout
 
