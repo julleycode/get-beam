@@ -145,6 +145,9 @@ class TestFlagGating:
         db.rollback = AsyncMock()
         with patch.object(cr, "settings") as s, patch.object(
             cr, "resolve_company_from_ip", new=AsyncMock(return_value="acme.com")
+        ), patch(
+            "apps.api.services.redis_client.get_redis",
+            side_effect=RuntimeError("no redis in test"),
         ):
             s.company_graph_enabled = True
             s.company_graph_staleness_days = 75

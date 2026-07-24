@@ -35,6 +35,10 @@ async def test_real_pg_insert_and_conflict_update(test_db):
 
     # Same (ip, source) → UPDATE, not a second row.
     await cr._write_through_company_graph(test_db, ip, "acme-corp.com", "Acme Corp", "rdns", 0.8)
+    # The write is a raw-core upsert; the fixture session uses expire_on_commit=False,
+    # so the ORM identity map still holds the pre-upsert row. Expire to force a fresh
+    # read of the actual DB state (production uses a fresh session per request).
+    test_db.expire_all()
     rows = (
         await test_db.execute(
             select(CompanyGraphNode).where(CompanyGraphNode.ip == ip)
@@ -46,6 +50,7 @@ async def test_real_pg_insert_and_conflict_update(test_db):
 
     # A different source for the same IP is a distinct row.
     await cr._write_through_company_graph(test_db, ip, "acme.com", None, "paid_ip", 0.7)
+    test_db.expire_all()
     rows = (
         await test_db.execute(
             select(CompanyGraphNode).where(CompanyGraphNode.ip == ip)
