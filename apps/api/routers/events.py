@@ -388,8 +388,12 @@ async def _process_signal_events(
                     logger.info("form_email_rejected", reason=reason, email_domain=raw_email.split("@")[-1])
                     continue
                 # Where the pixel captured it (form/input/login/checkout/
-                # newsletter/identify). Sanitized + capped to the column width.
-                src = (event.source or "form").strip().lower()[:20] or "form"
+                # newsletter/identify/mailto_click/url_param). Sanitized, capped,
+                # and normalized to the canonical source enum (AC13) — an
+                # unrecognized value becomes "other", never free text.
+                from apps.api.models.visitor_email import normalize_source
+
+                src = normalize_source(event.source)
                 emails_to_upsert.append({
                     "site_id": batch.site_id,
                     "visitor_id": batch.visitor_id,
