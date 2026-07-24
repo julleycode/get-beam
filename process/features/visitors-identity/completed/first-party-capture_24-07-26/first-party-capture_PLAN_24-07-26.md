@@ -14,7 +14,7 @@ Shape: **COMPLEX, single cohesive plan, 4 staged internal phases** (not an umbre
 one feature, one team, sequential dependency chain: harness must exist before any capture point ships).
 
 **Date**: 24-07-26
-**Status**: VALIDATE complete (Gate: PASS) — ready for EXECUTE
+**Status**: VERIFIED (24-07-26) — Docker/browser gates closed, archived to `completed/`
 **Complexity**: COMPLEX (4 staged internal phases, single cohesive plan)
 
 ## Overview
@@ -299,10 +299,21 @@ GUARDRAIL (still enforced, matches SPEC constraint intent): the raw URL param va
   in this environment (see Closeout below) — DEFERRED, not failed.
 - [x] UPDATE PROCESS (archive + backlog NOTE for D4 CLEAN/RED policy doc)
 
-## Closeout (UPDATE PROCESS, 24-07-26)
+## Closeout (UPDATE PROCESS, 24-07-26; promoted to VERIFIED 24-07-26)
 
-**Classification: WITH_GAPS** — code-complete; every Fully-Automated/Hybrid gate that could run in
-this sandbox is green; kept in `active/` (not archived) pending 2 deferred, environment-only gaps.
+**Classification: VERIFIED** — code-complete, and the 2 previously-deferred environment-only gaps
+are now closed by an independent EVL final run. Archived to `completed/`.
+
+**Docker/browser-gate closure (EVL final run, 24-07-26 — independent):**
+- AC5 webkit/firefox autofill legs — `e2e/autofill.spec.ts --project=webkit --project=firefox`:
+  2/2 passed (chromium leg was already green; all 3 browser projects now confirmed).
+- AC11 `do_not_resolve` integration re-confirm — 1/1 passed, **non-vacuous**: exercises a real
+  `Visitor(do_not_resolve=True)` row, calls the real `record_signal()` write path, and asserts the
+  resulting `identity_signals` insert count is `0` (not a mock/stub assertion).
+- Backend unit regression (source enum + URL-param logging) — 19/19 passed.
+- 3 test-infra fixes landed in commit `8c7ac6e` (session `expire_all`, the AC11 integration test
+  itself, and a Redis mock shared with the owned-data-layer fix) unblocked this closure — see the
+  `post-docker-gate-followups_NOTE_24-07-26.md` backlog note for what remains open.
 
 **Note for future readers — code pre-existed this RIPER pass:** at session start, `tracker.js`,
 `events.py`, `visitor_email.py`, the `apps/pixel/e2e/` harness, and the source-enum migration were
@@ -342,8 +353,16 @@ binary, live DB) that was never actually exercised in THIS closeout pass. Both r
 environment-only (not design or code defects) and have a documented, executable close command in
 the companion backlog NOTE — this plan stays in `active/` until those are run for real.
 
-**Backlog note (env-gaps + D4 CLEAN/RED policy doc pointer):** written this session, see
-`process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`.
+**Backlog note (env-gaps + D4 CLEAN/RED policy doc pointer):** written the prior session, see
+`process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`
+— marked RESOLVED this session (Gaps 1 and 2 closed; Gap 3 migration live-apply status: the
+round-trip was proven on a disposable Postgres this session, but a REAL/production live-apply
+remains a separate explicit operator action, unchanged from the note's original scope; D4 doc
+pointer remains open, tracked in the new followups note).
+
+**Promoted to VERIFIED and archived 24-07-26.** Commits `aad64c0`/`68d2e22`/`c3d0e03` (prior
+implementation/process) plus `8c7ac6e` (test-infra fixes this session). Task folder moved
+`active/` → `completed/` this session.
 
 ### EXECUTE Deviations (within-blast-radius, documented per protocol)
 - **D-E1** AC13 source-enum test authored as dedicated unit file `tests/unit/test_visitor_email_source_enum.py` (6 tests on pure `normalize_source`) instead of extending integration `TestEmailCaptureSource` per Phase 3 item 6. Reason: `normalize_source` is pure/DB-free (plan's own code comment says "unit-testable in the fast lane"); faster lane, matches the `-k source_enum` gate. Integration `TestEmailCaptureSource` retained (storage-path coverage). Within test blast radius — no source/schema deviation.

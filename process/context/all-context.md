@@ -210,7 +210,9 @@ structurally separate from human Visitor/Event data, never as a targetable outre
   constraint, first-party-capture Phase 3 — current head). Apply all eight in order before enabling
   `agent_detection_enabled`, `company_graph_enabled`, or `identity_signals_enabled` in any real
   environment. Re-confirm via `alembic heads` before applying — other work may advance the head
-  further.
+  further. Round-trip (`upgrade head` → `downgrade -1` → `upgrade head`) proven clean on a
+  disposable Postgres container 24-07-26 as part of owned-data-layer/first-party-capture closure —
+  this is NOT a production live-apply, which remains a separate explicit operator action.
 - Docker/live-integration known-gaps consolidated in
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`
 
@@ -227,7 +229,7 @@ metadata on a separate write path from `source_agent_visit_id` — `is_emailable
 reads it, and AI-referred humans stay fully emailable (the opposite guarantee from EvalLayer's
 agent-exclusion guardrail — these are real humans, not agents).
 
-## Owned Identity Data Layer (v1, shipped 23-07-26 — code-complete, WITH_GAPS)
+## Owned Identity Data Layer (v1, shipped 23-07-26 — VERIFIED 24-07-26)
 
 Makes every paid/free identity+company lookup a permanent, cross-tenant asset instead of a
 transient cache hit, and adds a strictly corroborating (never identity-creating) signal source
@@ -256,16 +258,19 @@ from existing outbound email engagement:
   both **default OFF** (`company_graph_staleness_days` default `75`); flipping either to `True` in
   a real environment is an explicit human, post-migration-live-apply operator action, matching the
   `agent_detection_enabled` precedent.
-- Status 23-07-26: code-complete, unit-verified (875/875 `tests/unit` passed, regression
-  `test_agent_origin_exclusion.py` 18 passed), Hybrid persistence tests + live migration apply
-  **not yet run** (Docker-gated). See
-  `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`
-  and `process/features/visitors-identity/active/owned-data-layer_23-07-26/`.
-- Known-gap: SendGrid live open/click payload shape + `custom_args` echo shape unverified against
-  a real payload (Agent-Probe tier); account-level SendGrid tracking-settings override behavior
-  needs-live-provider, not probed per policy.
+- Status 24-07-26: **VERIFIED and archived**. Docker-gate closure (EVL final run, 24-07-26,
+  independent): migration round-trip clean on a disposable Postgres (chain to head
+  `a9f2c1e7b4d6`), `test_company_graph.py` 14/14, integration `company_graph`+`identity_signals`
+  5/5, unit regression `test_agent_origin_exclusion.py` 18/18, donor `test_company_resolver.py`
+  59/59. See `process/features/visitors-identity/completed/owned-data-layer_23-07-26/` and the
+  resolved backlog note
+  `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`.
+- Known-gap (still open): SendGrid live open/click payload shape + `custom_args` echo shape
+  unverified against a real payload (Agent-Probe tier); account-level SendGrid tracking-settings
+  override behavior needs-live-provider, not probed per policy — see
+  `process/features/visitors-identity/backlog/post-docker-gate-followups_NOTE_24-07-26.md`.
 
-## First-Party Email Capture Expansion (v1, shipped 24-07-26 — code-complete, WITH_GAPS)
+## First-Party Email Capture Expansion (v1, shipped 24-07-26 — VERIFIED 24-07-26)
 
 Widens `apps/pixel/src/tracker.js`'s CLEAN first-party email capture surface — the raw seed feeding
 `visitor_emails` → the owned identity graph above — without loosening the "visitor must have
@@ -290,11 +295,12 @@ actively engaged this session" rule:
   (`ck_visitor_emails_source` CHECK constraint, additive/superset, offline-validated only).
 - New test infra: `apps/pixel/e2e/` — the first automated Playwright harness `tracker.js` capture
   logic has ever had (own config, chromium/webkit/firefox projects).
-- Status 24-07-26: code-complete, 13/15 SPEC ACs fully met, 2 partial on environment-only residuals
-  (webkit/firefox autofill legs — binaries not cached; Phase 3 integration lane — Docker down at
-  EVL time, ran green at EXECUTE). See
+- Status 24-07-26: **VERIFIED and archived**. Docker/browser-gate closure (EVL final run,
+  independent): AC5 webkit/firefox autofill legs 2/2 passed, AC11 `do_not_resolve` integration
+  re-confirm 1/1 passed (non-vacuous: real `Visitor(do_not_resolve=True)`, real `record_signal()`,
+  asserts insert count==0), backend unit regression 19/19 passed. All 15/15 SPEC ACs now met. See
   `process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`
-  and `process/features/visitors-identity/active/first-party-capture_24-07-26/`.
+  (RESOLVED) and `process/features/visitors-identity/completed/first-party-capture_24-07-26/`.
 
 ## Key Patterns and Conventions
 
@@ -341,12 +347,16 @@ actively engaged this session" rule:
 - Docs drift: `PRODUCT_ROADMAP.md` + `README.md` still say Claude/`claude-sonnet-4` for segmentation — code runs Gemini (see AI Layer)
 - EvalLayer + AI-referral + owned-data-layer + first-party-capture: `agent_detection_enabled`,
   `company_graph_enabled`, `identity_signals_enabled` all default OFF; 8 migrations pending
-  live-apply (`d11b39a6c843` → `a1c7e4f92b83` → `b3f9a1d2c7e5` → `c4e8f1a9d2b7` → `f8a2c1d9b3e7` →
-  `a3e9f1c7d2b5` → `e2a4c7f81b93` → `a9f2c1e7b4d6` — current head, confirmed 24-07-26) — see
-  AI-Agent-Traffic Layer + Owned Identity Data Layer + First-Party Email Capture Expansion
-  sections above, `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`,
-  `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`,
-  and `process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`
+  PRODUCTION live-apply (`d11b39a6c843` → `a1c7e4f92b83` → `b3f9a1d2c7e5` → `c4e8f1a9d2b7` →
+  `f8a2c1d9b3e7` → `a3e9f1c7d2b5` → `e2a4c7f81b93` → `a9f2c1e7b4d6` — current head, confirmed
+  24-07-26; round-trip verified clean on a disposable dev Postgres 24-07-26, NOT yet applied to
+  any real environment) — see AI-Agent-Traffic Layer + Owned Identity Data Layer + First-Party
+  Email Capture Expansion sections above,
+  `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`,
+  `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`
+  (RESOLVED), `process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`
+  (RESOLVED), and `process/features/visitors-identity/backlog/post-docker-gate-followups_NOTE_24-07-26.md`
+  (open: 5 unrelated integration failures + conftest Redis-isolation hardening)
 - Successor program planned: "Handoff Detection" (human-behind-the-agent correlation) — not yet
   scaffolded on disk; see `evallayer-umbrella_PLAN_22-07-26.md` §Program-Level Closeout
 

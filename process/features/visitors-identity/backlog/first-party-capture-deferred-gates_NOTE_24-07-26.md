@@ -11,7 +11,19 @@ metadata:
 
 # First-Party Capture — Deferred Gates Backlog
 
-**Why this note exists:** per the vacuous-green ban, an acceptance criterion whose only proving
+**STATUS: RESOLVED (24-07-26)** for Gap 1 and Gap 2. Independent EVL final run: Gap 1 (AC5
+webkit/firefox autofill legs) — `e2e/autofill.spec.ts --project=webkit --project=firefox` 2/2
+passed. Gap 2 (Phase 3 integration re-confirm) — the AC11 `do_not_resolve` integration test
+(non-vacuous: real `Visitor(do_not_resolve=True)`, real `record_signal()`, asserts insert
+count==0) 1/1 passed. Gap 3 (migration live-apply) — the round-trip was proven on a disposable
+Postgres this session (see `owned-data-layer-docker-verification_NOTE_23-07-26.md` for the shared
+migration-chain evidence); a REAL/production live-apply remains a separate explicit operator
+action, unchanged in scope. The D4 CLEAN/RED policy doc pointer remains genuinely open — carried
+forward to `post-docker-gate-followups_NOTE_24-07-26.md`. `first-party-capture_PLAN_24-07-26.md`
+promoted to VERIFIED and archived to `completed/`. This note is kept as audit trail — do not
+delete.
+
+**Why this note exists (original, 24-07-26):** per the vacuous-green ban, an acceptance criterion whose only proving
 gate never actually ran in this session is scored **unmet/partial** at closeout even when the rest
 of the plan is fully green. This tracks the exact residuals for
 `first-party-capture_PLAN_24-07-26.md` and the close command for each. None of these are design

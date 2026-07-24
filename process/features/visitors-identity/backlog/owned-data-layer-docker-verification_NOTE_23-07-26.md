@@ -11,7 +11,19 @@ metadata:
 
 # Owned Data Layer — Docker/Live-Verification Gap Backlog
 
-**Why this note exists:** per the vacuous-green ban, an acceptance criterion whose only proving
+**STATUS: RESOLVED (24-07-26).** All gates below closed by an independent EVL final run on a
+disposable `infra-postgres-1` container: migration round-trip clean (`upgrade head` →
+`downgrade -1` → `upgrade head`, chain to head `a9f2c1e7b4d6`), `test_company_graph.py` 14/14
+(double-run), integration `company_graph`+`identity_signals` 5/5, unit regression
+`test_agent_origin_exclusion.py` 18/18, donor `test_company_resolver.py` 59/59. 3 test-infra
+fixes landed in commit `8c7ac6e`. The two Agent-Probe rows (SendGrid live payload shape;
+account-level tracking-settings override) remain genuinely open — not closeable without a live
+SendGrid account/payload, carried forward to
+`process/features/visitors-identity/backlog/post-docker-gate-followups_NOTE_24-07-26.md`.
+`owned-data-layer_PLAN_23-07-26.md` promoted to VERIFIED and archived to `completed/`. This note
+is kept as audit trail — do not delete.
+
+**Why this note exists (original, 23-07-26):** per the vacuous-green ban, an acceptance criterion whose only proving
 gate is a Docker-gated integration test (or a live migration apply) that has never actually run is
 scored **unmet** at closeout, even when unit/regression coverage is fully green. This tracks the
 exact residuals for `owned-data-layer_PLAN_23-07-26.md` and the close command for each. None of

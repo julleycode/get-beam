@@ -8,7 +8,7 @@ feature: visitors-identity
 # Owned Identity Data Layer — Plan
 
 **Date**: 23-07-26
-**Status**: VALIDATED — Gate PASS (see `## Validate Contract`)
+**Status**: VERIFIED (24-07-26) — Docker/integration gates closed, archived to `completed/`
 **Complexity**: COMPLEX (schema + 2 staged internal phases, single plan artifact — not a phase program)
 
 ## Overview
@@ -559,17 +559,41 @@ cd apps/api && ../../.venv/bin/alembic upgrade head   # against disposable integ
 
 ---
 
-## Closeout (UPDATE PROCESS, 23-07-26)
+## Closeout (UPDATE PROCESS, 23-07-26; promoted to VERIFIED 24-07-26)
 
-**Classification: WITH_GAPS — code-complete + unit-verified. Kept in `active/` (not archived to
-`completed/`) pending Docker-gated integration/migration-apply verification.**
+**Classification: VERIFIED — code-complete + unit-verified + Hybrid/Docker-gated gates now
+independently confirmed green. Archived to `completed/`.**
 
-Rationale for keeping active rather than archiving: per the vacuous-green ban, AC2b, AC3
-(persistence half), AC8, and the identity_signals persistence gate all have their proving test
-tier as Hybrid (needs real Postgres) — those gates have never actually run. The plan is CODE DONE,
-not VERIFIED per this plan's own `## Phase Completion Rules`. Archiving now would misrepresent an
-unrun Hybrid gate as closed. See the Docker-verification gap note (linked below) for the exact
-close sequence to run once a disposable Postgres+Redis instance is available.
+**Docker-gate closure (EVL final run, 24-07-26 — independent):**
+- Migration round-trip clean on the `infra-postgres-1` disposable container: `upgrade head` →
+  `downgrade -1` → `upgrade head`, chain confirmed through to head `a9f2c1e7b4d6` (no destructive
+  schema change, no data loss on round-trip).
+- `tests/integration/test_company_graph.py` — 14/14 passed (double-run for stability; the
+  ambient-Redis dependency that caused earlier flakiness was removed — see note below).
+- Integration `company_graph` + `identity_signals` combined lane — 5/5 passed.
+- Unit regression `test_agent_origin_exclusion.py` — 18/18 passed (agent-exclusion boundary
+  unaffected).
+- Donor regression `test_company_resolver.py` — 59/59 passed (no regression in the pre-existing
+  free rDNS resolver this plan extends).
+- 3 test-infra fixes landed in commit `8c7ac6e` (session-`expire_all` fix, AC11 `do_not_resolve`
+  integration test, a `get_redis` mock for the unit lane) — see note below on what these fixed vs.
+  what they mean for production.
+
+**Test-infra self-poison, not a prod bug:** the original `test_company_graph.py` unit-lane
+flakiness was caused by an ambient Redis container (`itemintern-redis-1`) occupying port 6379 in
+this sandbox plus a missing `get_redis` mock in the unit test — the unit lane assumed Redis was
+unreachable and exercised the "Redis down" branch, but a real (unrelated) container answered on
+the default port instead. This is a **test-harness fixture gap**, not a defect in
+`company_resolver.py`/`identity_resolver.py`. Production code at commit `54cf384` is
+byte-identical to the code now marked VERIFIED — only the test's isolation was insufficient. See
+the new backlog note (`post-docker-gate-followups_NOTE_24-07-26.md`) for the durable conftest fix
+recommendation.
+
+Original (23-07-26) rationale for keeping active before this promotion, retained for history: per
+the vacuous-green ban, AC2b, AC3 (persistence half), AC8, and the identity_signals persistence
+gate all had their proving test tier as Hybrid (needs real Postgres) — those gates had never
+actually run. The plan was CODE DONE, not VERIFIED per this plan's own `## Phase Completion
+Rules`. That gap is now closed as of the 24-07-26 EVL final run above.
 
 **Commits:**
 - `54cf384` — `feat(identity): durable company_graph + cross-tenant full-profile reuse` (Phase 1)
@@ -587,10 +611,10 @@ close sequence to run once a disposable Postgres+Redis instance is available.
 
 **Docker-verification gap note:** `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`
 
-**Next action to promote to VERIFIED / archive:** run the close sequence in the gap note against a
-disposable Postgres+Redis, confirm the two Hybrid persistence tests and the migration
-apply/downgrade/apply round-trip, then re-open UPDATE PROCESS to move this task folder to
-`completed/`.
+**Promoted to VERIFIED and archived 24-07-26.** Docker gate closure evidence above; commits
+`54cf384`/`94852a9`/`24a0dcd`/`bd5e18a` (implementation + prior process) plus `8c7ac6e`
+(test-infra fixes). Task folder moved `active/` → `completed/` this session. Backlog note
+`owned-data-layer-docker-verification_NOTE_23-07-26.md` marked RESOLVED (see note header).
 
 ---
 

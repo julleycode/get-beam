@@ -35,17 +35,25 @@ The core visitor pipeline: raw pixel events → visitor aggregation + intent sco
 ## Current Status
 
 Status: stable — waterfall + budgets shipped; provider mix tuned via `*_ENABLED` env toggles.
+
 Owned data layer (`company_graph` cross-tenant durable store + `identity_signals` SendGrid
-open/click corroboration) shipped 23-07-26, code-complete + unit-verified, both flags default
-OFF — pending Docker-gated integration/migration verification before archival. See
-`active/owned-data-layer_23-07-26/` and `backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`.
+open/click corroboration), shipped 23-07-26, **VERIFIED 24-07-26** (Docker-gate closure: migration
+round-trip clean, integration + unit regression green). Both flags (`company_graph_enabled`,
+`identity_signals_enabled`) still default OFF — flipping either in a real environment remains a
+separate explicit operator action. Archived: `completed/owned-data-layer_23-07-26/`. Resolved
+backlog note: `backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`.
 
 First-party capture expansion (value-based field matching, mailto/URL-param, cross-browser
-autofill, shadow-DOM/same-origin-iframe capture feeding `visitor_emails`) shipped 24-07-26,
-code-complete, 13/15 SPEC ACs fully met — pending 2 environment-only gates (webkit/firefox
-autofill binaries, Phase 3 integration re-confirm) before archival. See
-`active/first-party-capture_24-07-26/` and
+autofill, shadow-DOM/same-origin-iframe capture feeding `visitor_emails`), shipped 24-07-26,
+**VERIFIED 24-07-26** (Docker/browser-gate closure: webkit/firefox autofill legs green,
+`do_not_resolve` integration re-confirm green — all 15/15 SPEC ACs now met). Archived:
+`completed/first-party-capture_24-07-26/`. Resolved backlog note:
 `backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`.
+
+Open followups (not blocking either archived plan): 5 unrelated pre-existing integration test
+failures (evallayer/handoff-detection, intent-signals, ai-referral — cross-feature triage needed)
+and a conftest Redis-isolation hardening recommendation. See
+`backlog/post-docker-gate-followups_NOTE_24-07-26.md`.
 
 ## Folder Contents
 
