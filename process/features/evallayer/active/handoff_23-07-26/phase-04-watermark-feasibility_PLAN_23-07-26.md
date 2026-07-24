@@ -14,7 +14,11 @@ metadata:
 **Program:** handoff
 **Umbrella plan:** process/features/evallayer/active/handoff_23-07-26/handoff-umbrella_PLAN_23-07-26.md
 **SPEC:** process/features/evallayer/active/handoff_23-07-26/handoff_SPEC_23-07-26.md (AC-H4-1, AC-H4-2)
-**Phase status:** ✅ VALIDATED (Gate: CONDITIONAL — 0 FAILs, security concern fixed in plan text this pass, 2 named accepted known-gaps; see Validate Contract)
+**Phase status:** ✅ COMPLETE (Gate: CONDITIONAL at PVL — 0 FAILs, security concern fixed in plan
+text, 2 named accepted known-gaps; see Validate Contract. PREP shipped gate-green 24-07-26. Founder
+ran the Step B dispatch 24-07-26; VERDICT = **INCONCLUSIVE** — see
+`phase-04-watermark-feasibility_FEASIBILITY_24-07-26.md`. Per AC-H4-2, phase is COMPLETE on any
+non-VIABLE verdict — no watermark implementation is authorized.)
 **Report destination:** process/features/evallayer/active/handoff_23-07-26/phase-04-watermark-feasibility_REPORT_23-07-26.md (flat in the program task folder)
 
 ---
@@ -305,13 +309,22 @@ ordinary code and does NOT require a probe.**
       B/C dispatch instructions as a separate Agent-Probe / needs-live-provider hard-stop entry.
       1 security CONCERN found and fixed in plan text this pass (reflected-XSS on `[t]`). Gate:
       CONDITIONAL (2 named, accepted known-gaps — see Validate Contract).
-- [ ] 5. EXECUTE — Step A (PREP route + middleware) executed and gate-green; Step B (dispatch,
-      requires opt-in) + Step C (VERDICT written) executed; Step D gate resolved.
-- [ ] 6. EVL — confirm PREP build/greps green; confirm VERDICT artifact exists with a valid keyword
-      (once dispatched); confirm no premature production implementation code was written.
-- [ ] 7. UPDATE PROCESS — phase report written (recording the verdict outcome regardless of
-      VIABLE/NOT-VIABLE/INCONCLUSIVE, or PREP-only status if dispatch is still pending opt-in),
-      umbrella state updated, commit done.
+- [x] 5. EXECUTE — Step A (PREP route + middleware) executed and gate-green (24-07-26, see
+      `phase-04-watermark-feasibility_REPORT_23-07-26.md`). Step B (dispatch) executed by the
+      founder 24-07-26 with explicit double opt-in (ChatGPT browse+cite request per Founder
+      Instructions). Step C (VERDICT written) complete — see
+      `phase-04-watermark-feasibility_FEASIBILITY_24-07-26.md`, verdict INCONCLUSIVE. Step D
+      resolved: D1 applies (verdict != VIABLE) — phase COMPLETE, no watermark-write code written.
+- [x] 6. EVL — PREP build/greps confirmed green at EXECUTE (24-07-26); VERDICT artifact confirmed
+      present with exactly one recorded keyword (`INCONCLUSIVE`) via
+      `grep -E "VIABLE|NOT-VIABLE|INCONCLUSIVE" phase-04-watermark-feasibility_FEASIBILITY_*.md`;
+      `grep -rn "watermark" apps/api/ apps/web/src/` confirms no production watermark-write code
+      path exists (AC-H4-2 satisfied).
+- [x] 7. UPDATE PROCESS — phase report already covers Step A (PREP); this closeout records the
+      Step B/C/D outcome, the WAF backlog finding
+      (`process/features/evallayer/backlog/aeo-waf-blocks-ai-fetchers_NOTE_24-07-26.md`), umbrella
+      state update, and program-level closeout. Commit deferred to a separate git-manager pass per
+      orchestrator instruction.
 
 **Validate-contract required before execute.** If step 4 (PVL) is unchecked or `## Validate
 Contract` reads "(placeholder — vc-validate-agent writes this section before EXECUTE)",

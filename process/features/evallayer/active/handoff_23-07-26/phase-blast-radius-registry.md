@@ -175,10 +175,14 @@ Blast radius (PVL-confirmed 24-07-26, not yet executed):
   `apps/web` dashboard files (`dashboard/agents/page.tsx`, `dashboard/visitors/**`) that H4 never
   touches
 
-status: PVL CONDITIONAL — PREP design LOCKED and validated 24-07-26 (Gate: CONDITIONAL, 1 security
+status: DONE — PREP design LOCKED and validated 24-07-26 (Gate: CONDITIONAL, 1 security
 CONCERN found and fixed in plan text — reflected-XSS on the `[t]` token, mitigated via strict-format
-validation + `notFound()`; 2 named accepted known-gaps, no high-risk-class gap). EXECUTE not yet
-started. Step B (dispatch) remains gated on explicit double opt-in independent of this PVL gate.
+validation + `notFound()`; 2 named accepted known-gaps, no high-risk-class gap). EXECUTE (Step A)
+complete 24-07-26, all PREP gates green. Step B (dispatch) executed by the founder 24-07-26 with
+explicit double opt-in — VERDICT = **INCONCLUSIVE** (fetch never reached the page; site's WAF
+returns 403 domain-wide to bot user-agents; see
+`phase-04-watermark-feasibility_FEASIBILITY_24-07-26.md`). Per AC-H4-2, phase COMPLETE — no
+watermark-write code authorized or written.
 
 PVL confirmation (24-07-26): blast radius above re-verified against live source at VALIDATE time —
 confirmed `apps/web/src/app/pricing-overview/` does not yet exist (no collision), confirmed

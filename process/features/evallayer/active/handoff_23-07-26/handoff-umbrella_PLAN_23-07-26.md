@@ -314,7 +314,7 @@ During /goal execution of a phase program:
 | 01 — Fetch events + tiering (H1) | 🔨 CODE DONE (Docker gaps) |
 | 02 — Handoff correlation (H2) | 🔨 CODE DONE (Docker gaps) |
 | 03 — Intent signals (H3) | 🔨 CODE DONE (Docker gaps) |
-| 04 — Watermark feasibility (H4) | ⏳ PLANNED |
+| 04 — Watermark feasibility (H4) | 🔨 CODE DONE (prep); probe INCONCLUSIVE |
 
 Status values: ⏳ PLANNED | 🔨 CODE DONE | 🧪 TESTING | ✅ VERIFIED | 🚧 BLOCKED | ✅ COMPLETE
 
@@ -427,7 +427,7 @@ cd /Users/apple/getbeam && python -m pytest tests/unit/ tests/integration/ -q
 
 ## Current Execution State
 
-Last updated: 24-07-26 (H3 UPDATE PROCESS)
+Last updated: 24-07-26 (H4 UPDATE PROCESS — program closeout)
 Completed phases: Phase 0 (Planning), Phase 1 — Fetch events + tiering (H1) — CODE DONE, EVL-confirmed
   green on all fully-automated gates; 2 Hybrid gates (Alembic upgrade/downgrade cycle, E7 live
   retention purge) remain Docker-gated known-gaps, tracked in
@@ -447,17 +447,20 @@ Completed phases: Phase 0 (Planning), Phase 1 — Fetch events + tiering (H1) �
   (`test_pixel.py::test_source_under_20kb`) was found during the full-suite re-run, caused by the
   concurrent `first-party-capture_24-07-26` session's `apps/pixel/src/tracker.js` change — not an
   H3 defect, no action taken on it here.
-Current phase: Phase 4 — Watermark feasibility (H4)
-Current loop step: RESEARCH (pending) — probe prep. **H4 is MANUAL-FIRST**: the live-provider
-  probe (`needs-live-provider` cost-class) requires explicit double opt-in from the founder before
-  any dispatch — this is a hard-stop class per the Program Goal Charter and Stable Program Goal,
-  never auto-run under `/goal`. RESEARCH/INNOVATE/PLAN-SUPPLEMENT/PVL for H4 may still proceed
-  normally up to the point of the actual probe dispatch.
+Current phase: PROGRAM COMPLETE (code) — all 4 phases code-complete; H4 closed with verdict
+  INCONCLUSIVE
+Current loop step: UPDATE-PROCESS (complete). H4's dispatch (Step B) was executed by the founder
+  24-07-26 with explicit double opt-in; verdict recorded INCONCLUSIVE — see
+  `phase-04-watermark-feasibility_FEASIBILITY_24-07-26.md` and `## Program-Level Closeout` above.
+  Open items are Docker/live-integration verification (H1/H2/H3, backlog) and the WAF-allowlist
+  ops fix + H4 re-probe (backlog) — both are follow-up maintenance, not new program phases.
 Validate-contract status: Phase 1 written (Gate: CONDITIONAL, pre-accepted Docker-gated residuals);
   Phase 2 written (Gate: CONDITIONAL, pre-accepted Docker-gated residual); Phase 3 written (Gate:
-  CONDITIONAL, 2 CONCERNs fixed in plan text, 1 Docker-gated residual); Phase 4 not yet written
-Program Net Gate: PENDING (3 of 4 phases code-done; program is effectively 3/4 code-complete —
-  H4 is the only remaining phase, and it is gated on user participation, not autonomous execution)
+  CONDITIONAL, 2 CONCERNs fixed in plan text, 1 Docker-gated residual); Phase 4 written (Gate:
+  CONDITIONAL, 1 security CONCERN fixed in plan text, 2 named accepted known-gaps)
+Program Net Gate: CODE-COMPLETE, WITH_GAPS (4 of 4 phases code-done; H4 verdict is INCONCLUSIVE —
+  not a blocker per AC-H4-2, phase is complete on any non-VIABLE verdict; Docker verification and
+  WAF-allowlist/re-probe remain as backlog, tracked in the two consolidated notes above)
 Latest validator run: 24-07-26 — see this UPDATE PROCESS closeout
 Cross-program note: Phase 1's migration (`c4e8f1a9d2b7`) has three foreign/downstream migrations
   chained onto it (`f8a2c1d9b3e7`, `a3e9f1c7d2b5` — visitors-identity "owned-data-layer" program;
@@ -477,6 +480,56 @@ subagent. Never spawn execute-agent when loop step is RESEARCH, INNOVATE, PLAN-S
 Note: The Stable Program Goal above is fixed. This section is the only part that changes —
 update-process-agent rewrites it after every phase closeout (overwrite, not append — git history
 is the audit log).
+
+---
+
+## Program-Level Closeout
+
+**Program status: CODE-COMPLETE (4 of 4 phases).** All four phases have shipped source code and
+are individually gate-green on their fully-automated tiers; program-wide code has NOT yet been
+committed, and Docker-gated Hybrid gates remain unrun (see consolidated backlog note below).
+
+**Capability shipped:**
+- **H1 — Fetch-event foundation:** per-hit `agent_fetch_events` persistence + on-demand-vs-index
+  tier classification, additive to the existing `agent_visits` rollup. Foundation for H2/H3.
+- **H2 — Fetch-to-click temporal correlation ("human behind the agent"):** the program's core,
+  proven capability. Links an on-demand AI fetch to the human's subsequent click-through at
+  high/medium confidence, with `is_emailable_identity` and `source_agent_visit_id` both confirmed
+  untouched in both directions (AC-H2-3, zero-diff + zero-reference tripwire + zero outreach-table
+  joins).
+- **H3 — Intent signals:** site/company-scoped "appeared after AI research" spike detection,
+  read-design (no new table), person-level and multi-tenant safety confirmed.
+- **H4 — Citation-watermark feasibility probe:** PREP (public tokenized probe page) shipped
+  gate-green. Founder-run live dispatch (Step B) executed 24-07-26. **Verdict: INCONCLUSIVE** — the
+  probe's on-demand fetcher never reached the page because `getbeam.fyi` returns HTTP 403
+  domain-wide to bot user-agents (confirmed via orchestrator `WebFetch` diagnostic); ChatGPT
+  answered from stale/wrong memory about a namesake competitor product instead. Per AC-H4-2, H4 is
+  COMPLETE on this verdict — no watermark implementation is authorized. See
+  `phase-04-watermark-feasibility_FEASIBILITY_24-07-26.md`.
+
+**Consolidated known-gaps (program-wide):**
+1. **Docker/live-integration verification gates** (H1/H2/H3) — Alembic upgrade/downgrade round-trip
+   for the single migration chain, and each phase's live-sweep Hybrid integration tests, have never
+   run against a live Postgres in this sandbox. Tracked in
+   `process/features/evallayer/backlog/handoff-program-docker-verification-gaps_NOTE_23-07-26.md`.
+   Not blocking CODE-COMPLETE status; blocks each phase's 🔨 → ✅ VERIFIED promotion.
+2. **H4 watermark re-probe + WAF/AEO finding** — the citation-watermark hypothesis was never
+   actually exercised (fetch blocked, not tested). The probe also surfaced a bigger finding: the
+   site's anti-bot WAF blocks on-demand AI answer-engine fetchers domain-wide, making AI-generated
+   answers about Beam wrong or stale regardless of any watermarking work. Recommended ops fix
+   (WAF allowlist for `ChatGPT-User`/`Claude-User`/on-demand `PerplexityBot`, using the
+   `apps/api/data/agent_ip_ranges/` data Beam already ships) is a founder-side infra decision, not
+   a code change. Tracked in
+   `process/features/evallayer/backlog/aeo-waf-blocks-ai-fetchers_NOTE_24-07-26.md`. This is the
+   precondition for any H4 re-probe.
+
+**Successor program:** "Handoff Detection" was itself the successor to the EvalLayer program. No
+further phases are planned inside this `handoff_23-07-26` task folder — H4's non-VIABLE verdict
+closes the watermarking sub-scope per AC-H4-2, and the two consolidated known-gaps above are
+routed to backlog rather than new phases. Any future work (Docker verification pass, WAF-allowlist
++ re-probe) is follow-up maintenance, not new program scope, and does not require a new feature
+folder — it can be picked up directly from the two backlog notes above when infra/founder
+availability allows.
 
 ---
 
