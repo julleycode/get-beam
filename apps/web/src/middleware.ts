@@ -30,6 +30,7 @@ if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
     "/pricing(.*)",
     "/blog(.*)",    // public marketing blog (SEO). /dashboard/blog stays protected.
     "/.well-known/(.*)",  // public agent-discovery manifests (ai-plugin.json)
+    "/pricing-overview(.*)",  // public citation-watermark probe page (H4) — must never 302 to /sign-in
   ]);
   handler = clerkMiddleware((auth: () => { protect: () => void }, request: NextRequest) => {
     if (!isPublicRoute(request)) {
