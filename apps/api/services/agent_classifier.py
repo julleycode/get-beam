@@ -25,6 +25,17 @@ _VENDOR_TOKENS: dict[str, frozenset[str]] = {
     "anthropic": frozenset({"claudebot", "anthropic-ai", "claude-user", "claude-searchbot"}),
     "perplexity": frozenset({"perplexitybot", "perplexity-user"}),
     "bytespider": frozenset({"bytespider"}),
+    # Google/Gemini (Handoff Detection H5, D-A). Added conservatively: the exact
+    # live Gemini/Google *on-demand* fetch UA token is UNVERIFIED (KG-3). The
+    # only documented Google user/owner-triggered fetcher is
+    # ``Google-CloudVertexBot`` (fetches sites on demand for Vertex AI Agents) —
+    # allowlisted here but kept INDEX-tier (NOT in _ON_DEMAND_TOKENS) so a
+    # crawler is never mislabeled as a live human-behind-the-agent fetch. Deliberately
+    # NOT ``google-extended``/``applebot-extended`` — those are robots.txt AI-control
+    # directives, not real fetch UAs (see test_agent_classifier AC13 exclusion), and
+    # must never classify. Promote to on-demand only after a real fetch UA is
+    # confirmed from live logs (KG-3 backlog stub).
+    "google": frozenset({"google-cloudvertexbot"}),
 }
 
 # Verification tiers. Phase 1 always returns "ua-only"; Phase 4 adds the other

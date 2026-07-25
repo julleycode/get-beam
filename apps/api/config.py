@@ -122,6 +122,48 @@ class Settings(BaseSettings):
     fullcontact_pixel_id: str = ""        # FullContact Acumen webtag ID
     customers_ai_pixel_id: str = ""       # Customers.ai X-Ray pixel ID
 
+    # ─── Ingest abuse hardening (P1–P5) ───
+    # Hard ceiling on the POST /ingest request body, enforced as a running byte
+    # count during ASGI receive() (NOT a Content-Length-only check — that header
+    # is forgeable and absent on chunked transfer-encoding). 256 KB is generous:
+    # a realistic 100-event batch is well under this, so no legitimate pixel
+    # payload is ever rejected.
+    ingest_body_max_bytes: int = 262_144
+
+    # How many TRUSTED reverse proxies / load balancers sit in front of the app.
+    # 0 (default) = trust nothing: X-Forwarded-For is ignored entirely and the
+    # client IP is request.client.host, which a caller cannot forge. N >= 1 =
+    # take the Nth-from-the-right XFF entry (the value the Nth trusted hop
+    # observed). Misconfiguration ALWAYS fails safe back to request.client.host —
+    # see services/ip_resolution.resolve_client_ip.
+    trusted_proxy_hops: int = 0
+
+    # Per-SITE ingest ceiling. The existing 100/min per-IP limiter is blind to a
+    # rotating-IP flood: spread across 500 IPs, every bucket stays under its
+    # allowance while one site absorbs the whole aggregate. This ceiling is the
+    # only layer that sees that total. Defaults OFF (same precedent as
+    # agent_detection_enabled / company_graph_enabled) — turning it on in a real
+    # environment is a deliberate operator action after the thresholds are tuned.
+    site_ingest_limit_enabled: bool = False
+    # Only consulted when site_ingest_limit_enabled is True.
+    site_ingest_limit_per_minute: int = 3000
+
+    # Write-time behavioural velocity detection. A rotating-IP flood has HIGH IP
+    # entropy by construction, so IP entropy alone is worthless against it. The
+    # signal that DOES separate a flood from real traffic is identity diversity:
+    # a flood mints many distinct visitor_ids that share very few distinct browser
+    # fingerprints. Flag only when BOTH hold — high distinct-visitor count AND low
+    # fingerprint diversity — so an organic viral spike (many visitors, many real
+    # fingerprints) is never caught. Defaults OFF, same precedent as above.
+    ingest_velocity_enabled: bool = False
+    ingest_velocity_window_seconds: int = 60
+    # Distinct visitor_ids per site per window before the shape starts to look
+    # like a flood at all. Calibration value — operator-tunable.
+    ingest_velocity_visitor_threshold: int = 200
+    # distinct_fingerprints / distinct_visitors ratio below which the traffic
+    # looks like "one attacker, many fake identities" rather than "many humans".
+    ingest_velocity_min_fingerprint_diversity: float = 0.3
+
     # When true, drop ingest events whose client IP belongs to a cloud-compute
     # provider (Azure/AWS/GCP/DO/OVH/…) — server/bot traffic, never real eyeballs.
     # Cached + fail-open: an IPinfo error never blocks a real visitor's events.
@@ -144,6 +186,21 @@ class Settings(BaseSettings):
     # applied in prod — with the flag off, ingest behavior is byte-identical to
     # pre-EvalLayer (recognized agent UAs fall through to the is_bot() drop).
     agent_detection_enabled: bool = False
+
+    # ─── Server-side AI-fetch capture beacon (Handoff Detection H5) ───
+    # When true, POST /api/v1/agents/fetch-beacon accepts an authenticated
+    # server-side beacon (from the getbeam.fyi edge middleware) that classifies
+    # an on-demand AI-fetcher UA and writes agent_visit + agent_fetch_event rows.
+    # Defaults OFF (mirrors agent_detection_enabled): with the flag off the
+    # endpoint answers 404 (dormant, not revealed) and writes nothing. Flip on
+    # only AFTER the pending EvalLayer migrations are live-applied in prod.
+    agent_fetch_beacon_enabled: bool = False
+    # Shared secret for the fetch-beacon trust boundary. Server-only on BOTH
+    # Cloudflare Pages (web) and Railway (API) — identical value, NEVER shipped
+    # to the browser. Empty (default) => the endpoint answers 401 to every call
+    # (dormant, guarded BEFORE any constant-time compare: hmac.compare_digest
+    # ('','') == True would otherwise ACCEPT an empty header — an auth bypass).
+    beam_fetch_beacon_secret: str = ""
 
     # ─── Owned identity data layer (durable company graph) ───
     # When true, every successful free rDNS company resolution is persisted
@@ -222,6 +279,30 @@ class Settings(BaseSettings):
     salesforce_client_id: str = ""
     salesforce_client_secret: str = ""
     salesforce_redirect_uri: str = "http://localhost:8000/api/v1/crm/callback/salesforce"
+
+    # ─── Ad Audiences (push a segment's hashed contacts OUT to an ad platform) ───
+    # Master feature flag. OFF by default: while false, every /api/v1/ads connect
+    # attempt returns HTTP 501 and no site's behavior changes. Flipping this on in
+    # a real environment is an explicit operator action AFTER the ad_connections /
+    # ad_audience_links migrations are live-applied.
+    ad_audiences_enabled: bool = False
+    meta_ads_client_id: str = ""
+    meta_ads_client_secret: str = ""
+    meta_ads_redirect_uri: str = "http://localhost:8000/api/v1/ads/callback/meta"
+    google_ads_client_id: str = ""
+    google_ads_client_secret: str = ""
+    google_ads_redirect_uri: str = "http://localhost:8000/api/v1/ads/callback/google"
+    # Present for schema symmetry only — LinkedIn stays ready=False, so these are
+    # never read while the provider is unsupported.
+    linkedin_ads_client_id: str = ""
+    linkedin_ads_client_secret: str = ""
+    linkedin_ads_redirect_uri: str = "http://localhost:8000/api/v1/ads/callback/linkedin"
+    # Per-site cap on ad push operations per clock hour. Independent counter from
+    # the CRM cap — a site's ad pushes and CRM pushes do not share one budget.
+    max_ads_pushes_per_hour_per_site: int = 20
+    ads_async_push: bool = False
+    ads_async_push_threshold: int = 200  # segment member count above which async kicks in
+
     # Per-site cap on CRM push operations per clock hour (abuse / runaway guard).
     max_crm_pushes_per_hour_per_site: int = 20
     # Offload large pushes to Celery. OFF by default — only safe when a Celery
@@ -294,6 +375,9 @@ class Settings(BaseSettings):
         "linkedin_client_id", "linkedin_client_secret", "linkedin_redirect_uri",
         "tiktok_client_key", "tiktok_client_secret", "tiktok_redirect_uri",
         "google_client_id", "google_client_secret", "google_redirect_uri",
+        "meta_ads_client_id", "meta_ads_client_secret", "meta_ads_redirect_uri",
+        "google_ads_client_id", "google_ads_client_secret", "google_ads_redirect_uri",
+        "linkedin_ads_client_id", "linkedin_ads_client_secret", "linkedin_ads_redirect_uri",
         mode="after",
     )
     @classmethod

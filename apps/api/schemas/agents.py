@@ -56,6 +56,27 @@ class RecentAiResearchEntry(BaseModel):
     researched_at: datetime
 
 
+class FetchBeaconIn(BaseModel):
+    """Server-side AI-fetch beacon payload (Handoff Detection H5).
+
+    Posted by the getbeam.fyi edge middleware when an on-demand AI-fetcher UA
+    hits a top-level document. Authenticated via the ``X-Beam-Fetch-Secret``
+    header (NOT in this body). ``token`` is present only when ``path`` matches
+    ``/pricing-overview/{token}`` — it decodes to the page's mint timestamp."""
+
+    site_id: str
+    user_agent: str
+    path: str
+    token: str | None = None
+
+
+class FetchBeaconAck(BaseModel):
+    """Minimal ack for the fetch beacon. ``status`` is one of
+    ``"written"`` | ``"noop"`` — the endpoint also maps these to 202/204."""
+
+    status: str
+
+
 class AgentAnalyticsResponse(BaseModel):
     """Read-only GEO/AEO analytics snapshot over AgentVisit rows (SPEC AC11).
 

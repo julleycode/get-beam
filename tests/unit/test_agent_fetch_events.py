@@ -32,6 +32,9 @@ _EXPECTED_ON_DEMAND = {
 }
 _EXPECTED_INDEX = {
     "gptbot", "claudebot", "anthropic-ai", "perplexitybot", "bytespider",
+    # H5 (D-A): google/Gemini added conservatively as INDEX-tier — the real
+    # on-demand fetch UA is unverified (KG-3), so it must never be on-demand.
+    "google-cloudvertexbot",
 }
 
 

@@ -123,6 +123,7 @@ async def persist_agent_fetch_event(
     tier: str,
     ip_address: str | None,
     page_path: str | None,
+    event_time: datetime | None = None,
 ) -> None:
     """Insert one append-only ``agent_fetch_events`` row. Fail-open.
 
@@ -130,19 +131,27 @@ async def persist_agent_fetch_event(
     own try/except and its own commit, so its failure never affects (and is
     never affected by) the rollup upsert. Plain ``insert()`` — append-only, no
     upsert/conflict semantics needed.
+
+    ``event_time`` (H5 E1) — when provided (e.g. a mint-time decoded from a
+    ``/pricing-overview/{token}`` beacon), it is written explicitly to
+    ``created_at``; when ``None`` (the default, and every pre-H5 caller), the
+    column keeps its ``Base.server_default=func.now()`` server-receive behavior.
+    ``created_at`` is a ``server_default`` column, so setting mint-time is
+    IMPOSSIBLE without this explicit override.
     """
     try:
-        await db.execute(
-            insert(AgentFetchEvent).values(
-                site_id=site_id,
-                vendor=classification.vendor,
-                raw_ua_token=classification.product_or_ua_token,
-                tier=tier,
-                page_path=page_path,
-                ip_address=ip_address or None,
-                verification_method=classification.verification_method,
-            )
-        )
+        values = {
+            "site_id": site_id,
+            "vendor": classification.vendor,
+            "raw_ua_token": classification.product_or_ua_token,
+            "tier": tier,
+            "page_path": page_path,
+            "ip_address": ip_address or None,
+            "verification_method": classification.verification_method,
+        }
+        if event_time is not None:
+            values["created_at"] = event_time
+        await db.execute(insert(AgentFetchEvent).values(**values))
         await db.commit()
     except Exception as exc:
         # Fail-open: log keys/vendor/site_id only (NO raw UA, NO IP — PII/GDPR

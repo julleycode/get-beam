@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest, NextFetchEvent } from "next/server";
+import { shouldFireFetchBeacon, fireFetchBeacon } from "@/lib/fetch-beacon";
 
 // Non-US visitors can't be identity-resolved yet (Beam only resolves US IPs),
 // so the onboarding "aha" demo falls flat for them — route them straight to
@@ -41,9 +42,22 @@ if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
   handler = () => NextResponse.next();
 }
 
-// Geo check runs first (covers every onboarding CTA at once); otherwise fall
-// through to Clerk auth.
 export default function middleware(req: NextRequest, ev: NextFetchEvent) {
+  // H5: fire-and-forget server-side AI-fetch beacon. Pure detection first, then
+  // a background POST via ev.waitUntil — it NEVER awaits, NEVER changes the
+  // response, and stays OUT of the Clerk callback. Dormant unless the server-only
+  // shared secret is present. Guarded so a helper bug can never break auth/redirect.
+  try {
+    const beaconPayload = shouldFireFetchBeacon(req);
+    if (beaconPayload && process.env.BEAM_FETCH_BEACON_SECRET) {
+      ev.waitUntil(fireFetchBeacon(beaconPayload));
+    }
+  } catch {
+    // Never let the beacon disturb the request path.
+  }
+
+  // Geo check runs first (covers every onboarding CTA at once); otherwise fall
+  // through to Clerk auth. Beacon above is a pure side-effect on this return.
   return geoRedirect(req) ?? handler(req, ev);
 }
 

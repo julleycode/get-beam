@@ -1,10 +1,12 @@
+import hmac
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.config import settings
 from apps.api.dependencies import get_current_user, verify_site_access as _verify_site_access
 from apps.api.models.agent_visit import AgentVisit
 from apps.api.models.database import get_db
@@ -15,6 +17,7 @@ from apps.api.schemas.agents import (
     AgentListResponse,
     AgentOut,
     AgentStatsResponse,
+    FetchBeaconIn,
 )
 from apps.api.services.agent_aggregator import (
     aggregate_agent_analytics,
@@ -22,10 +25,56 @@ from apps.api.services.agent_aggregator import (
     fetch_handoff_links_count,
     fetch_recent_ai_researched_companies,
 )
+from apps.api.services.agent_fetch_beacon import record_fetch_beacon
 
 logger = structlog.get_logger()
 
 router = APIRouter()
+
+
+def _verify_beacon_secret(
+    x_beam_fetch_secret: str | None = Header(default=None),
+) -> None:
+    """Shared-secret auth for the H5 fetch beacon. 401 on any failure.
+
+    Order is SECURITY-CRITICAL (VALIDATE E2):
+
+    1. Empty configured secret => 401 FIRST, BEFORE any ``hmac.compare_digest``.
+       ``hmac.compare_digest('', '')`` returns ``True``, so comparing an empty
+       header against an empty configured secret would ACCEPT it — an auth
+       bypass. The endpoint must be dormant (reject all) when unconfigured.
+    2. Empty/absent provided header => 401.
+    3. Constant-time compare (mismatch => 401).
+    """
+    configured = settings.beam_fetch_beacon_secret
+    if not configured:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if not x_beam_fetch_secret:
+        raise HTTPException(status_code=401, detail="unauthorized")
+    if not hmac.compare_digest(x_beam_fetch_secret, configured):
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
+@router.post("/fetch-beacon")
+async def fetch_beacon(
+    payload: FetchBeaconIn,
+    _auth: None = Depends(_verify_beacon_secret),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Authenticated server-side AI-fetch beacon (Handoff Detection H5).
+
+    Registered BEFORE the GET ``/{site_id}`` catch-alls (distinct HTTP method, so
+    no real collision, but explicit for clarity). Auth via the shared-secret
+    dependency (NO Clerk). Dormant when the flag is off (404 — endpoint not
+    revealed). On success maps the service sentinel: ``"written"`` => 202,
+    ``"noop"`` => 204. Never 403 for an unknown site (no id-existence leak).
+    """
+    if not settings.agent_fetch_beacon_enabled:
+        # Dormant: do not reveal the endpoint exists when disabled.
+        raise HTTPException(status_code=404, detail="Not Found")
+
+    result = await record_fetch_beacon(db, payload)
+    return Response(status_code=202 if result == "written" else 204)
 
 
 @router.get("/{site_id}", response_model=AgentListResponse)
