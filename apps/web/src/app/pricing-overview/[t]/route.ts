@@ -32,7 +32,8 @@ function pricingHtml(token: string): string {
 <title>Beam Pricing — plans and quotas</title>
 <meta name="description" content="Beam pricing: Free ($0/mo, 10 identified visitors), Pro ($19/mo, 50 identified visitors), and Max ($49/mo, unlimited identified visitors). Beam identifies anonymous website visitors and drafts outreach.">
 <link rel="canonical" href="${canonical}">
-<meta name="robots" content="noindex, follow">
+<!-- index, follow (was noindex): probe evidence 2026-07-24 — ChatGPT-User fetched this page (Cloudflare AI Crawl Control logged Allowed: 1, crawler NOT blocked) yet ChatGPT refused to cite it, saying the URL "may require authentication, be unindexed, or otherwise be inaccessible to web crawlers". noindex is the leading cause: AI answer engines read it as "do not use/cite", which defeats the whole point of a citable probe page. Temporary probe page — revisit indexability after the citation-watermark verdict is recorded. -->
+<meta name="robots" content="index, follow">
 </head>
 <body>
 <h1>Beam Pricing</h1>
