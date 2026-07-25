@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, String, Text, DateTime, Float, Integer, Index, func
+from sqlalchemy import Boolean, String, Text, DateTime, Float, Integer, Index, and_, func, or_
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -121,3 +121,27 @@ class ResolutionLog(Base):
     cost_usd: Mapped[float] = mapped_column(Float, nullable=False)
     response_time_ms: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+RESOLUTION_MIN_INTENT = 40
+
+
+def resolution_intent_filter(all_us_site_ids=()):
+    """Resolution-eligibility intent gate.
+
+    Sites listed in ``all_us_site_ids`` (the owner's own domains, see
+    ``services.resolution_eligibility``) qualify every US visitor at any
+    intent_score. All other sites keep intent_score >= RESOLUTION_MIN_INTENT
+    so provider budgets aren't burned on low-intent traffic.
+    """
+    base = Visitor.intent_score >= RESOLUTION_MIN_INTENT
+    ids = [s for s in all_us_site_ids if s]
+    if not ids:
+        return base
+    return or_(
+        and_(
+            Visitor.site_id.in_(ids),
+            func.upper(Visitor.country_code) == "US",
+        ),
+        base,
+    )

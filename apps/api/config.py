@@ -407,6 +407,9 @@ class Settings(BaseSettings):
 
     # ─── Rate limits ───
     default_daily_resolution_budget: int = 50   # Free tier: 50 visitor identifications/day per site (BYOK = unlimited)
+    # Comma-separated hostnames; sites whose url matches get US-any-intent resolution
+    # eligibility (all other sites keep the intent >= 40 gate). Empty string disables.
+    resolve_all_us_domains: str = "getbeam.fyi"
     default_daily_enrichment_budget: int = 3    # Free tier: 3 deep research/day (BYOK = unlimited)
     max_emails_per_hour_per_site: int = 50
 

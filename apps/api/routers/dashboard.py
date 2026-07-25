@@ -16,10 +16,11 @@ from apps.api.models.database import get_db
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.site import Site
 from apps.api.models.user import User
-from apps.api.models.visitor import IdentifiedVisitor, Visitor
+from apps.api.models.visitor import IdentifiedVisitor, Visitor, resolution_intent_filter
 from apps.api.dependencies import get_current_user
 from apps.api.schemas.sites import SiteOut
 from apps.api.schemas.visitors import VisitorStatsResponse
+from apps.api.services.resolution_eligibility import site_resolves_all_us
 from apps.api.services.usage_limits import _today_start, is_full_byok
 
 router = APIRouter()
@@ -65,6 +66,7 @@ async def get_overview(
         return DashboardOverview(sites=[], stats={})
 
     site_ids = [s.site_id for s in sites]
+    all_us_ids = [s.site_id for s in sites if site_resolves_all_us(s.url)]
 
     # BYOK status is user-level, not per-site — compute once (the old loop
     # re-ran this query for every site).
@@ -95,7 +97,7 @@ async def get_overview(
                 .filter(
                     and_(
                         Visitor.identity_status == "anonymous",
-                        Visitor.intent_score >= 40,
+                        resolution_intent_filter(all_us_ids),
                     )
                 )
                 .label("eligible_for_resolution"),

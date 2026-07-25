@@ -16,11 +16,12 @@ from apps.api.models.database import async_session
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.known_contact import KnownContact
 from apps.api.models.site import Site
-from apps.api.models.visitor import IdentifiedVisitor, Visitor
+from apps.api.models.visitor import IdentifiedVisitor, Visitor, resolution_intent_filter
 from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 from apps.api.services.billing import check_usage_allowed
 from apps.api.services.known_hash import email_hash
 from apps.api.services.osint_scanner import run_osint_scan
+from apps.api.services.resolution_eligibility import site_resolves_all_us
 from apps.api.services.resolution_runner import run_resolution_for_site
 from apps.api.services.social_resolver import resolve_social
 from apps.api.services.usage_limits import check_resolution_attempt_budget
@@ -149,6 +150,11 @@ async def _compute_visitor_stat_counts(db: AsyncSession, site_id: str) -> dict[s
     Results are identical to issuing each ``COUNT`` separately — the per-site
     ``WHERE`` is applied once and every filtered aggregate is scoped under it.
     """
+    site_url = (
+        await db.execute(select(Site.url).where(Site.site_id == site_id))
+    ).scalar_one_or_none()
+    all_us_ids = [site_id] if site_resolves_all_us(site_url) else []
+
     row = (
         await db.execute(
             select(
@@ -171,7 +177,7 @@ async def _compute_visitor_stat_counts(db: AsyncSession, site_id: str) -> dict[s
                 .filter(
                     and_(
                         Visitor.identity_status == "anonymous",
-                        Visitor.intent_score >= 40,
+                        resolution_intent_filter(all_us_ids),
                     )
                 )
                 .label("eligible_for_resolution"),

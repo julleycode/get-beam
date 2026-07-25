@@ -7,13 +7,14 @@ from sqlalchemy import select
 
 from apps.api.models.database import async_session
 from apps.api.models.site import Site
-from apps.api.models.visitor import Visitor
+from apps.api.models.visitor import Visitor, resolution_intent_filter
 from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 from apps.api.services.auto_drafter import AutoDrafter
 from apps.api.services.billing import check_usage_allowed, increment_usage
 from apps.api.services.celery_app import celery_app
 from apps.api.services.enricher import Enricher
 from apps.api.services.identity_resolver import IdentityResolver
+from apps.api.services.resolution_eligibility import site_resolves_all_us
 from apps.api.services.segmentation_trigger import check_and_trigger_segmentation
 from apps.api.services.social_intelligence import SocialIntelligence
 
@@ -57,7 +58,7 @@ async def _process_site(db, site_id: str) -> tuple[int, int]:
         select(Visitor).where(
             Visitor.site_id == site_id,
             Visitor.identity_status == "anonymous",
-            Visitor.intent_score >= 40,
+            resolution_intent_filter([site.site_id] if site and site_resolves_all_us(site.url) else []),
             Visitor.do_not_resolve.is_(False),
             # AC2 (GUARD #2): this Celery-beat task also fires Enricher.enrich_tier1
             # + AutoDrafter on resolved rows, so exclude synthetic agent-derived

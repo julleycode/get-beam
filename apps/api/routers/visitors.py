@@ -40,6 +40,7 @@ from apps.api.services.enricher import Enricher
 from apps.api.services.identity_classification import identity_level
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.known_hash import email_hash
+from apps.api.services.resolution_eligibility import site_resolves_all_us
 from apps.api.services.usage_limits import (
     check_enrich_budget,
     check_identify_budget,
@@ -953,7 +954,7 @@ async def resolve_site_visitors(
     """
     from sqlalchemy import text as sql_text
 
-    await _verify_site_access(db, site_id, user)
+    site = await _verify_site_access(db, site_id, user)
 
     budget = await check_identify_budget(db, site_id, user.id)
     if not budget["allowed"]:
@@ -986,7 +987,7 @@ async def resolve_site_visitors(
         select(func.count()).select_from(Visitor).where(
             Visitor.site_id == site_id,
             Visitor.identity_status == "anonymous",
-            Visitor.intent_score >= 40,
+            resolution_intent_filter([site_id] if site_resolves_all_us(site.url) else []),
         )
     )
     eligible_raw = count_result.scalar() or 0
