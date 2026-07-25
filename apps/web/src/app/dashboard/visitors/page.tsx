@@ -12,6 +12,7 @@ import { ErrorBanner } from "@/components/error-banner";
 import { EmptyState } from "@/components/empty-state";
 import { SiteSelector } from "@/components/site-selector";
 import { VisitorWidgets } from "@/components/visitor-widgets";
+import { type Period } from "@/components/ui/period-toggle";
 import { PageHeader } from "@/components/page-header";
 import { UsageWarningBanner } from "@/components/usage-warning-banner";
 import { UpgradeModal } from "@/components/upgrade-modal";
@@ -80,6 +81,17 @@ export default function VisitorsPage() {
   // "all" | "__any__" | a concrete ai_source label — AI-referral Source facet.
   // Attribution-only; never affects emailability.
   const [source, setSource] = useState("all");
+  // Shared Last 30 days / Lifetime window: drives the insight widgets AND the
+  // visitor list below. A view window, not a filter chip — it's deliberately
+  // excluded from hasFilters / clearFilters.
+  const [period, setPeriod] = useState<Period>("30d");
+
+  // The list's cutoff implied by the period toggle, in the same "YYYY-MM-DD"
+  // shape the date pickers produce. Lifetime means no cutoff.
+  const implicitLastFrom =
+    period === "30d"
+      ? new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+      : undefined;
 
   // Filters shared by the list AND the country facet, so the dropdown counts
   // reflect the same predicates as the rows. The country filter is NOT in here
@@ -95,7 +107,8 @@ export default function VisitorsPage() {
     enrichment_status: filter === "enriched" ? "enriched" : undefined,
     first_seen_from: firstFrom || undefined,
     first_seen_to: firstTo ? nextDay(firstTo) : undefined,
-    last_seen_from: lastFrom || undefined,
+    // A manual Last-seen-from filter always wins over the period toggle.
+    last_seen_from: lastFrom || implicitLastFrom,
     last_seen_to: lastTo ? nextDay(lastTo) : undefined,
   };
 
@@ -115,6 +128,7 @@ export default function VisitorsPage() {
     queryKey: [
       "visitors", siteId, page, filter, sortBy,
       firstFrom, firstTo, lastFrom, lastTo, country, visitorType, knownFilter, source,
+      period,
     ],
     queryFn: () =>
       api.listVisitors(siteId, {
@@ -422,7 +436,13 @@ export default function VisitorsPage() {
         <UsageWarningBanner />
       </div>
 
-      {siteId && <VisitorWidgets siteId={siteId} />}
+      {siteId && (
+        <VisitorWidgets
+          siteId={siteId}
+          period={period}
+          onPeriodChange={(p) => { setPeriod(p); setPage(1); }}
+        />
+      )}
 
       {siteId && (
         <div className="mb-4 flex flex-wrap items-end gap-4 rounded-lg border bg-muted/30 p-3">

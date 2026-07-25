@@ -15,13 +15,18 @@ import { Button } from "@/components/ui/button";
 import { KpiStrip } from "@/components/kpi-strip";
 import { TrafficFitCard } from "@/components/traffic-fit-card";
 import { BrowserCaptureCard } from "@/components/browser-capture-card";
+import { type Period } from "@/components/ui/period-toggle";
 
 type WidgetId = "funnel" | "traffic_fit" | "browser";
 
 type WidgetDef = {
   id: WidgetId;
   label: string;
-  Component: ComponentType<{ siteId: string }>;
+  Component: ComponentType<{
+    siteId: string;
+    period: Period;
+    onPeriodChange: (p: Period) => void;
+  }>;
 };
 
 // The catalogue of widgets a user can show on the Visitors page. Add new
@@ -64,8 +69,19 @@ const writeLocal = (ids: WidgetId[]) => {
  * the insight cards; the layout (ordered widget ids) is synced **per-user** to
  * the backend (GET/PUT /auth/widget-layout) so it follows them across devices,
  * with localStorage as an offline cache + instant first paint.
+ *
+ * The Last 30 days / Lifetime `period` is owned by the page (shared with the
+ * visitor list), so every widget's toggle drives the same window.
  */
-export function VisitorWidgets({ siteId }: { siteId: string }) {
+export function VisitorWidgets({
+  siteId,
+  period,
+  onPeriodChange,
+}: {
+  siteId: string;
+  period: Period;
+  onPeriodChange: (p: Period) => void;
+}) {
   const [layout, setLayout] = useState<WidgetId[]>(
     () => readLocal() ?? DEFAULT_LAYOUT
   );
@@ -207,7 +223,11 @@ export function VisitorWidgets({ siteId }: { siteId: string }) {
                   </div>
                 </div>
               )}
-              <Component siteId={siteId} />
+              <Component
+                siteId={siteId}
+                period={period}
+                onPeriodChange={onPeriodChange}
+              />
             </div>
           );
         })}

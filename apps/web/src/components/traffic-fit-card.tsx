@@ -45,11 +45,10 @@ const geoColor = (country: string, i: number) =>
  * qualification signal: a red "poor fit" means the traffic is mostly outside
  * coverage and won't resolve no matter how long the pixel runs.
  */
-export function TrafficFitCard({ siteId }: { siteId: string }) {
+export function TrafficFitCard({ siteId, period, onPeriodChange }: { siteId: string; period: Period; onPeriodChange: (p: Period) => void }) {
   const [data, setData] = useState<TrafficFit | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
-  const [period, setPeriod] = useState<Period>("30d");
 
   useEffect(() => {
     if (!siteId) return;
@@ -99,7 +98,7 @@ export function TrafficFitCard({ siteId }: { siteId: string }) {
               {s.label}
             </span>
           </div>
-          <PeriodToggle value={period} onChange={setPeriod} />
+          <PeriodToggle value={period} onChange={onPeriodChange} />
         </div>
       </CardHeader>
       <CardContent>

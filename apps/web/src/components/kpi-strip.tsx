@@ -28,11 +28,10 @@ type View = "numbers" | "graph";
  * identify and action rates. Reply rate / wedge need reply tracking (not built
  * yet) so we surface the gap honestly instead of a fake number.
  */
-export function KpiStrip({ siteId }: { siteId: string }) {
+export function KpiStrip({ siteId, period, onPeriodChange }: { siteId: string; period: Period; onPeriodChange: (p: Period) => void }) {
   const [data, setData] = useState<SiteKpis | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
-  const [period, setPeriod] = useState<Period>("30d");
   const [view, setView] = useState<View>("numbers");
   const [series, setSeries] = useState<TimeseriesPoint[] | null>(null);
   const [seriesLoading, setSeriesLoading] = useState(false);
@@ -137,7 +136,7 @@ export function KpiStrip({ siteId }: { siteId: string }) {
                 <LineChartIcon className="h-3.5 w-3.5" />
               </button>
             </div>
-            <PeriodToggle value={period} onChange={setPeriod} />
+            <PeriodToggle value={period} onChange={onPeriodChange} />
           </div>
         </div>
       </CardHeader>

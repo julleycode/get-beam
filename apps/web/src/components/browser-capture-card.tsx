@@ -71,11 +71,10 @@ const colorFor = (browser: string, index: number) =>
  * ITP / content-blockers are dropping the pixel on Safari/iOS — the signal for
  * whether a first-party install is worth building.
  */
-export function BrowserCaptureCard({ siteId }: { siteId: string }) {
+export function BrowserCaptureCard({ siteId, period, onPeriodChange }: { siteId: string; period: Period; onPeriodChange: (p: Period) => void }) {
   const [data, setData] = useState<BrowserBreakdown | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
-  const [period, setPeriod] = useState<Period>("30d");
 
   useEffect(() => {
     if (!siteId) return;
@@ -142,7 +141,7 @@ export function BrowserCaptureCard({ siteId }: { siteId: string }) {
               </span>
             )}
           </div>
-          <PeriodToggle value={period} onChange={setPeriod} />
+          <PeriodToggle value={period} onChange={onPeriodChange} />
         </div>
       </CardHeader>
       <CardContent>
