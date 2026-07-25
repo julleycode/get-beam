@@ -91,9 +91,11 @@ export default function SocialAccountsPage() {
   // KEEP IN SYNC with apps/extension/src/known-origins.js
   // (KNOWN_EXTENSION_ID / BEAM_ORIGINS / MESSAGE_SOURCE). These are two separate
   // build targets with no shared package, so the constants are duplicated.
-  // KNOWN_EXTENSION_ID stays a placeholder until the extension's first Chrome
-  // Web Store upload assigns the real id (plan OI-4 / Step 9).
-  const KNOWN_EXTENSION_ID = "PENDING_STORE_LISTING";
+  // This is the deterministic dev id derived from the extension manifest "key"
+  // (same id on every machine — no re-patching). At the extension's first Chrome
+  // Web Store upload the store assigns its OWN id: remove the manifest "key" and
+  // replace this value + the extension mirror with the store id (plan OI-4 / Step 9).
+  const KNOWN_EXTENSION_ID = "ejllllimjoomfaacgbedjjelljciicii";
   const EXTENSION_MESSAGE_SOURCE = "beam-extension";
 
   const [extensionDetected, setExtensionDetected] = useState(false);

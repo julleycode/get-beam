@@ -41,9 +41,10 @@ file. Shipped in two commits: `89d924d` (feat, code) and `646689e` (process, SPE
   available in sandbox. AC2's real proof — `git diff --name-only -- apps/api/` on the feature's own
   commit returning empty — was independently confirmed instead (see Test Gate Outcomes). →
   backlog NOTE below.
-- **`KNOWN_EXTENSION_ID` placeholder** (`"PENDING_STORE_LISTING"` in `known-origins.js`) swap to the
-  real Chrome Web Store extension id — cannot happen until first store upload (OI-4, by design,
-  documented in the plan).
+- **`KNOWN_EXTENSION_ID`** now a **dev-pinned id** (`ejllllimjoomfaacgbedjjelljciicii`, derived from
+  the manifest `key` — stable across machines, so unpacked testing works without per-load patching;
+  updated 25-07-26). Still pending: at first Chrome Web Store upload the store assigns its own id —
+  remove the manifest `key` and swap this id in `known-origins.js` + the dashboard mirror (OI-4).
 - ~~**Real extension icon**~~ — DONE (25-07-26): real Beam brand mark shipped at 4 sizes
   (`icons/icon-{16,32,48,128}.png`) from `icons/icon.svg`; manifest `icons` + `action.default_icon`
   wired to all four. Was a placeholder.

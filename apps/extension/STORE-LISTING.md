@@ -47,15 +47,19 @@ dedicated extension-privacy page).
 
 ## The one remaining code step after first upload (OI-4)
 
-On first upload (even as a draft) the Chrome Web Store assigns the real
-extension id. Replace `KNOWN_EXTENSION_ID = "PENDING_STORE_LISTING"` in BOTH:
+The extension currently ships a **dev-pinned id** (`ejllllimjoomfaacgbedjjelljciicii`),
+derived from the manifest `key` field so unpacked loads are stable across machines.
+On first upload (even as a draft) the Chrome Web Store assigns its **own** id,
+regardless of that `key`. At submission:
 
-- `apps/extension/src/known-origins.js`
-- `apps/web/src/app/dashboard/social-accounts/page.tsx`
+1. **Remove the `key` field** from `apps/extension/manifest.json` (the store manages the id).
+2. Replace the dev id `ejllllimjoomfaacgbedjjelljciicii` with the store-assigned id in BOTH:
+   - `apps/extension/src/known-origins.js`
+   - `apps/web/src/app/dashboard/social-accounts/page.tsx`
 
 then rebuild the extension and redeploy the dashboard. Until then the D6 primary
-channel cannot complete against the published extension (unpacked dev testing
-uses the auto-assigned id, which the e2e harness discovers dynamically).
+channel completes against the dev-pinned id for local/self-distributed testing;
+the published-store id only exists after step 1's upload.
 
 ## Verified sign-off still required
 

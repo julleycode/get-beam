@@ -3,6 +3,7 @@
   "name": "Beam — LinkedIn Outreach Connect",
   "version": "1.0.0",
   "description": "One-click connect your LinkedIn session to your Beam dashboard — no manual DevTools cookie copying.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvxe9AFRiACB4nHSlckCB0+XzYzvTfzaeey0f2nm8kAKA/ZcncwDx5/+JpFAfZU4hJVxZ9BT/tT2dwTeMgml6g9SPes0TYemo/WHikCZaL9IPkKByNnfaWnrKq8i978Ut90g4gF1Nn6HRarzQTwrsghElbonPrJFjQo/D5sCwhBaoFdLLc94gqvlthmKZyXEUgcvxRJtHkVMoGhqu+kYFWokeIjaMTeM+pqnHTF3c2Pn9vQABNB8TLUAkpmsdXxaTHQTgHoIsleOa//3nSLeuLZZbMzao4ompFzgLNpBJWYCkj5ZNS+Sxi/D5Fyb+wqyu5L00rYmC6gJGbxRlLRIYzQIDAQAB",
   "permissions": ["cookies"],
   "host_permissions": [
     "*://*.linkedin.com/*",
