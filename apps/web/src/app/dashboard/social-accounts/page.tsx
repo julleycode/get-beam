@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Platform } from "@/lib/api";
 import { ListCardSkeleton } from "@/components/skeletons";
@@ -63,6 +63,12 @@ export default function SocialAccountsPage() {
   // ── LinkedIn outreach (advanced) ──
   const [liCookie, setLiCookie] = useState("");
   const [liUserAgent, setLiUserAgent] = useState("");
+  // Pre-fill from this browser — the cookie is almost always copied in the
+  // same browser the dashboard is open in. useEffect (not initial state)
+  // because navigator is unavailable during SSR.
+  useEffect(() => {
+    setLiUserAgent((prev) => prev || navigator.userAgent);
+  }, []);
   const { data: outreachStatus } = useQuery({
     queryKey: ["linkedin-outreach-status"],
     queryFn: () => api.getLinkedInOutreachStatus(),
@@ -191,7 +197,7 @@ export default function SocialAccountsPage() {
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
             Lets Beam send real LinkedIn connection requests from your account
-            for a campaign&apos;s LinkedIn step. Your session cookie is stored
+            for a campaign&apos;s LinkedIn step. Your login key is stored
             encrypted in the outreach service — Beam never keeps a copy and never
             shows it again.
           </p>
@@ -224,40 +230,70 @@ export default function SocialAccountsPage() {
           >
             <div className="space-y-1.5">
               <Label htmlFor="li-cookie">
-                LinkedIn session cookie (li_at)
+                LinkedIn login key{" "}
+                <span className="font-normal text-muted-foreground">
+                  (the &quot;li_at&quot; cookie)
+                </span>
               </Label>
               <Textarea
                 id="li-cookie"
                 value={liCookie}
                 onChange={(e) => setLiCookie(e.target.value)}
-                placeholder="Paste the value of the li_at cookie"
+                placeholder="Looks like: AQEDAxxxxxxxxxxxxxxx…"
                 rows={2}
                 autoComplete="off"
                 disabled={outreachMut.isPending}
               />
-              <p className="text-xs text-muted-foreground">
-                In your browser, open DevTools → Application → Cookies →
-                linkedin.com, and copy the <span className="font-mono">li_at</span>{" "}
-                value.
-              </p>
+              <details className="rounded-md border border-border bg-muted/50 px-3 py-2 text-xs text-muted-foreground [&[open]>summary]:mb-2">
+                <summary className="cursor-pointer select-none font-medium text-foreground">
+                  How to find your login key (about 1 minute)
+                </summary>
+                <ol className="list-decimal space-y-1.5 pl-4">
+                  <li>
+                    Open <span className="font-medium">linkedin.com</span> in this browser
+                    and make sure you&apos;re signed in.
+                  </li>
+                  <li>
+                    Press <kbd className="rounded border border-border bg-background px-1 font-mono">F12</kbd>{" "}
+                    (Windows) or{" "}
+                    <kbd className="rounded border border-border bg-background px-1 font-mono">⌥⌘I</kbd>{" "}
+                    (Mac) — a technical panel opens. Don&apos;t worry, you can&apos;t break anything.
+                  </li>
+                  <li>
+                    At the top of that panel, click the{" "}
+                    <span className="font-medium">Application</span> tab (Chrome/Edge) or{" "}
+                    <span className="font-medium">Storage</span> tab (Firefox/Safari). Then in
+                    the left list, open <span className="font-medium">Cookies</span> →{" "}
+                    <span className="font-medium">https://www.linkedin.com</span>.
+                  </li>
+                  <li>
+                    In the table, find the row named{" "}
+                    <span className="font-mono font-medium">li_at</span>. Double-click its{" "}
+                    <span className="font-medium">Value</span>, copy it, and paste it above.
+                  </li>
+                </ol>
+              </details>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="li-ua">Browser User-Agent</Label>
-              <Input
-                id="li-ua"
-                value={liUserAgent}
-                onChange={(e) => setLiUserAgent(e.target.value)}
-                placeholder="Mozilla/5.0 (...) Chrome/... Safari/..."
-                autoComplete="off"
-                disabled={outreachMut.isPending}
-              />
-              <p className="text-xs text-muted-foreground">
-                Paste the exact User-Agent of the browser where you copied the
-                cookie (from{" "}
-                <span className="font-mono">navigator.userAgent</span> in the
-                console).
-              </p>
-            </div>
+            <details className="text-xs text-muted-foreground">
+              <summary className="cursor-pointer select-none">
+                Browser details — filled in automatically
+              </summary>
+              <div className="mt-2 space-y-1.5">
+                <Label htmlFor="li-ua">Browser User-Agent</Label>
+                <Input
+                  id="li-ua"
+                  value={liUserAgent}
+                  onChange={(e) => setLiUserAgent(e.target.value)}
+                  placeholder="Mozilla/5.0 (...) Chrome/... Safari/..."
+                  autoComplete="off"
+                  disabled={outreachMut.isPending}
+                />
+                <p className="text-xs text-muted-foreground">
+                  We detected this from your current browser. Only change it if you
+                  copied the login key in a different browser.
+                </p>
+              </div>
+            </details>
 
             {outreachMut.isError && (
               <p className="text-sm text-destructive">
