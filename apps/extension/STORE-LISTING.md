@@ -37,7 +37,7 @@ dedicated extension-privacy page).
 
 ## Listing assets checklist
 
-- [ ] 128×128 store icon (replace the placeholder `icons/icon-128.png`)
+- [x] 128×128 store icon — real Beam brand mark shipped (`icons/icon-128.png`, from `icons/icon.svg`)
 - [ ] At least one 1280×800 (or 640×400) screenshot/promo image
 - [ ] Short description (≤132 chars), e.g. "Connect your LinkedIn session to Beam
       in one click — no manual cookie copying."

@@ -72,5 +72,7 @@ metadata checklist, and the privacy policy pointer (`PRIVACY.md`). The real
 dashboard mirror (`apps/web/src/app/dashboard/social-accounts/page.tsx`) once it
 exists.
 
-The bundled `icons/icon-128.png` is a placeholder — replace with the real brand
-icon before submission.
+The bundled icons (`icons/icon-{16,32,48,128}.png`) are the real Beam brand mark —
+generated from `icons/icon.svg` (source of truth: the Beam beam/sparkle on the
+pink brand gradient, matching `apps/web/src/app/icon.svg`). To regenerate after
+editing the SVG, rasterize it to the four sizes with any SVG→PNG tool.
