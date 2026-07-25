@@ -45,6 +45,8 @@ import type {
   ApiKeyInfo,
   CrmConnection,
   CrmPushResult,
+  AdConnection,
+  AdPushResult,
   Platform,
   DraftStatus,
   SocialAccount,
@@ -889,6 +891,42 @@ class ApiClient {
     );
   }
 
+  // Ad Audiences — push a segment's hashed contacts OUT to an ad platform
+  async listAdConnections(siteId: string) {
+    return this.request<AdConnection[]>(`/api/v1/ads/${siteId}/connections`);
+  }
+
+  async connectAdProvider(siteId: string, provider: string) {
+    return this.request<{ auth_url: string }>(
+      `/api/v1/ads/${siteId}/connections/${provider}/connect`,
+      { method: "POST" }
+    );
+  }
+
+  async testAdConnection(siteId: string, provider: string) {
+    return this.request<{ provider: string; is_valid: boolean; message: string }>(
+      `/api/v1/ads/${siteId}/connections/${provider}/test`,
+      { method: "POST" }
+    );
+  }
+
+  async pushAdSegment(siteId: string, provider: string, segmentId: string) {
+    return this.request<AdPushResult>(
+      `/api/v1/ads/${siteId}/connections/${provider}/push`,
+      {
+        method: "POST",
+        body: JSON.stringify({ segment_id: segmentId }),
+      }
+    );
+  }
+
+  async disconnectAdProvider(siteId: string, provider: string) {
+    return this.request<{ status: string }>(
+      `/api/v1/ads/${siteId}/connections/${provider}`,
+      { method: "DELETE" }
+    );
+  }
+
   // BYOK API Keys
   async listApiKeys() {
     return this.request<ApiKeyInfo[]>("/api/v1/api-keys/");
@@ -1599,6 +1637,9 @@ export type {
   CrmProvider,
   CrmConnection,
   CrmPushResult,
+  AdProvider,
+  AdConnection,
+  AdPushResult,
   Platform,
   DraftStatus,
   SocialAccount,

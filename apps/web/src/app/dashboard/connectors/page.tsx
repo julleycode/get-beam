@@ -6,6 +6,7 @@ import { api, Segment } from "@/lib/api";
 import { SiteSelector } from "@/components/site-selector";
 import { PageHeader } from "@/components/page-header";
 import { CrmConnectPanel } from "@/components/crm-connect-panel";
+import { AdConnectPanel } from "@/components/ad-connect-panel";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -131,13 +132,19 @@ export default function ConnectorsPage() {
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as ConnectorTab)}>
         <TabsList>
-          <TabsTrigger value="export">Export</TabsTrigger>
+          <TabsTrigger value="export">Ad Audiences</TabsTrigger>
           <TabsTrigger value="connect">Connect CRM</TabsTrigger>
-          <TabsTrigger value="import">Import from CRM</TabsTrigger>
+          <TabsTrigger value="import">Exclude List</TabsTrigger>
         </TabsList>
 
         {/* ── Export: download a CSV for an ad platform ── */}
-        <TabsContent value="export">
+        <TabsContent value="export" className="space-y-6">
+          {/* Direct ad-platform push. There is no frontend feature-flag read
+              pattern in this app, so the panel always renders and the backend
+              returns a clean "not enabled" error when ad_audiences_enabled is
+              off — see phase-1-foundation plan step E2. */}
+          <AdConnectPanel siteId={siteId} segments={segments} />
+
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Export segment for ads</CardTitle>

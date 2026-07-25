@@ -732,6 +732,34 @@ export interface CrmConnection {
   created_at: string;
 }
 
+// ── Ad Audiences (push a segment straight to an ad platform) ──
+export type AdProvider = "meta" | "google" | "linkedin";
+
+export interface AdConnection {
+  provider: AdProvider;
+  auth_type: string;
+  status: "pending" | "connected" | "error" | "disconnected";
+  external_account_label: string | null;
+  ad_account_id: string | null;
+  business_id: string | null;
+  is_valid: boolean;
+  last_pushed_at: string | null;
+  last_error: string | null;
+  created_at: string;
+}
+
+export interface AdPushResult {
+  provider: string;
+  segment_id: string;
+  pushed: number;
+  failed: number;
+  skipped: number;
+  platform_audience_id: string;
+  warning: string;
+  errors: string[];
+  queued?: boolean;
+}
+
 export interface CrmPushResult {
   provider: string;
   segment_id: string;

@@ -34,11 +34,13 @@ from apps.api.models.agent_fetch_event import AgentFetchEvent  # noqa: F401 — 
 from apps.api.models.agent_handoff_link import AgentHandoffLink  # noqa: F401 — register for create_all
 from apps.api.models.company_graph import CompanyGraphNode  # noqa: F401 — register for create_all
 from apps.api.models.identity_signal import IdentitySignal  # noqa: F401 — register for create_all
+from apps.api.models.ad_connection import AdConnection  # noqa: F401 — register for create_all
+from apps.api.models.ad_audience_link import AdAudienceLink  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
 from apps.api.routers import known_contacts, costs, ai, dashboard, crm, changelog, click, open_pixel
-from apps.api.routers import email_sender_oauth, outcomes, referrals, agents
+from apps.api.routers import email_sender_oauth, outcomes, referrals, agents, ads
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
 from slowapi import _rate_limit_exceeded_handler
@@ -200,6 +202,7 @@ app.include_router(outcomes.router, prefix="/api/v1/outcomes", tags=["outcomes"]
 app.include_router(exports.router, prefix="/api/v1/exports", tags=["exports"])
 app.include_router(api_keys.router, prefix="/api/v1/api-keys", tags=["api-keys"])
 app.include_router(crm.router, prefix="/api/v1/crm", tags=["crm"])
+app.include_router(ads.router, prefix="/api/v1/ads", tags=["ads"])
 app.include_router(privacy.router, prefix="/api/v1/privacy", tags=["privacy"])
 
 # ── EasyEngage routers ──────────────────────────────────
