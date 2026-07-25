@@ -274,7 +274,7 @@
       await ob.bot(`
         <div class="ob-code">
           <button class="ob-copy" id="ob-copy">copy</button>
-<span class="tag">&lt;script</span> <span class="attr">src</span>=<span class="str">"https://beam.fyi/b.js"</span> <span class="attr">data-id</span>=<span class="str">"usr_8fk2c9"</span><span class="tag">&gt;&lt;/script&gt;</span>
+<span class="tag">&lt;script</span> <span class="attr">src</span>=<span class="str">"https://api.getbeam.fyi/pixel/tracker.js"</span> <span class="attr">data-site</span>=<span class="str">"YOUR_SITE_ID"</span> <span class="attr">data-api</span>=<span class="str">"https://api.getbeam.fyi"</span> <span class="attr">defer</span><span class="tag">&gt;&lt;/script&gt;</span>
         </div>`, { cls: 'rich plain', typing: false });
       const c = ob.controls(`
         <button class="ob-btn ob-btn-primary" data-go>i installed it</button>
@@ -282,14 +282,14 @@
       // copy button lives in the previous bubble
       const copyBtn = document.getElementById('ob-copy');
       if (copyBtn) copyBtn.addEventListener('click', () => {
-        const txt = '<script src="https://beam.fyi/b.js" data-id="usr_8fk2c9"></scr' + 'ipt>';
+        const txt = '<script src="https://api.getbeam.fyi/pixel/tracker.js" data-site="YOUR_SITE_ID" data-api="https://api.getbeam.fyi" defer></scr' + 'ipt>';
         if (navigator.clipboard) navigator.clipboard.writeText(txt).catch(() => {});
         copyBtn.textContent = '✓ copied'; copyBtn.classList.add('copied');
         setTimeout(() => { copyBtn.textContent = 'copy'; copyBtn.classList.remove('copied'); }, 1800);
       });
       c.querySelector('[data-go]').addEventListener('click', () => ob.answer('installed', 'detect'));
       c.querySelector('#ob-dev').addEventListener('click', () => {
-        const prompt = `Install the Beam tracking pixel on ${cleanHost(ob.state.url)} (${ob.state.platform || 'unknown platform'}).\n\nAdd this snippet before </head>:\n<script src="https://beam.fyi/b.js" data-id="usr_8fk2c9"></scr` + `ipt>\n\nFor ${ob.state.platform || 'your site'}: ${PLATFORM_INSTALL[ob.state.platform] || PLATFORM_INSTALL.unknown}`;
+        const prompt = `Install the Beam tracking pixel on ${cleanHost(ob.state.url)} (${ob.state.platform || 'unknown platform'}).\n\nAdd this snippet before </head>:\n<script src="https://api.getbeam.fyi/pixel/tracker.js" data-site="YOUR_SITE_ID" data-api="https://api.getbeam.fyi" defer></scr` + `ipt>\n\nFor ${ob.state.platform || 'your site'}: ${PLATFORM_INSTALL[ob.state.platform] || PLATFORM_INSTALL.unknown}`;
         if (navigator.clipboard) navigator.clipboard.writeText(prompt).catch(() => {});
         ob.modal(`
           <h3>prompt copied ✓</h3>
