@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Attacker page (e2e fixture — non-Beam origin)</title>
+  </head>
+  <body>
+    <!--
+      Served on a non-Beam origin (port 3999). The extension must NOT inject its
+      content script here and must NOT answer this page's externally_connectable
+      request (its origin is not in the manifest matches). Used by AC5.
+    -->
+    <div id="injected">unknown</div>
+    <div id="d6-result">idle</div>
+    <script>
+      document.getElementById("injected").textContent =
+        document.documentElement.dataset.beamExtension === "1"
+          ? "injected"
+          : "not-injected";
+
+      // Attempt the D6 primary channel from this non-Beam origin.
+      window.tryD6 = (extId) =>
+        new Promise((resolve) => {
+          try {
+            chrome.runtime.sendMessage(extId, { type: "beam-connect-request" }, (response) => {
+              if (chrome.runtime.lastError || !response) {
+                resolve("rejected");
+              } else {
+                resolve("answered:" + JSON.stringify(response));
+              }
+            });
+          } catch (e) {
+            resolve("threw");
+          }
+        });
+    </script>
+  </body>
+</html>

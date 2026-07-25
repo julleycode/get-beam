@@ -1,0 +1,16 @@
+{
+  "name": "beam-extension",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Beam LinkedIn Outreach Connect — MV3 browser extension (Chrome/Edge). Reads the LinkedIn li_at cookie and hands it to the open Beam dashboard tab over a locally-scoped, nonce-verified message channel. Dumb pipe: never calls the Beam backend directly.",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test \"test/*.test.mjs\"",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "esbuild": "0.24.0"
+  }
+}

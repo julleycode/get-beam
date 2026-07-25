@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Beam dashboard (e2e fixture)</title>
+  </head>
+  <body>
+    <!--
+      Test fixture that mirrors the real social-accounts page message contract:
+      D6 register-nonce + connect-request over externally_connectable, and the
+      D7 postMessage listener with origin + source + nonce verification (D10).
+      It stands in for the real Next.js dashboard, which needs auth + servers to
+      render. The extension id is passed via ?extid= (the real dashboard uses a
+      fixed KNOWN_EXTENSION_ID constant).
+    -->
+    <div id="status">idle</div>
+    <div id="error"></div>
+    <button id="connect">Connect with extension</button>
+
+    <script>
+      const params = new URLSearchParams(location.search);
+      const EXT_ID = params.get("extid");
+      const MESSAGE_SOURCE = "beam-extension";
+      const statusEl = document.getElementById("status");
+      const errorEl = document.getElementById("error");
+
+      // Per-page-load nonce, registered only over the D6 (sender-verified)
+      // channel. Never written to the DOM.
+      const nonce = crypto.randomUUID();
+
+      // Mirror the real handler: on a verified ok result, "connect" (we don't
+      // store the cookie anywhere — AC8) and mark the card connected.
+      function handleResult(data) {
+        if (!data || !data.ok || !data.cookie) {
+          errorEl.textContent = data && data.reason ? data.reason : "failed";
+          statusEl.textContent = "not-connected";
+          return;
+        }
+        errorEl.textContent = "";
+        statusEl.textContent = "connected";
+      }
+
+      function registerNonce() {
+        try {
+          chrome.runtime.sendMessage(EXT_ID, { type: "register-nonce", nonce });
+        } catch (e) {
+          /* extension unreachable */
+        }
+      }
+
+      // Detection (D5): DOM-attribute fallback + event.
+      if (document.documentElement.dataset.beamExtension === "1") registerNonce();
+      window.addEventListener("beam-extension-detected", registerNonce);
+
+      // D6 primary channel.
+      document.getElementById("connect").addEventListener("click", () => {
+        errorEl.textContent = "";
+        statusEl.textContent = "connecting";
+        try {
+          chrome.runtime.sendMessage(
+            EXT_ID,
+            { type: "beam-connect-request" },
+            (response) => {
+              if (chrome.runtime.lastError || !response) {
+                errorEl.textContent = "unreachable";
+                statusEl.textContent = "not-connected";
+                return;
+              }
+              handleResult(response);
+            }
+          );
+        } catch (e) {
+          errorEl.textContent = "unreachable";
+        }
+      });
+
+      // D7 popup relay: verify origin + source + nonce (D10).
+      window.addEventListener("message", (event) => {
+        if (event.origin !== location.origin) return;
+        const data = event.data;
+        if (!data || data.source !== MESSAGE_SOURCE) return;
+        if (data.nonce !== nonce) return; // forged / replayed → reject
+        handleResult(data);
+      });
+    </script>
+  </body>
+</html>

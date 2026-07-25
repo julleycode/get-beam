@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Beam LinkedIn Connect</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 16px;
+        width: 280px;
+        color: #1f2937;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 8px;
+      }
+      p {
+        font-size: 12px;
+        color: #6b7280;
+        margin: 0 0 12px;
+        line-height: 1.4;
+      }
+      .warn {
+        font-size: 11px;
+        color: #b45309;
+        background: #fffbeb;
+        border: 1px solid #fde68a;
+        border-radius: 6px;
+        padding: 8px;
+        margin: 0 0 12px;
+        line-height: 1.4;
+      }
+      button {
+        width: 100%;
+        padding: 8px 12px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #fff;
+        background: #1d4ed8;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      #status {
+        font-size: 12px;
+        color: #374151;
+        margin-top: 10px;
+        min-height: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Connect LinkedIn to Beam</h1>
+    <p>
+      Sends your current LinkedIn login to your open Beam dashboard tab so Beam
+      can send outreach from your account.
+    </p>
+    <div class="warn">
+      Automating LinkedIn is against LinkedIn's Terms of Service and can get your
+      account restricted. Use a low daily volume and only with an account you're
+      willing to risk.
+    </div>
+    <button id="connect">Connect now</button>
+    <div id="status"></div>
+    <script src="./popup.js"></script>
+  </body>
+</html>
