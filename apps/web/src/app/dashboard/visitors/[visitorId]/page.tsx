@@ -380,7 +380,7 @@ export default function VisitorDetailPage() {
   // Header line: "Job Title at Company" / "Company" / anonymous fallback.
   const roleLine =
     [visitor.job_title, visitor.company_name].filter(Boolean).join(" at ") ||
-    (identified ? "Identified visitor" : "Anonymous visitor");
+    (visitor.identity_status === "identified" ? "Identified visitor" : "Anonymous visitor");
   const locationLine = [visitor.city, visitor.region, visitor.country || visitor.country_code]
     .filter(Boolean)
     .join(", ");
