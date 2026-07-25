@@ -66,8 +66,14 @@ Scope tiers → phase mapping:
   "no live intent signal from AI-mediated research" gap.
 
 Explicitly out of scope (deferred tier):
-- Google-Extended / Applebot-Extended / Microsoft Copilot handoff or intent coverage (no
-  documented on-demand token exists for these vendors).
+- Google-Extended / Applebot-Extended / Microsoft Copilot **handoff or intent coverage** (H2/H3) —
+  no documented on-demand token confirmed for these vendors as of H1–H4. **Reconciled 25-07-26
+  (Phase H5):** the *capture* path (H1-style per-hit recording) now DOES include Google/Gemini —
+  H5 added a `google` vendor token (`google-cloudvertexbot`) to the classifier, conservatively
+  defaulted to **index tier** (never on-demand) until the real live Gemini/Google on-demand fetch
+  UA is confirmed (tracked as KG-3). This out-of-scope bullet still holds for H2 handoff
+  correlation and H3 intent alerts — those remain OpenAI/Anthropic/Perplexity-only until a
+  documented on-demand Google token exists and KG-3 is closed.
 - De-anonymizing a human purely from an index-crawl hit; index-tier hits are structurally
   ineligible for H2/H3, not a future toggle.
 - Emailing/contacting any agent-fetch record at any confidence level (AC-H2-3 is the proof).
@@ -180,6 +186,7 @@ START: Phase 1 (H1), loop step RESEARCH (pending). Spawn vc-research-agent for P
 | 2 — Handoff correlation + dashboard (H2) | `process/features/evallayer/active/handoff_23-07-26/phase-02-handoff-correlation_PLAN_23-07-26.md` | Periodic sweep joining on-demand fetches ↔ AI-referral clicks → `agent_handoff_links`; visitor-detail badge; AC-H2-3 emailability regression (program's highest-priority gate) | Phase 1 |
 | 3 — Intent signals (H3) | `process/features/evallayer/active/handoff_23-07-26/phase-03-intent-signals_PLAN_23-07-26.md` | Live on-demand commercial-page alert (reuse `hot_alert.py`); rolling-window spike detector; company-correlation metadata (never a new outreach trigger) | Phase 1 (parallel-safe with Phase 2 — see Blast Radius note below) |
 | 4 — Citation-watermark feasibility (H4) | `process/features/evallayer/active/handoff_23-07-26/phase-04-watermark-feasibility_PLAN_23-07-26.md` | Manual-first, double-opt-in live probe (VC-FEASIBILITY-PROBE-NEEDED, cost-class needs-live-provider); VERDICT artifact; conditional implementation only on VIABLE + sign-off | Phase 1 (serving infra only — probe itself has no phase dependency beyond H1's test-page infra if any is reused) |
+| 5 — Server-side AI-fetch capture (H5, added post-H4 25-07-26) | `process/features/evallayer/active/handoff_23-07-26/handoff-05-webfetch-capture_PLAN_25-07-26.md` | Cloudflare Pages middleware `waitUntil` beacon → `POST /fetch-beacon` → additive `agent_fetch_events` row, closing the H4-surfaced gap that edge/CDN-served pages never reach the Python ingest path; adds a conservative `google` (index-tier only) vendor token | H1 (additive to `agent_fetch_events` persistence; no new migration) |
 
 ### Join Conditions
 
@@ -303,6 +310,7 @@ During /goal execution of a phase program:
 | 2 — Handoff correlation (H2) | `process/features/evallayer/active/handoff_23-07-26/phase-02-handoff-correlation_REPORT_23-07-26.md` |
 | 3 — Intent signals (H3) | `process/features/evallayer/active/handoff_23-07-26/phase-03-intent-signals_REPORT_23-07-26.md` |
 | 4 — Watermark feasibility (H4) | `process/features/evallayer/active/handoff_23-07-26/phase-04-watermark-feasibility_REPORT_23-07-26.md` |
+| 5 — Server-side AI-fetch capture (H5) | `process/features/evallayer/active/handoff_23-07-26/handoff-05-webfetch-capture_REPORT_25-07-26.md` |
 
 ---
 
@@ -315,6 +323,7 @@ During /goal execution of a phase program:
 | 02 — Handoff correlation (H2) | 🔨 CODE DONE (Docker gaps) |
 | 03 — Intent signals (H3) | 🔨 CODE DONE (Docker gaps) |
 | 04 — Watermark feasibility (H4) | 🔨 CODE DONE (prep); probe INCONCLUSIVE |
+| 05 — Server-side AI-fetch capture (H5) | 🔨 CODE DONE (CONDITIONAL — deploy/Docker-gated KG-1..KG-4) |
 
 Status values: ⏳ PLANNED | 🔨 CODE DONE | 🧪 TESTING | ✅ VERIFIED | 🚧 BLOCKED | ✅ COMPLETE
 
@@ -427,7 +436,20 @@ cd /Users/apple/getbeam && python -m pytest tests/unit/ tests/integration/ -q
 
 ## Current Execution State
 
-Last updated: 24-07-26 (H4 UPDATE PROCESS — program closeout)
+Last updated: 25-07-26 (H5 UPDATE PROCESS — program closeout, umbrella reconciliation only)
+Phase 5 — Server-side AI-fetch capture (H5, added post-H4) — CODE DONE, CONDITIONAL. All
+  Fully-Automated gates green (beacon unit 15/15, classifier 24/24, Vitest 39/39, web edge build).
+  Integration test (KG-4, AC-H5-1/8 tripwire) written + collect-clean, NOT run (Docker unavailable
+  in sandbox). Live deploy confirmation (KG-1/KG-2) and Gemini on-demand UA confirmation (KG-3)
+  remain operator actions. Code commit `7327a81`; this reconciliation commit `9f4a8a7` (umbrella
+  only — no source, no other phase plan, no all-context.md touched, per instruction). Reconciled
+  the Google/Gemini out-of-scope bullet (capture path now includes Google at index-tier; H2/H3
+  handoff/intent coverage still excludes Google pending KG-3) and retracted the 24-07-26
+  "WAF blocks AI fetchers domain-wide" attribution (named fetchers — ChatGPT + Gemini — confirmed
+  reaching origin live 25-07-26; `ChatGPT-User` = Allowed). See `## Program-Level Closeout` above
+  for full detail.
+Program status: CODE-COMPLETE, 5 of 5 phases (H1-H4 from 24-07-26 unchanged below; H5 added).
+Last updated (pre-H5): 24-07-26 (H4 UPDATE PROCESS — program closeout)
 Completed phases: Phase 0 (Planning), Phase 1 — Fetch events + tiering (H1) — CODE DONE, EVL-confirmed
   green on all fully-automated gates; 2 Hybrid gates (Alembic upgrade/downgrade cycle, E7 live
   retention purge) remain Docker-gated known-gaps, tracked in
@@ -447,21 +469,26 @@ Completed phases: Phase 0 (Planning), Phase 1 — Fetch events + tiering (H1) �
   (`test_pixel.py::test_source_under_20kb`) was found during the full-suite re-run, caused by the
   concurrent `first-party-capture_24-07-26` session's `apps/pixel/src/tracker.js` change — not an
   H3 defect, no action taken on it here.
-Current phase: PROGRAM COMPLETE (code) — all 4 phases code-complete; H4 closed with verdict
-  INCONCLUSIVE
-Current loop step: UPDATE-PROCESS (complete). H4's dispatch (Step B) was executed by the founder
-  24-07-26 with explicit double opt-in; verdict recorded INCONCLUSIVE — see
+Current phase: PROGRAM COMPLETE (code) — all 5 phases code-complete (H1-H4 24-07-26; H5 added and
+  code-complete 25-07-26); H4 closed with verdict INCONCLUSIVE (403 attribution retracted 25-07-26,
+  see below); H5 CONDITIONAL pending deploy/Docker gates.
+Current loop step: UPDATE-PROCESS (complete, this reconciliation). H4's dispatch (Step B) was
+  executed by the founder 24-07-26 with explicit double opt-in; verdict recorded INCONCLUSIVE — see
   `phase-04-watermark-feasibility_FEASIBILITY_24-07-26.md` and `## Program-Level Closeout` above.
-  Open items are Docker/live-integration verification (H1/H2/H3, backlog) and the WAF-allowlist
-  ops fix + H4 re-probe (backlog) — both are follow-up maintenance, not new program phases.
+  H5 was added 25-07-26 as a direct follow-on inside this task folder (code `7327a81`, process
+  `9f4a8a7`). Open items are Docker/live-integration verification (H1/H2/H3/H5, backlog) and the
+  H4 re-probe (backlog, no longer WAF-gated per the 25-07-26 correction) — all follow-up
+  maintenance, not new program phases.
 Validate-contract status: Phase 1 written (Gate: CONDITIONAL, pre-accepted Docker-gated residuals);
   Phase 2 written (Gate: CONDITIONAL, pre-accepted Docker-gated residual); Phase 3 written (Gate:
   CONDITIONAL, 2 CONCERNs fixed in plan text, 1 Docker-gated residual); Phase 4 written (Gate:
-  CONDITIONAL, 1 security CONCERN fixed in plan text, 2 named accepted known-gaps)
-Program Net Gate: CODE-COMPLETE, WITH_GAPS (4 of 4 phases code-done; H4 verdict is INCONCLUSIVE —
-  not a blocker per AC-H4-2, phase is complete on any non-VIABLE verdict; Docker verification and
-  WAF-allowlist/re-probe remain as backlog, tracked in the two consolidated notes above)
-Latest validator run: 24-07-26 — see this UPDATE PROCESS closeout
+  CONDITIONAL, 1 security CONCERN fixed in plan text, 2 named accepted known-gaps); Phase 5 written
+  (Gate: CONDITIONAL, deploy/Docker-gated KG-1..KG-4, HIGH-RISK evidence pack approved-with-concerns)
+Program Net Gate: CODE-COMPLETE, WITH_GAPS (5 of 5 phases code-done; H4 verdict is INCONCLUSIVE —
+  not a blocker per AC-H4-2, phase is complete on any non-VIABLE verdict; H5 CONDITIONAL pending
+  operator deploy actions; Docker verification and H4 re-probe remain as backlog, tracked in the
+  consolidated notes above)
+Latest validator run: 24-07-26 (pre-H5) — see this UPDATE PROCESS closeout for 25-07-26 scope
 Cross-program note: Phase 1's migration (`c4e8f1a9d2b7`) has three foreign/downstream migrations
   chained onto it (`f8a2c1d9b3e7`, `a3e9f1c7d2b5` — visitors-identity "owned-data-layer" program;
   `e2a4c7f81b93` — this program's own H2 migration). Chain confirmed linear single head, no fork —
@@ -485,9 +512,11 @@ is the audit log).
 
 ## Program-Level Closeout
 
-**Program status: CODE-COMPLETE (4 of 4 phases).** All four phases have shipped source code and
-are individually gate-green on their fully-automated tiers; program-wide code has NOT yet been
-committed, and Docker-gated Hybrid gates remain unrun (see consolidated backlog note below).
+**Program status: CODE-COMPLETE (5 of 5 phases, updated 25-07-26).** All five phases have shipped
+source code and are individually gate-green on their fully-automated tiers. H1-H4's execution
+changes are committed (see Cross-program note below); H5's execution changes are committed as of
+25-07-26 (`7327a81`, process reconciliation `9f4a8a7`). Docker-gated Hybrid gates remain unrun for
+H1/H2/H3 (KG in the consolidated backlog note below) and for H5 (KG-4).
 
 **Capability shipped:**
 - **H1 — Fetch-event foundation:** per-hit `agent_fetch_events` persistence + on-demand-vs-index
@@ -500,36 +529,51 @@ committed, and Docker-gated Hybrid gates remain unrun (see consolidated backlog 
 - **H3 — Intent signals:** site/company-scoped "appeared after AI research" spike detection,
   read-design (no new table), person-level and multi-tenant safety confirmed.
 - **H4 — Citation-watermark feasibility probe:** PREP (public tokenized probe page) shipped
-  gate-green. Founder-run live dispatch (Step B) executed 24-07-26. **Verdict: INCONCLUSIVE** — the
-  probe's on-demand fetcher never reached the page because `getbeam.fyi` returns HTTP 403
-  domain-wide to bot user-agents (confirmed via orchestrator `WebFetch` diagnostic); ChatGPT
-  answered from stale/wrong memory about a namesake competitor product instead. Per AC-H4-2, H4 is
-  COMPLETE on this verdict — no watermark implementation is authorized. See
-  `phase-04-watermark-feasibility_FEASIBILITY_24-07-26.md`.
+  gate-green. Founder-run live dispatch (Step B) executed 24-07-26. **Verdict at the time: INCONCLUSIVE**
+  — the probe's on-demand fetcher never reached the page; at 24-07-26 this was attributed to
+  `getbeam.fyi` returning HTTP 403 domain-wide to bot user-agents. **Status corrected 25-07-26 (H5
+  reconciliation):** this "WAF blocks AI fetchers / domain-wide 403" attribution is RETRACTED. Live
+  verification on 25-07-26 confirmed named on-demand AI fetchers reach the getbeam.fyi origin —
+  ChatGPT and Gemini were proven live, and `ChatGPT-User` is explicitly **Allowed**. The original
+  403 was not a domain-wide WAF block; root cause of the 24-07-26 non-fetch is unresolved but is no
+  longer attributed to a blanket bot block. Per AC-H4-2, H4 remains COMPLETE on its recorded
+  verdict — no watermark implementation is authorized without a fresh VIABLE probe. See
+  `phase-04-watermark-feasibility_FEASIBILITY_24-07-26.md` for the original probe record.
+- **H5 — Server-side AI-fetch capture (added 25-07-26, post-H4):** Cloudflare Pages
+  middleware-`waitUntil` beacon (`fireFetchBeacon`) → `POST /fetch-beacon` → additive
+  `agent_fetch_events` row, closing the gap H4 surfaced — edge/CDN-served pages (the web app) never
+  reach the Python ingest path H1 instruments, so on-demand fetches to those pages were invisible to
+  capture regardless of any WAF/403 question. Also adds a conservative `google` vendor token
+  (`google-cloudvertexbot`, index-tier only, not on-demand) to the classifier. All Fully-Automated
+  gates green (unit 15/15, classifier 24/24, Vitest 39/39, web edge build). CONDITIONAL — Docker
+  integration run (KG-4) and live deploy confirmation (KG-1/KG-2) remain operator actions. See
+  `handoff-05-webfetch-capture_REPORT_25-07-26.md`.
 
 **Consolidated known-gaps (program-wide):**
-1. **Docker/live-integration verification gates** (H1/H2/H3) — Alembic upgrade/downgrade round-trip
-   for the single migration chain, and each phase's live-sweep Hybrid integration tests, have never
-   run against a live Postgres in this sandbox. Tracked in
-   `process/features/evallayer/backlog/handoff-program-docker-verification-gaps_NOTE_23-07-26.md`.
-   Not blocking CODE-COMPLETE status; blocks each phase's 🔨 → ✅ VERIFIED promotion.
-2. **H4 watermark re-probe + WAF/AEO finding** — the citation-watermark hypothesis was never
-   actually exercised (fetch blocked, not tested). The probe also surfaced a bigger finding: the
-   site's anti-bot WAF blocks on-demand AI answer-engine fetchers domain-wide, making AI-generated
-   answers about Beam wrong or stale regardless of any watermarking work. Recommended ops fix
-   (WAF allowlist for `ChatGPT-User`/`Claude-User`/on-demand `PerplexityBot`, using the
-   `apps/api/data/agent_ip_ranges/` data Beam already ships) is a founder-side infra decision, not
-   a code change. Tracked in
-   `process/features/evallayer/backlog/aeo-waf-blocks-ai-fetchers_NOTE_24-07-26.md`. This is the
-   precondition for any H4 re-probe.
+1. **Docker/live-integration verification gates** (H1/H2/H3/H5) — Alembic upgrade/downgrade
+   round-trip for the single migration chain, and each phase's live-sweep Hybrid integration tests
+   (including H5's KG-4 beacon integration test), have never run against a live Postgres in this
+   sandbox. Tracked in
+   `process/features/evallayer/backlog/handoff-program-docker-verification-gaps_NOTE_23-07-26.md`
+   (H1-H3) and `process/features/evallayer/backlog/handoff-05-cfpages-waituntil-verification_NOTE_25-07-26.md`
+   (H5 KG-1/KG-2). Not blocking CODE-COMPLETE status; blocks each phase's 🔨 → ✅ VERIFIED promotion.
+2. **H4 watermark re-probe** — the citation-watermark hypothesis was never actually exercised
+   (24-07-26 fetch failed for unresolved reasons, not a proven WAF block — see the corrected finding
+   above). The previously-recommended "WAF allowlist" ops fix is NO LONGER the diagnosed precondition:
+   named fetchers already reach origin (ChatGPT + Gemini confirmed live 25-07-26). Any H4 re-probe
+   should now investigate the actual 24-07-26 non-fetch cause directly rather than assume a
+   domain-wide block. Residual known-gap: Perplexity-User / Claude-User per-vendor allow-status is
+   still unverified (tracked alongside H5's KG-3 Gemini-on-demand-token gap in
+   `process/features/evallayer/backlog/handoff-05-gemini-ua-token-unverified_NOTE_25-07-26.md`).
 
-**Successor program:** "Handoff Detection" was itself the successor to the EvalLayer program. No
-further phases are planned inside this `handoff_23-07-26` task folder — H4's non-VIABLE verdict
-closes the watermarking sub-scope per AC-H4-2, and the two consolidated known-gaps above are
-routed to backlog rather than new phases. Any future work (Docker verification pass, WAF-allowlist
-+ re-probe) is follow-up maintenance, not new program scope, and does not require a new feature
-folder — it can be picked up directly from the two backlog notes above when infra/founder
-availability allows.
+**Successor program:** "Handoff Detection" was itself the successor to the EvalLayer program. H5
+(server-side AI-fetch capture) was added 25-07-26 as a direct follow-on inside this same
+`handoff_23-07-26` task folder — it closes a gap H4 surfaced, not new program scope. No further
+phases are planned inside this task folder. H4's recorded verdict closes the watermarking sub-scope
+per AC-H4-2 pending a fresh re-probe, and the consolidated known-gaps above are routed to backlog
+rather than new phases. Any future work (Docker verification pass for H1-H3 and H5, H4 re-probe) is
+follow-up maintenance, not new program scope, and does not require a new feature folder — it can be
+picked up directly from the backlog notes above when infra/founder availability allows.
 
 ---
 
