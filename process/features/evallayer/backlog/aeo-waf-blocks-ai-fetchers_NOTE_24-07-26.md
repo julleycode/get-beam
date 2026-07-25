@@ -1,13 +1,44 @@
 ---
 name: plan:aeo-waf-blocks-ai-fetchers-note
-description: "Backlog: getbeam.fyi's anti-bot WAF blocks on-demand AI answer-engine fetchers domain-wide, causing AI engines to answer about Beam from stale/wrong memory (ChatGPT cited a namesake competitor's pricing) — H4 probe finding, 24-07-26"
+description: "RESOLVED/RETRACTED 25-07-26: original WAF-blocks-AI-fetchers theory was disproven by live re-probe — root cause was a noindex meta tag (fixed 6252f92), not a WAF block. Named AI fetchers (ChatGPT/OAI, Gemini/Google) reach getbeam.fyi and cite it correctly. Residual known-gap: Perplexity-User/Claude-User WAF status unverified."
 date: 24-07-26
+corrected-on: 25-07-26
 metadata:
   node_type: memory
   type: plan
   feature: evallayer
   phase: program-closeout
+  status: resolved-retracted
 ---
+
+> **RESOLVED / RETRACTED (25-07-26).** This note's core premise — "getbeam.fyi's anti-bot WAF
+> blocks on-demand AI fetchers domain-wide" — is **disproven**. Live re-probe via Claude-in-Chrome
+> on the founder's real browser drove BOTH ChatGPT and Gemini to fetch
+> `https://getbeam.fyi/pricing-overview/ptio5ny`. Both reached the origin (200, not blocked),
+> returned Beam's REAL pricing (Free $0 / 10 identified visitors; Pro $19→$15 yearly / 50; Max
+> $49→$39 yearly / unlimited), and cited the exact tokenized URL back. The user's own Cloudflare
+> dashboard confirmed `ChatGPT-User` = Allowed.
+>
+> **Actual root cause:** the probe page carried `<meta name="robots" content="noindex">` — ChatGPT
+> explicitly reported the page appeared unindexed and therefore never attempted/completed the
+> fetch it later reported failing. Fixed in commit `6252f92` (noindex → index,follow); confirmed
+> live (robots meta on `getbeam.fyi/pricing-overview/ptio5ny` is now `index, follow`).
+>
+> **What was actually observed at the time (re-explained):** the original orchestrator `WebFetch`
+> 403s described below were against a generic/unnamed bot user-agent (the WebFetch tool itself),
+> NOT the named on-demand AI fetcher UAs (`ChatGPT-User`, `Google-Extended`/Gemini). They were never
+> valid evidence of a domain-wide or AI-fetcher-specific WAF block — conflating "some bot got a 403"
+> with "AI fetchers are blocked" was the error in the original analysis.
+>
+> **No ops/Cloudflare action is required based on this note.** The "Recommended ops fix" section
+> below is retracted — do not action it as written. The residual known-gap is narrower than
+> originally framed: exact WAF allow-status for `Perplexity-User` and `Claude-User` specifically
+> remains UNVERIFIED (only ChatGPT/OAI and Gemini/Google are proven Allowed and citation-capable).
+> See the corrected verdict in
+> `process/features/evallayer/active/handoff_23-07-26/phase-04-watermark-feasibility_FEASIBILITY_24-07-26.md`
+> (H4 verdict updated INCONCLUSIVE → VIABLE on 25-07-26).
+>
+> Original body preserved verbatim below for audit trail.
 
 # getbeam.fyi's Anti-Bot WAF Blocks On-Demand AI Fetchers (AEO Impact Finding)
 

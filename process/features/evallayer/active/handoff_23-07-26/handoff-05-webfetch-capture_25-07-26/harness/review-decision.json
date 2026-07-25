@@ -1,0 +1,21 @@
+{
+  "task": "Handoff Detection H5 — server-side AI-fetch capture beacon",
+  "reviewer": "vc-execute-agent (H5 self-review against approved plan + validate-contract E1-E7)",
+  "decision": "approved-with-concerns",
+  "blockingFindings": [],
+  "nonBlockingFindings": [
+    "KG-4: AC-H5-1 + AC-H5-8 Hybrid integration gate not run (Docker unavailable). Test written + collect-clean; must run on a disposable Postgres before prod enable.",
+    "KG-2: CF-Pages event.waitUntil delivery unverifiable without a deploy (backlog stub).",
+    "KG-3: exact live Gemini/Google on-demand fetch UA unverified; google kept INDEX-tier (backlog stub).",
+    "KG-1 residual: per-vendor WAF allow-status for Perplexity-User/Claude-User unverified.",
+    "Endpoint rate-limiting deferred to backlog; poison blast radius bounded to non-identity rows."
+  ],
+  "notes": "All E1-E7 implemented and verified. E1: persist_agent_fetch_event event_time param sets created_at (unit-asserted via compiled insert params). E2: _verify_beacon_secret guards empty configured secret FIRST, before hmac.compare_digest (empty-secret 401 regression green). E3: agent_fetch_beacon.py imports zero identity module; logs keys-only; non-vacuous AC-H5-8 tripwire written. E4: web matcher excludes /api,/trpc,_next,static,?_rsc; beacon outside Clerk callback, ev.waitUntil, AbortSignal.timeout(1500), errors swallowed, never alters response; edge build green. E5: google vendor added conservatively as google-cloudvertexbot INDEX-tier (NOT google-extended, which the AC13 exclusion test pins as never-classified). E6: blast-radius registry confirmed H1-H4 all DONE, disjoint. All Fully-Automated gates green (beacon unit 15/15, classifier 24/24, vitest 39/39, web build). Trust-boundary posture correct: default-OFF (404 dormant), shared-secret constant-time compare with empty-secret bypass guard, 204-not-403 tenancy, keys-only logging. No high-risk defect outstanding.",
+  "decisionLegacy": "APPROVE",
+  "conditions": [
+    "AC-H5-1 + AC-H5-8 Hybrid integration gate must be run on a disposable Postgres before production enable (KG-4) — test written, collect-clean, Docker unavailable in sandbox.",
+    "Operator must set BEAM_FETCH_BEACON_SECRET (Cloudflare Pages) + beam_fetch_beacon_secret (Railway) to an identical strong random value, live-apply the pending migrations, then flip agent_fetch_beacon_enabled=true.",
+    "Endpoint rate-limiting deferred to backlog (handoff-05-fetch-beacon-rate-limit_NOTE); poison blast radius is bounded to non-identity dashboard rows."
+  ],
+  "timestamp": "2026-07-25T18:15:00Z"
+}

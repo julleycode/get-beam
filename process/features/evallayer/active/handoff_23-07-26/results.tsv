@@ -1,0 +1,5 @@
+cycle	date	domain	gate	fails	concerns	known_gaps	loop_status	notes
+0	25-07-26	plan	CONDITIONAL	0	8	4	BASELINE	first-pass PVL for handoff-05-webfetch-capture; SUPPLEMENT REQUEST issued (empty-secret 401 guard, persist event_time param, add Vitest)
+1	25-07-26	plan	CONDITIONAL	0	0	4	SUPPLEMENT_APPLIED	3 actionable gaps resolved (2 already-present, #7 tightened to 3 ordered 401 branches); remaining = 4 accepted deploy/infra-gated known-gaps; re-validating from V1
+2	25-07-26	plan	CONDITIONAL	0	0	4	HALTED_SUCCESS	re-validate confirmed 3 gaps resolved; terminal CONDITIONAL accepted under /goal; PHASE_COMPLETE: VALIDATE; EXECUTE legal
+3	25-07-26	tests	EVL	0	0	4	HALTED_SUCCESS	EVL confirmation: 4/4 runnable gates PASS (unit 15/15, classifier 24/24, vitest 39/39, web build exit0); integration KG-4 Docker-gated; 2 pre-existing failures out-of-blast-radius

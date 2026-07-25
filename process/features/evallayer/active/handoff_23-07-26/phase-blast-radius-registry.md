@@ -189,3 +189,42 @@ confirmed `apps/web/src/app/pricing-overview/` does not yet exist (no collision)
 `apps/web/src/middleware.ts` `isPublicRoute` array insertion point via direct read, confirmed
 `apps/web/src/app/llms.txt/route.ts` as the shape precedent. Confirmed disjoint from Phase 1 (H1,
 DONE), Phase 2 (H2, DONE), and Phase 3 (H3, DONE) — no file overlap.
+
+---
+
+## Phase 5 (H5)
+
+Plan: `process/features/evallayer/active/handoff_23-07-26/handoff-05-webfetch-capture_PLAN_25-07-26.md`
+
+Blast radius (planned, not yet executed):
+
+- `apps/api/routers/agents.py` (additive: `POST /fetch-beacon` + shared-secret auth dep; H2/H3 analytics routes untouched)
+- `apps/api/config.py` (2 new settings: `agent_fetch_beacon_enabled`, `beam_fetch_beacon_secret`)
+- `apps/api/services/agent_classifier.py` (additive: `google` vendor in `_VENDOR_TOKENS` + on-demand token(s) in `_ON_DEMAND_TOKENS` — D-A; existing vendors untouched)
+- `apps/api/schemas/agents.py` (new `FetchBeaconIn` / `FetchBeaconAck`)
+- `apps/api/services/agent_fetch_beacon.py` (new — beacon business logic; reuses `persist_agent_visit`/`persist_agent_fetch_event`; imports ZERO identity path)
+- `apps/api/models/site.py` (READ only — tenancy lookup)
+- `apps/web/src/middleware.ts` (additive `ev.waitUntil` beacon; H4's `isPublicRoute`/matcher untouched)
+- `apps/web/src/lib/fetch-beacon.ts` (new — pure matcher + fire-and-forget POST)
+- `tests/unit/test_agent_fetch_beacon.py` (new)
+- `tests/integration/test_agent_fetch_beacon_integration.py` (new — includes AC-H5-8 non-emailability tripwire)
+- `apps/web/src/lib/fetch-beacon.test.ts` (new — pending JS unit runner decision)
+
+NO new migration (agent_visits `d11b39a6c843` + agent_fetch_events `c4e8f1a9d2b7` already on main).
+
+status: DONE — EXECUTE complete 25-07-26. Blast radius re-confirmed disjoint at EXECUTE: prior
+claimants H1 (`agent_classifier.py`, `agent_visit_persistence.py`), H2/H3 (`agents.py`,
+`schemas/agents.py`), H4 (`middleware.ts`) all DONE — all H5 edits are strictly ADDITIVE (new
+google vendor + new POST route + new `event_time` param + new import/beacon call), no prior H1–H4
+line rewritten. New files added within blast radius: `apps/api/services/agent_fetch_beacon.py`,
+`apps/web/src/lib/fetch-beacon.ts`, `apps/web/vitest.config.ts`, 3 test files. NO new migration
+(agent_visits `d11b39a6c843` + agent_fetch_events `c4e8f1a9d2b7` confirmed already on main).
+Fully-Automated gates GREEN: beacon unit 15/15, classifier additive 24/24, web-matcher Vitest
+39/39, web edge build OK. Hybrid AC-H5-1/AC-H5-8 integration test WRITTEN + collect-clean but
+Docker/PG unavailable in sandbox → KG-4 (run on disposable Postgres before prod enable). Gate:
+CONDITIONAL (deploy/infra-gated KG-1..KG-4 only; HIGH-RISK evidence pack written + validated,
+review-decision = approved-with-concerns). Google-vendor classifier edit supersedes the umbrella
+"Google-Extended out of scope" bullet for the capture path (D-A) — UPDATE PROCESS must reconcile
+the umbrella text. Two pre-existing HEAD-level unit failures in `test_agent_company_resolution.py`
+(resolution_runner.py `site.url` vs SimpleNamespace mock) are OUTSIDE H5 blast radius, not caused
+by this phase.

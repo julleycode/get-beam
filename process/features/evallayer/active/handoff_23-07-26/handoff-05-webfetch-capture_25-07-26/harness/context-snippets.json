@@ -1,0 +1,35 @@
+{
+  "task": "Handoff Detection H5 — server-side AI-fetch capture beacon",
+  "snippets": [
+    {
+      "file": "apps/api/routers/agents.py",
+      "lines": "34-77",
+      "description": "_verify_beacon_secret dependency — the trust-boundary primitive. E2 ordered guard: (1) empty configured secret => 401 FIRST (before any compare_digest, because hmac.compare_digest('','')==True is an auth bypass); (2) empty/absent header => 401; (3) hmac.compare_digest constant-time compare => 401 on mismatch. The POST /fetch-beacon route gates on agent_fetch_beacon_enabled (404 dormant) then Depends(_verify_beacon_secret).",
+      "content": "def _verify_beacon_secret(x_beam_fetch_secret: str | None = Header(default=None)) -> None:\n    configured = settings.beam_fetch_beacon_secret\n    if not configured:\n        raise HTTPException(status_code=401, detail='unauthorized')\n    if not x_beam_fetch_secret:\n        raise HTTPException(status_code=401, detail='unauthorized')\n    if not hmac.compare_digest(x_beam_fetch_secret, configured):\n        raise HTTPException(status_code=401, detail='unauthorized')"
+    },
+    {
+      "file": "apps/api/services/agent_fetch_beacon.py",
+      "lines": "70-125",
+      "description": "record_fetch_beacon — imports ZERO identity/Visitor module (E3 guardrail). Classify -> on-demand-tier gate -> public Site tenancy lookup (unknown => noop, never 403) -> decode token mint-ts -> persist_agent_visit + persist_agent_fetch_event(event_time=mint_ts). Logs keys/vendor/site_id only, never raw UA or IP.",
+      "content": "classification = classify_agent(payload.user_agent); if None -> 'noop'. tier = classify_tier(token); if tier != 'on-demand' -> 'noop'. site lookup -> None -> 'noop'. persist_agent_visit(...); persist_agent_fetch_event(..., event_time=decode_token_mint_ts(payload.token))."
+    },
+    {
+      "file": "apps/api/services/agent_visit_persistence.py",
+      "lines": "119-160",
+      "description": "E1: persist_agent_fetch_event gained optional event_time param. created_at is a Base server_default=func.now() column; setting mint-time is impossible without an explicit override. When event_time is provided it is written to created_at; when None the server default (receive time) applies. All pre-H5 callers pass None (unchanged behavior).",
+      "content": "values = {...}; if event_time is not None: values['created_at'] = event_time; await db.execute(insert(AgentFetchEvent).values(**values))"
+    },
+    {
+      "file": "apps/web/src/middleware.ts",
+      "lines": "48-63",
+      "description": "E4: fire-and-forget beacon in the exported middleware(req, ev), OUTSIDE the clerkMiddleware callback, wrapped in try/catch, gated on process.env.BEAM_FETCH_BEACON_SECRET presence, dispatched via ev.waitUntil — never awaited, never alters the geoRedirect ?? handler return.",
+      "content": "const beaconPayload = shouldFireFetchBeacon(req); if (beaconPayload && process.env.BEAM_FETCH_BEACON_SECRET) { ev.waitUntil(fireFetchBeacon(beaconPayload)); } ... return geoRedirect(req) ?? handler(req, ev);"
+    },
+    {
+      "file": "apps/web/src/lib/fetch-beacon.ts",
+      "lines": "36-100",
+      "description": "E4: pure matcher excludes /api, /trpc, /_next, static extensions, and ?_rsc prefetch; fires only GET + on-demand UA + top-level doc. fireFetchBeacon uses AbortSignal.timeout(1500) and swallows all errors; dormant unless BOTH the server-only secret and API base are set (secret never shipped to browser).",
+      "content": "isTopLevelDocumentPath rejects /api, /trpc, /_next, STATIC_EXT_RE, search.includes('_rsc'). fireFetchBeacon: if (!secret || !apiBase) return; try { fetch(..., { headers: { 'x-beam-fetch-secret': secret }, signal: AbortSignal.timeout(1500) }) } catch {}"
+    }
+  ]
+}

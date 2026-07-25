@@ -1,0 +1,9 @@
+{
+  "task": "Handoff Detection H5 — server-side AI-fetch capture beacon",
+  "planPath": "process/features/evallayer/active/handoff_23-07-26/handoff-05-webfetch-capture_PLAN_25-07-26.md",
+  "riskLevel": "high",
+  "riskClasses": ["permission, secret, or trust-boundary logic"],
+  "mustStopBeforeFinalize": true,
+  "humanApprovalRequired": true,
+  "why": "A new internet-reachable POST /api/v1/agents/fetch-beacon WRITES agent_visit + agent_fetch_event rows gated only by a shared secret (X-Beam-Fetch-Secret), plus an edge-middleware fire-and-forget beacon on every getbeam.fyi request. Trust boundary between Cloudflare Pages (web) and Railway (API). A leaked secret or empty-secret misconfiguration could let forged POSTs poison the Agents dashboard + handoff correlation. Blast radius is bounded to non-identity agent rows (AC-H5-8 tripwire), and the endpoint is default-OFF + dormant when the secret is absent. Operator must set the secret, live-apply migrations, and flip the flag."
+}

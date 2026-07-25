@@ -1,0 +1,109 @@
+{
+  "task": "Handoff Detection H5 — server-side AI-fetch capture beacon",
+  "result": "PASS (all runnable gates green; 1 Docker-gated Hybrid gate deferred as KG-4)",
+  "evl_confirmation_run": {
+    "runner": "vc-tester (EVL confirmation — independent re-run of validate-contract gates, 2026-07-25)",
+    "gates_green": true,
+    "gates_green_note": "true = all runnable gates pass; integration (KG-4) excluded as Docker-gated",
+    "results": [
+      { "command": "pytest tests/unit/test_agent_fetch_beacon.py -v", "result": "PASS", "detail": "15 passed in 0.86s" },
+      { "command": "pytest tests/unit -k agent_classifier", "result": "PASS", "detail": "24 passed, 1008 deselected in 1.52s" },
+      { "command": "npx vitest run apps/web/src/lib/fetch-beacon.test.ts", "result": "PASS", "detail": "39 passed in 620ms" },
+      { "command": "cd apps/web && npm run build", "result": "PASS", "detail": "exit 0; Middleware compiled 92.4 kB" },
+      { "command": "pytest tests/integration/test_agent_fetch_beacon_integration.py -k tripwire", "result": "KNOWN-GAP (KG-4)", "detail": "NOT RUN — docker.sock absent, Postgres+Redis unavailable; not run against shared/dev DB, not faked. Run on disposable Postgres." }
+    ],
+    "regression": {
+      "pre_existing_failures": [
+        "tests/unit/test_agent_company_resolution.py::test_ac2_resolution_runner_excludes_agent_rows",
+        "tests/unit/test_agent_company_resolution.py::test_ac2_resolution_tasks_process_site_excludes_agent_rows"
+      ],
+      "root_cause": "SimpleNamespace mock lacks .url attribute; fails in resolution_tasks.py:61 / resolution_runner.py — neither is an H5-touched file",
+      "classification": "OUTSIDE H5 blast radius — NOT H5-caused"
+    }
+  },
+  "manualChecks": [
+    "Blast-radius registry (phase-blast-radius-registry.md) confirmed H1-H4 all DONE and disjoint from H5 files (E6).",
+    "agent_fetch_beacon.py source read: imports ZERO identity/Visitor module (E3 structural guarantee).",
+    "middleware.ts read: beacon is OUTSIDE the clerkMiddleware callback, gated on secret env, ev.waitUntil, try/catch, never mutates the return (E4)."
+  ],
+  "commands": [
+    {
+      "step": "AC-H5-4 boundary: absent X-Beam-Fetch-Secret header rejected",
+      "command": "pytest tests/unit/test_agent_fetch_beacon.py -k missing_secret_401",
+      "result": "PASS",
+      "notes": "401 returned; record_fetch_beacon never reached."
+    },
+    {
+      "step": "AC-H5-4 boundary: wrong secret rejected (constant-time compare)",
+      "command": "pytest tests/unit/test_agent_fetch_beacon.py -k wrong_secret_401",
+      "result": "PASS",
+      "notes": "401; hmac.compare_digest mismatch path."
+    },
+    {
+      "step": "AC-H5-4 / E2 CRITICAL: empty configured secret => 401 for empty header, no header, AND a guessed header",
+      "command": "pytest tests/unit/test_agent_fetch_beacon.py -k empty_secret_401",
+      "result": "PASS",
+      "notes": "Guards the hmac.compare_digest('','')==True auth-bypass: unconfigured endpoint rejects ALL callers before any compare."
+    },
+    {
+      "step": "AC-H5-5: flag off => 404 dormant even with a valid secret",
+      "command": "pytest tests/unit/test_agent_fetch_beacon.py -k flag_off_404",
+      "result": "PASS",
+      "notes": "Endpoint not revealed when agent_fetch_beacon_enabled is False."
+    },
+    {
+      "step": "Happy path: valid secret + flag on + on-demand UA + known site => 202",
+      "command": "pytest tests/unit/test_agent_fetch_beacon.py -k valid_secret_on_demand",
+      "result": "PASS",
+      "notes": "Full auth+flag+classify+persist path returns 202."
+    },
+    {
+      "step": "AC-H5-6: unknown/foreign site_id => 204 no-op, never 403 (no id-existence leak)",
+      "command": "pytest tests/unit/test_agent_fetch_beacon.py -k unknown_site_noop",
+      "result": "PASS",
+      "notes": "Multi-tenant no-leak posture."
+    },
+    {
+      "step": "AC-H5-2/3: index crawler (gptbot) and junk UA => noop, nothing persisted",
+      "command": "pytest tests/unit/test_agent_fetch_beacon.py -k 'index_crawler_noop or junk_ua_noop'",
+      "result": "PASS",
+      "notes": "On-demand-only gating; None-path safety."
+    },
+    {
+      "step": "AC-H5-7 / E1: token decodes to mint-time and lands on created_at; invalid => None",
+      "command": "pytest tests/unit/test_agent_fetch_beacon.py -k 'token_mint_ts or invalid_token or persist_event_time'",
+      "result": "PASS",
+      "notes": "persist_agent_fetch_event event_time param verified via compiled insert params."
+    },
+    {
+      "step": "AC-H5-9: additive google vendor keeps classifier tests green + classify_tier total",
+      "command": "pytest tests/unit -k agent_classifier",
+      "result": "PASS",
+      "notes": "24 passed. google-cloudvertexbot added INDEX-tier; robots-txt exclusion (google-extended) intact."
+    },
+    {
+      "step": "AC-H5-10: middleware matcher truth table (GET + on-demand UA + top-level doc only)",
+      "command": "npx vitest run apps/web/src/lib/fetch-beacon.test.ts",
+      "result": "PASS",
+      "notes": "39 passed. Excludes /api, /trpc, _next, static, ?_rsc; rejects non-GET, index-crawler, human UAs."
+    },
+    {
+      "step": "Edge-runtime compile: middleware with beacon builds",
+      "command": "cd apps/web && npm run build",
+      "result": "PASS",
+      "notes": "Build succeeded; Middleware 92.4 kB."
+    },
+    {
+      "step": "AC-H5-1 + AC-H5-8: real-DB both-row write + zero-identity tripwire",
+      "command": "pytest tests/integration/test_agent_fetch_beacon_integration.py",
+      "result": "SKIP",
+      "notes": "KG-4: Docker daemon unavailable in this sandbox. Test WRITTEN and collect-clean (3 tests). Run on a disposable Postgres: docker compose -f infra/docker-compose.yml up -d postgres redis && .venv/bin/python -m pytest tests/integration/test_agent_fetch_beacon_integration.py -q. NEVER against a shared dev DB."
+    },
+    {
+      "step": "Regression: full unit lane",
+      "command": ".venv/bin/python -m pytest tests/unit -m unit -q",
+      "result": "PASS",
+      "notes": "465 passed. 2 pre-existing failures in test_agent_company_resolution.py are HEAD-level (resolution_runner.py:63 uses site.url; test mock is a SimpleNamespace without .url) — OUTSIDE H5 blast radius, not introduced by this phase (verified: working tree == HEAD for those files)."
+    }
+  ]
+}

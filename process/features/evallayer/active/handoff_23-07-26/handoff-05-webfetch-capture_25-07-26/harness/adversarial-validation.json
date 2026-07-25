@@ -1,0 +1,39 @@
+{
+  "scenarios": [
+    {
+      "scenario": "Forged POST from the open internet with NO secret header attempts to write poison agent rows.",
+      "ruled_out": true,
+      "rationale": "_verify_beacon_secret rejects an empty/absent header with 401 before record_fetch_beacon runs. Covered by test_missing_secret_401."
+    },
+    {
+      "scenario": "Empty-configured-secret auth bypass: attacker sends an empty (or any) header while the server secret env is unset, exploiting hmac.compare_digest('','')==True.",
+      "ruled_out": true,
+      "rationale": "E2 guard raises 401 when settings.beam_fetch_beacon_secret is falsy BEFORE any compare_digest call — an unconfigured endpoint rejects every caller. Covered by test_empty_secret_401 (empty header, no header, and guessed header all 401)."
+    },
+    {
+      "scenario": "Replayed / captured secret used against the dormant endpoint.",
+      "ruled_out": true,
+      "rationale": "Endpoint is default-OFF (agent_fetch_beacon_enabled=False -> 404, not revealed). Even with the flag on, the blast radius of any accepted write is bounded to non-identity agent_visits/agent_fetch_events rows — never a Visitor/IdentifiedVisitor/emailable identity (AC-H5-8 tripwire). Rate-limiting is a documented backlog follow-up (handoff-05-fetch-beacon-rate-limit_NOTE); poisoning cannot escalate to outreach."
+    },
+    {
+      "scenario": "On-demand mislabel: a crawler UA (e.g. GPTBot, or an unverified Google/Gemini token) is treated as a live human-behind-the-agent fetch, fabricating a handoff signal downstream.",
+      "ruled_out": true,
+      "rationale": "classify_tier is conservative — only KNOWN user-driven tokens are on-demand; the new google vendor (google-cloudvertexbot) is INDEX-tier and 204'd. Covered by test_index_crawler_noop and test_google_index_tier_noop. KG-3 residual: the exact live Gemini on-demand UA is unverified; keeping google index-tier means at worst we MISS a capture, never fabricate one."
+    },
+    {
+      "scenario": "Beacon path reaches an identity/Visitor write and creates an emailable contact.",
+      "ruled_out": true,
+      "rationale": "agent_fetch_beacon.py imports ZERO identity/Visitor module (structural guarantee). The non-vacuous AC-H5-8 integration tripwire asserts the SAME real POST that writes agent rows creates zero Visitor/IdentifiedVisitor rows (Docker-gated run — KG-4)."
+    },
+    {
+      "scenario": "PII/GDPR leak: raw fetcher UA or IP written to logs.",
+      "ruled_out": true,
+      "rationale": "The service logs keys/vendor/site_id/tier only — never the raw UA or IP (matches the existing persistence-layer discipline). No fetcher IP is even available to the endpoint (the middleware forwards none); ip_address is passed empty/None."
+    },
+    {
+      "scenario": "Middleware beacon degrades or breaks the user's request (auth/redirect) on every getbeam.fyi hit.",
+      "ruled_out": true,
+      "rationale": "Beacon is fire-and-forget via ev.waitUntil (never awaited), wrapped in try/catch, outside the Clerk callback, with AbortSignal.timeout(1500) and all errors swallowed. It never mutates the geoRedirect ?? handler response. Matcher excludes /api, /trpc, _next, static, prefetch."
+    }
+  ]
+}
