@@ -281,6 +281,12 @@ class Settings(BaseSettings):
     # looks like "one attacker, many fake identities" rather than "many humans".
     ingest_velocity_min_fingerprint_diversity: float = 0.3
 
+    # When true, drop events whose page URL host is a loopback/dev host
+    # (localhost, 127.x, ::1, 0.0.0.0, *.localhost) — dev environments loading a
+    # prod snippet produce noise visitors; disable in test harnesses that
+    # legitimately post localhost URLs.
+    ingest_drop_local_urls: bool = True
+
     # When true, drop ingest events whose client IP belongs to a cloud-compute
     # provider (Azure/AWS/GCP/DO/OVH/…) — server/bot traffic, never real eyeballs.
     # Cached + fail-open: an IPinfo error never blocks a real visitor's events.

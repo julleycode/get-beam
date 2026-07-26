@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
@@ -10,6 +10,7 @@ from apps.api.models.database import get_db
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.user import User
 from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog, Visitor
+from apps.api.models.visitor_email import VisitorEmail
 from apps.api.dependencies import get_current_user, verify_site_access as _verify_site_access
 from apps.api.routers.visitors_helpers import (
     _EXPORT_EVENT_CAP,
@@ -75,8 +76,33 @@ async def list_visitors(
 ) -> VisitorListResponse:
     await _verify_site_access(db, site_id, user)
 
-    query = select(Visitor).where(Visitor.site_id == site_id)
-    count_query = select(func.count()).select_from(Visitor).where(Visitor.site_id == site_id)
+    # Hide "ghost" rows: zero-pageview fragment visitors created by
+    # storage-blocked subframe tracker instances, which only ever emitted
+    # interaction events (scroll / time_on_page). Identified visitors are kept
+    # even at zero pageviews — an identity row or a captured email
+    # (visitor_emails) both mean a real lead whose pageview beacon was lost.
+    not_ghost = or_(
+        Visitor.total_pageviews > 0,
+        select(IdentifiedVisitor.id)
+        .where(
+            IdentifiedVisitor.site_id == Visitor.site_id,
+            IdentifiedVisitor.visitor_id == Visitor.visitor_id,
+        )
+        .exists(),
+        select(VisitorEmail.id)
+        .where(
+            VisitorEmail.site_id == Visitor.site_id,
+            VisitorEmail.visitor_id == Visitor.visitor_id,
+        )
+        .exists(),
+    )
+
+    query = select(Visitor).where(Visitor.site_id == site_id, not_ghost)
+    count_query = (
+        select(func.count())
+        .select_from(Visitor)
+        .where(Visitor.site_id == site_id, not_ghost)
+    )
 
     # Build the filter predicates once and apply the same list to both the row
     # query and the count query, so the paginated total always matches the rows.

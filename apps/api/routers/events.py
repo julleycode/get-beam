@@ -45,6 +45,27 @@ def _tp_from_url(url: str | None) -> UUID | None:
         return None
 
 
+def _is_local_url(url: str | None) -> bool:
+    """True when the page URL host is a loopback/dev host.
+
+    A customer's local dev environment loading the production pixel snippet posts
+    real-looking events from a real public IP, so only the page URL can separate
+    them. Never raises — a malformed/absent URL is treated as non-local so the
+    drop is never widened.
+    """
+    if not url:
+        return False
+    try:
+        host = (urlsplit(url).hostname or "").lower()
+    except Exception:
+        return False
+    return (
+        host in ("localhost", "::1", "0.0.0.0")
+        or host.startswith("127.")
+        or host.endswith(".localhost")
+    )
+
+
 async def _parse_event_batch(request: Request) -> EventBatch:
     """Parse EventBatch from request body.
 
@@ -161,6 +182,17 @@ async def ingest_events(
         # Tracking paused for this site — silently drop the events (same pattern
         # as the bot filter above). Pixel stays installed; no error surfaced.
         return Response(status_code=204)
+
+    # Local/dev URL drop — a dev machine running the prod snippet has a real
+    # public IP, so the page URL is the only signal. Silent 204 like the filters
+    # above when the whole batch is local; otherwise only the survivors are
+    # stored and signal-processed. Private LAN ranges are deliberately NOT
+    # dropped (intranet deployments can be legitimate).
+    if _settings.ingest_drop_local_urls:
+        survivors = [e for e in batch.events if not _is_local_url(e.url)]
+        if not survivors:
+            return Response(status_code=204)
+        batch.events = survivors
 
     # Trusted-proxy-aware resolution. At the default trusted_proxy_hops=0 the
     # X-Forwarded-For header is IGNORED entirely, so a caller can no longer forge
