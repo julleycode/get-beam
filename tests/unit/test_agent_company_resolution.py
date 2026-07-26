@@ -389,7 +389,11 @@ async def test_ac2_resolution_runner_excludes_agent_rows():
 
     db = MagicMock()
     db.execute = AsyncMock(side_effect=_exec)
-    site = SimpleNamespace(site_id="site-1", user_id="user-1")
+    # `url` is NOT NULL on the real Site model and run_resolution_for_site reads it
+    # via site_resolves_all_us(); a non-owner domain keeps the ordinary intent gate.
+    site = SimpleNamespace(
+        site_id="site-1", user_id="user-1", url="https://example.com"
+    )
     await resolution_runner.run_resolution_for_site(db, site)
 
     assert any("is_agent_derived" in s for s in captured)
@@ -423,8 +427,10 @@ async def test_ac2_resolution_tasks_process_site_excludes_agent_rows():
     captured: list = []
 
     r_site = MagicMock()
+    # `url` is NOT NULL on the real Site model and _process_site reads it via
+    # site_resolves_all_us(); a non-owner domain keeps the ordinary intent gate.
     r_site.scalar_one_or_none.return_value = SimpleNamespace(
-        site_id="site-1", user_id="user-1"
+        site_id="site-1", user_id="user-1", url="https://example.com"
     )
     r_visitors = MagicMock()
     r_visitors.scalars.return_value.all.return_value = []  # empty → short-circuit
