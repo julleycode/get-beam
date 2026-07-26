@@ -27,6 +27,7 @@ function OnboardingFlow() {
   const [url, setUrl] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState("");
+  const [showUpgrade, setShowUpgrade] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const [siteId, setSiteId] = useState("");
@@ -64,6 +65,7 @@ function OnboardingFlow() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    setShowUpgrade(false);
     setLoading(true);
 
     try {
@@ -87,6 +89,8 @@ function OnboardingFlow() {
         setDetecting(false);
       }
     } catch (err) {
+      const detail = (err as { detail?: { code?: string } } | null)?.detail;
+      setShowUpgrade(detail?.code === "site_limit_reached");
       setError(err instanceof Error ? err.message : "Failed to create site");
     } finally {
       setLoading(false);
@@ -170,7 +174,19 @@ function OnboardingFlow() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleCreate} className="space-y-4">
-              {error && <p className="text-sm text-destructive">{error}</p>}
+              {error && (
+                <p className="text-sm text-destructive">
+                  {error}
+                  {showUpgrade && (
+                    <>
+                      {" "}
+                      <a href="/pricing" className="underline font-medium">
+                        View plans
+                      </a>
+                    </>
+                  )}
+                </p>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="name">Site name</Label>
                 <Input

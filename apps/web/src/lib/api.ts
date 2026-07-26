@@ -173,6 +173,15 @@ class ApiClient {
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
+      // Structured detail (e.g. 402 site_limit_reached): surface the human
+      // message and attach the raw object so callers can branch on detail.code.
+      // String `detail` behavior is unchanged.
+      if (typeof body.detail === "object" && body.detail !== null) {
+        const err = new Error(
+          body.detail.message || `Request failed: ${res.status}`,
+        );
+        throw Object.assign(err, { detail: body.detail });
+      }
       throw new Error(body.detail || `Request failed: ${res.status}`);
     }
 

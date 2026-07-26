@@ -18,6 +18,17 @@ PLAN_LIMITS: dict[str, Optional[int]] = {
     "max": None,
 }
 
+# Per-plan website (Site) count limits: None = unlimited.
+# MUST stay in sync with the pricing page copy at
+# apps/web/src/app/pricing/page.tsx ("1 website" / "3 websites" /
+# "Unlimited websites"). There is no shared Python↔TS constant; this comment
+# plus the drift-guard test in tests/unit/test_site_limit.py is the guard.
+PLAN_SITE_LIMITS: dict[str, Optional[int]] = {
+    "free": 1,
+    "pro": 3,
+    "max": None,
+}
+
 # Referral program: each activated referral permanently adds this many
 # identified visitors to the monthly limit, up to the cap. The cap is enforced
 # at award time (LEAST in SQL — see referral_activation) and again defensively
@@ -35,6 +46,15 @@ ENTITLEMENT_GRACE = timedelta(days=1)
 def get_plan_limits(plan: str) -> Optional[int]:
     """Return monthly identified-visitor limit for a plan. None = unlimited."""
     return PLAN_LIMITS.get(plan, 10)
+
+
+def get_site_limit(plan: str) -> Optional[int]:
+    """Return the max number of websites a plan may create. None = unlimited.
+
+    An unknown plan key falls back to the most restrictive tier (free), mirroring
+    get_plan_limits' fallback-to-free posture: never grant more than we sold.
+    """
+    return PLAN_SITE_LIMITS.get(plan, PLAN_SITE_LIMITS["free"])
 
 
 def get_effective_limit(plan: str, bonus_monthly_quota: int | None) -> Optional[int]:

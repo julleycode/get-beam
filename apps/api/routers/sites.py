@@ -5,7 +5,7 @@ import uuid
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
@@ -23,6 +23,7 @@ from apps.api.schemas.sites import (
     SitePixelSnippet,
     SiteUpdate,
 )
+from apps.api.services.billing import get_effective_plan, get_site_limit
 from apps.api.services.platform_detector import detect_platform
 from apps.api.services.pixel_verifier import verify_pixel
 from apps.api.services.wordpress_plugin_generator import generate_plugin_zip
@@ -77,6 +78,43 @@ async def create_site(
             )
         # Same user already has this site — return it as-is (dedup)
         return SiteOut.model_validate(existing)
+
+    # Per-plan website limit. Checked only on the true-create path: the 409 and
+    # dedup-200 branches above short-circuit first, so re-POSTing a site you
+    # already own always works even at (or over) the limit.
+    effective_plan = get_effective_plan(user.plan, user.current_period_end)
+    limit = get_site_limit(effective_plan)
+    if limit is not None:
+        count = (
+            await db.execute(
+                select(func.count()).select_from(Site).where(Site.user_id == user.id)
+            )
+        ).scalar_one()
+        # `>=` (not `>`) so a grandfathered over-limit user keeps every existing
+        # site but cannot add another.
+        if count >= limit:
+            logger.info(
+                "site_limit_blocked",
+                user_id=str(user.id),
+                plan=effective_plan,
+                limit=limit,
+                current_count=count,
+            )
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "site_limit_reached",
+                    "message": (
+                        f"Your {effective_plan.capitalize()} plan includes "
+                        f"{limit} website{'s' if limit != 1 else ''}. "
+                        "Upgrade to add more."
+                    ),
+                    "plan": effective_plan,
+                    "limit": limit,
+                    "current_count": count,
+                    "upgrade_url": "/pricing",
+                },
+            )
 
     site = Site(
         site_id=_generate_site_id(),
