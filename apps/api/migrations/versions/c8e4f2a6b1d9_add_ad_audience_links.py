@@ -29,6 +29,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    if inspector.has_table("ad_audience_links"):
+        # Table already created by the main.py create_all safety net on an
+        # earlier boot (it front-runs pending CREATE TABLE migrations for any
+        # new model). Alembic still records this revision as applied, so the
+        # chain continues cleanly past it.
+        return
+
     op.create_table(
         "ad_audience_links",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
