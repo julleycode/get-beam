@@ -49,12 +49,14 @@ Today the ONLY writer of `agent_visits` / `agent_fetch_events` is the pixel inge
 
 **WAF status (CORRECTED 25-07-26 — supersedes the earlier KG-1 "403 domain-wide" claim):** Named on-demand AI fetchers REACH the getbeam.fyi origin. Proven live 25-07-26 (Claude-in-Chrome on the user's own browser): ChatGPT AND Gemini both fetched `https://getbeam.fyi/pricing-overview/{token}` → HTTP 200 + real content + cited the exact token; the Cloudflare dashboard showed `ChatGPT-User = Allowed`. The earlier 403 was a **generic/unnamed** bot UA, not a named fetcher UA. Capture is therefore **NOT** infra-gated behind a WAF allowlist for named fetchers. Residual (minor): per-vendor WAF allow-status for `Perplexity-User` / `Claude-User` specifically is unverified (only ChatGPT/OAI + Gemini/Google proven reaching origin) — a CONDITIONAL note, not a blocker.
 
+**Post-ship correction (25-07-26, live verification):** the earlier assumption that getbeam.fyi's web app runs on **Cloudflare Pages** was WRONG. Live verification (Claude-in-Chrome, response headers `x-vercel-id`/`x-vercel-cache`) confirmed the web app is hosted on **Vercel** (project `retarget-agent`, org `tranthaiwork-droid`, repo `julleycode/retarget-agent`, auto-deploys `main`). Cloudflare only proxies DNS/WAF in front (hence the `cf-ray`/`server: cloudflare` headers alongside the Vercel ones) — it does not host the app. This plan's Operator Handoff, Touchpoints, and KG-2 below are corrected accordingly. Vercel Edge Middleware supports `event.waitUntil` natively, so the original KG-2 runtime-support risk is downgraded — the only residual is confirming live beacon delivery once the env vars are set correctly on Vercel and redeployed. (Root cause of the observed 0-capture during verification: the 3 beacon env vars were mistakenly set on Cloudflare Pages instead of Vercel, so `process.env.BEAM_FETCH_BEACON_SECRET` was undefined on the live host — the middleware code itself is correctly deployed, commits `9f4a8a7`/`e26c0f6`.)
+
 ---
 
 ## Goals
 
 1. Record on-demand AI fetcher hits to getbeam.fyi as `agent_visit` + `agent_fetch_event` rows via a server-side beacon, with zero frontend change to the Agents dashboard.
-2. Establish a secure, spoof-resistant trust boundary (shared-secret header, constant-time compare) between the Cloudflare-Pages web layer and the Railway API.
+2. Establish a secure, spoof-resistant trust boundary (shared-secret header, constant-time compare) between the Vercel web layer and the Railway API.
 3. Keep the ingest hot path, Clerk auth flow, and `isPublicRoute` logic untouched; the beacon is additive, fire-and-forget, and fully dormant behind a default-OFF flag + absent-secret skip.
 4. Preserve the program's highest-priority guardrail: agent records stay structurally non-emailable; the beacon touches no identity surface.
 
@@ -72,7 +74,7 @@ Today the ONLY writer of `agent_visits` / `agent_fetch_events` is the pixel inge
 ## Locked Design Decisions (user-approved — do NOT re-litigate)
 
 1. **Scope = site-wide.** Detect on-demand fetcher UA on every getbeam.fyi request in `apps/web/src/middleware.ts`, not only the probe page. Filter to real top-level document GETs from recognized on-demand fetcher UAs ONLY — never fire on static assets, API/`trpc` calls, prefetches, or non-fetcher traffic. Must not disturb Clerk auth or `isPublicRoute`.
-2. **Auth = shared secret.** `POST /api/v1/agents/fetch-beacon` requires header `X-Beam-Fetch-Secret`, whose value is a server-only env var present on BOTH Cloudflare Pages (`BEAM_FETCH_BEACON_SECRET`) and the Railway API. Constant-time compare; 401 without/with wrong secret; never shipped to the browser. This is the trust boundary — HIGH-RISK (spoofed POSTs poison the dashboard + correlation).
+2. **Auth = shared secret.** `POST /api/v1/agents/fetch-beacon` requires header `X-Beam-Fetch-Secret`, whose value is a server-only env var present on BOTH Vercel (`BEAM_FETCH_BEACON_SECRET`) and the Railway API. Constant-time compare; 401 without/with wrong secret; never shipped to the browser. This is the trust boundary — HIGH-RISK (spoofed POSTs poison the dashboard + correlation).
 3. **Write BOTH** `agent_visit` AND `agent_fetch_event` (reuse `persist_agent_visit` + `persist_agent_fetch_event`; `persist_agent_fetch_event` gets a small additive optional `event_time` param — see VALIDATE E1).
 4. **Include Google/Gemini (VALIDATE-locked, D-A resolved).** This phase brings Google-Extended/Gemini IN even though the umbrella listed it out-of-scope. The umbrella reconciliation is a required EXECUTE/UPDATE-PROCESS follow-up.
 5. **Fetch-event timestamp (VALIDATE-locked).** Use the decoded mint-time from the token when the path is `/pricing-overview/{token}`; fall back to server-receive time for site-wide (non-token) paths.
@@ -99,7 +101,7 @@ Today the ONLY writer of `agent_visits` / `agent_fetch_events` is the pixel inge
 | `apps/api/models/site.py` | READ only — resolve `Site.site_id` for tenancy (public, no Clerk). | `Site` class; mirror `events.py:126` `select(Site.tracking_enabled).where(Site.site_id == ...)` |
 | `apps/api/services/agent_fetch_beacon.py` (NEW) | Extract beacon business logic (classify → gate on on-demand tier → resolve site → decode token to mint ts → write both rows) into a testable service function, keeping the router thin. Import ZERO identity/Visitor module (guardrail). | new file; DB-session-injected |
 
-### apps/web (Cloudflare Pages) — the detector + fire-and-forget beacon
+### apps/web (Vercel) — the detector + fire-and-forget beacon
 
 | File | Change | Anchor / note |
 |---|---|---|
@@ -220,7 +222,7 @@ Today the ONLY writer of `agent_visits` / `agent_fetch_events` is the pixel inge
 | classifier additive: `tests/unit -k agent_classifier` green + tier completeness | Fully-Automated | AC-H5-9 google token additive |
 | `fetch-beacon.ts` Vitest matcher truth table | Fully-Automated | AC-H5-10 middleware fires only on real on-demand doc GETs |
 | Web e2e: normal traffic auth/render unaffected | Agent-Probe | AC-H5-10 no Clerk/isPublicRoute regression |
-| Live: fetcher → CF-Pages middleware → `waitUntil` → row post-deploy | Known-Gap (deploy-gated) | real capture end-to-end (KG-2) |
+| Live: fetcher → Vercel middleware → `waitUntil` → row post-deploy | Known-Gap (deploy-gated) | real capture end-to-end (KG-2, downgraded) |
 
 ---
 
@@ -250,7 +252,7 @@ Today the ONLY writer of `agent_visits` / `agent_fetch_events` is the pixel inge
 ### Known-Gaps (deploy/infra-gated — carried, keep gate CONDITIONAL; excluded from CONCERN count)
 
 - **KG-1 (DOWNGRADED — no longer a blocker):** per-vendor WAF allow-status for `Perplexity-User` / `Claude-User` is unverified. ChatGPT/OAI + Gemini/Google are PROVEN to reach the origin (live 25-07-26). The earlier "403 domain-wide" claim was a generic-bot-UA artifact, not a named-fetcher block. → residual note only; refine after real capture.
-- **KG-2:** `event.waitUntil()` reliability on Cloudflare Pages Edge runtime is unverifiable without a deploy. → backlog stub `handoff-05-cfpages-waituntil-verification_NOTE`.
+- **KG-2 (DOWNGRADED 25-07-26 — host correction):** the web app is hosted on **Vercel**, not Cloudflare Pages as originally assumed. Vercel Edge Middleware supports `event.waitUntil` natively, so runtime support is no longer in question. Residual: confirm live beacon delivery once the 3 env vars are set on Vercel (not CF Pages) and the app is redeployed. → backlog stub `handoff-05-cfpages-waituntil-verification_NOTE` (reframed as Vercel verification).
 - **KG-3:** the exact live Gemini/Google on-demand fetch UA token is unverified (no documented token). Ship best-known conservative token defaulted to index tier; refine after real capture. → backlog stub `handoff-05-gemini-ua-token-unverified_NOTE`.
 - **KG-4:** integration tests are Docker/PG-gated in this sandbox — run on a disposable Postgres, never against shared dev DB.
 
@@ -267,12 +269,13 @@ Today the ONLY writer of `agent_visits` / `agent_fetch_events` is the pixel inge
 
 ## Operator Handoff (post-merge USER actions — Claude cannot do these)
 
-1. Generate a strong random secret; set `BEAM_FETCH_BEACON_SECRET` on **Cloudflare Pages** (web, server-only) AND `beam_fetch_beacon_secret` on **Railway** (API) — identical value.
-2. Set the web-side API base + site id env for the beacon target (`api.getbeam.fyi` + the getbeam.fyi site_id).
-3. Live-apply the 8 pending migrations before flipping any flag.
-4. Flip `agent_fetch_beacon_enabled = true` on the API.
-5. (Optional, no longer a precondition) A Cloudflare WAF allowlist for on-demand AI fetchers only matters for vendors NOT yet proven reaching origin (Perplexity/Claude — KG-1). ChatGPT/Gemini already reach origin.
-6. After deploy, verify `event.waitUntil` beacon delivery on CF Pages (KG-2) by triggering a real ChatGPT/Perplexity/Gemini browse and checking the Agents dashboard.
+1. Generate a strong random secret; set it as `BEAM_FETCH_BEACON_SECRET` on **Vercel → project `retarget-agent` → Settings → Environment Variables (Production)**, AND as `beam_fetch_beacon_secret` on **Railway** (API) — identical value. (CORRECTED 25-07-26: the web app is hosted on Vercel, not Cloudflare Pages — do not set these vars on Cloudflare.)
+2. Also set on Vercel (same location): `BEAM_SITE_ID = beam_getbeam_fyi` and `BEAM_API_BASE = https://api.getbeam.fyi` (the getbeam.fyi Beam site_id + the beacon's API target).
+3. **Redeploy** the Vercel project after setting the env vars (env var changes require a redeploy to take effect).
+4. Live-apply the 8 pending migrations before flipping any flag.
+5. Flip `agent_fetch_beacon_enabled = true` on the API.
+6. (Optional, no longer a precondition) A Cloudflare WAF allowlist for on-demand AI fetchers only matters for vendors NOT yet proven reaching origin (Perplexity/Claude — KG-1). ChatGPT/Gemini already reach origin. (Cloudflare still fronts DNS/WAF in front of Vercel — this step is unrelated to the Vercel hosting correction.)
+7. After redeploy, verify `event.waitUntil` beacon delivery on **Vercel** (KG-2, downgraded — Vercel Edge Middleware supports `waitUntil` natively; this step just confirms live delivery) by triggering a real ChatGPT/Perplexity/Gemini browse and checking the Agents dashboard.
 
 ---
 
@@ -292,7 +295,7 @@ Today the ONLY writer of `agent_visits` / `agent_fetch_events` is the pixel inge
 ## Phase Completion Rules
 
 - **CODE DONE** when Sections A–E are implemented and all Fully-Automated + Hybrid gates are green.
-- **CONDITIONAL** (not VERIFIED) while KG-2 (CF-Pages `waitUntil` unverifiable), KG-3 (Gemini UA token unverified), and KG-1 residual (Perplexity/Claude per-vendor WAF allow-status) remain open — deploy/infra-gated, each has a backlog stub; the gate stays CONDITIONAL, never a silent PASS.
+- **CONDITIONAL** (not VERIFIED) while KG-2 (Vercel `waitUntil` live-delivery confirmation pending — downgraded 25-07-26, host corrected from Cloudflare Pages to Vercel), KG-3 (Gemini UA token unverified), and KG-1 residual (Perplexity/Claude per-vendor WAF allow-status) remain open — deploy/infra-gated, each has a backlog stub; the gate stays CONDITIONAL, never a silent PASS.
 - **✅ VERIFIED** only after: (a) all in-blast-radius Fully-Automated + Hybrid gates green (incl. the AC-H5-8 tripwire), (b) regression check confirms no drift in shipped EvalLayer/handoff suites, (c) validate-contract exists, (d) operator completed the Operator Handoff and confirmed a real fetch was captured (user-confirmed working).
 - Autonomous program phase: commit + push EXECUTE changes (separate from process/plan commits) after EVL.
 
@@ -377,13 +380,13 @@ def test_google_vendor_additive_keeps_classify_tier_total():
 ```
 
 Dimension findings:
-- Infra fit: CONCERN — endpoint mounts cleanly at `/api/v1/agents` (main.py:281); config EvalLayer flag block + tables already exist (no migration); `ev.waitUntil` available in `middleware(req, ev)`. BUT `apps/web` has no JS unit runner today → Vitest must be added (decision A, checklist #9); CF-Pages `waitUntil` delivery unverifiable pre-deploy (KG-2).
+- Infra fit: CONCERN — endpoint mounts cleanly at `/api/v1/agents` (main.py:281); config EvalLayer flag block + tables already exist (no migration); `ev.waitUntil` available in `middleware(req, ev)`. BUT `apps/web` has no JS unit runner today → Vitest must be added (decision A, checklist #9); web app host CORRECTED 25-07-26 to Vercel (not Cloudflare Pages) — Vercel Edge Middleware supports `waitUntil` natively, so KG-2 is downgraded to a live-delivery confirmation residual only.
 - Test coverage: CONCERN — strong Fully-Automated unit tier + Hybrid integration incl. the AC-H5-8 identity tripwire (correct min tier for an identity-adjacent surface); web matcher gate depends on the Vitest add; integration is Docker/PG-gated (KG-4). No developed behavior rests on Known-Gap alone → net gate not vacuously green.
 - Breaking changes: CONCERN — new endpoint + classifier edits are purely additive (no existing contract changed), BUT the plan's original Touchpoints "reuse `persist_agent_fetch_event` unchanged / no edit" was FALSE: `created_at` is `Base.server_default=func.now()`, so AC-H5-7 mint-time REQUIRES a small additive `event_time` param on that function (now corrected in the plan). Umbrella "Google-Extended out of scope" needs UP reconciliation.
 - Security surface: CONCERN — trust-boundary primitive is correct (shared secret + `hmac.compare_digest` + default-OFF + dormant-when-secret-absent + 404-not-revealed + 204-not-403 tenancy). VALIDATE CONFIRMED `hmac.compare_digest('','') == True` → an empty configured secret would ACCEPT an empty header (auth bypass) unless guarded — mandatory explicit empty-secret 401 BEFORE the compare (E2). No endpoint rate-limiting (poisoning bounded to non-identity dashboard rows) → backlog follow-up. Keys-only logging must be enforced in the new service (no raw UA/IP).
 - Section A (config + classifier): PASS — anchors accurate (`_VENDOR_TOKENS` L23, `_ON_DEMAND_TOKENS` L46, `classify_tier` L51); additive google vendor safe; conservative default-index resolves R-5/KG-3.
 - Section B (endpoint + service): CONCERN — mechanically feasible (Site-lookup pattern reusable from events.py:126); highest-risk edits = empty-secret guard (E2) + the persist `event_time` edit (E1); route-order POST-vs-GET safe.
-- Section C (web middleware + beacon): CONCERN — feasible; matcher MUST exclude api/trpc (middleware runs for them per `config.matcher`); beacon must stay outside the Clerk callback; deploy-gated KG-2.
+- Section C (web middleware + beacon): CONCERN — feasible; matcher MUST exclude api/trpc (middleware runs for them per `config.matcher`); beacon must stay outside the Clerk callback; host CORRECTED to Vercel — deploy-gated KG-2 (downgraded: Vercel supports waitUntil natively, residual is live-delivery confirmation only).
 - Section D (tests): CONCERN — feasible once Vitest added; AC-H5-8 tripwire must be non-vacuous (real DB, real POST, assert zero identity rows).
 - Section E (docs/registry/closeout): PASS — registry claim + umbrella reconciliation + operator handoff are documentation tasks.
 
@@ -401,15 +404,15 @@ Open gaps:
 
 Known Gaps (pre-classified — excluded from CONCERN/FAIL count; carried as residuals):
 - KG-1 residual: per-vendor WAF allow-status for Perplexity-User / Claude-User unverified (ChatGPT/OAI + Gemini/Google PROVEN reaching origin live 25-07-26). known-gap: documented.
-- KG-2: CF-Pages `event.waitUntil` delivery unverifiable without deploy. known-gap: documented — backlog stub handoff-05-cfpages-waituntil-verification_NOTE.
+- KG-2 (DOWNGRADED 25-07-26 — host correction): web app is Vercel, not Cloudflare Pages; Vercel Edge Middleware supports `event.waitUntil` natively. known-gap: documented — residual is confirming live beacon delivery post-config/redeploy — backlog stub handoff-05-cfpages-waituntil-verification_NOTE (reframed for Vercel).
 - KG-3: exact live Gemini/Google on-demand fetch UA token unverified. known-gap: documented — backlog stub handoff-05-gemini-ua-token-unverified_NOTE.
 - KG-4: integration tests Docker/PG-gated (disposable Postgres only). known-gap: documented.
 
 What this coverage does NOT prove:
 - Fully-Automated unit gates prove request/response contract + classify gating + auth + tenancy + token decode in-process; they do NOT prove real DB persistence (that is AC-H5-8 Hybrid) nor real edge-runtime delivery.
 - The AC-H5-8 Hybrid tripwire proves no identity rows are written against a real Postgres; it does NOT prove behavior on the production DB, nor under concurrent load.
-- The Vitest matcher truth table proves the pure UA/path decision; it does NOT prove the middleware actually fires under the CF-Pages Edge runtime (KG-2) nor that a real fetcher UA reaches the origin for every vendor (KG-1 residual for Perplexity/Claude).
-- No gate proves end-to-end live capture (fetcher → CF-Pages middleware → waitUntil beacon → row) — that is the deploy-gated Known-Gap requiring the operator's post-deploy manual probe.
+- The Vitest matcher truth table proves the pure UA/path decision; it does NOT prove the middleware actually fires under the live Vercel Edge runtime (KG-2, downgraded — Vercel supports `waitUntil` natively) nor that a real fetcher UA reaches the origin for every vendor (KG-1 residual for Perplexity/Claude).
+- No gate proves end-to-end live capture (fetcher → Vercel middleware → waitUntil beacon → row) — that is the deploy-gated Known-Gap requiring the operator's post-deploy manual probe.
 
 Gate: CONDITIONAL (TERMINAL, cycle-1 accepted; no FAILs; 3 actionable concerns resolved; developed behavior proven by Fully-Automated + Hybrid gates; only pre-accepted deploy/infra-gated known-gaps KG-1..KG-4 remain — deliberately CONDITIONAL per Phase Completion Rules, never a silent PASS)
 Accepted by: session (autonomous, /goal execution) — accepted concerns: [web-runner-Vitest-add (resolved in-plan, checklist #9), persist-event_time-edit (E1), empty-secret-401-guard (E2), endpoint-rate-limit-deferred (backlog), gemini-UA-conservative-token (E5/KG-3)]

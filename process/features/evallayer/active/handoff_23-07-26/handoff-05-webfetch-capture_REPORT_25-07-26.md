@@ -91,15 +91,22 @@ performed (per instruction).
 
 ## Operator Handoff (post-merge USER actions — Claude cannot do these)
 
-1. Generate a strong random secret; set `BEAM_FETCH_BEACON_SECRET` on Cloudflare Pages (web) AND
+**CORRECTED 25-07-26 (live verification):** the web app is hosted on **Vercel** (project
+`retarget-agent`), not Cloudflare Pages as originally assumed here — Cloudflare only proxies
+DNS/WAF. Set the beacon env vars on Vercel, not Cloudflare.
+
+1. Generate a strong random secret; set it as `BEAM_FETCH_BEACON_SECRET` on **Vercel → project
+   `retarget-agent` → Settings → Environment Variables (Production)** AND as
    `beam_fetch_beacon_secret` on Railway (API) — identical value, server-only.
-2. Set the web-side beacon target env: `BEAM_API_BASE` (e.g. `https://api.getbeam.fyi`) + `BEAM_SITE_ID`
-   (the getbeam.fyi Beam site_id).
-3. Live-apply the 8 pending EvalLayer/handoff migrations before flipping any flag.
-4. Flip `agent_fetch_beacon_enabled = true` on the API.
-5. Run the KG-4 integration test on a disposable Postgres before relying on prod capture.
-6. After deploy, trigger a real ChatGPT/Perplexity/Gemini browse of getbeam.fyi and confirm a new
-   Agents-dashboard row (closes KG-2). Capture the real Gemini fetch UA to close KG-3.
+2. Also set on Vercel: `BEAM_API_BASE` (`https://api.getbeam.fyi`) + `BEAM_SITE_ID`
+   (`beam_getbeam_fyi`, the getbeam.fyi Beam site_id).
+3. **Redeploy** the Vercel project after setting the env vars.
+4. Live-apply the 8 pending EvalLayer/handoff migrations before flipping any flag.
+5. Flip `agent_fetch_beacon_enabled = true` on the API.
+6. Run the KG-4 integration test on a disposable Postgres before relying on prod capture.
+7. After redeploy, trigger a real ChatGPT/Perplexity/Gemini browse of getbeam.fyi and confirm a new
+   Agents-dashboard row (closes KG-2 — downgraded: Vercel Edge Middleware supports `waitUntil`
+   natively, so this just confirms live delivery). Capture the real Gemini fetch UA to close KG-3.
 
 ## Forward Preview
 

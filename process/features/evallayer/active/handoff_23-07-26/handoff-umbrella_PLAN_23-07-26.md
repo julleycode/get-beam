@@ -186,7 +186,7 @@ START: Phase 1 (H1), loop step RESEARCH (pending). Spawn vc-research-agent for P
 | 2 — Handoff correlation + dashboard (H2) | `process/features/evallayer/active/handoff_23-07-26/phase-02-handoff-correlation_PLAN_23-07-26.md` | Periodic sweep joining on-demand fetches ↔ AI-referral clicks → `agent_handoff_links`; visitor-detail badge; AC-H2-3 emailability regression (program's highest-priority gate) | Phase 1 |
 | 3 — Intent signals (H3) | `process/features/evallayer/active/handoff_23-07-26/phase-03-intent-signals_PLAN_23-07-26.md` | Live on-demand commercial-page alert (reuse `hot_alert.py`); rolling-window spike detector; company-correlation metadata (never a new outreach trigger) | Phase 1 (parallel-safe with Phase 2 — see Blast Radius note below) |
 | 4 — Citation-watermark feasibility (H4) | `process/features/evallayer/active/handoff_23-07-26/phase-04-watermark-feasibility_PLAN_23-07-26.md` | Manual-first, double-opt-in live probe (VC-FEASIBILITY-PROBE-NEEDED, cost-class needs-live-provider); VERDICT artifact; conditional implementation only on VIABLE + sign-off | Phase 1 (serving infra only — probe itself has no phase dependency beyond H1's test-page infra if any is reused) |
-| 5 — Server-side AI-fetch capture (H5, added post-H4 25-07-26) | `process/features/evallayer/active/handoff_23-07-26/handoff-05-webfetch-capture_PLAN_25-07-26.md` | Cloudflare Pages middleware `waitUntil` beacon → `POST /fetch-beacon` → additive `agent_fetch_events` row, closing the H4-surfaced gap that edge/CDN-served pages never reach the Python ingest path; adds a conservative `google` (index-tier only) vendor token | H1 (additive to `agent_fetch_events` persistence; no new migration) |
+| 5 — Server-side AI-fetch capture (H5, added post-H4 25-07-26) | `process/features/evallayer/active/handoff_23-07-26/handoff-05-webfetch-capture_PLAN_25-07-26.md` | Vercel (web host — CORRECTED 25-07-26, was mis-assumed Cloudflare Pages) middleware `waitUntil` beacon → `POST /fetch-beacon` → additive `agent_fetch_events` row, closing the H4-surfaced gap that edge/CDN-served pages never reach the Python ingest path; adds a conservative `google` (index-tier only) vendor token | H1 (additive to `agent_fetch_events` persistence; no new migration) |
 
 ### Join Conditions
 
@@ -539,14 +539,17 @@ H1/H2/H3 (KG in the consolidated backlog note below) and for H5 (KG-4).
   longer attributed to a blanket bot block. Per AC-H4-2, H4 remains COMPLETE on its recorded
   verdict — no watermark implementation is authorized without a fresh VIABLE probe. See
   `phase-04-watermark-feasibility_FEASIBILITY_24-07-26.md` for the original probe record.
-- **H5 — Server-side AI-fetch capture (added 25-07-26, post-H4):** Cloudflare Pages
+- **H5 — Server-side AI-fetch capture (added 25-07-26, post-H4):** Vercel (web host — CORRECTED
+  25-07-26, live verification found the web app runs on Vercel project `retarget-agent`, not
+  Cloudflare Pages as originally assumed; Cloudflare only proxies DNS/WAF in front)
   middleware-`waitUntil` beacon (`fireFetchBeacon`) → `POST /fetch-beacon` → additive
   `agent_fetch_events` row, closing the gap H4 surfaced — edge/CDN-served pages (the web app) never
   reach the Python ingest path H1 instruments, so on-demand fetches to those pages were invisible to
   capture regardless of any WAF/403 question. Also adds a conservative `google` vendor token
   (`google-cloudvertexbot`, index-tier only, not on-demand) to the classifier. All Fully-Automated
   gates green (unit 15/15, classifier 24/24, Vitest 39/39, web edge build). CONDITIONAL — Docker
-  integration run (KG-4) and live deploy confirmation (KG-1/KG-2) remain operator actions. See
+  integration run (KG-4) and live deploy confirmation (KG-1/KG-2, KG-2 downgraded since Vercel
+  supports `waitUntil` natively) remain operator actions. See
   `handoff-05-webfetch-capture_REPORT_25-07-26.md`.
 
 **Consolidated known-gaps (program-wide):**
