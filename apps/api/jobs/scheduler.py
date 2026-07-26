@@ -5,10 +5,12 @@ trigger-agnostic services (e.g. resolution_runner) so jobs stay thin and
 can move to a Railway cron service or Celery worker without rewrites.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from sqlalchemy import select
 
 from apps.api.config import settings
 from apps.api.models.database import async_session
@@ -202,14 +204,172 @@ async def _intent_signal_sweep_job() -> None:
         logger.exception("intent_signal_sweep_crashed")
 
 
+async def _sweep_one_site(
+    site_id: str,
+    allow_defer: bool,
+    wait_seconds: int = 0,
+) -> tuple[str, int]:
+    """Attempt one site's FULL recompute. Returns (outcome, visitors).
+
+    Outcomes: "ran" | "deferred" | "skipped".
+
+    E17 — the Redis-degraded fail direction is FLAG-CONDITIONAL, not blanket.
+    "A duplicate full recompute is idempotent" is true of full-vs-full and FALSE
+    of full-vs-incremental: a `since=None` SET racing an additive incremental
+    merge can inflate total_pageviews / total_sessions, which is the exact G1
+    failure this phase exists to prevent. So with the incremental flag ON we skip
+    the site (stale-but-correct beats wrong — D7's own hierarchy); with it OFF we
+    proceed.
+    """
+    from apps.api.services import aggregation_debounce as dbnc
+    from apps.api.services.visitor_aggregator import aggregate_visitors_for_site
+
+    key = dbnc.debounce_key(site_id)
+    marker = dbnc.sweep_pending_key(site_id)
+
+    acquired = await dbnc.try_acquire(key, settings.aggregation_min_interval_seconds)
+
+    # End-of-pass retry (E16c): the yield marker is already set, so no NEW
+    # per-ingest run may take the key — it therefore frees within one TTL. Poll
+    # for it rather than giving up instantly, otherwise a short pass never
+    # actually retries and the deferred site waits a whole interval.
+    if acquired is False and wait_seconds > 0:
+        deadline = asyncio.get_running_loop().time() + wait_seconds
+        while acquired is False and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(1)
+            acquired = await dbnc.try_acquire(
+                key, settings.aggregation_min_interval_seconds
+            )
+
+    if acquired is None:
+        if settings.aggregation_incremental_enabled:
+            logger.warning("aggregation_sweep_skipped_redis_degraded", site_id=site_id)
+            return ("skipped", 0)
+        # Flag OFF → full-vs-full only → genuinely idempotent → fail open.
+        logger.info("aggregation_sweep_redis_degraded_proceeding", site_id=site_id)
+    elif acquired is False:
+        if allow_defer:
+            # E16(a) — set the YIELD MARKER instead of silently dropping the
+            # site. Per-ingest triggers stand down while it is set, so the
+            # debounce key frees within one TTL and the end-of-pass retry wins.
+            await dbnc.try_acquire(
+                marker,
+                settings.aggregation_min_interval_seconds
+                * dbnc.SWEEP_PENDING_TTL_MULTIPLIER,
+            )
+            logger.info("aggregation_sweep_deferred", site_id=site_id)
+            return ("deferred", 0)
+        logger.warning("aggregation_sweep_site_contended", site_id=site_id)
+        await dbnc.release(marker)
+        return ("skipped", 0)
+
+    try:
+        async with async_session() as db:
+            # E19 — the sweep is the REPAIR path. `since=None` is passed
+            # explicitly and unconditionally; the incremental branch is never
+            # taken, whatever aggregation_incremental_enabled says. This job is
+            # the sole writer of avg_time_on_page and intent_score under D7.
+            count = await aggregate_visitors_for_site(db, site_id, since=None)
+        return ("ran", count)
+    except Exception:
+        logger.exception("aggregation_sweep_site_failed", site_id=site_id)
+        return ("skipped", 0)
+    finally:
+        # E16(d) — clear the marker whether the site succeeded or failed, so a
+        # crash can never wedge every per-ingest trigger for that site.
+        await dbnc.release(marker)
+
+
+async def _aggregation_sweep_job() -> None:
+    """Periodic FULL-recompute repair sweep (capacity-hardening Phase 3, item 11).
+
+    This job is the mechanism behind the Public Contracts freshness bound: with
+    `aggregation_incremental_enabled` ON it is the ONLY writer of
+    `avg_time_on_page` and `intent_score` (D7), so worst-case staleness equals
+    `aggregation_sweep_interval_minutes`. With the flag OFF it is
+    redundant-but-harmless (an idempotent full recompute).
+
+    Pool-awareness is MANDATORY, not advisory (item 11d): the API container's
+    pool is pool_size=3 + max_overflow=2 = 5 connections, shared with request
+    traffic and ten other scheduler jobs. Sites are processed STRICTLY
+    SEQUENTIALLY, one open session at a time — no parallel fan-out over sites,
+    and no long-lived outer session held across the loop.
+    """
+    try:
+        from apps.api.models.site import Site
+
+        async with async_session() as db:
+            result = await db.execute(select(Site.site_id))
+            site_ids = [row[0] for row in result.all()]
+
+        ran = 0
+        visitors = 0
+        deferred: list[str] = []
+
+        for site_id in site_ids:
+            outcome, count = await _sweep_one_site(site_id, allow_defer=True)
+            if outcome == "ran":
+                ran += 1
+                visitors += count
+            elif outcome == "deferred":
+                deferred.append(site_id)
+
+        # E16(c) — retry deferred sites once at the end of the pass. The debounce
+        # TTL is aggregation_min_interval_seconds and no NEW per-ingest run may
+        # take the key while the yield marker is set, so the key frees within one
+        # TTL. Without this retry even transient contention costs a full interval.
+        retried = 0
+        for site_id in deferred:
+            outcome, count = await _sweep_one_site(
+                site_id,
+                allow_defer=False,
+                wait_seconds=settings.aggregation_min_interval_seconds + 5,
+            )
+            if outcome == "ran":
+                ran += 1
+                retried += 1
+                visitors += count
+
+        logger.info(
+            "aggregation_sweep_complete",
+            sites=len(site_ids),
+            aggregated=ran,
+            deferred=len(deferred),
+            retried=retried,
+            visitors=visitors,
+        )
+    except Exception:
+        logger.exception("aggregation_sweep_crashed")
+
+
 def start_scheduler() -> None:
-    """Start the background scheduler. Call once at app startup."""
+    """Start the background scheduler. Call once at app startup.
+
+    Capacity-hardening Phase 4c: EVERY `interval` job below carries an explicit
+    `jitter` and `misfire_grace_time`.
+
+    - `jitter` — these are interval triggers, so they align to BOOT time, not to
+      the wall clock. Every container in a deploy boots within seconds of the
+      others, so without jitter the same job fires simultaneously across all
+      containers against one shared 5-connection pool. Jitter is nominally ~10%
+      of the default interval, capped, so the fleet spreads out.
+    - `misfire_grace_time` — APScheduler's default is 1 second, so any job that
+      is late (busy event loop, container under load) is SILENTLY SKIPPED rather
+      than run. Every value below is explicit for that reason.
+
+    The single `CronTrigger` job (`outcome_digest`) is deliberately excluded:
+    `jitter` semantics differ for cron, and a weekly digest has no thundering-herd
+    problem. Asserted by tests/unit/test_scheduler_job_config.py (AC13), which
+    derives the counts from the AST — never from line numbers.
+    """
     scheduler.add_job(
         _sync_job,
         "interval",
         minutes=settings.sync_interval_minutes,
         id="sync_all_feeds",
         replace_existing=True,
+        jitter=300,
+        misfire_grace_time=300,
     )
     scheduler.add_job(
         _resolution_sweep_job,
@@ -225,6 +385,8 @@ def start_scheduler() -> None:
         # on every boot is safe. (Railway cron is the durable fix — see
         # apps/api/jobs/run_sweep_once.py.)
         next_run_time=datetime.now(timezone.utc) + timedelta(seconds=20),
+        jitter=180,
+        misfire_grace_time=300,
     )
     scheduler.add_job(
         _publish_scheduled_blog_job,
@@ -232,6 +394,10 @@ def start_scheduler() -> None:
         minutes=1,
         id="publish_scheduled_blog",
         replace_existing=True,
+        # 1-minute interval: keep jitter small enough that publishing stays
+        # near-on-time, but non-zero so it stops coinciding with the longer jobs.
+        jitter=6,
+        misfire_grace_time=30,
     )
     scheduler.add_job(
         _retention_purge_job,
@@ -239,6 +405,12 @@ def start_scheduler() -> None:
         hours=settings.retention_purge_interval_hours,
         id="retention_purge",
         replace_existing=True,
+        # Holds TWO connections for the whole purge (an outer advisory-lock
+        # session plus an inner delete session — retention.py:116/122, :177/183).
+        # That 2-connection reservation is documented in the config.py 4b pool
+        # math; the wide jitter keeps it off the boot burst.
+        jitter=600,
+        misfire_grace_time=3600,
     )
     scheduler.add_job(
         _agent_verification_sweep_job,
@@ -246,6 +418,8 @@ def start_scheduler() -> None:
         minutes=settings.agent_verification_sweep_interval_minutes,
         id="agent_verification_sweep",
         replace_existing=True,
+        jitter=90,
+        misfire_grace_time=300,
     )
     scheduler.add_job(
         _handoff_correlation_sweep_job,
@@ -253,6 +427,8 @@ def start_scheduler() -> None:
         minutes=settings.handoff_correlation_sweep_interval_minutes,
         id="handoff_correlation_sweep",
         replace_existing=True,
+        jitter=60,
+        misfire_grace_time=300,
     )
     scheduler.add_job(
         _intent_signal_sweep_job,
@@ -260,6 +436,29 @@ def start_scheduler() -> None:
         minutes=settings.intent_signal_sweep_interval_minutes,
         id="intent_signal_sweep",
         replace_existing=True,
+        jitter=60,
+        misfire_grace_time=300,
+    )
+    scheduler.add_job(
+        _aggregation_sweep_job,
+        "interval",
+        minutes=settings.aggregation_sweep_interval_minutes,
+        id="aggregation_sweep",
+        replace_existing=True,
+        # E18 — explicit boot offset, same reason as resolution_sweep above:
+        # APScheduler's first interval fire is at +interval, and the API process
+        # restarts on every deploy. A 60-minute job on a service that redeploys
+        # more often than hourly would NEVER fire, voiding the Public Contracts
+        # staleness bound for avg_time_on_page / intent_score. The offset is
+        # larger than the existing 20/30/45/60s offsets so the (heaviest) sweep
+        # does not pile onto the boot burst; Phase 4c's jitter then spreads it
+        # across containers.
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
+        # Phase 4c — the heaviest job in the file (full-history recompute per
+        # site). Jitter matters most here: without it every container runs the
+        # unbounded sweep at the same instant against the shared pool.
+        jitter=300,
+        misfire_grace_time=600,
     )
     if settings.changelog_sync_enabled:
         scheduler.add_job(
@@ -269,6 +468,8 @@ def start_scheduler() -> None:
             id="changelog_sync",
             replace_existing=True,
             next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
+            jitter=600,
+            misfire_grace_time=3600,
         )
     if settings.connection_nudge_enabled:
         scheduler.add_job(
@@ -278,6 +479,8 @@ def start_scheduler() -> None:
             id="connection_nudge",
             replace_existing=True,
             next_run_time=datetime.now(timezone.utc) + timedelta(seconds=45),
+            jitter=300,
+            misfire_grace_time=600,
         )
     if settings.referrals_enabled:
         scheduler.add_job(
@@ -287,6 +490,8 @@ def start_scheduler() -> None:
             id="referral_activation",
             replace_existing=True,
             next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
+            jitter=300,
+            misfire_grace_time=600,
         )
     if settings.outcomes_digest_enabled:
         from apscheduler.triggers.cron import CronTrigger

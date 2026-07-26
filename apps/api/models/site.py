@@ -61,5 +61,13 @@ class Site(Base):
     last_outcome_digest_sent_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )
+    # Watermark for the incremental aggregation path (capacity-hardening Phase 3,
+    # decision D2). NULL = never aggregated incrementally → the next run does a
+    # full recompute and then stamps this. Advanced ONLY after a successful
+    # commit of that run's upserts, and the window is half-open
+    # (created_at > last_aggregated_at) so no event is ever merged twice.
+    last_aggregated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
