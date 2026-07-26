@@ -63,6 +63,18 @@ def _visitor():
 
 
 class TestEnricherSkipsKnown:
+    @pytest.fixture(autouse=True)
+    def _no_domain_fallback(self, monkeypatch):
+        """A PDL miss no longer ends the waterfall — it falls through to Apollo
+        and then to the free company-from-domain fill. These tests assert the
+        known-contact GATE, so stub the tail to None and keep the original
+        "ends right after the PDL call" shape."""
+        import apps.api.services.enricher as enricher_mod
+
+        monkeypatch.setattr(
+            enricher_mod, "_domain_enrichment", lambda email: None
+        )
+
     def _enricher(self):
         db = AsyncMock()
         db.commit = AsyncMock()
@@ -70,6 +82,7 @@ class TestEnricherSkipsKnown:
         # Return None so the waterfall ends right after the (asserted) PDL call —
         # we only care WHETHER the paid step was reached, not the full cascade.
         e._enrich_pdl = AsyncMock(return_value=None)
+        e._enrich_apollo = AsyncMock(return_value=None)
         return e
 
     @pytest.mark.asyncio
@@ -96,6 +109,12 @@ class TestEnricherSkipsKnown:
                    AsyncMock(return_value=(False, None))):
             s.skip_enrich_known = True
             s.people_data_labs_api_key = "k"
+            # These tests assert the KNOWN-CONTACT gate, not the fallback chain.
+            # Without explicit values the patched settings MagicMock reads
+            # truthy and _enrich_pdl returning None would fall through into a
+            # real Apollo HTTP call.
+            s.apollo_api_key = ""
+            s.mock_external_apis = False
             await e.enrich_tier1(visitor, identified)
         e._enrich_pdl.assert_awaited_once()  # reached the paid waterfall
 
@@ -109,6 +128,12 @@ class TestEnricherSkipsKnown:
                    AsyncMock(return_value=(True, "csv"))) as chk:
             s.skip_enrich_known = False
             s.people_data_labs_api_key = "k"
+            # These tests assert the KNOWN-CONTACT gate, not the fallback chain.
+            # Without explicit values the patched settings MagicMock reads
+            # truthy and _enrich_pdl returning None would fall through into a
+            # real Apollo HTTP call.
+            s.apollo_api_key = ""
+            s.mock_external_apis = False
             await e.enrich_tier1(visitor, identified)
         chk.assert_not_called()  # gate off → don't even check known
         e._enrich_pdl.assert_awaited_once()

@@ -3,11 +3,19 @@
 Waterfall enrichment — output of provider A becomes input for provider B:
 
 1. PDL Enrich (email → job title, company, LinkedIn URL, Twitter handle)
+   1b. Apollo people/match — fallback when PDL has no record for the address
+   1c. Email domain → company name/domain — free last resort, no job title
 2. Proxycurl (LinkedIn URL from step 1 → headline, summary, followers)
 3. Twitter (handle from step 1 → bio, followers, topics)
 4. Deep Research (Claude API + web search → comprehensive social profile)
 
-System-level API keys (PDL, Proxycurl) are used automatically.
+Steps 2-4 consume step 1's OUTPUT, so a step-1 miss used to mean zero
+enrichment for that visitor — and PDL, a US-centric B2B dataset, misses most
+non-US and small-company addresses. Steps 1b/1c exist to keep the waterfall
+producing something in that (common) case. Consumer mailboxes deliberately get
+nothing from 1c: an employer cannot be inferred from gmail.com.
+
+System-level API keys (PDL, Apollo, Proxycurl) are used automatically.
 BYOK keys (user-provided) extend coverage when system keys are absent.
 """
 
@@ -54,6 +62,39 @@ _http_retry = retry(
     retry=retry_if_exception(_is_transient_http_error),
     reraise=True,
 )
+
+
+# Consumer mailbox providers. An address here says nothing about an employer,
+# so the domain fallback must not invent a company from it (a "Gmail" company
+# on a lead is worse than an empty field).
+_FREE_MAIL_DOMAINS: frozenset[str] = frozenset({
+    "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.uk", "yahoo.co.jp",
+    "hotmail.com", "hotmail.co.uk", "outlook.com", "live.com", "msn.com",
+    "aol.com", "icloud.com", "me.com", "mac.com", "proton.me", "protonmail.com",
+    "gmx.com", "gmx.de", "mail.com", "zoho.com", "yandex.com", "yandex.ru",
+    "qq.com", "163.com", "126.com", "naver.com", "hanmail.net", "daum.net",
+    "fastmail.com", "hey.com", "tutanota.com", "pm.me", "duck.com",
+})
+
+
+def _domain_enrichment(email: str | None) -> dict | None:
+    """Last-resort, zero-cost enrichment: company identity from the email domain.
+
+    Returns None for consumer mailboxes and malformed addresses. This yields
+    only ``company_name``/``company_domain`` — deliberately no job title, since
+    a domain says where someone works, never what they do.
+    """
+    if not email or "@" not in email:
+        return None
+    domain = email.rsplit("@", 1)[1].strip().lower().lstrip("www.")
+    if not domain or "." not in domain or domain in _FREE_MAIL_DOMAINS:
+        return None
+    # "acme-corp.co.uk" → "Acme Corp"; the registrable label only.
+    label = domain.split(".")[0]
+    company = label.replace("-", " ").replace("_", " ").strip().title()
+    if not company:
+        return None
+    return {"company_name": company, "company_domain": domain}
 
 
 # All enrichment fields — used for completeness scoring
@@ -212,22 +253,41 @@ class Enricher:
         # here and the caller leaves the status retryable; only a definitive
         # no-match marks "failed".
         try:
-            pdl_data = await self._enrich_pdl(identified.email, visitor=visitor)
+            person_data = await self._enrich_pdl(identified.email, visitor=visitor)
         except _PDLNonTransientError:
             # Bad/expired PDL key (or 400): leave the visitor retryable instead
             # of marking it permanently "failed" on a key problem.
             logger.warning("enrichment_pdl_non_transient_retryable", visitor_id=visitor.visitor_id[:8])
             return None
-        if not pdl_data:
+
+        # ── Step 1b: PDL missed → Apollo person-match ──
+        # PDL is a US-centric B2B dataset, so it 404s on most non-US and
+        # small-company addresses. Before this fallback existed a PDL miss meant
+        # zero enrichment: steps 2 and 3 below consume PDL's own output, so they
+        # cannot run without it.
+        if not person_data:
+            person_data = await self._enrich_apollo(identified.email, visitor=visitor)
+
+        # ── Step 1c: both people-providers missed → free company-from-domain ──
+        if not person_data:
+            person_data = _domain_enrichment(identified.email)
+            if person_data:
+                logger.info(
+                    "enrichment_domain_fallback",
+                    visitor_id=visitor.visitor_id[:8],
+                    company_domain=person_data.get("company_domain"),
+                )
+
+        if not person_data:
             visitor.enrichment_status = "failed"
             await self.db.commit()
             return None
 
-        # Upsert enrichment profile with PDL data
-        profile = await self._upsert_profile(visitor, pdl_data)
+        # Upsert enrichment profile with whichever provider matched
+        profile = await self._upsert_profile(visitor, person_data)
 
         # ── Step 2: Cascade — Proxycurl (linkedin_url → details) ──
-        linkedin_url = pdl_data.get("linkedin_url") or (profile.linkedin_url if profile else None)
+        linkedin_url = person_data.get("linkedin_url") or (profile.linkedin_url if profile else None)
         if linkedin_url:
             proxycurl_key = self._get_system_proxycurl_key()
             if proxycurl_key:
@@ -239,7 +299,7 @@ class Enricher:
         # ── Step 3: Cascade — Twitter (handle → bio/followers) ──
         # Runs when EITHER the official X bearer token OR the TwitterAPI.io
         # fallback key is configured — _enrich_twitter picks the provider.
-        twitter_handle = pdl_data.get("twitter_handle") or (profile.twitter_handle if profile else None)
+        twitter_handle = person_data.get("twitter_handle") or (profile.twitter_handle if profile else None)
         if twitter_handle:
             twitter_key = self._get_system_twitter_key()
             if twitter_key or settings.twitterapi_io_api_key:
@@ -250,7 +310,7 @@ class Enricher:
 
         # ── Step 4 (opt-in): read known YouTube/Reddit content into persona ──
         # Non-fatal, flag-gated, high-intent only. Writes to social_context.
-        await self._fetch_and_store_content(visitor, profile, pdl_data)
+        await self._fetch_and_store_content(visitor, profile, person_data)
 
         # ── Avatar (secondary): if Twitter gave no image, try OSINT profiles.
         # Read after Step 4 so any freshly-written social_context is included.
@@ -477,6 +537,105 @@ class Enricher:
                 # negative-cache; signal the caller to keep the visitor retryable.
                 raise _PDLNonTransientError(f"PDL non-transient {resp.status_code}")
         return None
+
+    @_http_retry
+    async def _enrich_apollo(self, email: str, *, visitor: Visitor | None = None) -> dict | None:
+        """Enrich a person from Apollo by email — the fallback when PDL 404s.
+
+        Apollo's coverage skews differently from PDL's (better on non-US and
+        small companies), which is the entire reason this exists. Costs 0
+        credits when Apollo finds nothing, ~1 when it does; personal emails and
+        phone numbers are deliberately NOT requested (``reveal_personal_emails``
+        defaults false) — we already hold the address, and revealing more PII
+        than the product needs is not free, legally or in credits.
+
+        Returns the same dict shape as ``_enrich_pdl`` so ``_upsert_profile``
+        consumes either interchangeably. Cached 7 days, positive and negative.
+        """
+        if not settings.apollo_api_key or not settings.apollo_enabled:
+            return None
+
+        cache_key = f"enrich:apollo:{hashlib.sha256(email.strip().lower().encode()).hexdigest()}"
+        hit, cached = await self._cache_get(cache_key)
+        if hit:
+            logger.debug("apollo_enrich_cache_hit", match=cached is not None)
+            return cached
+
+        if settings.mock_external_apis:
+            domain = email.rsplit("@", 1)[-1]
+            data = {
+                "job_title": "Mock Title",
+                "company_name": f"Mock Co ({domain})",
+                "company_domain": domain,
+                "seniority_level": "manager",
+            }
+            await self._cache_set(cache_key, data)
+            return data
+
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                "https://api.apollo.io/api/v1/people/match",
+                headers={"X-Api-Key": settings.apollo_api_key},
+                json={"email": email},
+            )
+            if resp.status_code != 200:
+                if resp.status_code == 404:
+                    logger.debug("apollo_enrich_no_match", email_prefix=email[:5])
+                    await self._cache_set(cache_key, None)
+                    await self._log_enrich(visitor, "apollo", "person_enrich", False)
+                    return None
+                logger.warning("apollo_enrich_error", status=resp.status_code)
+                if resp.status_code in _TRANSIENT_HTTP_STATUSES:
+                    resp.raise_for_status()
+                # Non-transient (401 bad key / 422): not a no-match. Don't
+                # negative-cache, and don't raise — PDL already missed, so the
+                # caller should still fall through to the free domain fill.
+                return None
+
+            person = (resp.json() or {}).get("person") or {}
+            if not person:
+                # A 200 with no person IS Apollo's documented "no records
+                # enriched" answer, so treat it as a definitive miss.
+                logger.debug("apollo_enrich_empty_person", email_prefix=email[:5])
+                await self._cache_set(cache_key, None)
+                await self._log_enrich(visitor, "apollo", "person_enrich", False)
+                return None
+
+            org = person.get("organization") or {}
+            data = {
+                "full_name": person.get("name"),
+                "job_title": person.get("title"),
+                "company_name": org.get("name"),
+                "company_domain": org.get("primary_domain") or org.get("website_url"),
+                "company_size": org.get("estimated_num_employees"),
+                "industry": org.get("industry"),
+                "seniority_level": person.get("seniority"),
+                "linkedin_url": person.get("linkedin_url"),
+                "twitter_handle": (person.get("twitter_url", "") or "").rstrip("/").split("/")[-1] or None,
+                "facebook_url": person.get("facebook_url"),
+                "github_url": person.get("github_url"),
+                "city": person.get("city"),
+                "country": person.get("country"),
+            }
+            if not any(data.get(f) for f in ("job_title", "company_name", "linkedin_url")):
+                # Shape drift guard: a 200 that maps to nothing usable means the
+                # response keys moved. Log the keys (never the values — this is
+                # PII) so it surfaces instead of silently enriching nobody.
+                logger.warning(
+                    "apollo_enrich_unmapped_response",
+                    person_keys=sorted(person.keys())[:25],
+                    org_keys=sorted(org.keys())[:25],
+                )
+                await self._log_enrich(visitor, "apollo", "person_enrich", False)
+                return None
+
+            # company_size arrives as an int; the column is a string.
+            if data["company_size"] is not None:
+                data["company_size"] = str(data["company_size"])
+            await self._cache_set(cache_key, data)
+            await self._log_enrich(visitor, "apollo", "person_enrich", True)
+            logger.info("cascade_apollo_ok", email_prefix=email[:5])
+            return data
 
     async def _enrich_proxycurl(
         self, linkedin_url: str, *, api_key: str, visitor: Visitor | None = None
