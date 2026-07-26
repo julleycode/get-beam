@@ -116,7 +116,17 @@ def correlate_fetch_to_clicks(
             continue
         if classify_ai_source(getattr(ev, "referrer", None)) != expected:
             continue
-        delta = int((ev.created_at - fetch_at).total_seconds())
+        # Event.created_at is naive (models/event.py DateTime without tz) while
+        # AgentFetchEvent.created_at / fetch_at are aware (Base DateTime(timezone=True)).
+        # Subtracting mixed-awareness datetimes raises TypeError, so normalize both
+        # operands to aware UTC before computing the delta. Defensive on either side.
+        ev_created = ev.created_at
+        if ev_created.tzinfo is None:
+            ev_created = ev_created.replace(tzinfo=timezone.utc)
+        fetch_at_aware = fetch_at
+        if fetch_at_aware.tzinfo is None:
+            fetch_at_aware = fetch_at_aware.replace(tzinfo=timezone.utc)
+        delta = int((ev_created - fetch_at_aware).total_seconds())
         if delta < 0 or delta > _WINDOW_SECONDS:
             continue
         exact = fetch_page_path is not None and ev.page_path == fetch_page_path
@@ -186,7 +196,14 @@ async def run_handoff_correlation_sweep(
         try:
             counters["processed"] += 1
 
+            # AgentFetchEvent.created_at is aware (Base DateTime(timezone=True))
+            # but Event.created_at is naive (models/event.py). Comparing/subtracting
+            # them — both in the SQL filter below and inside correlate_fetch_to_clicks
+            # — raises on mixed awareness. Coerce fetch_at to naive UTC so it matches
+            # the naive Event column the sweep queries and diffs against.
             fetch_at = fetch_event.created_at
+            if fetch_at.tzinfo is not None:
+                fetch_at = fetch_at.astimezone(timezone.utc).replace(tzinfo=None)
             window_end = fetch_at + timedelta(seconds=_WINDOW_SECONDS)
             # site_id-scoped (AC-H2-5): only this site's pageviews are candidates.
             ev_result = await db.execute(

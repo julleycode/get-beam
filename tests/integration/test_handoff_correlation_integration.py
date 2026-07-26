@@ -49,7 +49,9 @@ async def test_sweep_links_real_fetch_to_real_click(test_db):
             event_type="pageview",
             page_path="/pricing",
             referrer="https://chatgpt.com/",
-            created_at=now + timedelta(seconds=120),
+            # Event.created_at is a naive column (models/event.py DateTime without
+            # tz), matching how prod stores events. Strip tz so asyncpg accepts it.
+            created_at=(now + timedelta(seconds=120)).replace(tzinfo=None),
         )
     )
     await test_db.commit()
@@ -90,7 +92,8 @@ async def test_sweep_is_idempotent_unique_constraint(test_db):
             event_type="pageview",
             page_path="/x",
             referrer="https://chatgpt.com/",
-            created_at=now + timedelta(seconds=60),
+            # Naive Event.created_at (see prod column type) — strip tz for asyncpg.
+            created_at=(now + timedelta(seconds=60)).replace(tzinfo=None),
         )
     )
     await test_db.commit()
