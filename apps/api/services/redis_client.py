@@ -24,6 +24,14 @@ def get_redis() -> Redis:
             settings.redis_url,
             decode_responses=True,
             socket_connect_timeout=5,
+            # A Redis that accepts the connection and then hangs would otherwise
+            # block every awaited call forever. socket_timeout bounds the read;
+            # retry_on_timeout=False surfaces the TimeoutError to the caller
+            # instead of silently retrying (every caller already degrades on a
+            # Redis exception). Unflagged by design: an infinite hang becomes a
+            # bounded error.
+            socket_timeout=5,
+            retry_on_timeout=False,
         )
     return _client
 
