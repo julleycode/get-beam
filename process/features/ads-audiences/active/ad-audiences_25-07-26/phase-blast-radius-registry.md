@@ -154,6 +154,22 @@ Validate Contract finding). This mirrors the `ads_tasks.py` / `routers/ads.py` e
 format above: additive-only, no existing field renamed/removed/restructured, and no other Phase
 3 edit to `config.py` beyond this one field group is authorized under this grant.
 
+**Registry append (26-07-26, PLAN-SUPPLEMENT, Phase 3 inner-loop RESEARCH fold-in):** `apps/api/services/ads_push.py` Phase-3 extension-point entry (above) is extended by one line: + provider-aware refresh-token selection in `fresh_access_token` (as-built `ads_push.py:146` passes the decrypted ACCESS token to `refresher(token)`; Google's refresh call needs the decrypted REFRESH token instead — see the phase plan's new Step B checklist item). This is a second, scoped `ads_push.py` touch beyond the existing EEA-branch extension point; same additive-only, no-other-edit constraint applies.
+
+**Registry append (26-07-26, EXECUTE time — forced-by-deliverable test flip, same rationale and
+precedent as Phase 2's own `tests/unit/test_ads_stub_501.py` entry above):**
+`tests/unit/test_ads_stub_501.py` — Phase 3 flips the `google` leg from "raises
+NotImplementedError" to "returns a real accounts.google.com OAuth URL", because this phase's
+deliverable is exactly that Google stops being a stub. Since no READY provider raises
+`NotImplementedError` any more, the router's 501 mapping is re-proven against a SYNTHETIC stub
+provider inside the same test rather than deleted — coverage is preserved, not removed. Meta's
+Phase-2 assertion is untouched; flag-off 501 stays covered by `tests/unit/test_ads_flag_off_501.py`.
+
+**Not used (declared but unexercised):** Phase 3's `apps/api/tasks/ads_tasks.py` and
+`apps/api/routers/ads.py` extension points were NOT edited — no Google-specific task leg or
+response-shape change proved necessary (EEA-excluded rows fall out as ordinary `skipped`). This is
+a narrowing of the declared blast radius, not an expansion.
+
 **Classification:** parallel-safe with Phase 2 (see resolution below for the two shared
 extension-point files).
 
@@ -189,7 +205,7 @@ not a blocker to running Phase 2 and Phase 3 in parallel.
 |---|---|
 | Phase 1 | DONE |
 | Phase 2 | DONE — EVL green (14 gates), 3 env-only known-gaps (E3 sandbox smoke, AC7 Playwright legs, AC13 error shape); code-complete, not yet ✅ VERIFIED per plan's own Phase Completion Rules |
-| Phase 3 | (no field — plan created 25-07-26, not yet executed) |
+| Phase 3 | DONE — EXECUTE green (30 new unit + 3 new integration; full unit lane 574 passed, ads integration 23 passed, zero CRM/csv drift), 1 env-only known-gap (G2/E4 Hybrid Google sandbox smoke); code-complete, not yet ✅ VERIFIED per the plan's own Phase Completion Rules |
 
 Valid status values (written by the orchestrator during execution, per
 `process/development-protocols/orchestration.md` §BLOCKED Escalation Path): `BLOCKED-skipped /
