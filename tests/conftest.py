@@ -10,6 +10,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
+import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -32,9 +33,29 @@ os.environ.setdefault("TOKEN_ENCRYPTION_KEY", _Fernet.generate_key().decode())
 os.environ.setdefault("GEMINI_API_KEY", "")
 
 
+def _native_enum_names(metadata) -> list[str]:
+    """Collect PG native ENUM type names declared anywhere on the metadata.
+
+    Metadata-driven on purpose: `import apps.api.main` registers every model
+    before this runs, so new Enum columns are picked up without edits here.
+    """
+    names: list[str] = []
+    for table in metadata.tables.values():
+        for col in table.columns:
+            if isinstance(col.type, sa.Enum) and col.type.name and col.type.name not in names:
+                names.append(col.type.name)
+    return names
+
+
 @pytest_asyncio.fixture
 async def test_engine():
-    """Create a test database engine (requires local postgres running)."""
+    """Create a test database engine (requires local postgres running).
+
+    Setup and teardown are enum-safe: `drop_all` leaves PG native ENUM types
+    behind, so a second pytest process would hit duplicate-type errors. We
+    drop tables first, then the types (CASCADE on a type while stale tables
+    still reference it would silently drop their columns).
+    """
     from apps.api.config import settings
 
     engine = create_async_engine(
@@ -70,14 +91,23 @@ async def test_engine():
     # above goes stale silently (stripe_events was missing).
     import apps.api.main  # noqa: F401
 
+    enum_names = _native_enum_names(Base.metadata)
+
     async with engine.begin() as conn:
+        # Clear residue from any prior crashed/incomplete run: tables first,
+        # then the native enum types they referenced.
+        await conn.run_sync(Base.metadata.drop_all)
+        for name in enum_names:
+            await conn.execute(sa.text(f'DROP TYPE IF EXISTS "{name}" CASCADE'))
         await conn.run_sync(Base.metadata.create_all)
 
     yield engine
 
-    # Cleanup: drop all tables
+    # Cleanup: drop all tables, then the enum types they left behind
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
+        for name in enum_names:
+            await conn.execute(sa.text(f'DROP TYPE IF EXISTS "{name}" CASCADE'))
 
     await engine.dispose()
 
