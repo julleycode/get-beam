@@ -387,7 +387,10 @@ class IdentityResolver(
     # ──────────────────── Main Waterfall ────────────────────
 
     async def resolve(
-        self, visitor: Visitor, source_agent_visit_id: str | None = None
+        self,
+        visitor: Visitor,
+        source_agent_visit_id: str | None = None,
+        force_retry: bool = False,
     ) -> IdentifiedVisitor | None:
         """Identity resolution with parallel provider execution.
 
@@ -411,6 +414,13 @@ class IdentityResolver(
         provider mixins (hunter/apollo/pdl) whose ``_save_identified`` calls would
         otherwise need editing — closing the atomicity gap on EVERY resolution
         path, not just the ones inside this module.
+
+        ``force_retry`` is the manual per-row retry path: a human deliberately
+        re-running a visitor whose prior attempt may have happened while a
+        provider was down (402/403 outage rows are indistinguishable from real
+        no-matches in ``resolution_logs`` — the recorded cost is 0.0 either way).
+        It bypasses ONLY the 30-day recency gate. The daily budget, billing,
+        ``do_not_resolve``/suppression, and VPN gates all still apply.
         """
         # GUARD #1: set fresh at the top of every resolve() call. Sequential per
         # row in the sweep; every human caller passes None and resets it here, so
@@ -446,7 +456,9 @@ class IdentityResolver(
         # ── Paid provider waterfall gates ──
         # The 30-day recency skip and daily budget only guard the PAID providers
         # below, not the free prior-signal path above.
-        if await self.was_recently_attempted(visitor.site_id, visitor.visitor_id):
+        if not force_retry and await self.was_recently_attempted(
+            visitor.site_id, visitor.visitor_id
+        ):
             logger.info("resolution_skipped_recent_attempt", visitor_id=visitor.visitor_id[:8])
             return None
 

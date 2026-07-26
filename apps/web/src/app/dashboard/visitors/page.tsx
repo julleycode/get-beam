@@ -329,9 +329,26 @@ export default function VisitorsPage() {
       // on the canonical profile; the API surfaces its email here too.
       return <StatusBadge status="identified" label="Merged" className="opacity-80" />;
     }
-    if (s === "unresolvable" || s === "vpn_filtered") {
+    if (s === "vpn_filtered") {
       return (
         <StatusBadge status={s} label={s.replace("_", " ")} className="opacity-60" />
+      );
+    }
+    if (s === "unresolvable") {
+      // Retryable: a prior attempt may have failed during a provider outage.
+      const retrying = resolveMut.isPending && actioningId === v.visitor_id;
+      return (
+        <div className="flex items-center gap-2">
+          <StatusBadge status={s} label={s.replace("_", " ")} className="opacity-60" />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={retrying}
+            onClick={() => resolveMut.mutate(v.visitor_id)}
+          >
+            {retrying ? "Retrying…" : "Retry"}
+          </Button>
+        </div>
       );
     }
     const busy = resolveMut.isPending && actioningId === v.visitor_id;

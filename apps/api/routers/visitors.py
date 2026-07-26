@@ -774,12 +774,18 @@ async def resolve_one_visitor(
     if not visitor:
         raise HTTPException(status_code=404, detail="Visitor not found")
 
-    # Already processed → don't re-run (no extra paid lookup). For an
-    # unresolvable visitor, surface WHY (region coverage) rather than a terse
-    # "Already processed" the owner can't act on.
-    if visitor.identity_status != "anonymous":
-        note = _coverage_note(visitor) if visitor.identity_status == "unresolvable" else None
-        return {"status": visitor.identity_status, "message": note or "Already processed."}
+    # Already processed → don't re-run (no extra paid lookup), EXCEPT for an
+    # `unresolvable` row: a human clicking Retry is deliberately re-running a
+    # visitor whose prior attempt may have failed during a provider outage
+    # (402/403 look identical to a real no-match). Reset it to anonymous and
+    # fall through to the same waterfall with force_retry.
+    # `vpn_filtered` stays non-retryable — the IP is still masked.
+    is_retry = False
+    if visitor.identity_status == "unresolvable":
+        is_retry = True
+        visitor.identity_status = "anonymous"
+    elif visitor.identity_status != "anonymous":
+        return {"status": visitor.identity_status, "message": "Already processed."}
 
     # Privacy opt-out / intent gates BEFORE the paid waterfall: resolve() would
     # bail on these anyway, but bailing here lets us return the real reason (not
@@ -788,7 +794,11 @@ async def resolve_one_visitor(
     if visitor.do_not_resolve:
         return {"status": "anonymous", "skip_reason": "privacy_opt_out",
                 "message": _SKIP_REASON_MESSAGES["privacy_opt_out"]}
-    if visitor.intent_score < 40:
+    # Intent gate honours the site-scoped all-US eligibility rule: on an all-US
+    # site every US visitor qualifies regardless of intent score.
+    if visitor.intent_score < 40 and not (
+        site_resolves_all_us(site.url) and (visitor.country_code or "").upper() == "US"
+    ):
         return {"status": "anonymous", "skip_reason": "below_intent_threshold",
                 "message": _SKIP_REASON_MESSAGES["below_intent_threshold"]}
 
@@ -800,7 +810,7 @@ async def resolve_one_visitor(
             "message": _SKIP_REASON_MESSAGES["monthly_plan_limit_reached"],
         }
 
-    identified = await IdentityResolver(db).resolve(visitor)
+    identified = await IdentityResolver(db).resolve(visitor, force_retry=is_retry)
 
     if identified:
         await increment_usage(db, site.user_id)
