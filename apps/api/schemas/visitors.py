@@ -46,6 +46,10 @@ class VisitorOut(BaseModel):
     # for this visitor ("high"/"medium"), or None when no link exists. List-row
     # pill only — PROBABILISTIC, never affects emailability.
     handoff_confidence: str | None = None
+    # Cadence bot flag: the visitor's visit schedule looks cron-like AND their
+    # sessions are pageview-only. VISIBILITY-ONLY badge — never affects
+    # emailability, aggregates, or resolution. Batch-computed, default False.
+    is_bot_suspect: bool = False
 
     model_config = {"from_attributes": True}
 

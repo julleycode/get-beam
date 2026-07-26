@@ -310,6 +310,55 @@ class Settings(BaseSettings):
     # pre-EvalLayer (recognized agent UAs fall through to the is_bot() drop).
     agent_detection_enabled: bool = False
 
+    # ─── Cadence bot flag ───
+    # Fifth, ORTHOGONAL bot layer. The four existing ones (tracker.js webdriver
+    # check, bot_filter UA regex, agent_classifier vendor list, ingest_velocity
+    # flood shape) all reason about identity strings or short-window traffic
+    # shape. A polite, low-volume daily crawl with a convincing UA sails past all
+    # four. This layer looks at BEHAVIOR OVER TIME instead: is the visit schedule
+    # cron-like (low coefficient of variation on inter-visit gaps) AND does the
+    # visitor never do anything a script would not bother faking (near-zero
+    # engagement-event ratio)? Only the CONJUNCTION flags.
+    #
+    # VISIBILITY-ONLY. is_bot_suspect never sets is_abuse_flagged or
+    # do_not_resolve, is never read by is_emailable_identity(), and is never
+    # added to any aggregate FILTER exclusion. A real, wanted contact who also
+    # runs a bot stays exactly as emailable and exactly as counted — the only
+    # new thing is a dashboard badge.
+    #
+    # Defaults OFF (same operator-gated posture as agent_detection_enabled /
+    # site_ingest_limit_enabled). ROLLOUT ORDER: the migration adding
+    # visitors.is_bot_suspect / identified_visitors.is_bot_suspect must be
+    # LIVE-APPLIED first; then tune the two thresholds below against real event
+    # history samples; only then flip this flag in a real environment.
+    cadence_bot_flag_enabled: bool = False
+
+    # How often the batch sweep runs. Mirrors aggregation_sweep_interval_minutes.
+    # Detection is batch-only by design (AC-4) — nothing here ever runs on the
+    # POST /ingest hot path.
+    cadence_bot_flag_sweep_interval_minutes: int = 60
+
+    # NON-NEGOTIABLE bounded-read cap. Without it, a visitor with years of
+    # history would force an unbounded events scan on every sweep tick — a
+    # self-inflicted DoS that grows with the table. Every sweep query carries
+    # `events.created_at >= now() - cadence_bot_flag_lookback_days`.
+    cadence_bot_flag_lookback_days: int = 90
+
+    # Minimum distinct visit-day floor, evaluated BEFORE any variance math
+    # (precondition-before-ratio, same shape as ingest_velocity_visitor_threshold).
+    # Below this floor the decision is False unconditionally: too little data to
+    # judge a cadence, and a 2-visit "perfectly regular" series is noise.
+    cadence_bot_flag_min_visits: int = 5
+
+    # Coefficient-of-variation ceiling below which a visit schedule counts as
+    # "cron-like". Operator-tunable so the detection module carries no magic
+    # number. Tune against real samples before enabling.
+    cadence_bot_flag_max_variance_threshold: float = 0.15
+
+    # Engagement-ratio ceiling below which a visitor's sessions count as
+    # "pageview-only" (no click/scroll/time_on_page/conversion). Operator-tunable.
+    cadence_bot_flag_max_engagement_ratio: float = 0.05
+
     # ─── Server-side AI-fetch capture beacon (Handoff Detection H5) ───
     # When true, POST /api/v1/agents/fetch-beacon accepts an authenticated
     # server-side beacon (from the getbeam.fyi edge middleware) that classifies

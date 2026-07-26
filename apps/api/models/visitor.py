@@ -76,6 +76,14 @@ class Visitor(Base):
     is_abuse_flagged: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # Cadence bot flag (visibility-only, see cadence_bot_flag.py) — structurally
+    # independent of is_abuse_flagged; never read by is_emailable_identity();
+    # never excluded from any aggregate FILTER clause. Set by the batch sweep
+    # only (cadence_bot_flag_sweep.py), never on the ingest hot path. Sticky:
+    # OR-merged, a later clean window never un-flags.
+    is_bot_suspect: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -111,6 +119,14 @@ class IdentifiedVisitor(Base):
     # atomic INSERT that creates this row (_save_identified). Any row carrying it
     # can NEVER be an outreach target — see is_emailable_identity.
     is_abuse_flagged: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    # Cadence bot flag (visibility-only, see cadence_bot_flag.py) — structurally
+    # independent of is_abuse_flagged; never read by is_emailable_identity();
+    # never excluded from any aggregate FILTER clause. Mirrored from
+    # Visitor.is_bot_suspect by the batch sweep. A flagged row stays fully
+    # emailable and fully counted — the flag is a dashboard badge, nothing more.
+    is_bot_suspect: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
     # Phase 05 (encrypt PII at rest) — added nullable, not yet read/written.

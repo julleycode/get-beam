@@ -203,6 +203,10 @@ export interface Visitor {
   // Handoff Detection H2: strongest fetch↔click handoff link confidence
   // ("high"/"medium"), or null/undefined when none. PROBABILISTIC list-row pill.
   handoff_confidence?: string | null;
+  // Cadence bot flag: visit schedule looks cron-like AND sessions are
+  // pageview-only. VISIBILITY-ONLY badge — never affects emailability,
+  // aggregates, or resolution.
+  is_bot_suspect?: boolean;
 }
 
 export interface VisitorDetail extends Visitor {

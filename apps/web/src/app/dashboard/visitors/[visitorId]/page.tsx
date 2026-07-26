@@ -477,6 +477,14 @@ export default function VisitorDetailPage() {
                   via {aiSourceLabel(visitor.ai_source)}
                 </span>
               )}
+              {visitor.is_bot_suspect && (
+                <span
+                  className="rounded-full bg-warning-muted px-2.5 py-0.5 text-xs font-medium text-warning"
+                  title="Bot-suspect — this visitor's visit schedule is unusually regular (cron-like) and their sessions are pageview-only, with no scrolling, clicks or dwell time. Visibility signal only: they stay fully contactable and fully counted."
+                >
+                  Bot-suspect
+                </span>
+              )}
               {visitor.handoff_vendor && visitor.handoff_confidence && (
                 <span
                   className="rounded-full bg-info-muted px-2.5 py-0.5 text-xs font-medium text-info"
@@ -828,6 +836,9 @@ export default function VisitorDetailPage() {
               <InfoRow label="Country">{visitor.country_code || "Unknown"}</InfoRow>
               {visitor.top_referrer && <InfoRow label="Referrer">{visitor.top_referrer}</InfoRow>}
               {visitor.ai_source && <InfoRow label="Arrived via">{aiSourceLabel(visitor.ai_source)}</InfoRow>}
+              {visitor.is_bot_suspect && (
+                <InfoRow label="Bot-suspect">Cron-like cadence, pageview-only sessions</InfoRow>
+              )}
               {visitor.handoff_vendor && visitor.handoff_confidence && (
                 <InfoRow label="AI research signal">{handoffCopy(visitor)}</InfoRow>
               )}

@@ -692,6 +692,14 @@ export default function VisitorsPage() {
                           via {aiSourceLabel(v.ai_source)}
                         </span>
                       )}
+                      {v.is_bot_suspect && (
+                        <span
+                          className="shrink-0 rounded bg-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-warning"
+                          title="Bot-suspect — cron-like visit cadence and pageview-only sessions. Visibility signal only: still fully contactable and fully counted."
+                        >
+                          Bot-suspect
+                        </span>
+                      )}
                       {v.handoff_confidence && (
                         <span
                           className="shrink-0 rounded bg-info-muted px-1.5 py-0.5 text-[10px] font-medium text-info"

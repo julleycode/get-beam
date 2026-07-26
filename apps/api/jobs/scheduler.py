@@ -204,6 +204,33 @@ async def _intent_signal_sweep_job() -> None:
         logger.exception("intent_signal_sweep_crashed")
 
 
+async def _cadence_bot_flag_sweep_job() -> None:
+    """Periodic job: behavioral stealth-crawler detection (cadence bot flag).
+
+    run_cadence_bot_flag_sweep opens its own per-(site, visitor) fail-open
+    iteration; this wrapper opens the session and swallows any top-level crash.
+    Never touches the ingest hot path — detection is batch-only by design (AC-4).
+
+    The enabled-check lives here AND inside the sweep: the job is registered
+    unconditionally (unlike the optional jobs below) because `events` rows exist
+    regardless of the flag, so retroactive detection is the point — but with the
+    flag off this returns before opening a session or issuing a single query.
+    """
+    from apps.api.config import settings
+
+    if not settings.cadence_bot_flag_enabled:
+        return
+    try:
+        from apps.api.services.cadence_bot_flag_sweep import (
+            run_cadence_bot_flag_sweep,
+        )
+
+        async with async_session() as db:
+            await run_cadence_bot_flag_sweep(db)
+    except Exception:
+        logger.exception("cadence_bot_flag_sweep_crashed")
+
+
 async def _sweep_one_site(
     site_id: str,
     allow_defer: bool,
@@ -437,6 +464,15 @@ def start_scheduler() -> None:
         id="intent_signal_sweep",
         replace_existing=True,
         jitter=60,
+        misfire_grace_time=300,
+    )
+    scheduler.add_job(
+        _cadence_bot_flag_sweep_job,
+        "interval",
+        minutes=settings.cadence_bot_flag_sweep_interval_minutes,
+        id="cadence_bot_flag_sweep",
+        replace_existing=True,
+        jitter=90,
         misfire_grace_time=300,
     )
     scheduler.add_job(
