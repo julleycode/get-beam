@@ -1,0 +1,7 @@
+iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_status	loop_status	notes
+0	2026-07-25	9	3	6	0	n/a	baseline	PVL first pass Gate: BLOCKED — FAILs concentrated in Phase 3 merge design + test tiering; validate-contract written
+1	2026-07-25	9	3	6	9	n/a	in_progress	SUPPLEMENT_APPLIED 9/9 gaps; D6/D7 locked; revalidate from V1 pending
+2	2026-07-25	3	3	0	0	n/a	in_progress	Cycle-1 FAILs closed; new root-cause FAIL: scheduled full-recompute mechanism missing (Gaps 10-12); BLOCKED escalation step 3 user gate
+3	2026-07-25	3	3	0	3	n/a	in_progress	SUPPLEMENT_APPLIED 3/3 (user chose APScheduler mechanism); revalidate from V1 pending
+4	2026-07-25	5	0	5	5	converged	HALTED_SUCCESS	Gate: CONDITIONAL — 0 FAIL; 5 CONCERNs accepted in-contract as binding E16-E21 + AC-V5..V10; PHASE_COMPLETE: VALIDATE
+5	2026-07-26	0	0	0	0	converged	HALTED_SUCCESS	EVL all phases: 4d/1b/2/3/4 ALL GATES PASS, 0 EVL fix cycles; program code-complete, operator gates open by design
