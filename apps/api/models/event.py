@@ -40,6 +40,14 @@ class Event(Base):
     # Privacy opt-out signal from the browser (GPC or DNT) on this event.
     # Aggregated per visitor (BOOL_OR) into visitors.do_not_resolve.
     optout: bool = Column(Boolean, default=False, server_default="false", nullable=False)
+    # Ingest abuse marker (P3 site-ceiling trip OR P4 velocity flag), written at
+    # insert time. Flag-but-store: the row is kept for forensics but is excluded
+    # from the visitor rollup (aggregate_visitors_for_site) and, transitively,
+    # from outreach eligibility. Aggregated per visitor (BOOL_OR) into
+    # visitors.is_abuse_flagged, exactly like optout -> do_not_resolve.
+    is_flagged_abuse: bool = Column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     created_at: datetime = Column(DateTime, default=func.now(), nullable=False)
 
     __table_args__ = (
@@ -47,4 +55,6 @@ class Event(Base):
         Index("ix_events_site_visitor", "site_id", "visitor_id"),
         Index("ix_events_site_created", "site_id", "created_at"),
         Index("ix_events_created", "created_at"),
+        # Supports the aggregator's exclusion filter and the P5 health query.
+        Index("ix_events_site_flagged", "site_id", "is_flagged_abuse"),
     )

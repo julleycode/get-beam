@@ -15,8 +15,9 @@ from apps.api.schemas.events import EventBatch
 from apps.api.services.agent_classifier import classify_agent, classify_tier
 from apps.api.services.agent_visit_persistence import persist_agent_visit, persist_agent_fetch_event
 from apps.api.services.bot_filter import is_bot
+from apps.api.services.ip_resolution import resolve_client_ip
 from apps.api.services.link_decorator import decode_bid
-from apps.api.services.rate_limiter import limiter
+from apps.api.services.rate_limiter import limiter, site_ceiling_tripped
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -44,15 +45,6 @@ def _tp_from_url(url: str | None) -> UUID | None:
         return None
 
 
-def _extract_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return ""
-
-
 async def _parse_event_batch(request: Request) -> EventBatch:
     """Parse EventBatch from request body.
 
@@ -67,10 +59,50 @@ async def _parse_event_batch(request: Request) -> EventBatch:
     return EventBatch(**data)
 
 
+async def stash_site_id(request: Request) -> str | None:
+    """Populate ``request.state.site_id`` before the rate-limit layer runs.
+
+    The site-ceiling limiter keys on site_id, which lives in the POST body — but
+    a slowapi key_func fires before the endpoint has parsed anything. FastAPI
+    resolves dependencies BEFORE calling the (slowapi-wrapped) endpoint, so a
+    dependency is the earliest hook that can see the body.
+
+    Reads the body exactly once in the logical sense: Starlette caches the bytes
+    on ``request._body``, so ``_parse_event_batch``'s later ``await
+    request.body()`` is a free cache hit, not a second read. Fail-open — a
+    malformed/oversized/absent body leaves state unset and the endpoint's own
+    parse produces the 400.
+
+    Inert when the site ceiling is disabled (the default): the stash exists ONLY
+    to feed that limiter, so with the flag off we must not buffer+JSON-parse a
+    body the bot filter may be about to drop unread. Flag off == byte-identical
+    to pre-hardening behaviour.
+    """
+    from apps.api.config import settings
+
+    site_id: str | None = None
+    if not settings.site_ingest_limit_enabled:
+        request.state.site_id = None
+        return None
+    try:
+        raw = await request.body()
+        if raw:
+            data = json.loads(raw)
+            candidate = data.get("site_id") if isinstance(data, dict) else None
+            if isinstance(candidate, str) and candidate:
+                site_id = candidate
+    except Exception:
+        site_id = None
+    request.state.site_id = site_id
+    return site_id
+
+
 @router.post("/ingest", status_code=204)
 @limiter.limit("100/minute")
 async def ingest_events(
-    request: Request, db: AsyncSession = Depends(get_db)
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    _site_id_stash: str | None = Depends(stash_site_id),
 ) -> Response:
     # Extract user-agent from request header for bot detection
     request_ua = request.headers.get("user-agent", "")
@@ -130,7 +162,44 @@ async def ingest_events(
         # as the bot filter above). Pixel stays installed; no error surfaced.
         return Response(status_code=204)
 
-    ip_address = _extract_ip(request)
+    # Trusted-proxy-aware resolution. At the default trusted_proxy_hops=0 the
+    # X-Forwarded-For header is IGNORED entirely, so a caller can no longer forge
+    # a fresh identity per request for the rate limiter / datacenter+proxy drops /
+    # velocity signal downstream. Never raises — falls back to request.client.host.
+    ip_address = resolve_client_ip(request)
+
+    # ─── TEMPORARY DIAGNOSTIC — Phase 0 P0.1 (capacity-hardening plan 25-07-26) ───
+    # WHY: the per-IP rate limiter keys on exactly this resolved value
+    # (services/rate_limiter.client_ip_key_func). If Railway's edge terminates the
+    # connection, request.client.host is the proxy for EVERY visitor and all traffic
+    # collapses into one 100/min bucket. That hypothesis is UNVERIFIED live and
+    # cannot be proven from the repo — only from production cardinality.
+    #
+    # PII RULE (absolute): the resolved key IS the client IP. It is NEVER logged.
+    # Only the truncated SHA-256 (cardinality is preserved, the value is not
+    # recoverable) and the LENGTH of the forwarded chain are emitted. The chain
+    # itself is never logged either.
+    #
+    # REMOVAL CONDITION (Phase 2 exit gate — mandatory, not optional cleanup):
+    # delete this block as soon as >=100 real ingests have been observed and the
+    # distinct-`key_hash` vs distinct-`visitor_id` count has been written into the
+    # plan's "Resume and Execution Handoff" item 5 (P0.1). It must not survive the
+    # Phase 2 closeout regardless of what the observation shows.
+    import hashlib as _hashlib
+
+    logger.info(
+        "ingest_client_key",
+        key_hash=_hashlib.sha256((ip_address or "unknown").encode()).hexdigest()[:12],
+        xff_len=len(
+            [
+                p
+                for p in request.headers.get("x-forwarded-for", "").split(",")
+                if p.strip()
+            ]
+        ),
+        trusted_proxy_hops=_settings.trusted_proxy_hops,
+    )
+    # ─── END TEMPORARY DIAGNOSTIC (P0.1) ───
 
     # EvalLayer agent branch — HARD return. A recognized AI-agent visit is
     # persisted to agent_visits and answered with 204 BEFORE any human-path code
@@ -171,6 +240,45 @@ async def ingest_events(
         if is_proxy_or_vpn(await check_ip_privacy(ip_address)):
             return Response(status_code=204)
 
+    # ── Abuse signals (P3 site ceiling + P4 velocity) ──────────────────
+    # Option C, flag-but-store: a tripped signal NEVER rejects the request (the
+    # response stays 204 and the rows are still written). It marks the rows
+    # is_flagged_abuse so the visitor rollup and outreach-eligibility gate
+    # exclude them, instead of hard-dropping traffic that might be legitimate.
+    abuse_flagged = site_ceiling_tripped(batch.site_id)
+    if abuse_flagged:
+        logger.warning(
+            "site_ingest_ceiling_tripped",
+            site_id=batch.site_id,
+            limit_per_minute=_settings.site_ingest_limit_per_minute,
+        )
+
+    # P4 velocity: one check per BATCH, not per event — velocity is a
+    # per-visitor-ARRIVAL signal, and site_id/visitor_id are batch-level fields.
+    # The fingerprint is the first usable per-event _fp in the batch.
+    # Gate BEFORE touching Redis: with the flag off this branch must be entirely
+    # inert — no client construction, no connection — so ingest behaviour is
+    # byte-identical to pre-hardening. (get_redis() caches a module-global client
+    # bound to the creating event loop, so building one here unconditionally
+    # would also strand that client across loops.)
+    if not abuse_flagged and _settings.ingest_velocity_enabled:
+        batch_fp: str | None = None
+        for _event in batch.events:
+            _raw_fp = _event.fp
+            if _raw_fp and isinstance(_raw_fp, str) and _raw_fp.startswith(("fp_", "fp2_")):
+                batch_fp = _raw_fp[:64]
+                break
+        try:
+            from apps.api.services.ingest_velocity import check_velocity
+            from apps.api.services.redis_client import get_redis
+
+            abuse_flagged = await check_velocity(
+                get_redis(), batch.site_id, batch.visitor_id, batch_fp
+            )
+        except Exception as exc:
+            # Fail-open: velocity detection must never block a real visitor.
+            logger.warning("ingest_velocity_unavailable", error=str(exc))
+
     # Client Hints extraction (best-effort)
     ch_ua = request.headers.get("sec-ch-ua", "")
     ch_platform = request.headers.get("sec-ch-ua-platform", "").strip('"')
@@ -209,6 +317,10 @@ async def ingest_events(
             page_title=event.page_title or "",
             page_path=event.page_path or "",
             optout=bool(event.optout),
+            # P3 site-ceiling trip OR P4 velocity flag. Written in the SAME INSERT
+            # that stores the row, so there is no window where flood traffic is
+            # durable and unmarked.
+            is_flagged_abuse=abuse_flagged,
             created_at=event.ts.replace(tzinfo=None) if event.ts.tzinfo else event.ts,
         )
         for event in batch.events
@@ -268,7 +380,9 @@ async def ingest_events(
 
     # Run aggregation in background so we don't block the 204 response — but
     # coalesce per site so a burst of batches can't spawn an unbounded pile of
-    # overlapping aggregations.
+    # overlapping aggregations. This in-memory set is now only the cheap FIRST
+    # layer; the cross-container Redis debounce + sweep-yield checks live in
+    # _background_aggregate (Phase 3 item 7 / E16b).
     site_id = batch.site_id
     if site_id not in _aggregating:
         _aggregating.add(site_id)
@@ -537,10 +651,51 @@ async def _process_signal_events(
 
 
 async def _background_aggregate(site_id: str) -> None:
-    """Run visitor aggregation in a background task with its own DB session."""
+    """Run visitor aggregation in a background task with its own DB session.
+
+    Capacity-hardening Phase 3 (W1) checklist item 7 + instruction E16(b). Two
+    coordination checks run BEFORE any DB work, both against Redis so they hold
+    across containers (the in-memory `_aggregating` set above is only a cheap
+    per-process first layer and cannot dedup N containers):
+
+    1. `agg:sweep_pending:{site_id}` — the repair sweep's yield marker. When it is
+       set the sweep is waiting for the debounce key so it can run a FULL
+       recompute, which is a strict superset of this run's work. We stand down and
+       deliberately do NOT take the debounce key; taking it is exactly what
+       starves the sweep on a continuously-ingesting site.
+    2. `agg:debounce:{site_id}` — `SET NX EX aggregation_min_interval_seconds`.
+       Already held means another run covers these events.
+
+    If Redis is degraded we FAIL OPEN to today's behavior (the in-memory guard
+    alone) — this path must never fail the 204.
+    """
     try:
-        from apps.api.services.visitor_aggregator import aggregate_visitors_for_site
+        from apps.api.config import settings as _s
+        from apps.api.services import aggregation_debounce as _dbnc
+        from apps.api.services.visitor_aggregator import (
+            aggregate_visitors_for_site,
+            get_aggregation_watermark,
+        )
+
+        pending = await _dbnc.exists(_dbnc.sweep_pending_key(site_id))
+        if pending is True:
+            logger.info("aggregation_yielded_to_sweep", site_id=site_id)
+            return
+
+        acquired = await _dbnc.try_acquire(
+            _dbnc.debounce_key(site_id), _s.aggregation_min_interval_seconds
+        )
+        if acquired is False:
+            logger.info("aggregation_debounced", site_id=site_id)
+            return
+        # acquired is None → Redis degraded → fall through (fail open).
+
         async with async_session() as db:
-            await aggregate_visitors_for_site(db, site_id)
+            since = None
+            if _s.aggregation_incremental_enabled:
+                # A NULL watermark means "never aggregated" → full recompute,
+                # which then stamps the watermark for subsequent runs.
+                since = await get_aggregation_watermark(db, site_id)
+            await aggregate_visitors_for_site(db, site_id, since=since)
     except Exception as e:
         logger.warning("background_aggregate_failed", error=str(e), site_id=site_id)

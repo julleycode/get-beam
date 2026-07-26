@@ -65,6 +65,35 @@ class Settings(BaseSettings):
     # Celery
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
+    # Is a Celery WORKER actually deployed and consuming the broker? OFF by
+    # default. No worker process exists in this repo (Dockerfile CMD is
+    # alembic+uvicorn; railway.json declares one service), so queueing a task
+    # would drop it silently. Every `.delay()` call site ANDs this flag with its
+    # own per-surface `*_async_push` flag, so the default keeps today's exact
+    # behavior: the async branch is never entered and the work runs inline.
+    # Flipping this to True is an explicit operator action, valid only once a
+    # worker service is live (see capacity-hardening plan Phase 1(a)).
+    celery_worker_enabled: bool = False
+
+    # ─── Aggregation cost control (capacity-hardening plan Phase 3 / W1) ───
+    # OFF = today's exact behavior: every ingest batch triggers a FULL-history
+    # recompute per site, totals SET (not incremented) on conflict, which is
+    # idempotent but superlinear under a traffic spike.
+    # ON = watermark-incremental path: only events newer than the site's
+    # last_aggregated_at are merged (with a 30-minute LAG lookback so session
+    # boundaries stay correct at the window edge). Only the mergeable columns are
+    # written incrementally; avg_time_on_page and intent_score are DESCOPED (D7)
+    # and refreshed exclusively by the APScheduler full-recompute repair sweep
+    # (aggregation_sweep_interval_minutes, default 60 = the staleness bound).
+    # Flipping this to True is an explicit operator action.
+    aggregation_incremental_enabled: bool = False
+    # Per-site debounce TTL for the cross-container Redis key agg:debounce:{site_id}.
+    # Replaces the per-process in-memory _aggregating set, which cannot dedup N
+    # containers. Also the TTL that bounds the sweep's end-of-pass retry (E16c).
+    aggregation_min_interval_seconds: int = 60
+    # Rows per bulk-upsert chunk on the incremental path (one round-trip per
+    # chunk instead of one per visitor — shortens the row-lock window).
+    aggregation_upsert_chunk_size: int = 500
 
     # ─── Clerk Authentication ───
     clerk_secret_key: str = ""
@@ -136,6 +165,29 @@ class Settings(BaseSettings):
     # take the Nth-from-the-right XFF entry (the value the Nth trusted hop
     # observed). Misconfiguration ALWAYS fails safe back to request.client.host —
     # see services/ip_resolution.resolve_client_ip.
+    #
+    # SPOOFING TRADEOFF (read before changing this value). Trusting N hops means
+    # the caller can forge every XFF entry to the LEFT of the trusted ones —
+    # resolve_client_ip takes the Nth-from-the-RIGHT entry precisely so that the
+    # forgeable prefix is discarded. Therefore N must equal EXACTLY the number of
+    # reverse proxies Beam actually controls:
+    #   N too HIGH -> a caller injects entries and mints an arbitrary limiter key
+    #                 per request, evading the per-IP limit entirely.
+    #   N too LOW  -> every visitor behind the proxy shares one bucket (collapse),
+    #                 and real traffic gets mass-429'd.
+    # A chain shorter than N fails safe back to request.client.host, so a wrong
+    # HIGH value degrades to collapse rather than to a crash — but it is still a
+    # rate-limiter bypass and must not be guessed.
+    #
+    # WHY THIS IS STILL 0 (Phase 2, capacity-hardening plan 25-07-26). The
+    # expected Railway topology is one edge proxy (N = 1), but the collapse is
+    # UNVERIFIED live and the real hop count cannot be derived from this repo.
+    # The plan forbids flipping it blind. The default therefore stays at today's
+    # safe value until the Phase 0 P0.1 diagnostic (routers/events.py,
+    # "ingest_client_key") has been observed over >=100 real ingests and distinct
+    # key_hash counts are compared against distinct visitor_id counts. Raising
+    # this value is then an explicit operator action, set to the OBSERVED hop
+    # count and never higher.
     trusted_proxy_hops: int = 0
 
     # Per-SITE ingest ceiling. The existing 100/min per-IP limiter is blind to a
@@ -144,6 +196,17 @@ class Settings(BaseSettings):
     # only layer that sees that total. Defaults OFF (same precedent as
     # agent_detection_enabled / company_graph_enabled) — turning it on in a real
     # environment is a deliberate operator action after the thresholds are tuned.
+    #
+    # ROLLOUT ORDER (Phase 2, capacity-hardening plan 25-07-26). This ceiling and
+    # ingest_velocity_enabled below were both designed to COMPENSATE for a blind
+    # per-IP limiter. Enabling either before trusted_proxy_hops is correct would
+    # tune them against collapsed traffic and bake in the wrong thresholds.
+    # Required order:
+    #   1. trusted_proxy_hops set to the P0.1-observed value (per-IP keying correct)
+    #   2. THEN site_ingest_limit_enabled, after ~1 week of real per-site volume;
+    #      set site_ingest_limit_per_minute to ~5x the OBSERVED per-site p99/min,
+    #      never to the audit's 3000 placeholder below.
+    #   3. THEN ingest_velocity_enabled, last (see its own note).
     site_ingest_limit_enabled: bool = False
     # Only consulted when site_ingest_limit_enabled is True.
     site_ingest_limit_per_minute: int = 3000
@@ -155,6 +218,12 @@ class Settings(BaseSettings):
     # fingerprints. Flag only when BOTH hold — high distinct-visitor count AND low
     # fingerprint diversity — so an organic viral spike (many visitors, many real
     # fingerprints) is never caught. Defaults OFF, same precedent as above.
+    #
+    # ROLLOUT ORDER: enable LAST — step 3 of the sequence documented on
+    # site_ingest_limit_enabled above. This is the rotating-IP-flood detector;
+    # once per-IP keying is correct it becomes a SECOND layer of defence rather
+    # than the primary one, so its thresholds should be calibrated against
+    # already-correct per-IP data.
     ingest_velocity_enabled: bool = False
     ingest_velocity_window_seconds: int = 60
     # Distinct visitor_ids per site per window before the shape starts to look
@@ -442,6 +511,7 @@ class Settings(BaseSettings):
     agent_verification_sweep_interval_minutes: int = 15  # APScheduler agent IP-verification sweep cadence
     handoff_correlation_sweep_interval_minutes: int = 10  # APScheduler fetch↔click handoff correlation sweep cadence (H2)
     intent_signal_sweep_interval_minutes: int = 10  # APScheduler live commercial-page intent-signal + spike sweep cadence (H3)
+    aggregation_sweep_interval_minutes: int = 60  # APScheduler full-recompute aggregation repair sweep cadence
     # Data retention (GDPR data minimization / privacy-policy 90-day promise):
     # raw events older than this are auto-purged. Enriched profiles are kept.
     event_retention_days: int = 90

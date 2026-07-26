@@ -41,6 +41,7 @@ from apps.api.routers import social_auth, drafts, feed, social_accounts, compani
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
 from apps.api.routers import known_contacts, costs, ai, dashboard, crm, changelog, click, open_pixel
 from apps.api.routers import email_sender_oauth, outcomes, referrals, agents, ads
+from apps.api.routers import ingest_health
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
 from slowapi import _rate_limit_exceeded_handler
@@ -187,10 +188,95 @@ class PixelCORSMiddleware:
 
 app.add_middleware(PixelCORSMiddleware)
 
+
+# ── Ingest body-size guard (abuse hardening P1) ────────────────────
+class IngestBodySizeLimitMiddleware:
+    """Reject oversized POST /ingest bodies BEFORE they are buffered/parsed.
+
+    Pure ASGI middleware (not BaseHTTPMiddleware) for the same reason as
+    PixelCORSMiddleware above: BaseHTTPMiddleware's anyio task-group wrapping
+    conflicts with asyncpg's event loop under pytest / ASGITransport.
+
+    Two layers:
+      1. Content-Length fast path — reject without touching receive() at all.
+      2. Running byte count across every http.request message — the only guard
+         that holds for chunked transfer-encoding (no Content-Length) or a
+         forged/understated Content-Length header.
+
+    The rejection response carries NO request echo and NO user data (AC-9).
+
+    Registered AFTER PixelCORSMiddleware so it is the outermost middleware and
+    an oversized body is dropped before any other middleware does work.
+    """
+
+    _GUARDED_PATHS = {"/api/v1/events/ingest"}
+
+    def __init__(self, app):
+        self.app = app
+
+    @staticmethod
+    async def _reject(send) -> None:
+        await send({
+            "type": "http.response.start",
+            "status": 413,
+            "headers": [
+                (b"content-type", b"text/plain; charset=utf-8"),
+                (b"content-length", b"18"),
+                (b"access-control-allow-origin", b"*"),
+            ],
+        })
+        await send({"type": "http.response.body", "body": b"payload too large\n"})
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("path", "") not in self._GUARDED_PATHS:
+            await self.app(scope, receive, send)
+            return
+
+        max_bytes = settings.ingest_body_max_bytes
+
+        # Fast path: an honest Content-Length lets us reject without reading a
+        # single body byte. A forged/absent one falls through to the counter.
+        for key, value in scope.get("headers", []):
+            if key == b"content-length":
+                try:
+                    if int(value) > max_bytes:
+                        await self._reject(send)
+                        return
+                except (ValueError, TypeError):
+                    pass  # Malformed header — the running counter still guards.
+                break
+
+        state = {"seen": 0, "rejected": False}
+
+        async def counting_receive():
+            message = await receive()
+            if message["type"] == "http.request":
+                state["seen"] += len(message.get("body", b""))
+                if state["seen"] > max_bytes:
+                    state["rejected"] = True
+                    # Stop feeding the app: report an empty, complete body so the
+                    # downstream parser fails fast instead of hanging on more_body.
+                    return {"type": "http.request", "body": b"", "more_body": False}
+            return message
+
+        async def guarded_send(message):
+            # Once oversized, suppress whatever the app produced and emit 413.
+            if state["rejected"]:
+                if message["type"] == "http.response.start":
+                    await IngestBodySizeLimitMiddleware._reject(send)
+                return
+            await send(message)
+
+        await self.app(scope, counting_receive, guarded_send)
+
+
+app.add_middleware(IngestBodySizeLimitMiddleware)
+
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(events.router, prefix="/api/v1/events", tags=["events"])
 app.include_router(sites.router, prefix="/api/v1/sites", tags=["sites"])
 app.include_router(known_contacts.router, prefix="/api/v1/sites", tags=["known-contacts"])
+app.include_router(ingest_health.router, prefix="/api/v1/sites", tags=["ingest-health"])
 app.include_router(visitors.router, prefix="/api/v1/visitors", tags=["visitors"])
 app.include_router(agents.router, prefix="/api/v1/agents", tags=["agents"])
 app.include_router(costs.router, prefix="/api/v1/costs", tags=["costs"])

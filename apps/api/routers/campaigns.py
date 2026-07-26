@@ -723,7 +723,9 @@ async def _resolve_linkedin_targets(
                 skipped_no_linkedin += 1
                 continue
             if not is_emailable_identity(
-                iv.resolution_provider, getattr(iv, "source_agent_visit_id", None)
+                iv.resolution_provider,
+                getattr(iv, "source_agent_visit_id", None),
+                getattr(iv, "is_abuse_flagged", False),
             ):
                 skipped_no_linkedin += 1
                 continue

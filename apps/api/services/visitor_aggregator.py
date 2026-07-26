@@ -2,7 +2,7 @@ import math
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -167,6 +167,7 @@ async def _upsert_visitor(
     ip_address: str | None,
     first_touch_referrer: str | None = None,
     do_not_resolve: bool = False,
+    is_abuse_flagged: bool = False,
 ) -> None:
     """Upsert a single visitor row into the visitors table."""
     if avg_time_on_page is None or (isinstance(avg_time_on_page, float) and math.isnan(avg_time_on_page)):
@@ -212,6 +213,7 @@ async def _upsert_visitor(
         ip_address=ip_address or None,
         intent_score=intent,
         do_not_resolve=do_not_resolve,
+        is_abuse_flagged=is_abuse_flagged,
     ).on_conflict_do_update(
         index_elements=["site_id", "visitor_id"],
         set_={
@@ -232,21 +234,133 @@ async def _upsert_visitor(
             # Sticky opt-out: once true it stays true, even if a later recompute
             # sees events without the flag (e.g. a different browser/session).
             "do_not_resolve": text("visitors.do_not_resolve OR EXCLUDED.do_not_resolve"),
+            # Sticky abuse marker, same semantics as do_not_resolve above: once a
+            # visitor's traffic looked like a flood, a later clean recompute must
+            # not launder it back into outreach eligibility.
+            "is_abuse_flagged": text(
+                "visitors.is_abuse_flagged OR EXCLUDED.is_abuse_flagged"
+            ),
             "updated_at": datetime.utcnow(),
         },
     )
     await db.execute(stmt)
 
 
-async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
+# ─── Aggregation SQL (capacity-hardening Phase 3 / W1) ────────────────────────
+# ONE template with four insertion points. With since=None every placeholder
+# expands to the empty string / today's exact expression, so the emitted SQL is
+# BYTE-IDENTICAL to the pre-change query (contract E4: append, never rewrite).
+# The incremental variant only ADDS a lookback bound, a window filter, a
+# first-in-window marker, and a delta-shaped session expression.
+_DEFAULT_SESSIONS_EXPR = "MAX(session_num) FILTER (WHERE NOT is_flagged_abuse)"
+# Incremental session DELTA. `is_new_session` is 1 when the gap to the previous
+# event is > 30 min. `is_first_in_window` is 1 when this visitor has NO
+# predecessor inside the read window at all — and because the read window starts
+# a full 30 minutes BEFORE the watermark, "no predecessor in the window" can only
+# mean either a brand-new visitor (session 1) or a gap > 30 min (a new session).
+# Either way it contributes exactly one session, which is why the two cases are
+# OR-ed rather than special-cased.
+_INCREMENTAL_SESSIONS_EXPR = (
+    "SUM(CASE WHEN is_new_session = 1 OR is_first_in_window = 1 THEN 1 ELSE 0 END)"
+    " FILTER (WHERE NOT is_flagged_abuse)"
+)
+_INCREMENTAL_BOUNDARY_EXTRA_COLS = """,
+                CASE
+                    WHEN LAG(created_at) OVER (
+                        PARTITION BY visitor_id ORDER BY created_at
+                    ) IS NULL THEN 1
+                    ELSE 0
+                END AS is_first_in_window"""
+
+_AGGREGATE_SQL_TEMPLATE = """
+        WITH session_boundaries AS (
+            SELECT
+                visitor_id, created_at, event_type, url, referrer,
+                utm_source, utm_medium, country_code, device_type,
+                scroll_depth, time_on_page, ip_address, optout, is_flagged_abuse,
+                CASE
+                    WHEN created_at - LAG(created_at) OVER (
+                        PARTITION BY visitor_id ORDER BY created_at
+                    ) > INTERVAL '30 minutes' THEN 1
+                    ELSE 0
+                END AS is_new_session{boundary_extra_cols}
+            FROM events
+            WHERE site_id = :site_id{lookback_clause}
+        ),
+        session_numbered AS (
+            SELECT *,
+                SUM(is_new_session) OVER (
+                    PARTITION BY visitor_id ORDER BY created_at
+                ) + 1 AS session_num
+            FROM session_boundaries
+        )
+        SELECT
+            visitor_id,
+            MIN(created_at) FILTER (WHERE NOT is_flagged_abuse) AS first_seen,
+            MAX(created_at) FILTER (WHERE NOT is_flagged_abuse) AS last_seen,
+            COUNT(*) FILTER (WHERE event_type = 'pageview' AND NOT is_flagged_abuse) AS total_pageviews,
+            {sessions_expr} AS total_sessions,
+            COALESCE(MAX(scroll_depth) FILTER (WHERE NOT is_flagged_abuse), 0) AS max_scroll_depth,
+            COALESCE(AVG(time_on_page) FILTER (WHERE time_on_page > 0 AND NOT is_flagged_abuse), 0) AS avg_time_on_page,
+            ARRAY_AGG(DISTINCT url) FILTER (WHERE event_type = 'pageview' AND url != '' AND NOT is_flagged_abuse) AS pages_visited,
+            MAX(referrer) FILTER (WHERE referrer != '' AND NOT is_flagged_abuse) AS top_referrer,
+            (ARRAY_AGG(referrer ORDER BY created_at ASC) FILTER (WHERE event_type = 'pageview' AND NOT is_flagged_abuse))[1] AS first_touch_referrer,
+            MAX(utm_source) FILTER (WHERE utm_source != '' AND NOT is_flagged_abuse) AS utm_source,
+            MAX(utm_medium) FILTER (WHERE utm_medium != '' AND NOT is_flagged_abuse) AS utm_medium,
+            MAX(country_code) FILTER (WHERE country_code != '' AND NOT is_flagged_abuse) AS country_code,
+            MAX(device_type) FILTER (WHERE device_type != '' AND NOT is_flagged_abuse) AS device_type,
+            (ARRAY_AGG(ip_address ORDER BY created_at DESC) FILTER (WHERE ip_address != '' AND NOT is_flagged_abuse))[1] AS latest_ip,
+            BOOL_OR(optout) AS do_not_resolve,
+            BOOL_OR(is_flagged_abuse) AS abuse_flagged
+        FROM session_numbered{window_clause}
+        GROUP BY visitor_id
+    """
+
+# LAG needs to see at least one event BEFORE the watermark to decide whether the
+# first in-window event opens a new session — so the incremental run READS from
+# `since - 30 minutes` but only MERGES rows strictly after `since`.
+BOUNDARY_LOOKBACK = timedelta(minutes=30)
+
+
+def build_aggregate_sql(since: datetime | None) -> str:
+    """Return the aggregation SQL. `since=None` reproduces today's query verbatim."""
+    if since is None:
+        return _AGGREGATE_SQL_TEMPLATE.format(
+            boundary_extra_cols="",
+            lookback_clause="",
+            sessions_expr=_DEFAULT_SESSIONS_EXPR,
+            window_clause="",
+        )
+    return _AGGREGATE_SQL_TEMPLATE.format(
+        boundary_extra_cols=_INCREMENTAL_BOUNDARY_EXTRA_COLS,
+        lookback_clause="\n              AND created_at > :lookback_start",
+        sessions_expr=_INCREMENTAL_SESSIONS_EXPR,
+        window_clause="\n        WHERE created_at > :since",
+    )
+
+
+async def aggregate_visitors_for_site(
+    db: AsyncSession,
+    site_id: str,
+    since: datetime | None = None,
+) -> int:
     """Aggregate visitors from the PostgreSQL events table.
 
     Uses window functions to detect real session boundaries:
     a new session starts when there is a gap > 30 minutes between consecutive events.
 
-    Aggregates the FULL event history per visitor (idempotent recompute) so the
-    intent score and pages_visited reflect all activity, not just a recent window.
-    Totals are SET (not incremented) on conflict — see _upsert_visitor.
+    `since=None` (the default, and the ONLY behavior when
+    `aggregation_incremental_enabled` is False) aggregates the FULL event history
+    per visitor — an idempotent, self-healing recompute where totals are SET (not
+    incremented) on conflict. This is also the repair path: it is the sole writer
+    of `avg_time_on_page` and `intent_score` once the incremental flag is on (D7).
+
+    `since` set selects the watermark-incremental path: only events created after
+    the watermark are MERGED (additively), while the read window starts 30 minutes
+    earlier so `LAG` can still classify the first in-window event's session
+    boundary. Incremental runs never write `avg_time_on_page` / `intent_score`
+    (D7) and never overwrite `first_touch_referrer` / `ai_source` / `ip_address`
+    (D6 / E13 / E14).
     """
     # Check if events table exists
     check = await db.execute(text(
@@ -259,81 +373,273 @@ async def aggregate_visitors_for_site(db: AsyncSession, site_id: str) -> int:
     # 1. Detect session boundaries (gap > 30 min between events)
     # 2. Count distinct sessions per visitor
     # 3. Extract latest IP address
-    result = await db.execute(text("""
-        WITH session_boundaries AS (
-            SELECT
-                visitor_id, created_at, event_type, url, referrer,
-                utm_source, utm_medium, country_code, device_type,
-                scroll_depth, time_on_page, ip_address, optout,
-                CASE
-                    WHEN created_at - LAG(created_at) OVER (
-                        PARTITION BY visitor_id ORDER BY created_at
-                    ) > INTERVAL '30 minutes' THEN 1
-                    ELSE 0
-                END AS is_new_session
-            FROM events
-            WHERE site_id = :site_id
-        ),
-        session_numbered AS (
-            SELECT *,
-                SUM(is_new_session) OVER (
-                    PARTITION BY visitor_id ORDER BY created_at
-                ) + 1 AS session_num
-            FROM session_boundaries
-        )
-        SELECT
-            visitor_id,
-            MIN(created_at) AS first_seen,
-            MAX(created_at) AS last_seen,
-            COUNT(*) FILTER (WHERE event_type = 'pageview') AS total_pageviews,
-            MAX(session_num) AS total_sessions,
-            COALESCE(MAX(scroll_depth), 0) AS max_scroll_depth,
-            COALESCE(AVG(time_on_page) FILTER (WHERE time_on_page > 0), 0) AS avg_time_on_page,
-            ARRAY_AGG(DISTINCT url) FILTER (WHERE event_type = 'pageview' AND url != '') AS pages_visited,
-            MAX(referrer) FILTER (WHERE referrer != '') AS top_referrer,
-            (ARRAY_AGG(referrer ORDER BY created_at ASC) FILTER (WHERE event_type = 'pageview' AND referrer != ''))[1] AS first_touch_referrer,
-            MAX(utm_source) FILTER (WHERE utm_source != '') AS utm_source,
-            MAX(utm_medium) FILTER (WHERE utm_medium != '') AS utm_medium,
-            MAX(country_code) FILTER (WHERE country_code != '') AS country_code,
-            MAX(device_type) FILTER (WHERE device_type != '') AS device_type,
-            (ARRAY_AGG(ip_address ORDER BY created_at DESC) FILTER (WHERE ip_address != ''))[1] AS latest_ip,
-            BOOL_OR(optout) AS do_not_resolve
-        FROM session_numbered
-        GROUP BY visitor_id
-    """), {"site_id": site_id})
+    params: dict = {"site_id": site_id}
+    if since is not None:
+        params["since"] = _strip_tz(since)
+        params["lookback_start"] = _strip_tz(since - BOUNDARY_LOOKBACK)
 
+    # Stamp the watermark from the DB clock BEFORE reading, so events that land
+    # mid-run are picked up by the NEXT run rather than silently skipped.
+    run_started_at = None
+    if since is not None:
+        run_started_at = (await db.execute(text("SELECT now()"))).scalar()
+
+    result = await db.execute(text(build_aggregate_sql(since)), params)
+
+    rows = result.fetchall()
     count = 0
-    for row in result.fetchall():
+
+    if since is None:
+        for row in rows:
+            (
+                visitor_id, first_seen, last_seen, total_pageviews,
+                total_sessions, max_scroll_depth, avg_time_on_page, pages_visited,
+                top_referrer, first_touch_referrer, utm_source, utm_medium,
+                country_code, device_type, latest_ip, do_not_resolve, abuse_flagged,
+            ) = row
+
+            await _upsert_visitor(
+                db, site_id, visitor_id,
+                first_seen or datetime.utcnow(),
+                last_seen or datetime.utcnow(),
+                total_pageviews or 0,
+                total_sessions or 1,
+                max_scroll_depth or 0,
+                avg_time_on_page or 0.0,
+                pages_visited or [],
+                top_referrer, utm_source, utm_medium, country_code, device_type,
+                latest_ip,
+                first_touch_referrer=first_touch_referrer,
+                do_not_resolve=bool(do_not_resolve),
+                is_abuse_flagged=bool(abuse_flagged),
+            )
+            count += 1
+    else:
+        count = await _bulk_upsert_visitors_incremental(db, site_id, rows)
+
+    await db.commit()
+
+    # Watermark advances ONLY after a successful commit of this run's upserts
+    # (checklist item 9). A crash before this point simply re-reads the same
+    # half-open window next time; because the window is `created_at > watermark`
+    # and never a rolling "last N hours", a re-read can never double-merge.
+    if since is not None and run_started_at is not None:
+        await _advance_watermark(db, site_id, run_started_at)
+
+    # Phase 4: Resolve IP → company domain for visitors that don't have one yet.
+    # This already ran AFTER the commit above, so nothing needs "moving"; the
+    # remaining Phase 3 change is the DISPATCH half — behind the incremental flag
+    # the external lookups no longer sit on the awaited ingest path.
+    if since is not None:
+        _dispatch_company_resolution(site_id)
+    else:
+        await _resolve_companies(db, site_id)
+
+    logger.info(
+        "visitors_aggregated",
+        site_id=site_id,
+        count=count,
+        incremental=since is not None,
+    )
+    return count
+
+
+async def _advance_watermark(db: AsyncSession, site_id: str, stamp: datetime) -> None:
+    """Stamp `sites.last_aggregated_at` post-commit. Never fails the run."""
+    from apps.api.models.site import Site
+
+    try:
+        await db.execute(
+            update(Site)
+            .where(Site.site_id == site_id)
+            .values(last_aggregated_at=_strip_tz(stamp))
+        )
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logger.warning("aggregation_watermark_advance_failed", site_id=site_id, error=str(exc))
+
+
+async def get_aggregation_watermark(db: AsyncSession, site_id: str) -> datetime | None:
+    """Return the site's incremental watermark, or None when it has never run.
+
+    None means "no bounded window is safe yet" — the caller must full-recompute.
+    """
+    from apps.api.models.site import Site
+
+    try:
+        result = await db.execute(
+            select(Site.last_aggregated_at).where(Site.site_id == site_id)
+        )
+        return result.scalar_one_or_none()
+    except Exception as exc:
+        logger.warning("aggregation_watermark_read_failed", site_id=site_id, error=str(exc))
+        return None
+
+
+# Merge expressions for the incremental bulk upsert. Every column here is either
+# additive or keep-existing — NEVER a plain SET, because a bounded run can only
+# see the rows inside its own window.
+#
+# DELIBERATELY ABSENT (D7): `avg_time_on_page` and `intent_score`. A window-only
+# value for either would be WRONG, not merely stale — avg_time_on_page has no
+# correct weighted merge without a stored contributing-event count, and
+# intent_score is computed in Python from all-time inputs. The full-recompute
+# repair sweep is their sole writer.
+_INCREMENTAL_SET = {
+    "last_seen": text("GREATEST(visitors.last_seen, EXCLUDED.last_seen)"),
+    "total_pageviews": text("visitors.total_pageviews + EXCLUDED.total_pageviews"),
+    "total_sessions": text("visitors.total_sessions + EXCLUDED.total_sessions"),
+    "max_scroll_depth": text("GREATEST(visitors.max_scroll_depth, EXCLUDED.max_scroll_depth)"),
+    # JSONB array union — order-insensitive, duplicate-free.
+    "pages_visited": text(
+        "(SELECT COALESCE(jsonb_agg(DISTINCT p), '[]'::jsonb) FROM jsonb_array_elements("
+        "COALESCE(visitors.pages_visited, '[]'::jsonb) || COALESCE(EXCLUDED.pages_visited, '[]'::jsonb)"
+        ") AS p)"
+    ),
+    # D6 — keep-existing-if-set. A window-only recompute would otherwise
+    # overwrite the true chronological first touch (the exact bug guarded by
+    # test_first_touch_beats_lexicographic_max).
+    "first_touch_referrer": text(
+        "COALESCE(NULLIF(visitors.first_touch_referrer, ''), EXCLUDED.first_touch_referrer)"
+    ),
+    # E13 — ai_source is conditioned on whether the REFERRER was kept, never
+    # COALESCEd independently. classify_ai_source() returns NULL for every
+    # ordinary referrer, so a symmetric COALESCE would let a later AI-referred
+    # pageview stamp "Arrived via ChatGPT" onto a visitor whose kept first touch
+    # is google.com — a false badge on the common case.
+    "ai_source": text(
+        "CASE WHEN NULLIF(visitors.first_touch_referrer, '') IS NOT NULL "
+        "THEN visitors.ai_source ELSE EXCLUDED.ai_source END"
+    ),
+    # E14 — preserve the existing keep-if-set semantic (`ip_address or
+    # Visitor.ip_address` in the single-row path). A window with no IP must never
+    # blank a stored one.
+    "ip_address": text("COALESCE(EXCLUDED.ip_address, visitors.ip_address)"),
+    # Sticky flags — unchanged from the full-recompute path.
+    "do_not_resolve": text("visitors.do_not_resolve OR EXCLUDED.do_not_resolve"),
+    "is_abuse_flagged": text("visitors.is_abuse_flagged OR EXCLUDED.is_abuse_flagged"),
+}
+
+
+async def _bulk_upsert_visitors_incremental(
+    db: AsyncSession,
+    site_id: str,
+    rows: list,
+) -> int:
+    """Chunked bulk upsert for the incremental path (decision D4).
+
+    One round-trip per chunk instead of one per visitor, which shortens the
+    row-lock window proportionally. `site_id` stays in both the values and the
+    conflict index elements so tenant scoping is structurally preserved (C6).
+    """
+    from apps.api.config import settings
+
+    if not rows:
+        return 0
+
+    payload: list[dict] = []
+    for row in rows:
         (
             visitor_id, first_seen, last_seen, total_pageviews,
             total_sessions, max_scroll_depth, avg_time_on_page, pages_visited,
             top_referrer, first_touch_referrer, utm_source, utm_medium,
-            country_code, device_type, latest_ip, do_not_resolve,
+            country_code, device_type, latest_ip, do_not_resolve, abuse_flagged,
         ) = row
 
-        await _upsert_visitor(
-            db, site_id, visitor_id,
-            first_seen or datetime.utcnow(),
-            last_seen or datetime.utcnow(),
-            total_pageviews or 0,
-            total_sessions or 1,
-            max_scroll_depth or 0,
-            avg_time_on_page or 0.0,
-            pages_visited or [],
-            top_referrer, utm_source, utm_medium, country_code, device_type,
-            latest_ip,
-            first_touch_referrer=first_touch_referrer,
-            do_not_resolve=bool(do_not_resolve),
+        first_seen = _strip_tz(first_seen or datetime.utcnow())
+        last_seen = _strip_tz(last_seen or datetime.utcnow())
+        payload.append({
+            "site_id": site_id,
+            "visitor_id": visitor_id,
+            "first_seen": first_seen,
+            "last_seen": last_seen,
+            "total_pageviews": total_pageviews or 0,
+            # DELTA, not a total — and `or 1` would be WRONG here. A window whose
+            # only event continues the previous session yields a delta of 0, and
+            # coercing that to 1 invents a session on every batch. A genuinely
+            # new visitor always yields >= 1 via is_first_in_window.
+            "total_sessions": total_sessions if total_sessions is not None else 0,
+            # Insert-only defaults for the two DESCOPED columns: a brand-new row
+            # needs *some* value, and the repair sweep overwrites both. They are
+            # absent from _INCREMENTAL_SET, so an existing row is never touched.
+            "avg_time_on_page": avg_time_on_page or 0.0,
+            "max_scroll_depth": max_scroll_depth or 0,
+            "pages_visited": pages_visited or [],
+            "top_referrer": top_referrer or None,
+            "first_touch_referrer": first_touch_referrer or None,
+            "ai_source": classify_ai_source(first_touch_referrer),
+            "utm_source": utm_source or None,
+            "utm_medium": utm_medium or None,
+            "country_code": country_code or None,
+            "device_type": device_type or None,
+            "ip_address": latest_ip or None,
+            "intent_score": 0.0,
+            "do_not_resolve": bool(do_not_resolve),
+            "is_abuse_flagged": bool(abuse_flagged),
+        })
+
+    chunk_size = max(settings.aggregation_upsert_chunk_size, 1)
+    set_ = dict(_INCREMENTAL_SET)
+    set_["updated_at"] = datetime.utcnow()
+
+    for start in range(0, len(payload), chunk_size):
+        chunk = payload[start:start + chunk_size]
+        stmt = pg_insert(Visitor).values(chunk).on_conflict_do_update(
+            index_elements=["site_id", "visitor_id"],
+            set_=set_,
         )
-        count += 1
+        await db.execute(stmt)
 
-    await db.commit()
+    return len(payload)
 
-    # Phase 4: Resolve IP → company domain for visitors that don't have one yet
-    await _resolve_companies(db, site_id)
 
-    logger.info("visitors_aggregated", site_id=site_id, count=count)
-    return count
+# Strong refs so dispatched resolutions are not garbage-collected mid-flight.
+_resolution_tasks: set = set()
+
+
+def _dispatch_company_resolution(site_id: str) -> None:
+    """Fire company resolution off the ingest path (checklist item 6).
+
+    MANDATORY GUARD: `_upsert_company` merges with unconditional
+    `companies.total_visitors + 1` / `+ EXCLUDED.total_sessions` /
+    `+ EXCLUDED.total_pageviews`. Two concurrent resolutions for one site would
+    therefore INFLATE company counters. Dispatch is only legal behind a
+    single-flight lock, so this takes `agg:resolve:{site_id}` and never runs
+    without it — including when Redis is degraded (fail CLOSED: a skipped
+    resolution is retried by the next run, an inflated counter is permanent).
+    """
+    import asyncio
+
+    async def _run() -> None:
+        from apps.api.config import settings
+        from apps.api.models.database import async_session
+        from apps.api.services import aggregation_debounce as _dbnc
+
+        key = _dbnc.resolve_lock_key(site_id)
+        acquired = await _dbnc.try_acquire(key, settings.aggregation_min_interval_seconds)
+        if acquired is not True:
+            logger.info(
+                "company_resolution_skipped_single_flight",
+                site_id=site_id,
+                redis_degraded=acquired is None,
+            )
+            return
+        try:
+            async with async_session() as db:
+                await _resolve_companies(db, site_id)
+        except Exception as exc:
+            logger.warning("company_resolution_dispatch_failed", site_id=site_id, error=str(exc))
+        finally:
+            await _dbnc.release(key)
+
+    try:
+        task = asyncio.create_task(_run())
+        _resolution_tasks.add(task)
+        task.add_done_callback(_resolution_tasks.discard)
+    except RuntimeError:
+        # No running loop (sync/Celery context) — nothing to dispatch onto.
+        logger.info("company_resolution_dispatch_no_loop", site_id=site_id)
 
 
 async def _resolve_companies(db: AsyncSession, site_id: str) -> None:

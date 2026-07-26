@@ -69,6 +69,13 @@ class Visitor(Base):
     is_agent_derived: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # Ingest abuse marker, aggregated from events.is_flagged_abuse via
+    # BOOL_OR in aggregate_visitors_for_site. Sticky on recompute (OR-merged on
+    # conflict), exactly like do_not_resolve: once a visitor's traffic looked
+    # like a flood, a later clean window must not launder it back to emailable.
+    is_abuse_flagged: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -100,6 +107,12 @@ class IdentifiedVisitor(Base):
     # every human-resolved row. Any row carrying this can NEVER be an outreach
     # target (SPEC AC10).
     source_agent_visit_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Ingest abuse marker, copied from Visitor.is_abuse_flagged inside the SAME
+    # atomic INSERT that creates this row (_save_identified). Any row carrying it
+    # can NEVER be an outreach target — see is_emailable_identity.
+    is_abuse_flagged: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     # Phase 05 (encrypt PII at rest) — added nullable, not yet read/written.
     email_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     email_bidx: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)

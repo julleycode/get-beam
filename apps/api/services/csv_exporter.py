@@ -79,6 +79,7 @@ async def _get_segment_visitors(
         if not is_emailable_identity(
             identified.resolution_provider,
             getattr(identified, "source_agent_visit_id", None),
+            getattr(identified, "is_abuse_flagged", False),
         ):
             continue
 

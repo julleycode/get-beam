@@ -801,6 +801,10 @@ class IdentityResolver(
             confidence_score=data.get("confidence_score"),
             # GUARD #1: agent-origin marker written atomically with the row.
             source_agent_visit_id=agent_marker,
+            # Ingest-abuse marker, copied from the visitor row in the SAME INSERT
+            # so there is no window where an abuse-derived identity is durable and
+            # unmarked. is_emailable_identity refuses any row carrying it.
+            is_abuse_flagged=bool(getattr(visitor, "is_abuse_flagged", False)),
         )
         self.db.add(identified)
         visitor.identity_status = "identified"

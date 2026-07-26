@@ -54,7 +54,9 @@ def identity_level(provider: str | None) -> str | None:
 
 
 def is_emailable_identity(
-    provider: str | None, source_agent_visit_id: str | None = None
+    provider: str | None,
+    source_agent_visit_id: str | None = None,
+    is_abuse_flagged: bool = False,
 ) -> bool:
     """Whether an identity may be emailed / exported to ad+CRM / alerted as THE
     visitor.
@@ -77,5 +79,13 @@ def is_emailable_identity(
     # AC10 override: agent-origin records are never outreach targets, no matter
     # what provider they carry. Checked first, unconditionally.
     if source_agent_visit_id is not None:
+        return False
+    # Ingest-abuse override (ingest-abuse-hardening AC-4): an identity derived
+    # from traffic the ingest layer flagged as flood/abuse is never an outreach
+    # target either — the "visitor" it describes is very likely synthetic. Same
+    # unconditional, provider-independent shape as the agent guard above, and
+    # deliberately gated through this ONE shared helper so a new call site can't
+    # drift into checking only half the guardrail.
+    if is_abuse_flagged:
         return False
     return identity_level(provider) == "person"

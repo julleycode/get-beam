@@ -200,7 +200,9 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
         # Never email a company-level guess (hunter/apollo map IP -> company and
         # return a RANDOM employee, not the visitor) or an unclassified provider.
         if not is_emailable_identity(
-            iv.resolution_provider, getattr(iv, "source_agent_visit_id", None)
+            iv.resolution_provider,
+            getattr(iv, "source_agent_visit_id", None),
+            getattr(iv, "is_abuse_flagged", False),
         ):
             summary["skipped_company_level"] += 1
             continue
