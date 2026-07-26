@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, type Platform } from "@/lib/api";
+import { LinkedInConnectWizard } from "@/components/linkedin-connect-wizard";
+import { LinkedInTosWarning } from "@/components/linkedin-tos-warning";
+import {
+  useLinkedInExtensionStatus,
+  WIZARD_REOPEN_PARAM,
+} from "@/lib/use-linkedin-extension-status";
 import { ListCardSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { PlatformBadge } from "@/components/platform-badge";
@@ -24,8 +31,10 @@ const ALL_PLATFORMS: { platform: Platform; label: string; color: string }[] = [
   { platform: "tiktok", label: "TikTok", color: "bg-gray-900" },
 ];
 
-export default function SocialAccountsPage() {
+function SocialAccountsPageInner() {
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   const { data: accounts, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["social-accounts"],
@@ -82,147 +91,34 @@ export default function SocialAccountsPage() {
     },
   });
 
-  // ── LinkedIn outreach via the Beam browser extension (additive) ──
-  // The manual cookie-paste form above always stays as the fallback. The
-  // extension is a "dumb pipe": it hands us the li_at cookie + UA over a
-  // locally-scoped, nonce-verified message channel, and we call the SAME
-  // existing enableLinkedInOutreach endpoint. No backend change.
+  // ── LinkedIn outreach via the Beam browser extension ──
+  // All extension state (detection, the D6/D7 nonce channels, the read-only
+  // signed-in probe, and the one-click connect) lives in one shared hook.
   //
-  // KEEP IN SYNC with apps/extension/src/known-origins.js
-  // (KNOWN_EXTENSION_ID / BEAM_ORIGINS / MESSAGE_SOURCE). These are two separate
-  // build targets with no shared package, so the constants are duplicated.
-  // This is the deterministic dev id derived from the extension manifest "key"
-  // (same id on every machine — no re-patching). At the extension's first Chrome
-  // Web Store upload the store assigns its OWN id: remove the manifest "key" and
-  // replace this value + the extension mirror with the store id (plan OI-4 / Step 9).
-  const KNOWN_EXTENSION_ID = "ejllllimjoomfaacgbedjjelljciicii";
-  const EXTENSION_MESSAGE_SOURCE = "beam-extension";
+  // THIS IS THE ONLY CALL SITE. The wizard below receives the state as props —
+  // a second live hook instance would double-register the D6 nonce and silently
+  // break the popup-relay path (see the hook's header comment).
+  const linkedInExt = useLinkedInExtensionStatus();
 
-  const [extensionDetected, setExtensionDetected] = useState(false);
-  const [extensionError, setExtensionError] = useState<string | null>(null);
-  // Per-page-load nonce. Registered with the extension over the Chrome
-  // sender-verified channel; the popup-relay (D7) message must echo it back or
-  // we reject it, so a co-resident copy-cat extension cannot forge a response
-  // (plan D10 / OI-3). Never rendered into the DOM or a CustomEvent.
-  const [extensionNonce] = useState(() =>
-    typeof crypto !== "undefined" && crypto.randomUUID
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2)
-  );
-
-  const extensionMut = useMutation({
-    mutationFn: (creds: { cookie: string; userAgent: string }) =>
-      api.enableLinkedInOutreach(creds.cookie, creds.userAgent),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["linkedin-outreach-status"] });
-    },
-    onError: (err: Error) => {
-      setExtensionError(err.message || "Couldn't connect via the extension.");
-    },
-  });
-
-  // Never log the cookie / userAgent / raw response anywhere (plan AC8).
-  const handleExtensionResult = (data: {
-    ok?: boolean;
-    cookie?: string;
-    userAgent?: string;
-    reason?: string;
-  }) => {
-    if (!data.ok || !data.cookie) {
-      setExtensionError(
-        data.reason === "not_signed_in"
-          ? "You're not signed into LinkedIn in this browser. Sign in at linkedin.com, then try again."
-          : "Couldn't read your LinkedIn login. Make sure you're signed in at linkedin.com."
-      );
-      return;
-    }
-    setExtensionError(null);
-    extensionMut.mutate({
-      cookie: data.cookie,
-      userAgent: data.userAgent || navigator.userAgent,
-    });
-  };
-
-  // Primary channel (D6): page → extension via externally_connectable. Same
-  // one-click flow is reused for first connect and refresh/reconnect (AC10).
-  const connectViaExtension = () => {
-    setExtensionError(null);
-    try {
-      window.chrome?.runtime?.sendMessage(
-        KNOWN_EXTENSION_ID,
-        { type: "beam-connect-request" },
-        (response) => {
-          if (window.chrome?.runtime?.lastError || !response) {
-            setExtensionError(
-              "Couldn't reach the Beam extension. Is it installed and enabled?"
-            );
-            return;
-          }
-          handleExtensionResult(
-            response as {
-              ok?: boolean;
-              cookie?: string;
-              userAgent?: string;
-              reason?: string;
-            }
-          );
-        }
-      );
-    } catch {
-      setExtensionError(
-        "Couldn't reach the Beam extension. Is it installed and enabled?"
-      );
-    }
-  };
+  // Wizard dialog. `?connectLinkedIn=1` reopens it after the install step's
+  // page reload; the param is stripped so a plain refresh doesn't re-trigger it.
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [manualFormOpen, setManualFormOpen] = useState(false);
+  const manualFormRef = useRef<HTMLDetailsElement | null>(null);
+  const reopenParam = searchParams.get(WIZARD_REOPEN_PARAM);
 
   useEffect(() => {
-    // Firefox/Safari expose no `window.chrome` extension API — every guard here
-    // naturally no-ops and only the manual form renders (AC9). Do NOT add an
-    // "install extension" prompt for unsupported browsers.
-    const markDetected = () => {
-      setExtensionDetected(true);
-      // Register the nonce over the D6 (externally_connectable) channel — the
-      // only sender-verified path. Never expose it on any page-readable surface.
-      try {
-        window.chrome?.runtime?.sendMessage(KNOWN_EXTENSION_ID, {
-          type: "register-nonce",
-          nonce: extensionNonce,
-        });
-      } catch {
-        /* extension not installed / unreachable — ignore */
-      }
-    };
+    if (reopenParam !== "1") return;
+    setWizardOpen(true);
+    router.replace("/dashboard/social-accounts");
+  }, [reopenParam, router]);
 
-    // (a) first-paint DOM-attribute fallback; (b) event path if it fires later.
-    if (document.documentElement.dataset.beamExtension === "1") markDetected();
-    window.addEventListener("beam-extension-detected", markDetected);
-
-    // Secondary channel (D7) popup relay: trust a message only when it is from
-    // our own origin AND carries the known source discriminator AND the nonce we
-    // registered (D10/OI-3 — origin + source alone are forgeable by a
-    // co-resident copy-cat extension in the same page context).
-    const onMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
-      const data = event.data as {
-        source?: string;
-        nonce?: string;
-        ok?: boolean;
-        cookie?: string;
-        userAgent?: string;
-        reason?: string;
-      } | null;
-      if (!data || data.source !== EXTENSION_MESSAGE_SOURCE) return;
-      if (data.nonce !== extensionNonce) return; // forged / replayed → reject
-      handleExtensionResult(data);
-    };
-    window.addEventListener("message", onMessage);
-
-    return () => {
-      window.removeEventListener("beam-extension-detected", markDetected);
-      window.removeEventListener("message", onMessage);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const showManualForm = () => {
+    setManualFormOpen(true);
+    requestAnimationFrame(() => {
+      manualFormRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  };
 
   return (
     <div className="max-w-3xl space-y-6">
@@ -343,16 +239,31 @@ export default function SocialAccountsPage() {
             encrypted in the outreach service — Beam never keeps a copy and never
             shows it again.
           </p>
-          <div className="rounded-md border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
-            <strong>Warning:</strong> automating LinkedIn is against LinkedIn&apos;s
-            Terms of Service and can get your account restricted or banned. Use a
-            low daily volume and only with accounts you&apos;re willing to risk.
-          </div>
+          <LinkedInTosWarning />
+
+          {/* Guided wizard — the primary entry point. Only offered on browsers
+              that can actually run the extension; Firefox/Safari fall straight
+              through to the manual form below (AC9/AC12). */}
+          {linkedInExt.isChromeOrEdge && (
+            <div className="space-y-2 rounded-md border border-border bg-muted/40 p-3">
+              <p className="text-sm font-medium text-foreground">
+                Guided setup (about a minute)
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Walks you through it step by step — no copying anything by hand.
+              </p>
+              <Button type="button" onClick={() => setWizardOpen(true)}>
+                {outreachStatus?.outreach_connected
+                  ? "Reconnect LinkedIn"
+                  : "Connect LinkedIn"}
+              </Button>
+            </div>
+          )}
 
           {/* Extension path (additive). Renders only when the Beam extension is
               detected; always sits BELOW the ToS warning above (AC7), never
               bypassing it. The manual form below always renders regardless. */}
-          {extensionDetected && (
+          {linkedInExt.extensionDetected && (
             <div className="space-y-2 rounded-md border border-border bg-muted/40 p-3">
               <p className="text-sm font-medium text-foreground">
                 Beam extension detected
@@ -363,21 +274,21 @@ export default function SocialAccountsPage() {
               </p>
               <Button
                 type="button"
-                onClick={connectViaExtension}
+                onClick={linkedInExt.connect}
                 disabled={
-                  extensionMut.isPending || outreachStatus?.configured === false
+                  linkedInExt.isPending || outreachStatus?.configured === false
                 }
               >
-                {extensionMut.isPending
+                {linkedInExt.isPending
                   ? "Connecting..."
                   : outreachStatus?.outreach_connected
                     ? "Refresh connection with extension"
                     : "Connect with extension"}
               </Button>
-              {extensionError && (
-                <p className="text-sm text-destructive">{extensionError}</p>
+              {linkedInExt.error && (
+                <p className="text-sm text-destructive">{linkedInExt.error}</p>
               )}
-              {extensionMut.isSuccess && (
+              {linkedInExt.isConnected && (
                 <p className="text-sm text-success">Connected via extension.</p>
               )}
             </div>
@@ -395,6 +306,20 @@ export default function SocialAccountsPage() {
             </div>
           ) : null}
 
+          {/* Manual paste form — de-emphasized as the advanced/fallback path, but
+              always reachable (AC12) and the ONLY path on Firefox/Safari (D12).
+              Kept expanded until the one-click extension path is actually
+              available, so a user with no working alternative is never left
+              staring at a collapsed section. */}
+          <details
+            ref={manualFormRef}
+            open={!linkedInExt.extensionDetected || manualFormOpen}
+            onToggle={(e) => setManualFormOpen(e.currentTarget.open)}
+            className="rounded-md border border-border px-3 py-2 [&[open]>summary]:mb-3"
+          >
+            <summary className="cursor-pointer select-none text-sm font-medium text-foreground">
+              Advanced: paste your login key manually
+            </summary>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -500,8 +425,30 @@ export default function SocialAccountsPage() {
                   : "Enable LinkedIn outreach"}
             </Button>
           </form>
+          </details>
         </CardContent>
       </Card>
+
+      <LinkedInConnectWizard
+        open={wizardOpen}
+        onOpenChange={setWizardOpen}
+        serverConfigured={outreachStatus?.configured !== false}
+        alreadyConnected={!!outreachStatus?.outreach_connected}
+        onShowManualForm={showManualForm}
+        {...linkedInExt}
+      />
     </div>
+  );
+}
+
+export default function SocialAccountsPage() {
+  // useSearchParams (the wizard reopen param) needs a Suspense boundary — same
+  // pattern as the onboarding page's resume params.
+  return (
+    <Suspense
+      fallback={<ListCardSkeleton rows={3} leading />}
+    >
+      <SocialAccountsPageInner />
+    </Suspense>
   );
 }

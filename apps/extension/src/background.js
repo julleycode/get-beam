@@ -2,6 +2,7 @@
 // channels. Never logs or stores the cookie / userAgent (plan AC8).
 import {
   readLinkedInSession,
+  checkLinkedInSignedIn,
   registerNonce,
   nonceForTab,
 } from "./connect-logic.js";
@@ -23,6 +24,21 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 
   if (message.type === "beam-connect-request") {
     readLinkedInSession(chrome).then((result) => sendResponse(result));
+    return true; // async response
+  }
+
+  // Read-only signed-in probe for the onboarding wizard (onboarding plan D5).
+  // Status only — the response shape has no cookie/userAgent field (AC5).
+  //
+  // Deliberately NO nonce on this leg, and that is not an oversight: the nonce
+  // (D10) exists to protect the D7 window.postMessage RELAY, where event.origin
+  // alone is forgeable by a co-resident extension. This probe is served ONLY on
+  // onMessageExternal, which Chrome itself gates on
+  // manifest.externally_connectable.matches with a Chrome-verified `sender` — a
+  // control a co-resident extension cannot forge. There is no relay leg here, so
+  // there is no gap for a nonce to close.
+  if (message.type === "beam-session-check") {
+    checkLinkedInSignedIn(chrome).then((result) => sendResponse(result));
     return true; // async response
   }
 

@@ -58,4 +58,19 @@ test.describe("LinkedIn outreach — extension integration (dashboard side)", ()
 
     expect(outreachConnectCalls).toBe(0);
   });
+
+  // Onboarding-plan D8 regression: the extension detection / nonce logic moved
+  // into the shared useLinkedInExtensionStatus() hook. The two tests above are
+  // the unmodified non-regression proof; this one asserts the new guided-setup
+  // launcher is present alongside them.
+  test("D8: guided wizard launcher is present on the card", async ({ page }) => {
+    await page.goto("/dashboard/social-accounts");
+    await expect(
+      page.getByText(/against LinkedIn's Terms of Service/i)
+    ).toBeVisible({ timeout: 15_000 });
+
+    await expect(
+      page.getByRole("button", { name: /^(Connect|Reconnect) LinkedIn$/ }).first()
+    ).toBeVisible();
+  });
 });

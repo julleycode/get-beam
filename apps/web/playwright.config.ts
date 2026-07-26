@@ -35,9 +35,14 @@ export default defineConfig({
   /* Reuse already-running dev servers */
   webServer: [
     {
+      // Local branch invokes the venv interpreter by explicit path on purpose:
+      // Playwright runs webServer.command through /bin/sh, which has no `source`
+      // builtin, and macOS has no bare `python` on PATH (only python3 / the venv).
+      // Do NOT "fix" this back to `source .venv/bin/activate && python ...` —
+      // that fails with `python: command not found` (exit 127).
       command: process.env.CI
         ? 'cd ../.. && PYTHONPATH=. python -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000'
-        : 'cd ../.. && source .venv/bin/activate && PYTHONPATH=. python -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000',
+        : 'cd ../.. && PYTHONPATH=. .venv/bin/python3.11 -m uvicorn apps.api.main:app --host 0.0.0.0 --port 8000',
       port: 8000,
       timeout: 30_000,
       reuseExistingServer: true,

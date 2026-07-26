@@ -33,6 +33,22 @@
             resolve("threw");
           }
         });
+
+      // Attempt the onboarding read-only session probe from this non-Beam origin.
+      window.trySessionCheck = (extId) =>
+        new Promise((resolve) => {
+          try {
+            chrome.runtime.sendMessage(extId, { type: "beam-session-check" }, (response) => {
+              if (chrome.runtime.lastError || !response) {
+                resolve("rejected");
+              } else {
+                resolve("answered:" + JSON.stringify(response));
+              }
+            });
+          } catch (e) {
+            resolve("threw");
+          }
+        });
     </script>
   </body>
 </html>

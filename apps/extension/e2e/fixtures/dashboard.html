@@ -16,6 +16,9 @@
     <div id="status">idle</div>
     <div id="error"></div>
     <button id="connect">Connect with extension</button>
+    <!-- Onboarding wizard's read-only signed-in probe (D5 / AC5-AC6). -->
+    <div id="session-check">idle</div>
+    <button id="check-session">Check LinkedIn session</button>
 
     <script>
       const params = new URLSearchParams(location.search);
@@ -72,6 +75,38 @@
         } catch (e) {
           errorEl.textContent = "unreachable";
         }
+      });
+
+      // Onboarding read-only probe (D5): D6 channel only, no nonce on this leg.
+      // Exposes the RAW response keys so the spec can assert no `cookie` field.
+      window.trySessionCheck = () =>
+        new Promise((resolve) => {
+          try {
+            chrome.runtime.sendMessage(
+              EXT_ID,
+              { type: "beam-session-check" },
+              (response) => {
+                if (chrome.runtime.lastError || !response) {
+                  resolve({ status: "rejected" });
+                  return;
+                }
+                resolve({ status: "answered", response });
+              }
+            );
+          } catch (e) {
+            resolve({ status: "threw" });
+          }
+        });
+
+      document.getElementById("check-session").addEventListener("click", () => {
+        window.trySessionCheck().then((r) => {
+          document.getElementById("session-check").textContent =
+            r.status === "answered"
+              ? r.response.signedIn
+                ? "signed-in"
+                : "not-signed-in"
+              : r.status;
+        });
       });
 
       // D7 popup relay: verify origin + source + nonce (D10).

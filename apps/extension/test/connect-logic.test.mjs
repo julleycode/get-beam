@@ -4,6 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   readLinkedInSession,
+  checkLinkedInSignedIn,
   findBeamTab,
   resolvePopupConnect,
   registerNonce,
@@ -95,6 +96,46 @@ test("AC4: Beam tab present → dispatched with that tab id", async () => {
 test("findBeamTab ignores tabs without a numeric id", async () => {
   const chrome = fakeChrome({ tabs: { query: async () => [{ url: "x" }] } });
   assert.equal(await findBeamTab(chrome, ["*"]), null);
+});
+
+// ── Onboarding AC5: read-only signed-in probe never returns the cookie ──
+test("AC5: checkLinkedInSignedIn never returns a cookie key (signed in)", async () => {
+  const chrome = fakeChrome({
+    cookies: { get: async () => ({ value: "AQEDA-fake-li_at" }) },
+  });
+  const result = await checkLinkedInSignedIn(chrome);
+  assert.deepEqual(result, { signedIn: true });
+  // Explicit key-presence assertions, not just falsy checks.
+  assert.equal("cookie" in result, false);
+  assert.equal("userAgent" in result, false);
+  assert.deepEqual(Object.keys(result), ["signedIn"]);
+});
+
+test("AC5: checkLinkedInSignedIn cookie null → not_signed_in, no cookie key", async () => {
+  const chrome = fakeChrome({ cookies: { get: async () => null } });
+  const result = await checkLinkedInSignedIn(chrome);
+  assert.deepEqual(result, { signedIn: false, reason: "not_signed_in" });
+  assert.equal("cookie" in result, false);
+  assert.equal("userAgent" in result, false);
+});
+
+test("AC5: checkLinkedInSignedIn empty cookie value → not_signed_in", async () => {
+  const chrome = fakeChrome({ cookies: { get: async () => ({ value: "" }) } });
+  const result = await checkLinkedInSignedIn(chrome);
+  assert.deepEqual(result, { signedIn: false, reason: "not_signed_in" });
+});
+
+test("AC5: checkLinkedInSignedIn cookies.get throws → cookie_read_failed, no cookie key", async () => {
+  const chrome = fakeChrome({
+    cookies: {
+      get: async () => {
+        throw new Error("boom");
+      },
+    },
+  });
+  const result = await checkLinkedInSignedIn(chrome);
+  assert.deepEqual(result, { signedIn: false, reason: "cookie_read_failed" });
+  assert.equal("cookie" in result, false);
 });
 
 // ── D10 nonce registry ──

@@ -10,11 +10,14 @@ import {
 } from "./known-origins.js";
 
 /**
- * Read the LinkedIn li_at session cookie via the injected chrome API.
+ * Single shared cookie-read + not-signed-in detection path (onboarding plan D6).
+ * BOTH readLinkedInSession() (full connect, returns the cookie) and
+ * checkLinkedInSignedIn() (read-only probe, never returns the cookie) call this
+ * — there is deliberately no duplicated "not signed in" branch between them.
  * @param {typeof chrome} chromeApi
- * @returns {Promise<{ok: true, cookie: string, userAgent: string} | {ok: false, reason: string}>}
+ * @returns {Promise<{ok: true, value: string} | {ok: false, reason: "not_signed_in" | "cookie_read_failed"}>}
  */
-export async function readLinkedInSession(chromeApi) {
+async function readLinkedInCookieValue(chromeApi) {
   let cookie;
   try {
     cookie = await chromeApi.cookies.get({
@@ -31,12 +34,45 @@ export async function readLinkedInSession(chromeApi) {
     return { ok: false, reason: "not_signed_in" };
   }
 
+  return { ok: true, value: cookie.value };
+}
+
+/**
+ * Read the LinkedIn li_at session cookie via the injected chrome API.
+ * @param {typeof chrome} chromeApi
+ * @returns {Promise<{ok: true, cookie: string, userAgent: string} | {ok: false, reason: string}>}
+ */
+export async function readLinkedInSession(chromeApi) {
+  const read = await readLinkedInCookieValue(chromeApi);
+  if (!read.ok) {
+    return { ok: false, reason: read.reason };
+  }
+
   // Service-worker global scope exposes navigator.userAgent (self.navigator).
   const userAgent =
     (typeof self !== "undefined" && self.navigator && self.navigator.userAgent) ||
     "";
 
-  return { ok: true, cookie: cookie.value, userAgent };
+  return { ok: true, cookie: read.value, userAgent };
+}
+
+/**
+ * Read-only "is the user signed into LinkedIn?" probe (onboarding plan D5).
+ *
+ * SECURITY (AC5): the returned object structurally has NO `cookie` and NO
+ * `userAgent` field on either branch — status only. The onboarding wizard needs
+ * to know whether to show "sign into LinkedIn" without triggering a full
+ * connect, and a boolean is the least it can be told.
+ *
+ * @param {typeof chrome} chromeApi
+ * @returns {Promise<{signedIn: true} | {signedIn: false, reason: "not_signed_in" | "cookie_read_failed"}>}
+ */
+export async function checkLinkedInSignedIn(chromeApi) {
+  const read = await readLinkedInCookieValue(chromeApi);
+  if (!read.ok) {
+    return { signedIn: false, reason: read.reason };
+  }
+  return { signedIn: true };
 }
 
 /**
