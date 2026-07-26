@@ -283,8 +283,31 @@ async def push_segment_endpoint(
         or 0
     )
 
-    # Offload big segments to a worker when enabled (and one is running).
-    if settings.crm_async_push and member_count > settings.crm_async_push_threshold:
+    # Offload big segments to a worker ONLY when one is actually consuming the
+    # broker. One condition, two flags — resolved truth table:
+    #
+    #   crm_async_push | celery_worker_enabled | behavior
+    #   ---------------|-----------------------|----------------------------------
+    #   False (default)| False (default)       | inline (today's exact behavior)
+    #   False          | True                  | inline (async is opt-in per surface)
+    #   True           | False                 | inline + warning (NEVER .delay():
+    #                  |                       | no consumer = silent drop)
+    #   True           | True                  | .delay(), return queued=True
+    #
+    # The inline fallback runs the same tenant-scoped push_segment() body the
+    # task would have run, so no auth/tenancy check is bypassed.
+    _async_requested = (
+        settings.crm_async_push and member_count > settings.crm_async_push_threshold
+    )
+    if _async_requested and not settings.celery_worker_enabled:
+        logger.warning(
+            "async_push_requested_without_worker",
+            surface="crm",
+            site_id=site_id,
+            provider=provider,
+            members=member_count,
+        )
+    if _async_requested and settings.celery_worker_enabled:
         from apps.api.tasks.crm_tasks import push_segment_to_crm
 
         push_segment_to_crm.delay(site_id, provider, body.segment_id)
