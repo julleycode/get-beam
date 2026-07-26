@@ -35,8 +35,11 @@ function walk(dir, predicate, out = []) {
   if (!fs.existsSync(abs)) return out;
   for (const entry of fs.readdirSync(abs, { withFileTypes: true })) {
     const rel = path.join(dir, entry.name);
-    if (entry.isDirectory()) walk(rel, predicate, out);
-    else if (!predicate || predicate(rel)) out.push(rel);
+    if (entry.isDirectory()) {
+      // Skip nested git worktrees (other branches' content, not this checkout's) and node_modules.
+      if (rel === ".claude/worktrees" || entry.name === "node_modules") continue;
+      walk(rel, predicate, out);
+    } else if (!predicate || predicate(rel)) out.push(rel);
   }
   return out;
 }
