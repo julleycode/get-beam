@@ -86,6 +86,7 @@ pytest config: `pyproject.toml` — `asyncio_mode=auto`, markers `unit` / `integ
 - `source .venv/bin/activate` fails in CI — `playwright.config.ts` uses a `process.env.CI` conditional
 - Redis async GC prints "Event loop is closed" tracebacks at teardown — noise, not failure; check the pytest summary line
 - Handlers passed to `gemini_agent_loop` share one AsyncSession: sequential only, never commit inside a tool handler
+- Alembic offline `--sql` dry-run needs an EXPLICIT `<from-rev>:<to-rev>` range in this repo — the `upgrade head --sql` / `downgrade -1 --sql` shorthand fails partway through the chain because `b7d3e9f1a4c2_add_ad_connections.py` calls `sa.inspect(bind)`, unsupported against alembic's offline `MockConnection`; use e.g. `alembic upgrade d5b1f7c3a908:head --sql` scoped past that migration (confirmed at cadence-bot-flag EXECUTE, 26-07-26)
 
 **Playwright rules (canonical — from repeated CI failures):**
 1. NEVER `waitForTimeout()` + `isVisible()` — use `await expect(locator).toBeVisible({ timeout: 15_000 })` (auto-retry)

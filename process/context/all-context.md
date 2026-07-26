@@ -90,7 +90,13 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
 - `pixel` — tracking pixel, event ingest, consent, bot filtering; ingest-abuse-hardening
   (rotating-IP-flood defense: body-size cap, trusted-proxy IP resolution, per-site ceiling,
   write-time velocity flag, operator observability) shipped 25-07-26, archived 26-07-26 with 2
-  known-gaps — see Ingest Abuse Hardening section below
+  known-gaps — see Ingest Abuse Hardening section below. cadence-bot-flag v1 (behavioral,
+  non-UA stealth-crawler detection: cadence-variance + engagement-mix conjunction, batch
+  APScheduler sweep, visibility-only `is_bot_suspect` flag on Visitor/IdentifiedVisitor, default
+  OFF) EXECUTE+EVL-green 26-07-26, plan stays active pending 4 known-gaps (migration live
+  round-trip, AC-14 live-crawler validation, AC-8/AC-9 Agent-Probe manual render check,
+  Playwright auth-harness leg) — see
+  `process/features/pixel/backlog/cadence-bot-flag-deferred-gates_NOTE_26-07-26.md`
 - `evallayer` — AI-agent traffic detection (agent_classifier, `/agents` API + dashboard tab, IP/rDNS
   verification, agent→company outreach-safe resolution, GEO/AEO analytics, outreach-exclusion
   guardrail); 8-phase program, code-complete 23-07-26, pending Docker-gate closure — see
@@ -216,10 +222,11 @@ structurally separate from human Visitor/Event data, never as a targetable outre
 - `apps/api/services/agent_aggregator.py` — read-only vendor/page/verification-method analytics,
   `GET /api/v1/agents/{site_id}/analytics`
 - Feature flag: `agent_detection_enabled` in `apps/api/config.py` — **defaults OFF**
-- 11 migrations pending live-apply, in order (Docker-gated, never run against a real Postgres in
+- 12 migrations pending live-apply, in order (Docker-gated, never run against a real Postgres in
   the sandbox that built this — chain verified by reading each file's `revision`/`down_revision`
-  header; **TRUE current head re-confirmed LIVE 26-07-26 via `alembic -c apps/api/alembic.ini
-  heads`: `d5b1f7c3a908` — single head, no branching**): `d11b39a6c843` (agent_visits
+  header; **TRUE current head re-confirmed LIVE 26-07-26 (at cadence-bot-flag EXECUTE) via
+  `alembic -c apps/api/alembic.ini heads`: `e6b2d4a1c837` — single head, no branching**):
+  `d11b39a6c843` (agent_visits
   table) → `a1c7e4f92b83` (Phase 5 visitor.is_agent_derived / IdentifiedVisitor.source_agent_visit_id)
   → `b3f9a1d2c7e5` (AI-referral, see below) → `c4e8f1a9d2b7` (Handoff Detection Phase H1,
   agent_fetch_events) → `f8a2c1d9b3e7` (company_graph, owned-data-layer Phase 1) →
@@ -228,16 +235,22 @@ structurally separate from human Visitor/Event data, never as a targetable outre
   constraint, first-party-capture Phase 3) → `c7d3b8e1f624` (ingest-abuse-hardening P4, see
   Ingest Abuse Hardening section below) → `b7d3e9f1a4c2` (add_ad_connections, ads-audiences) →
   `c8e4f2a6b1d9` (add_ad_audience_links, ads-audiences) → `d5b1f7c3a908`
-  (add_site_last_aggregated_at, capacity-hardening — **current head**). Apply all eleven in order
-  before enabling `agent_detection_enabled`, `company_graph_enabled`, `identity_signals_enabled`,
-  `site_ingest_limit_enabled`, or `ingest_velocity_enabled` in any real environment. Re-confirm via
-  `alembic heads` before applying — other work may advance the head further (it already has,
-  repeatedly, from concurrent programs — see migration-collision memory note). Round-trip
-  (`upgrade head` → `downgrade -1` → `upgrade head`) proven clean on a disposable Postgres container
-  24-07-26 for the chain up to `a9f2c1e7b4d6` only, as part of owned-data-layer/first-party-capture
-  closure. The 4 migrations added after that point (`c7d3b8e1f624`, `b7d3e9f1a4c2`, `c8e4f2a6b1d9`,
-  `d5b1f7c3a908`) are offline `--sql`-validated only, NOT live-round-tripped — this is NOT a
-  production live-apply, which remains a separate explicit operator action.
+  (add_site_last_aggregated_at, capacity-hardening) → `e6b2d4a1c837` (add_cadence_bot_flag,
+  cadence-bot-flag — **current head**). Apply all twelve in order before enabling
+  `agent_detection_enabled`, `company_graph_enabled`, `identity_signals_enabled`,
+  `site_ingest_limit_enabled`, `ingest_velocity_enabled`, or `cadence_bot_flag_enabled` in any real
+  environment. Re-confirm via `alembic heads` before applying — other work may advance the head
+  further (it already has, repeatedly, from concurrent programs — see migration-collision memory
+  note). Round-trip (`upgrade head` → `downgrade -1` → `upgrade head`) proven clean on a disposable
+  Postgres container 24-07-26 for the chain up to `a9f2c1e7b4d6` only, as part of
+  owned-data-layer/first-party-capture closure. The 5 migrations added after that point
+  (`c7d3b8e1f624`, `b7d3e9f1a4c2`, `c8e4f2a6b1d9`, `d5b1f7c3a908`, `e6b2d4a1c837`) are offline
+  `--sql`-validated only, NOT live-round-tripped — this is NOT a production live-apply, which
+  remains a separate explicit operator action. Note: an unscoped `alembic upgrade head --sql` fails
+  mid-chain because `b7d3e9f1a4c2_add_ad_connections.py` calls `sa.inspect(bind)` (unsupported
+  against alembic's offline `MockConnection`) — offline validation of the tail of the chain must use
+  an explicit `<from>:<to>` range (e.g. `upgrade d5b1f7c3a908:head --sql`), confirmed at
+  cadence-bot-flag EXECUTE 26-07-26; see `process/context/tests/all-tests.md` for the gotcha.
 - Docker/live-integration known-gaps consolidated in
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`
 
@@ -428,7 +441,7 @@ block) — all default OFF/permissive, same operator-gated posture as `agent_det
 - Billing: `GUMROAD_*` (active), `STRIPE_*`, `LEMONSQUEEZY_*` (legacy)
 - Encryption: `ENCRYPTION_KEY`, `TOKEN_ENCRYPTION_KEY`, `PII_HMAC_KEY`, `PII_ENCRYPTION_KEY` — prod startup fails fast if missing
 - Traffic hygiene: `BLOCK_DATACENTER_TRAFFIC`, `BLOCK_PROXY_VPN_TRAFFIC`
-- Feature flags: `ENABLE_OSINT_SCAN`, `ENABLE_CONTENT_READER`, `CHANGELOG_SYNC_ENABLED`, `OUTCOMES_DIGEST_ENABLED`, `REFERRALS_ENABLED`, `CRM_*`
+- Feature flags: `ENABLE_OSINT_SCAN`, `ENABLE_CONTENT_READER`, `CHANGELOG_SYNC_ENABLED`, `OUTCOMES_DIGEST_ENABLED`, `REFERRALS_ENABLED`, `CRM_*`, `CADENCE_BOT_FLAG_*`
 
 ## Open Questions / Outstanding Work
 
@@ -437,24 +450,28 @@ block) — all default OFF/permissive, same operator-gated posture as `agent_det
 - Legacy `plan/` folder (11 dated pre-harness plans) is read-only history — migrate still-relevant items into `process/features/*/backlog/` opportunistically
 - e2e coverage gaps: billing + exports (see `tests/all-tests.md` Known Gaps)
 - Docs drift: `PRODUCT_ROADMAP.md` + `README.md` still say Claude/`claude-sonnet-4` for segmentation — code runs Gemini (see AI Layer)
-- EvalLayer + AI-referral + owned-data-layer + first-party-capture + ingest-abuse-hardening:
-  `agent_detection_enabled`, `company_graph_enabled`, `identity_signals_enabled`,
-  `site_ingest_limit_enabled`, `ingest_velocity_enabled` all default OFF; 11 migrations pending
-  PRODUCTION live-apply (`d11b39a6c843` → `a1c7e4f92b83` → `b3f9a1d2c7e5` → `c4e8f1a9d2b7` →
-  `f8a2c1d9b3e7` → `a3e9f1c7d2b5` → `e2a4c7f81b93` → `a9f2c1e7b4d6` → `c7d3b8e1f624` →
-  `b7d3e9f1a4c2` → `c8e4f2a6b1d9` → `d5b1f7c3a908` — **current head, single head, confirmed LIVE
-  via `alembic heads` on 26-07-26**; round-trip verified clean on a disposable dev Postgres only up
-  to `a9f2c1e7b4d6` (24-07-26) — the 4 migrations after that point are offline `--sql`-validated
-  only, NOT yet live-round-tripped, and NONE of the 11 are applied to any real environment) — see
+- EvalLayer + AI-referral + owned-data-layer + first-party-capture + ingest-abuse-hardening +
+  cadence-bot-flag: `agent_detection_enabled`, `company_graph_enabled`, `identity_signals_enabled`,
+  `site_ingest_limit_enabled`, `ingest_velocity_enabled`, `cadence_bot_flag_enabled` all default
+  OFF; 12 migrations pending PRODUCTION live-apply (`d11b39a6c843` → `a1c7e4f92b83` →
+  `b3f9a1d2c7e5` → `c4e8f1a9d2b7` → `f8a2c1d9b3e7` → `a3e9f1c7d2b5` → `e2a4c7f81b93` →
+  `a9f2c1e7b4d6` → `c7d3b8e1f624` → `b7d3e9f1a4c2` → `c8e4f2a6b1d9` → `d5b1f7c3a908` →
+  `e6b2d4a1c837` — **current head, single head, confirmed LIVE via `alembic heads` on 26-07-26 (at
+  cadence-bot-flag EXECUTE)**; round-trip verified clean on a disposable dev Postgres only up
+  to `a9f2c1e7b4d6` (24-07-26) — the 5 migrations after that point are offline `--sql`-validated
+  only, NOT yet live-round-tripped, and NONE of the 12 are applied to any real environment) — see
   AI-Agent-Traffic Layer + Owned Identity Data Layer + First-Party Email Capture Expansion + Ingest
   Abuse Hardening sections above,
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`,
   `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`
   (RESOLVED), `process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`
   (RESOLVED), `process/features/visitors-identity/backlog/post-docker-gate-followups_NOTE_24-07-26.md`
-  (open: 5 unrelated integration failures + conftest Redis-isolation hardening), and
+  (open: 5 unrelated integration failures + conftest Redis-isolation hardening),
   `process/features/pixel/backlog/ingest-abuse-hardening-deferred-gates_NOTE_25-07-26.md` (open:
-  migration live round-trip; AC-4a mutation-kill re-verification)
+  migration live round-trip; AC-4a mutation-kill re-verification), and
+  `process/features/pixel/backlog/cadence-bot-flag-deferred-gates_NOTE_26-07-26.md` (open:
+  migration live round-trip; AC-14 live-crawler validation; AC-8/AC-9 Agent-Probe manual render
+  check; Playwright auth-harness leg)
 - Successor program planned: "Handoff Detection" (human-behind-the-agent correlation) — not yet
   scaffolded on disk; see `evallayer-umbrella_PLAN_22-07-26.md` §Program-Level Closeout
 
