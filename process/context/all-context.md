@@ -1,6 +1,6 @@
 # Beam - All Context
 
-Last updated: 2026-07-24
+Last updated: 2026-07-26
 
 This file is the root context entrypoint for the repo.
 
@@ -87,11 +87,21 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
 - `campaigns-outreach` — AI segmentation, campaign planning, email + social outreach, drafts
 - `billing` — Gumroad MoR billing, plans/quotas, BYOK keys
 - `marketing-site` — public site: landing, blog, changelog, SEO (content sources in `marketing/`)
-- `pixel` — tracking pixel, event ingest, consent, bot filtering
+- `pixel` — tracking pixel, event ingest, consent, bot filtering; ingest-abuse-hardening
+  (rotating-IP-flood defense: body-size cap, trusted-proxy IP resolution, per-site ceiling,
+  write-time velocity flag, operator observability) shipped 25-07-26, archived 26-07-26 with 2
+  known-gaps — see Ingest Abuse Hardening section below
 - `evallayer` — AI-agent traffic detection (agent_classifier, `/agents` API + dashboard tab, IP/rDNS
   verification, agent→company outreach-safe resolution, GEO/AEO analytics, outreach-exclusion
   guardrail); 8-phase program, code-complete 23-07-26, pending Docker-gate closure — see
   `process/features/evallayer/active/evallayer_22-07-26/evallayer-umbrella_PLAN_22-07-26.md`
+- `ads-audiences` — OAuth-linked ad channels (Meta Custom Audiences, Google Data Manager API,
+  LinkedIn deferred/CSV-only) with direct segment-audience push mirroring the CRM connector
+  pattern; 3-phase program. Phase 1 Foundation (models, `services/ads/` registry, router, mock-mode
+  parity, UI panel) shipped 25-07-26 — mock-mode complete, `ad_audiences_enabled` default OFF, 2
+  env-only known-gaps (migration round-trip Docker-gated, Playwright auth harness). Phase 2 (Meta
+  live) next — see
+  `process/features/ads-audiences/active/ad-audiences_25-07-26/ad-audiences-umbrella_PLAN_25-07-26.md`
 
 ## Context Group Lifecycle
 
@@ -146,6 +156,9 @@ getbeam/
       tasks/              -- Celery tasks (segmentation, aggregation, resolution, crm)
       config.py           -- pydantic-settings (all env vars)
     pixel/                -- vanilla JS tracking pixel (src/tracker.js)
+    extension/            -- LinkedIn Outreach Connect browser extension (Chrome/Edge MV3, esbuild,
+                             own Playwright e2e); "dumb pipe" to the dashboard tab, zero backend
+                             surface — see campaigns-outreach feature folder
   infra/docker-compose.yml -- local postgres:16 + redis:7 + clickhouse:24
   tests/                  -- pytest: unit/ (no deps) + integration/ (needs PG+Redis)
   marketing/              -- brand/launch/strategy/assets + content-writer references
@@ -199,20 +212,28 @@ structurally separate from human Visitor/Event data, never as a targetable outre
 - `apps/api/services/agent_aggregator.py` — read-only vendor/page/verification-method analytics,
   `GET /api/v1/agents/{site_id}/analytics`
 - Feature flag: `agent_detection_enabled` in `apps/api/config.py` — **defaults OFF**
-- 8 migrations pending live-apply, in order (Docker-gated, never run against a real Postgres in
+- 11 migrations pending live-apply, in order (Docker-gated, never run against a real Postgres in
   the sandbox that built this — chain verified by reading each file's `revision`/`down_revision`
-  header, last re-confirmed live via `alembic heads` on 24-07-26): `d11b39a6c843` (agent_visits
+  header; **TRUE current head re-confirmed LIVE 26-07-26 via `alembic -c apps/api/alembic.ini
+  heads`: `d5b1f7c3a908` — single head, no branching**): `d11b39a6c843` (agent_visits
   table) → `a1c7e4f92b83` (Phase 5 visitor.is_agent_derived / IdentifiedVisitor.source_agent_visit_id)
   → `b3f9a1d2c7e5` (AI-referral, see below) → `c4e8f1a9d2b7` (Handoff Detection Phase H1,
   agent_fetch_events) → `f8a2c1d9b3e7` (company_graph, owned-data-layer Phase 1) →
   `a3e9f1c7d2b5` (identity_signals, owned-data-layer Phase 2) → `e2a4c7f81b93` (Handoff
   Detection Phase 2, agent_handoff_links) → `a9f2c1e7b4d6` (`ck_visitor_emails_source` CHECK
-  constraint, first-party-capture Phase 3 — current head). Apply all eight in order before enabling
-  `agent_detection_enabled`, `company_graph_enabled`, or `identity_signals_enabled` in any real
-  environment. Re-confirm via `alembic heads` before applying — other work may advance the head
-  further. Round-trip (`upgrade head` → `downgrade -1` → `upgrade head`) proven clean on a
-  disposable Postgres container 24-07-26 as part of owned-data-layer/first-party-capture closure —
-  this is NOT a production live-apply, which remains a separate explicit operator action.
+  constraint, first-party-capture Phase 3) → `c7d3b8e1f624` (ingest-abuse-hardening P4, see
+  Ingest Abuse Hardening section below) → `b7d3e9f1a4c2` (add_ad_connections, ads-audiences) →
+  `c8e4f2a6b1d9` (add_ad_audience_links, ads-audiences) → `d5b1f7c3a908`
+  (add_site_last_aggregated_at, capacity-hardening — **current head**). Apply all eleven in order
+  before enabling `agent_detection_enabled`, `company_graph_enabled`, `identity_signals_enabled`,
+  `site_ingest_limit_enabled`, or `ingest_velocity_enabled` in any real environment. Re-confirm via
+  `alembic heads` before applying — other work may advance the head further (it already has,
+  repeatedly, from concurrent programs — see migration-collision memory note). Round-trip
+  (`upgrade head` → `downgrade -1` → `upgrade head`) proven clean on a disposable Postgres container
+  24-07-26 for the chain up to `a9f2c1e7b4d6` only, as part of owned-data-layer/first-party-capture
+  closure. The 4 migrations added after that point (`c7d3b8e1f624`, `b7d3e9f1a4c2`, `c8e4f2a6b1d9`,
+  `d5b1f7c3a908`) are offline `--sql`-validated only, NOT live-round-tripped — this is NOT a
+  production live-apply, which remains a separate explicit operator action.
 - Docker/live-integration known-gaps consolidated in
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`
 
@@ -302,6 +323,73 @@ actively engaged this session" rule:
   `process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`
   (RESOLVED) and `process/features/visitors-identity/completed/first-party-capture_24-07-26/`.
 
+## Ingest Abuse Hardening (v1, shipped 25-07-26 — archived 26-07-26, 2 known-gaps)
+
+Hardens `POST /ingest` against a rotating-IP flood/DDoS (spread across many IPs, each staying
+under the per-IP allowance while one site absorbs the aggregate) with 5 additive layers, in order:
+
+- **P1 — streaming body-size guard.** `IngestBodySizeLimitMiddleware` in `main.py`, pure ASGI
+  (matches the `PixelCORSMiddleware` precedent), scoped to `/api/v1/events/ingest` only. Rejects
+  `413` via a `Content-Length` fast path plus a running byte counter inside a wrapped `receive()`
+  (catches chunked/forged-header cases) — never reads past the cap.
+- **P2 — trusted-proxy IP resolution.** New `apps/api/services/ip_resolution.py`
+  (`resolve_client_ip()`, `client_ip_key_func()`) replaces the old spoofable `_extract_ip()`.
+  Takes the Nth-from-the-right `X-Forwarded-For` entry (discarding the forgeable prefix);
+  misconfiguration/absence always falls back to `request.client.host`. The per-IP slowapi limiter's
+  `key_func` now uses this resolver everywhere IP matters.
+- **P3 — per-site ingest ceiling.** A second slowapi limiter keyed on `request.state.site_id`
+  (stashed via a genuine `Depends()`, inert unless the flag below is on) — the layer the per-IP
+  limiter structurally cannot see (a flood spread across 500 IPs never trips any single bucket).
+- **P4 — write-time velocity flag.** New `apps/api/services/ingest_velocity.py`: flags a site's
+  events when BOTH distinct-visitor count is high AND fingerprint diversity is low within a window
+  (an organic viral spike has many visitors but many *real* fingerprints, so it never trips).
+  New columns `events.is_flagged_abuse`, `visitors.is_abuse_flagged`,
+  `identified_visitors.is_abuse_flagged` (migration `c7d3b8e1f624`) — flag-but-store, never drops
+  the row. `visitor_aggregator.py`'s rollup SQL excludes flagged rows from every metric aggregate
+  via `FILTER (WHERE NOT is_flagged_abuse)` (NOT a CTE-level `WHERE` — see Deviation below) while the
+  flag still propagates `Event → Visitor → IdentifiedVisitor` via `BOOL_OR`/sticky-`OR` merge.
+  `is_emailable_identity()` gained a third guard parameter `is_abuse_flagged`, wired at all 3 call
+  sites (`campaign_sender.py`, `csv_exporter.py`, and `routers/campaigns.py:725` — a 3rd site found
+  by grep, not named in the original plan).
+- **P5 — operator observability.** `GET /api/v1/sites/{site_id}/ingest-health`
+  (`apps/api/routers/ingest_health.py`) — tenant-scoped, counts/ratios/flood-verdict only, no PII.
+
+**New feature flags/settings in `apps/api/config.py`** (`## ─── Ingest abuse hardening (P1–P5) ───`
+block) — all default OFF/permissive, same operator-gated posture as `agent_detection_enabled`:
+  - `ingest_body_max_bytes: int = 262_144` (256 KB; always-on, not a toggle — this is the P1 cap itself)
+  - `trusted_proxy_hops: int = 0` (0 = trust nothing, XFF ignored entirely; raising this is a
+    deliberate operator action set to an OBSERVED hop count, never guessed — see inline config.py
+    comment for the collapse/bypass tradeoff)
+  - `site_ingest_limit_enabled: bool = False` + `site_ingest_limit_per_minute: int = 3000`
+    (placeholder threshold — tune from OBSERVED per-site p99 before enabling, never ship the 3000
+    default live)
+  - `ingest_velocity_enabled: bool = False` + `ingest_velocity_window_seconds: int = 60` +
+    `ingest_velocity_visitor_threshold: int = 200` +
+    `ingest_velocity_min_fingerprint_diversity: float = 0.3`
+  - **Required rollout order** (documented inline in config.py): `trusted_proxy_hops` (once the
+    real hop count is observed) → THEN `site_ingest_limit_enabled` (after ~1 week of real per-site
+    volume) → THEN `ingest_velocity_enabled` last. Enabling velocity/site-ceiling before
+    `trusted_proxy_hops` is correct would tune both against already-collapsed per-IP traffic.
+  - Note: inline comments on these two settings also reference a concurrent, separate
+    `general-plans/active/capacity-hardening_25-07-26/` program (Phase 2) that refined the
+    same settings' rollout guidance — the settings are shared/co-owned across both plans, not a
+    conflict, but worth knowing if either plan is revisited.
+- **Migration `c7d3b8e1f624`** (`add_ingest_abuse_flag`) chains directly off the prior chain's head
+  `a9f2c1e7b4d6`. **TRUE current alembic head, re-verified live 26-07-26 via
+  `alembic -c apps/api/alembic.ini heads`: `d5b1f7c3a908` — single head, no branching.** Two
+  unrelated `ads-audiences` migrations landed concurrently during EXECUTE and chained cleanly on
+  top: full chain is now `a9f2c1e7b4d6 → c7d3b8e1f624 (this migration) → b7d3e9f1a4c2
+  (add_ad_connections) → c8e4f2a6b1d9 (add_ad_audience_links) → d5b1f7c3a908
+  (add_site_last_aggregated_at, current head)`. Offline `--sql` validated clean both directions;
+  **live round-trip on a disposable Postgres NOT run** (Docker daemon down in the EXECUTE
+  environment) — Known-Gap, see backlog note below. Re-run `alembic heads` immediately before any
+  live apply; other concurrent work may extend the chain further.
+- Status 26-07-26: **archived with 2 known-gaps** (EVL-PASS: 24 unit + 16 integration tests, 0
+  failures, 0 EVL fix cycles). See
+  `process/features/pixel/completed/ingest-abuse-hardening_25-07-26/` and
+  `process/features/pixel/backlog/ingest-abuse-hardening-deferred-gates_NOTE_25-07-26.md` (open:
+  migration live round-trip; AC-4a mutation-kill re-verification).
+
 ## Key Patterns and Conventions
 
 **Python:** type hints on all functions; async for all I/O; `structlog` only (never `print()`); `httpx` async for external calls (never `requests`); every external call has timeout + retry/backoff + error handling; never swallow exceptions; Pydantic models for every API schema; config via `pydantic-settings` env only — no hardcoded secrets.
@@ -345,18 +433,24 @@ actively engaged this session" rule:
 - Legacy `plan/` folder (11 dated pre-harness plans) is read-only history — migrate still-relevant items into `process/features/*/backlog/` opportunistically
 - e2e coverage gaps: billing + exports (see `tests/all-tests.md` Known Gaps)
 - Docs drift: `PRODUCT_ROADMAP.md` + `README.md` still say Claude/`claude-sonnet-4` for segmentation — code runs Gemini (see AI Layer)
-- EvalLayer + AI-referral + owned-data-layer + first-party-capture: `agent_detection_enabled`,
-  `company_graph_enabled`, `identity_signals_enabled` all default OFF; 8 migrations pending
+- EvalLayer + AI-referral + owned-data-layer + first-party-capture + ingest-abuse-hardening:
+  `agent_detection_enabled`, `company_graph_enabled`, `identity_signals_enabled`,
+  `site_ingest_limit_enabled`, `ingest_velocity_enabled` all default OFF; 11 migrations pending
   PRODUCTION live-apply (`d11b39a6c843` → `a1c7e4f92b83` → `b3f9a1d2c7e5` → `c4e8f1a9d2b7` →
-  `f8a2c1d9b3e7` → `a3e9f1c7d2b5` → `e2a4c7f81b93` → `a9f2c1e7b4d6` — current head, confirmed
-  24-07-26; round-trip verified clean on a disposable dev Postgres 24-07-26, NOT yet applied to
-  any real environment) — see AI-Agent-Traffic Layer + Owned Identity Data Layer + First-Party
-  Email Capture Expansion sections above,
+  `f8a2c1d9b3e7` → `a3e9f1c7d2b5` → `e2a4c7f81b93` → `a9f2c1e7b4d6` → `c7d3b8e1f624` →
+  `b7d3e9f1a4c2` → `c8e4f2a6b1d9` → `d5b1f7c3a908` — **current head, single head, confirmed LIVE
+  via `alembic heads` on 26-07-26**; round-trip verified clean on a disposable dev Postgres only up
+  to `a9f2c1e7b4d6` (24-07-26) — the 4 migrations after that point are offline `--sql`-validated
+  only, NOT yet live-round-tripped, and NONE of the 11 are applied to any real environment) — see
+  AI-Agent-Traffic Layer + Owned Identity Data Layer + First-Party Email Capture Expansion + Ingest
+  Abuse Hardening sections above,
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`,
   `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`
   (RESOLVED), `process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`
-  (RESOLVED), and `process/features/visitors-identity/backlog/post-docker-gate-followups_NOTE_24-07-26.md`
-  (open: 5 unrelated integration failures + conftest Redis-isolation hardening)
+  (RESOLVED), `process/features/visitors-identity/backlog/post-docker-gate-followups_NOTE_24-07-26.md`
+  (open: 5 unrelated integration failures + conftest Redis-isolation hardening), and
+  `process/features/pixel/backlog/ingest-abuse-hardening-deferred-gates_NOTE_25-07-26.md` (open:
+  migration live round-trip; AC-4a mutation-kill re-verification)
 - Successor program planned: "Handoff Detection" (human-behind-the-agent correlation) — not yet
   scaffolded on disk; see `evallayer-umbrella_PLAN_22-07-26.md` §Program-Level Closeout
 
