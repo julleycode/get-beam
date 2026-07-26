@@ -49,5 +49,9 @@ class PushAdSegmentResult(BaseModel):
     # Non-empty when the matched audience is below the platform minimum
     # (AC7). Advisory only — the push still happened.
     warning: str = ""
+    # Structured companions to `warning` (AC7) so the UI renders the real
+    # threshold instead of a hardcoded number. Additive — advisory only.
+    below_minimum: bool = False
+    minimum_threshold: int = 0
     errors: list[str] = Field(default_factory=list)
     queued: bool = False  # true when the push was offloaded to a background worker

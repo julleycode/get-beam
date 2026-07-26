@@ -40,6 +40,13 @@ const OAUTH_ADS: { provider: AdProvider; name: string; ready: boolean }[] = [
   { provider: "linkedin", name: "LinkedIn Matched Audiences", ready: false },
 ];
 
+// AC7 pre-push warning threshold. Kept in sync by hand with
+// ads_push.MIN_AUDIENCE_SIZE — the exact post-push number comes back on the
+// push response (`minimum_threshold`); this constant only drives the
+// approximate warning shown BEFORE the user confirms.
+const MIN_AUDIENCE_SIZE = 1000;
+const MIN_AUDIENCE_MATCHABLE = 100;
+
 function toneFor(status: string): "success" | "warning" | "destructive" | "neutral" {
   if (status === "connected") return "success";
   if (status === "error") return "destructive";
@@ -90,6 +97,12 @@ export function AdConnectPanel({
   const connectionFor = (provider: AdProvider) =>
     connections.find((c) => c.provider === provider);
 
+  // The selected segment, only when it's small enough to warrant the AC7
+  // pre-push warning (null otherwise, so the banner simply doesn't render).
+  const selected = segments.find((s) => s.id === pushSegment);
+  const selectedSegmentSmall =
+    selected && selected.visitor_count < MIN_AUDIENCE_SIZE ? selected : null;
+
   async function handleConnect(provider: AdProvider) {
     if (!siteId) return;
     setBusy(provider);
@@ -139,11 +152,21 @@ export function AdConnectPanel({
     setPushFor(null);
     try {
       const r = await api.pushAdSegment(siteId, provider, pushSegment);
+      // AC7 post-push: prefer the backend's exact copy; if the response only
+      // carries the structured flags, build the same sentence from the real
+      // threshold rather than a hardcoded number.
+      const sizeNote = r.warning
+        ? ` ${r.warning}`
+        : r.below_minimum
+          ? ` This audience is below the ~${(
+              r.minimum_threshold || MIN_AUDIENCE_SIZE
+            ).toLocaleString()} matched contacts ad platforms typically need for reliable targeting — the push still went through.`
+          : "";
       setMsg(
         r.queued
           ? "Push queued — running in the background."
           : `Pushed ${r.pushed}, failed ${r.failed}, skipped ${r.skipped}.` +
-              (r.warning ? ` ${r.warning}` : "") +
+              sizeNote +
               (r.errors.length ? ` — ${r.errors[0]}` : "")
       );
       load();
@@ -269,10 +292,25 @@ export function AdConnectPanel({
               {pushFor?.external_account_label || pushFor?.provider} as a custom
               audience. Suppressed and unsubscribed contacts are skipped
               automatically, and only hashed identifiers are sent. Ad platforms
-              typically need around 1,000 matched contacts before an audience
-              becomes usable for targeting.
+              accept audiences from about {MIN_AUDIENCE_MATCHABLE} matched
+              contacts, but typically need around{" "}
+              {MIN_AUDIENCE_SIZE.toLocaleString()} before targeting works well.
             </DialogDescription>
           </DialogHeader>
+
+          {/* AC7 pre-push warning. `visitor_count` is an APPROXIMATE estimate
+              taken before the safety filters run, so the real matched count is
+              usually lower — the exact number arrives in the push response. */}
+          {selectedSegmentSmall && (
+            <p className="text-sm text-amber-600" role="alert" data-testid="ads-pre-push-warning">
+              Heads up: this segment has about{" "}
+              {selectedSegmentSmall.visitor_count.toLocaleString()} visitors —
+              below the ~{MIN_AUDIENCE_SIZE.toLocaleString()} that ad platforms
+              usually need for reliable targeting, and the matched count after
+              filtering will be lower still. You can push anyway, or cancel and
+              pick a larger segment.
+            </p>
+          )}
           <div className="space-y-2">
             <label className="text-sm font-medium">Segment</label>
             <Select value={pushSegment} onValueChange={setPushSegment}>

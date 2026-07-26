@@ -266,6 +266,8 @@ async def push_segment_endpoint(
         skipped=outcome.skipped,
         platform_audience_id=outcome.platform_audience_id,
         warning=outcome.warning,
+        below_minimum=outcome.below_minimum,
+        minimum_threshold=outcome.minimum_threshold,
         errors=outcome.errors,
         queued=outcome.queued,
     )

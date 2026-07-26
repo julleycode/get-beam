@@ -1,8 +1,14 @@
 """D5 — stub-provider defense in depth.
 
-With ad_audiences_enabled=True but MOCK_EXTERNAL_APIS=False (the window before
-Phase 2/3 wires the real providers), meta/google raise NotImplementedError. The
-router must surface that as a clean HTTP 501, never an unhandled 500.
+With ad_audiences_enabled=True but MOCK_EXTERNAL_APIS=False, a provider that is
+still a stub raises NotImplementedError. The router must surface that as a clean
+HTTP 501, never an unhandled 500.
+
+Phase 2 note (26-07-26): `meta` is no longer a stub — its real Graph API path
+landed, so it no longer raises NotImplementedError and is out of these
+assertions. `google` remains the stub until Phase 3 wires it, and keeps proving
+the router's 501 mapping. The meta 501-on-flag-off path is unaffected and still
+covered by test_ads_flag_off_501.py.
 
 Pure unit test: the endpoint coroutine is called directly with the site-ownership
 and OAuth-state seams stubbed, so no DB or Redis is touched.
@@ -42,7 +48,7 @@ def stubbed_seams(monkeypatch):
     monkeypatch.setattr(settings, "google_ads_client_secret", "secret")
 
 
-@pytest.mark.parametrize("provider", ["meta", "google"])
+@pytest.mark.parametrize("provider", ["google"])  # meta is implemented (Phase 2)
 async def test_ads_stub_501_connect_returns_501_not_500(stubbed_seams, provider):
     with pytest.raises(HTTPException) as exc:
         await ads_router.connect_oauth("site_x", provider, user=_User(), db=None)
@@ -56,9 +62,14 @@ async def test_ads_stub_501_provider_really_raises_not_implemented(stubbed_seams
     from apps.api.services.ads.factory import get_provider
 
     with pytest.raises(NotImplementedError):
-        await get_provider("meta").get_oauth_url("state")
-    with pytest.raises(NotImplementedError):
         await get_provider("google").get_oauth_url("state")
+
+    # Phase 2 contract flip, asserted rather than assumed: meta no longer
+    # raises here. If this ever starts raising again, the Meta provider has
+    # regressed back to a stub.
+    assert (await get_provider("meta").get_oauth_url("state")).startswith(
+        "https://www.facebook.com/"
+    )
 
 
 async def test_ads_stub_501_mock_mode_still_works(monkeypatch, stubbed_seams):

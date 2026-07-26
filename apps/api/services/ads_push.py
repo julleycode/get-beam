@@ -26,7 +26,9 @@ from apps.api.models.ad_connection import AdConnection
 from apps.api.models.segment import SegmentMember
 from apps.api.services.ads.base import HashedContact, sanitize_error
 from apps.api.services.ads.factory import get_provider
+from apps.api.services.ads.meta import MetaAudienceTermsError
 from apps.api.services.csv_exporter import _get_segment_visitors, _sha256
+from apps.api.services.encryption import decrypt_token, encrypt_token
 
 logger = structlog.get_logger()
 
@@ -34,6 +36,10 @@ logger = structlog.get_logger()
 # item. Until then this placeholder drives the small-segment warning only — it
 # never blocks a push.
 MIN_AUDIENCE_SIZE = 1000
+# Meta's TECHNICAL floor — a smaller audience is accepted but effectively
+# unusable for targeting. Surfaced alongside MIN_AUDIENCE_SIZE so the warning
+# explains both numbers (D1).
+MIN_AUDIENCE_MATCHABLE = 100
 
 
 @dataclass
@@ -45,6 +51,10 @@ class PushSegmentOutcome:
     queued: bool = False
     platform_audience_id: str = ""
     warning: str = ""
+    # AC7: structured companions to the free-text `warning`, so the UI can
+    # render the real threshold instead of hardcoding a number.
+    below_minimum: bool = False
+    minimum_threshold: int = MIN_AUDIENCE_SIZE
     errors: list[str] = field(default_factory=list)
 
 
@@ -102,6 +112,55 @@ async def _get_link(
     return result.scalar_one_or_none()
 
 
+async def fresh_access_token(db: AsyncSession, conn: AdConnection) -> str:
+    """Refresh the connection's access token when it is at/past expiry.
+
+    Structurally mirrors ``crm_push.fresh_access_token`` with one deliberate
+    difference: ``AdsProvider`` (services/ads/base.py) declares no
+    ``refresh_tokens`` method — unlike ``CRMConnector``, which has a concrete
+    ABC-level default. Google/LinkedIn providers therefore have no such method
+    at all, so the lookup is ``getattr``-guarded: an absent refresher means
+    "this provider's token lifecycle isn't managed here", and the push proceeds
+    unchanged rather than raising ``AttributeError``.
+
+    Meta note: the refresher takes the CURRENT access token (Meta has no
+    separate refresh secret), so this must run BEFORE the stored token expires.
+
+    On refresh failure the connection is marked ``status="error"`` with a
+    sanitized ``last_error`` — the panel's existing Reconnect affordance
+    surfaces it. Never logs or returns a raw token.
+    """
+    token = decrypt_token(conn.access_token) if conn.access_token else ""
+    expires = conn.token_expires_at
+    if expires and expires.tzinfo is None:
+        expires = expires.replace(tzinfo=timezone.utc)
+    if not (expires and expires <= datetime.now(timezone.utc)):
+        return token
+
+    provider_impl = get_provider(conn.provider)
+    refresher = getattr(provider_impl, "refresh_tokens", None)
+    if refresher is None or not token:
+        return token
+
+    try:
+        tokens = await refresher(token)
+    except Exception as exc:  # noqa: BLE001 — persist a sanitized, PII-free error
+        conn.status = "error"
+        conn.is_valid = False
+        conn.last_error = sanitize_error(exc, "Token refresh failed")[:500]
+        await db.commit()
+        logger.warning("ads_token_refresh_failed", provider=conn.provider)
+        return token
+
+    conn.access_token = encrypt_token(tokens.access_token)
+    if tokens.refresh_token:
+        conn.refresh_token = encrypt_token(tokens.refresh_token)
+    conn.token_expires_at = tokens.expires_at
+    await db.commit()
+    logger.info("ads_token_refreshed", provider=conn.provider)
+    return tokens.access_token
+
+
 async def push_segment_to_ads(
     db: AsyncSession, site_id: str, provider: str, segment_id: str
 ) -> PushSegmentOutcome:
@@ -123,8 +182,31 @@ async def push_segment_to_ads(
         or 0
     )
 
-    # Offload big segments to a worker when enabled (and one is running).
-    if settings.ads_async_push and member_count > settings.ads_async_push_threshold:
+    # Offload big segments to a worker ONLY when one is actually consuming the
+    # broker. One condition, two flags — resolved truth table:
+    #
+    #   ads_async_push | celery_worker_enabled | behavior
+    #   ---------------|-----------------------|----------------------------------
+    #   False (default)| False (default)       | inline (today's exact behavior)
+    #   False          | True                  | inline (async is opt-in per surface)
+    #   True           | False                 | inline + warning (NEVER .delay():
+    #                  |                       | no consumer = silent drop)
+    #   True           | True                  | .delay(), return queued=True
+    #
+    # The inline fallback is the rest of this function — the same safety-filter
+    # chain and tenant scoping the task body would have run.
+    _async_requested = (
+        settings.ads_async_push and member_count > settings.ads_async_push_threshold
+    )
+    if _async_requested and not settings.celery_worker_enabled:
+        logger.warning(
+            "async_push_requested_without_worker",
+            surface="ads",
+            site_id=site_id,
+            provider=provider,
+            members=member_count,
+        )
+    if _async_requested and settings.celery_worker_enabled:
         from apps.api.tasks.ads_tasks import push_segment_to_ads_task
 
         push_segment_to_ads_task.delay(site_id, provider, segment_id)
@@ -142,10 +224,24 @@ async def push_segment_to_ads(
     link = await _get_link(db, conn.id, segment_id)
 
     provider_impl = get_provider(provider)
+    # Refresh first so a long-running/queued push doesn't fail on a stale token.
+    await fresh_access_token(db, conn)
     try:
         result = await provider_impl.create_or_update_audience(conn, link, contacts)
     except NotImplementedError:
         raise
+    except MetaAudienceTermsError as exc:
+        # AC13: keep this message verbatim — it names the specific precondition
+        # and carries the per-account remediation URL, unlike the generic
+        # sanitized branch below. Contains no PII (account id + static URL only).
+        conn.status = "error"
+        conn.is_valid = False
+        conn.last_error = str(exc)[:500]
+        await db.commit()
+        logger.warning("ads_push_blocked_tos", site_id=site_id, provider=provider)
+        return PushSegmentOutcome(
+            found=True, failed=len(contacts), skipped=skipped, errors=[conn.last_error]
+        )
     except Exception as exc:  # noqa: BLE001 — persist a sanitized, PII-free error
         conn.status = "error"
         conn.is_valid = False
@@ -191,12 +287,14 @@ async def push_segment_to_ads(
         conn.last_error = None
     await db.commit()
 
+    below_minimum = len(contacts) < MIN_AUDIENCE_SIZE
     warning = ""
-    if len(contacts) < MIN_AUDIENCE_SIZE:
+    if below_minimum:
         warning = (
-            f"This audience has {len(contacts)} matched contacts — ad platforms "
-            f"typically need around {MIN_AUDIENCE_SIZE} before an audience becomes "
-            "usable for targeting."
+            f"This audience has {len(contacts)} matched contacts. Ad platforms "
+            f"accept audiences from about {MIN_AUDIENCE_MATCHABLE} contacts, but "
+            f"typically need around {MIN_AUDIENCE_SIZE} before matching and "
+            "targeting quality is reliable — the push still went through."
         )
 
     logger.info(
@@ -215,5 +313,7 @@ async def push_segment_to_ads(
         skipped=skipped,
         platform_audience_id=result.platform_audience_id,
         warning=warning,
+        below_minimum=below_minimum,
+        minimum_threshold=MIN_AUDIENCE_SIZE,
         errors=result.errors,
     )

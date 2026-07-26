@@ -756,6 +756,10 @@ export interface AdPushResult {
   skipped: number;
   platform_audience_id: string;
   warning: string;
+  /** True when the matched audience is under `minimum_threshold` (AC7). */
+  below_minimum?: boolean;
+  /** Practical per-platform minimum the backend warned against (AC7). */
+  minimum_threshold?: number;
   errors: string[];
   queued?: boolean;
 }
