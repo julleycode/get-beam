@@ -341,7 +341,7 @@ async def verify_pixel_endpoint(
     """Verify that the tracking pixel is installed on the site."""
     site = await verify_site_access(db, site_id, user)
 
-    verify_result = await verify_pixel(site.url, site_id)
+    verify_result = await verify_pixel(site.url, site_id, db=db)
 
     if verify_result["verified"] and not site.pixel_verified:
         site.pixel_verified = True
