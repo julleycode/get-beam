@@ -190,6 +190,16 @@ class Settings(BaseSettings):
     # count and never higher.
     trusted_proxy_hops: int = 0
 
+    # Prefer Cloudflare's CF-Connecting-IP header for the ingest client IP.
+    # api.getbeam.fyi is permanently CF-proxied, so the direct peer (and any
+    # trusted-hop XFF walk) sees CF edge IPs — useless for identity resolution.
+    # CF-Connecting-IP always carries the real client. Trade-off vs the P2
+    # hop-count design: a caller that reaches the Railway origin DIRECTLY
+    # (bypassing CF) can forge this header — acceptable until the origin is
+    # locked to CF IP ranges (backlogged). Set false to fall back to the pure
+    # trusted_proxy_hops behavior.
+    ingest_trust_cf_connecting_ip: bool = True
+
     # Per-SITE ingest ceiling. The existing 100/min per-IP limiter is blind to a
     # rotating-IP flood: spread across 500 IPs, every bucket stays under its
     # allowance while one site absorbs the whole aggregate. This ceiling is the

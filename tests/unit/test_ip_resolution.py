@@ -92,3 +92,32 @@ def test_key_func_defaults_to_settings_and_ignores_xff():
     a = client_ip_key_func(_FakeRequest({"x-forwarded-for": "9.9.9.9"}))
     b = client_ip_key_func(_FakeRequest({"x-forwarded-for": "8.8.8.8"}))
     assert a == b == _REAL_PEER
+
+
+def test_cf_connecting_ip_used_when_flag_on(monkeypatch):
+    """CF-Connecting-IP wins over XFF/socket peer when the flag is on."""
+    from apps.api.config import settings
+
+    monkeypatch.setattr(settings, "ingest_trust_cf_connecting_ip", True)
+    req = _FakeRequest(
+        {"cf-connecting-ip": "203.0.113.77", "x-forwarded-for": "1.2.3.4, 5.6.7.8"}
+    )
+    assert resolve_client_ip(req, trusted_proxy_hops=0) == "203.0.113.77"
+
+
+def test_cf_connecting_ip_ignored_when_flag_off(monkeypatch):
+    """Flag off: CF header is ignored, old hop-count behaviour applies."""
+    from apps.api.config import settings
+
+    monkeypatch.setattr(settings, "ingest_trust_cf_connecting_ip", False)
+    req = _FakeRequest({"cf-connecting-ip": "203.0.113.77"})
+    assert resolve_client_ip(req, trusted_proxy_hops=0) == _REAL_PEER
+
+
+def test_cf_connecting_ip_falls_back_on_malformed_value(monkeypatch):
+    """A garbage CF-Connecting-IP value must fall back, never raise."""
+    from apps.api.config import settings
+
+    monkeypatch.setattr(settings, "ingest_trust_cf_connecting_ip", True)
+    req = _FakeRequest({"cf-connecting-ip": "not-an-ip, stuff"})
+    assert resolve_client_ip(req, trusted_proxy_hops=0) == _REAL_PEER

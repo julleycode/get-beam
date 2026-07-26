@@ -21,7 +21,14 @@ comment before changing the value.
 This function must NEVER raise into the ingest request path: every failure mode —
 absent header, malformed value, chain shorter than the configured hop count,
 unexpected exception — falls back to ``request.client.host``.
+
+Cloudflare's ``CF-Connecting-IP`` header is checked first (gated by
+``settings.ingest_trust_cf_connecting_ip``, default on) since a permanently
+CF-proxied origin sees only CF edge IPs at the direct peer — the trusted-hop
+XFF walk below can't recover the real client in that topology.
 """
+
+import ipaddress
 
 import structlog
 from fastapi import Request
@@ -41,6 +48,21 @@ def resolve_client_ip(request: Request, trusted_proxy_hops: int | None = None) -
             direct = request.client.host or ""
     except Exception:  # pragma: no cover — defensive; Request.client is a property
         direct = ""
+
+    try:
+        from apps.api.config import settings as _cf_settings
+
+        if _cf_settings.ingest_trust_cf_connecting_ip:
+            cf_ip = request.headers.get("cf-connecting-ip")
+            if cf_ip:
+                cf_ip = cf_ip.strip()
+                try:
+                    ipaddress.ip_address(cf_ip)
+                    return cf_ip
+                except ValueError:
+                    pass  # malformed — fall through to hop-count logic
+    except Exception:
+        pass  # never let CF-header handling break ingest
 
     if trusted_proxy_hops is None:
         try:
