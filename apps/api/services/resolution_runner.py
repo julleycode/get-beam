@@ -24,7 +24,10 @@ from apps.api.models.visitor import Visitor, resolution_intent_filter
 from apps.api.services.billing import check_usage_allowed, increment_usage
 from apps.api.services.enricher import Enricher
 from apps.api.services.identity_resolver import IdentityResolver
-from apps.api.services.resolution_eligibility import site_resolves_all_us
+from apps.api.services.resolution_eligibility import (
+    first_win_boost_site_ids,
+    site_resolves_all_us,
+)
 from apps.api.services.segmentation_trigger import check_and_trigger_segmentation
 
 logger = structlog.get_logger()
@@ -44,9 +47,13 @@ async def run_resolution_for_site(
     """Resolve + enrich eligible visitors for one site.
 
     Eligibility: identity_status == "anonymous" AND the resolution intent
-    gate — intent_score >= 40, except on owner sites whose url matches
-    ``settings.resolve_all_us_domains``, where US visitors qualify at any
-    intent_score. Highest intent first. Each visitor passes the monthly billing gate
+    gate — intent_score >= RESOLUTION_MIN_INTENT (20), with two widenings:
+    on owner sites whose url matches ``settings.resolve_all_us_domains`` US
+    visitors qualify at any intent_score, and while a site is inside the
+    first-win boost window (fewer than ``settings.first_win_boost_count``
+    identified visitors ever) the floor is waived entirely.
+
+    Highest intent first. Each visitor passes the monthly billing gate
     (free=10/mo) before resolution; the resolver itself enforces the
     per-site daily budget and the 30-day no-retry rule. Each visitor is
     processed in isolation so one failure can't abort the batch.
@@ -56,11 +63,16 @@ async def run_resolution_for_site(
     """
     from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 
+    boost_ids = await first_win_boost_site_ids(db, [site.site_id])
+
     result = await db.execute(
         select(Visitor).where(
             Visitor.site_id == site.site_id,
             Visitor.identity_status == "anonymous",
-            resolution_intent_filter([site.site_id] if site_resolves_all_us(site.url) else []),
+            resolution_intent_filter(
+                [site.site_id] if site_resolves_all_us(site.url) else [],
+                no_floor_site_ids=boost_ids,
+            ),
             Visitor.do_not_resolve.is_(False),
             # AC2 (GUARD #2): never re-resolve the synthetic agent-derived rows
             # (they run through resolve() only via the company-resolution sweep).

@@ -16,12 +16,20 @@ from apps.api.models.database import async_session
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.known_contact import KnownContact
 from apps.api.models.site import Site
-from apps.api.models.visitor import IdentifiedVisitor, Visitor, resolution_intent_filter
+from apps.api.models.visitor import (
+    RESOLUTION_MIN_INTENT,
+    IdentifiedVisitor,
+    Visitor,
+    resolution_intent_filter,
+)
 from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 from apps.api.services.billing import check_usage_allowed
 from apps.api.services.known_hash import email_hash
 from apps.api.services.osint_scanner import run_osint_scan
-from apps.api.services.resolution_eligibility import site_resolves_all_us
+from apps.api.services.resolution_eligibility import (
+    first_win_boost_site_ids,
+    site_resolves_all_us,
+)
 from apps.api.services.resolution_runner import run_resolution_for_site
 from apps.api.services.social_resolver import resolve_social
 from apps.api.services.usage_limits import check_resolution_attempt_budget
@@ -154,6 +162,9 @@ async def _compute_visitor_stat_counts(db: AsyncSession, site_id: str) -> dict[s
         await db.execute(select(Site.url).where(Site.site_id == site_id))
     ).scalar_one_or_none()
     all_us_ids = [site_id] if site_resolves_all_us(site_url) else []
+    # First-win boost: while the site has fewer than settings.first_win_boost_count
+    # identified visitors ever, the intent floor is waived for it entirely.
+    boost_ids = await first_win_boost_site_ids(db, [site_id])
 
     row = (
         await db.execute(
@@ -177,7 +188,7 @@ async def _compute_visitor_stat_counts(db: AsyncSession, site_id: str) -> dict[s
                 .filter(
                     and_(
                         Visitor.identity_status == "anonymous",
-                        resolution_intent_filter(all_us_ids),
+                        resolution_intent_filter(all_us_ids, no_floor_site_ids=boost_ids),
                     )
                 )
                 .label("eligible_for_resolution"),
@@ -225,7 +236,9 @@ async def _resolution_skip_reason(
     # usage limit, so it must be reported as such, never as "budget used up".
     if getattr(visitor, "do_not_resolve", False):
         return "privacy_opt_out"
-    if visitor.intent_score < 40:
+    if visitor.intent_score < RESOLUTION_MIN_INTENT and not await first_win_boost_site_ids(
+        db, [site.site_id]
+    ):
         return "below_intent_threshold"
     if not visitor.ip_address:
         return "no_ip_address"
@@ -246,7 +259,9 @@ async def _resolution_skip_reason(
 # for privacy-opted-out visitors).
 _SKIP_REASON_MESSAGES: dict[str, str] = {
     "privacy_opt_out": "This visitor opted out of identification (privacy signal / suppression list). Policy block — not a usage limit.",
-    "below_intent_threshold": "Intent score is below 40 — not eligible for identification yet.",
+    "below_intent_threshold": (
+        f"Intent score is below {RESOLUTION_MIN_INTENT:g} — not eligible for identification yet."
+    ),
     "no_ip_address": "No IP address captured for this visitor — can't run identity lookup.",
     "recently_attempted": "Already attempted in the last 30 days. Will retry automatically after the cooldown.",
     "daily_budget_exhausted": "Daily identification budget used up for this site. Resets tomorrow (UTC). Add your own API keys in Settings to lift the daily cap.",

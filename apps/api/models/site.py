@@ -23,7 +23,8 @@ class Site(Base):
     daily_resolution_budget: Mapped[int] = mapped_column(default=50)
     # When False (default), the auto resolution sweep skips this site — the owner
     # identifies visitors one at a time via the per-row Identify button. When True,
-    # the sweep auto-resolves anonymous visitors with intent >= 40.
+    # the sweep auto-resolves anonymous visitors that clear the resolution
+    # intent gate (RESOLUTION_MIN_INTENT, waived inside the first-win boost window).
     auto_identify_enabled: Mapped[bool] = mapped_column(
         default=False, nullable=False, server_default="false"
     )

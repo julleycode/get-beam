@@ -616,8 +616,14 @@ class Settings(BaseSettings):
     # ─── Rate limits ───
     default_daily_resolution_budget: int = 50   # Free tier: 50 visitor identifications/day per site (BYOK = unlimited)
     # Comma-separated hostnames; sites whose url matches get US-any-intent resolution
-    # eligibility (all other sites keep the intent >= 40 gate). Empty string disables.
+    # eligibility (all other sites keep the RESOLUTION_MIN_INTENT gate). Empty string disables.
     resolve_all_us_domains: str = "getbeam.fyi"
+    # While a site has fewer than N identified visitors EVER, the resolution intent
+    # floor is waived entirely for that site (aha-moment bootstrap — a brand-new site
+    # can't clear the floor on first-visit traffic). Highest-intent-first ordering,
+    # the daily budget, the plan cap, and the 30-day no-retry gate are unchanged.
+    # 0 disables the boost.
+    first_win_boost_count: int = 5
     default_daily_enrichment_budget: int = 3    # Free tier: 3 deep research/day (BYOK = unlimited)
     max_emails_per_hour_per_site: int = 50
 

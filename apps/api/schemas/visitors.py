@@ -94,7 +94,7 @@ class VisitorStatsResponse(BaseModel):
     could_enrich_more: int
     # Count feeding the auto-segmentation trigger (enriched AND not yet segmented)
     enriched_unsegmented: int
-    # Anonymous visitors at intent >= 40, waiting on the next resolution run
+    # Anonymous visitors that clear the resolution intent gate, waiting on the next run
     eligible_for_resolution: int
     # Daily identification quota (limit is None for BYOK = unlimited)
     identify_used_today: int

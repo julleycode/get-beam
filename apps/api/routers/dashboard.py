@@ -20,7 +20,10 @@ from apps.api.models.visitor import IdentifiedVisitor, Visitor, resolution_inten
 from apps.api.dependencies import get_current_user
 from apps.api.schemas.sites import SiteOut
 from apps.api.schemas.visitors import VisitorStatsResponse
-from apps.api.services.resolution_eligibility import site_resolves_all_us
+from apps.api.services.resolution_eligibility import (
+    first_win_boost_site_ids,
+    site_resolves_all_us,
+)
 from apps.api.services.usage_limits import _today_start, is_full_byok
 
 router = APIRouter()
@@ -67,6 +70,9 @@ async def get_overview(
 
     site_ids = [s.site_id for s in sites]
     all_us_ids = [s.site_id for s in sites if site_resolves_all_us(s.url)]
+    # First-win boost: sites with fewer than settings.first_win_boost_count
+    # identified visitors ever waive the intent floor entirely.
+    boost_ids = await first_win_boost_site_ids(db, site_ids)
 
     # BYOK status is user-level, not per-site — compute once (the old loop
     # re-ran this query for every site).
@@ -97,7 +103,7 @@ async def get_overview(
                 .filter(
                     and_(
                         Visitor.identity_status == "anonymous",
-                        resolution_intent_filter(all_us_ids),
+                        resolution_intent_filter(all_us_ids, no_floor_site_ids=boost_ids),
                     )
                 )
                 .label("eligible_for_resolution"),

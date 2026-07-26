@@ -9,7 +9,13 @@ from apps.api.config import settings
 from apps.api.models.database import get_db
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.user import User
-from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog, Visitor
+from apps.api.models.visitor import (
+    RESOLUTION_MIN_INTENT,
+    IdentifiedVisitor,
+    ResolutionLog,
+    Visitor,
+    resolution_intent_filter,
+)
 from apps.api.models.visitor_email import VisitorEmail
 from apps.api.dependencies import get_current_user, verify_site_access as _verify_site_access
 from apps.api.routers.visitors_helpers import (
@@ -41,7 +47,10 @@ from apps.api.services.enricher import Enricher
 from apps.api.services.identity_classification import identity_level
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.known_hash import email_hash
-from apps.api.services.resolution_eligibility import site_resolves_all_us
+from apps.api.services.resolution_eligibility import (
+    first_win_boost_site_ids,
+    site_resolves_all_us,
+)
 from apps.api.services.usage_limits import (
     check_enrich_budget,
     check_identify_budget,
@@ -820,10 +829,16 @@ async def resolve_one_visitor(
     if visitor.do_not_resolve:
         return {"status": "anonymous", "skip_reason": "privacy_opt_out",
                 "message": _SKIP_REASON_MESSAGES["privacy_opt_out"]}
-    # Intent gate honours the site-scoped all-US eligibility rule: on an all-US
-    # site every US visitor qualifies regardless of intent score.
-    if visitor.intent_score < 40 and not (
-        site_resolves_all_us(site.url) and (visitor.country_code or "").upper() == "US"
+    # Intent gate honours both widenings the sweep applies: on an all-US site
+    # every US visitor qualifies regardless of intent score, and a site inside
+    # the first-win boost window waives the floor entirely.
+    boost_ids = await first_win_boost_site_ids(db, [site_id])
+    if (
+        visitor.intent_score < RESOLUTION_MIN_INTENT
+        and site_id not in boost_ids
+        and not (
+            site_resolves_all_us(site.url) and (visitor.country_code or "").upper() == "US"
+        )
     ):
         return {"status": "anonymous", "skip_reason": "below_intent_threshold",
                 "message": _SKIP_REASON_MESSAGES["below_intent_threshold"]}
@@ -1019,11 +1034,15 @@ async def resolve_site_visitors(
         )
         await db.commit()
 
+    boost_ids = await first_win_boost_site_ids(db, [site_id])
     count_result = await db.execute(
         select(func.count()).select_from(Visitor).where(
             Visitor.site_id == site_id,
             Visitor.identity_status == "anonymous",
-            resolution_intent_filter([site_id] if site_resolves_all_us(site.url) else []),
+            resolution_intent_filter(
+                [site_id] if site_resolves_all_us(site.url) else [],
+                no_floor_site_ids=boost_ids,
+            ),
         )
     )
     eligible_raw = count_result.scalar() or 0
@@ -1044,7 +1063,7 @@ async def resolve_site_visitors(
                 "used": budget["used"],
                 "limit": budget["limit"],
             }
-        return {"status": "no_eligible", "message": "No visitors with intent >= 40 to resolve."}
+        return {"status": "no_eligible", "message": "No eligible visitors to resolve yet."}
 
     background_tasks.add_task(_run_resolution_job, site_id, eligible)
 

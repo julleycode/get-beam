@@ -136,25 +136,38 @@ class ResolutionLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
-RESOLUTION_MIN_INTENT = 40
+# Resolution-eligibility floor ONLY. The "hot / high-intent" DISPLAY label used by
+# kpi.py / hot_alert.py / conviction.py / timeseries.py stays at 40 — do not couple them.
+RESOLUTION_MIN_INTENT = 20
 
 
-def resolution_intent_filter(all_us_site_ids=()):
+def resolution_intent_filter(all_us_site_ids=(), no_floor_site_ids=()):
     """Resolution-eligibility intent gate.
 
-    Sites listed in ``all_us_site_ids`` (the owner's own domains, see
-    ``services.resolution_eligibility``) qualify every US visitor at any
-    intent_score. All other sites keep intent_score >= RESOLUTION_MIN_INTENT
-    so provider budgets aren't burned on low-intent traffic.
+    Three tiers, widest first:
+
+    - Sites listed in ``no_floor_site_ids`` are inside the first-win boost window
+      (fewer than ``settings.first_win_boost_count`` identified visitors ever, see
+      ``services.resolution_eligibility.first_win_boost_site_ids``): the intent floor
+      is waived entirely, so every anonymous visitor qualifies.
+    - Sites listed in ``all_us_site_ids`` (the owner's own domains) qualify every US
+      visitor at any intent_score.
+    - Everything else keeps intent_score >= RESOLUTION_MIN_INTENT (20) so provider
+      budgets aren't burned on low-intent traffic.
+
+    Both arguments default to empty, which reduces to the plain floor.
     """
     base = Visitor.intent_score >= RESOLUTION_MIN_INTENT
     ids = [s for s in all_us_site_ids if s]
-    if not ids:
+    no_floor_ids = [s for s in no_floor_site_ids if s]
+    if ids:
+        base = or_(
+            and_(
+                Visitor.site_id.in_(ids),
+                func.upper(Visitor.country_code) == "US",
+            ),
+            base,
+        )
+    if not no_floor_ids:
         return base
-    return or_(
-        and_(
-            Visitor.site_id.in_(ids),
-            func.upper(Visitor.country_code) == "US",
-        ),
-        base,
-    )
+    return or_(Visitor.site_id.in_(no_floor_ids), base)

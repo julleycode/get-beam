@@ -120,7 +120,7 @@ async def multi_site_client(test_client: AsyncClient, test_engine) -> AsyncClien
         s.add(Site(site_id="site_c", user_id=user_id, name="C", url="https://c.co"))
 
         # site_a: identified+enriched (segmented), identified+enriched (unsegmented),
-        # one anonymous eligible (intent>=40). One low-completeness enrichment
+        # one anonymous eligible. One low-completeness enrichment
         # profile (could_enrich_more) + one identification today (used quota).
         s.add(_visitor("site_a", "a1", identity_status="identified", enrichment_status="enriched", segmented=True, intent_score=90))
         s.add(_visitor("site_a", "a2", identity_status="identified", enrichment_status="enriched", segmented=False, intent_score=80))
@@ -129,7 +129,8 @@ async def multi_site_client(test_client: AsyncClient, test_engine) -> AsyncClien
         s.add(EnrichmentProfile(site_id="site_a", visitor_id="a2", enrichment_completeness=0.9))
         s.add(IdentifiedVisitor(site_id="site_a", visitor_id="a1", resolved_at=datetime.utcnow()))
 
-        # site_b: intent==40 boundary is eligible, intent<40 is not.
+        # site_b: no identified visitors ever -> inside the first-win boost
+        # window, so the intent floor is waived and BOTH anonymous rows count.
         s.add(_visitor("site_b", "b1", identity_status="anonymous", intent_score=40))
         s.add(_visitor("site_b", "b2", identity_status="anonymous", intent_score=10))
         await s.commit()
@@ -166,11 +167,14 @@ async def test_overview_matches_per_site_stats(multi_site_client: AsyncClient) -
     assert a["identified"] == 2
     assert a["enriched"] == 2
     assert a["enriched_unsegmented"] == 1   # a2 only (a1 segmented)
-    assert a["eligible_for_resolution"] == 1  # a3 (anonymous, intent>=40)
+    # site_a has 1 IdentifiedVisitor (< first_win_boost_count=5), so it is also
+    # inside the boost window — a3 is its only anonymous row either way.
+    assert a["eligible_for_resolution"] == 1  # a3 (the only anonymous row)
     assert a["could_enrich_more"] == 1      # the 0.4 profile only
     assert a["identify_used_today"] == 1    # a1 resolved today
     assert a["identify_daily_limit"] == 50  # free-tier default budget
     assert a["identify_is_byok"] is False
 
-    assert overview["stats"]["site_b"]["eligible_for_resolution"] == 1  # b1 (==40)
+    # site_b: 0 identified ever -> boost active -> floor waived -> b1 AND b2.
+    assert overview["stats"]["site_b"]["eligible_for_resolution"] == 2  # b1, b2
     assert overview["stats"]["site_c"]["total_visitors"] == 0  # empty site → zeros

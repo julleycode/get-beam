@@ -14,7 +14,10 @@ from apps.api.services.billing import check_usage_allowed, increment_usage
 from apps.api.services.celery_app import celery_app
 from apps.api.services.enricher import Enricher
 from apps.api.services.identity_resolver import IdentityResolver
-from apps.api.services.resolution_eligibility import site_resolves_all_us
+from apps.api.services.resolution_eligibility import (
+    first_win_boost_site_ids,
+    site_resolves_all_us,
+)
 from apps.api.services.segmentation_trigger import check_and_trigger_segmentation
 from apps.api.services.social_intelligence import SocialIntelligence
 
@@ -54,11 +57,18 @@ async def _process_site(db, site_id: str) -> tuple[int, int]:
     site = site_result.scalar_one_or_none()
     site_user_id = site.user_id if site else None
 
+    # First-win boost: a site with fewer than settings.first_win_boost_count
+    # identified visitors ever waives the intent floor entirely.
+    boost_ids = await first_win_boost_site_ids(db, [site_id]) if site else []
+
     result = await db.execute(
         select(Visitor).where(
             Visitor.site_id == site_id,
             Visitor.identity_status == "anonymous",
-            resolution_intent_filter([site.site_id] if site and site_resolves_all_us(site.url) else []),
+            resolution_intent_filter(
+                [site.site_id] if site and site_resolves_all_us(site.url) else [],
+                no_floor_site_ids=boost_ids,
+            ),
             Visitor.do_not_resolve.is_(False),
             # AC2 (GUARD #2): this Celery-beat task also fires Enricher.enrich_tier1
             # + AutoDrafter on resolved rows, so exclude synthetic agent-derived

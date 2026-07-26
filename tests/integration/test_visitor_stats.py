@@ -105,8 +105,11 @@ class TestVisitorStats:
         # enriched_unsegmented excludes the segmented=True visitor
         assert data["enriched"] == 2
         assert data["enriched_unsegmented"] == 1
-        # anonymous + intent >= 40: v-eligible and v-no-ip
-        assert data["eligible_for_resolution"] == 2
+        # eligible_for_resolution: the site has 0 identified visitors ever, so
+        # it is inside the first-win boost window (< first_win_boost_count=5) and
+        # the intent floor is waived — every anonymous row counts: v-eligible,
+        # v-low-intent, v-no-ip (the 2 identified rows are not anonymous).
+        assert data["eligible_for_resolution"] == 3
         # quota trio (free tier, site default budget 50, nothing used)
         assert data["identify_used_today"] == 0
         assert data["identify_daily_limit"] == 50
@@ -115,13 +118,30 @@ class TestVisitorStats:
 
 class TestResolutionSkipReason:
     @pytest.mark.asyncio
-    async def test_below_intent_threshold(self, test_client, stats_setup):
+    async def test_below_intent_threshold(self, test_client, stats_setup, monkeypatch):
+        # The fixture site has 0 identified visitors, so the first-win boost
+        # would waive the floor entirely. Disable the boost to exercise the
+        # plain floor gate (intent 10 < RESOLUTION_MIN_INTENT=20).
+        from apps.api.config import settings
+
+        monkeypatch.setattr(settings, "first_win_boost_count", 0)
         resp = await test_client.get(
             f"/api/v1/visitors/{stats_setup['site_id']}/v-low-intent",
             headers=_auth(stats_setup["token"]),
         )
         assert resp.status_code == 200, resp.text
         assert resp.json()["resolution_skip_reason"] == "below_intent_threshold"
+
+    @pytest.mark.asyncio
+    async def test_first_win_boost_waives_the_floor(self, test_client, stats_setup):
+        """Boost active (site has < 5 identified ever): a low-intent visitor is
+        eligible, so the skip reason is no longer below_intent_threshold."""
+        resp = await test_client.get(
+            f"/api/v1/visitors/{stats_setup['site_id']}/v-low-intent",
+            headers=_auth(stats_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["resolution_skip_reason"] == "awaiting_next_run"
 
     @pytest.mark.asyncio
     async def test_no_ip_address(self, test_client, stats_setup):
@@ -232,13 +252,14 @@ class TestVisitorStatCountsHelper:
             _visitor(sid, "v1", identity_status="identified", enrichment_status="enriched", segmented=True, intent_score=90),
             # identified + enriched, NOT segmented -> enriched_unsegmented
             _visitor(sid, "v2", identity_status="identified", enrichment_status="enriched", segmented=False, intent_score=80),
-            # anonymous, intent >= 40 -> eligible
+            # anonymous, above the floor -> eligible
             _visitor(sid, "v3", identity_status="anonymous", enrichment_status="pending", intent_score=55),
-            # anonymous, intent < 40 -> NOT eligible
+            # anonymous, below the floor -> eligible only while the boost is on
             _visitor(sid, "v4", identity_status="anonymous", enrichment_status="pending", intent_score=10),
-            # anonymous, intent exactly 40 -> eligible (>= boundary)
+            # anonymous, above the floor -> eligible
             _visitor(sid, "v5", identity_status="anonymous", enrichment_status="pending", intent_score=40),
-            # anonymous + enriched, not segmented -> enriched + enriched_unsegmented, NOT eligible (intent<40)
+            # anonymous + enriched, not segmented -> enriched + enriched_unsegmented;
+            # below the floor, so eligible only while the boost is on
             _visitor(sid, "v6", identity_status="anonymous", enrichment_status="enriched", segmented=False, intent_score=12),
         ])
         test_db.add(EnrichmentProfile(site_id=sid, visitor_id="v1", enrichment_completeness=0.4))
@@ -250,8 +271,35 @@ class TestVisitorStatCountsHelper:
         assert counts["identified"] == 2               # v1, v2
         assert counts["enriched"] == 3                 # v1, v2, v6
         assert counts["enriched_unsegmented"] == 2     # v2, v6 (v1 segmented)
-        assert counts["eligible_for_resolution"] == 2  # v3, v5 (40 is >= 40)
+        # The site has 0 identified visitors ever -> inside the first-win boost
+        # window, so the intent floor is waived and every anonymous row counts.
+        assert counts["eligible_for_resolution"] == 4  # v3, v4, v5, v6
         assert counts["could_enrich_more"] == 1        # only the 0.4 profile
+
+    @pytest.mark.asyncio
+    async def test_eligible_counts_use_floor_when_boost_disabled(
+        self, test_db, bare_site, monkeypatch
+    ):
+        """With the first-win boost off, eligibility is the plain floor
+        (RESOLUTION_MIN_INTENT=20, >= boundary inclusive)."""
+        from apps.api.config import settings
+        from apps.api.models.visitor import RESOLUTION_MIN_INTENT
+        from apps.api.routers.visitors import _compute_visitor_stat_counts
+
+        monkeypatch.setattr(settings, "first_win_boost_count", 0)
+        sid = bare_site.site_id
+        test_db.add_all([
+            _visitor(sid, "f1", identity_status="anonymous", intent_score=55),   # eligible
+            _visitor(sid, "f2", identity_status="anonymous", intent_score=20),   # eligible (== floor)
+            _visitor(sid, "f3", identity_status="anonymous", intent_score=19),   # NOT eligible
+            _visitor(sid, "f4", identity_status="anonymous", intent_score=0),    # NOT eligible
+        ])
+        await test_db.commit()
+
+        assert RESOLUTION_MIN_INTENT == 20
+        counts = await _compute_visitor_stat_counts(test_db, sid)
+        assert counts["total"] == 4
+        assert counts["eligible_for_resolution"] == 2  # f1, f2
 
     @pytest.mark.asyncio
     async def test_empty_site_returns_zeros(self, test_db, bare_site):
