@@ -144,6 +144,20 @@ async def _outcome_digest_job() -> None:
         logger.exception("outcome_digest_crashed")
 
 
+async def _daily_digest_job() -> None:
+    """Daily job: email owners of pixel-active sites their 24h working report.
+
+    send_daily_digests manages its own session, holds an advisory lock,
+    throttles per site (20h), and isolates per-site send failures.
+    """
+    try:
+        from apps.api.services.daily_digest import send_daily_digests
+
+        await send_daily_digests()
+    except Exception:
+        logger.exception("daily_digest_crashed")
+
+
 async def _agent_verification_sweep_job() -> None:
     """Periodic job: upgrade eligible ua-only agent visits to ip-verified.
 
@@ -537,6 +551,20 @@ def start_scheduler() -> None:
             CronTrigger(day_of_week="mon", hour=15, timezone="UTC"),
             id="outcome_digest",
             replace_existing=True,
+        )
+    if settings.daily_digest_enabled:
+        from apscheduler.triggers.cron import CronTrigger
+
+        scheduler.add_job(
+            _daily_digest_job,
+            CronTrigger(hour=settings.daily_digest_hour_utc, timezone="UTC"),
+            id="daily_digest",
+            replace_existing=True,
+            # No jitter (E20 excludes cron jobs — a fixed send hour is the point;
+            # the per-site advisory lock already prevents replica double-sends).
+            # A generous grace window so a deploy at the top of the hour doesn't
+            # silently skip the whole day's digest.
+            misfire_grace_time=3600,
         )
     scheduler.start()
     logger.info(

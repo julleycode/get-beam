@@ -177,6 +177,15 @@ class Settings(BaseSettings):
     # ─── Weekly outcomes digest ("Beam this week: X sent, Y clicks, Z conversions") ───
     outcomes_digest_enabled: bool = False  # master switch for the Monday digest email job
 
+    # ─── Daily activity digest (owner-only: today's actions + identified/enriched detail) ───
+    # Distinct from outcomes_digest_enabled above: that one is the WEEKLY,
+    # forward-safe proof email (no contact details). This one is the DAILY
+    # working report and DOES contain visitor PII, so it goes to the site owner
+    # only and is never framed as shareable.
+    daily_digest_enabled: bool = False  # master switch for the daily digest job
+    daily_digest_hour_utc: int = 13  # cron hour (UTC) — ~08:00 US Eastern
+    daily_digest_max_visitors: int = 25  # detail rows per email before "see all" link
+
     # ─── Referral program ("give quota, get quota") ───
     referrals_enabled: bool = False  # master switch for the hourly activation-reward job
 

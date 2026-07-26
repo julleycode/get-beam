@@ -62,6 +62,13 @@ class Site(Base):
     last_outcome_digest_sent_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )
+    # Throttle stamp for the daily activity digest email (naive UTC). NULL =
+    # never sent; the daily job skips sites stamped within the last 20h. Kept
+    # separate from last_outcome_digest_sent_at so the weekly forwardable digest
+    # and this owner-only daily report never throttle each other.
+    last_daily_digest_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
     # Watermark for the incremental aggregation path (capacity-hardening Phase 3,
     # decision D2). NULL = never aggregated incrementally → the next run does a
     # full recompute and then stamps this. Advanced ONLY after a successful

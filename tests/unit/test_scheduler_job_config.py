@@ -111,7 +111,14 @@ class TestSchedulerInventory:
         interval = [c for c in calls if _is_interval(c)]
         cron = [c for c in calls if not _is_interval(c)]
         assert len(interval) + len(cron) == len(calls)
-        assert len(cron) == 1, "expected exactly one non-interval (CronTrigger) job"
+        # Every job is either interval or CronTrigger — nothing else. The cron
+        # set is the two digest emails (weekly outcomes + daily activity); a new
+        # entry here means a new fixed-time job that Phase 4c's jitter assertion
+        # must keep excluding.
+        assert {_kwargs(c)["id"].value for c in cron} == {
+            "outcome_digest",
+            "daily_digest",
+        }
 
 
 class TestAC13IntervalJobHardening:
@@ -155,23 +162,29 @@ class TestAC13IntervalJobHardening:
                     "0 would restore the silent-skip / thundering-herd behavior"
                 )
 
-    def test_the_cron_job_is_excluded_from_the_jitter_requirement(self):
-        """jitter semantics differ for cron — E20 excludes the single CronTrigger."""
+    def test_the_cron_jobs_are_excluded_from_the_jitter_requirement(self):
+        """jitter semantics differ for cron — E20 excludes every CronTrigger.
+
+        A fixed send hour is the whole point of these jobs, and their per-site
+        advisory lock (not jitter) is what keeps replicas from double-sending.
+        """
         cron = [c for c in _add_job_calls() if not _is_interval(c)]
-        assert len(cron) == 1
-        assert "jitter" not in _kwargs(cron[0])
+        assert cron, "expected at least one CronTrigger job"
+        assert [c for c in cron if "jitter" in _kwargs(c)] == []
 
     def test_the_asserted_set_is_derived_not_hardcoded(self):
-        """E20 arithmetic: 13 total / 12 interval / 1 cron — all AST-derived.
+        """E20 arithmetic: 14 total / 12 interval / 2 cron — all AST-derived.
 
-        Was 12/11/1; +1 interval job for cadence_bot_flag_sweep (cadence-bot-flag
-        plan, 26-07-26). Updated per this gate's own instruction to re-derive the
-        arithmetic when a job is added — never to relax the assertion.
+        Was 13/12/1; +1 cron job for daily_digest (daily activity digest,
+        26-07-26). Before that 12/11/1 → +1 interval job for
+        cadence_bot_flag_sweep. Updated per this gate's own instruction to
+        re-derive the arithmetic when a job is added — never to relax the
+        assertion.
         """
         calls = _add_job_calls()
         interval = [c for c in calls if _is_interval(c)]
-        assert len(calls) == 13, f"expected 13 add_job calls, found {len(calls)}"
+        assert len(calls) == 14, f"expected 14 add_job calls, found {len(calls)}"
         assert len(interval) == 12, (
-            f"expected 11 interval calls, found {len(interval)}; if a job was "
+            f"expected 12 interval calls, found {len(interval)}; if a job was "
             "added or removed, update E20's arithmetic — do not relax this gate"
         )
