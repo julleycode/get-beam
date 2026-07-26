@@ -74,6 +74,36 @@ structural changes to shared registry/factory/base):**
 - `apps/web/src/components/ad-connect-panel.tsx` — Phase 2 renders the AC13 error message and
   AC7 warning text returned by the push endpoint; no structural change to the panel's
   provider-list rendering logic (that stays Phase-1-owned).
+- `apps/api/services/ads_push.py` — **(appended 26-07-26 at EXECUTE time per Execute-Agent
+  Instruction E3 in the Phase 2 validate-contract; closes the registry-declaration gap the
+  inner-PVL pass found.)** Phase 2 adds a scoped `fresh_access_token(db, conn)` helper
+  (structurally identical to `crm_push.fresh_access_token`) and one guarded call site inside
+  `push_segment_to_ads` immediately before `create_or_update_audience`, plus the additive
+  `below_minimum`/`minimum_threshold` fields on `PushSegmentOutcome`. Additive only — no
+  existing function signature changed, no restructure of the Phase-1 safety-filter/hash
+  sequence. The refresh call is `getattr`-guarded so non-Meta providers (which have no
+  `refresh_tokens` method) are skipped, keeping Phase 3's Google path untouched. Structurally
+  isolated from Phase 3's declared `if provider == "google":` EEA-exclusion branch.
+- `apps/api/schemas/ads.py` — **(appended 26-07-26 at EXECUTE time, same E3 rationale.)** Phase 2
+  adds the two additive response fields `below_minimum: bool` / `minimum_threshold: int` to
+  `PushAdSegmentResult` (the schema half of the already-declared `routers/ads.py` extension
+  point above — the router cannot return the fields without them existing on the model). No
+  existing field renamed or removed.
+- `apps/web/src/lib/api-types.ts` — **(appended 26-07-26 at EXECUTE time, same E3 rationale.)**
+  Phase 2 adds the two OPTIONAL fields `below_minimum?: boolean` / `minimum_threshold?: number`
+  to the existing `AdPushResult` interface — the TypeScript mirror of the `schemas/ads.py`
+  addition above, without which the panel cannot read the fields the push endpoint now returns.
+  Optional-typed so no existing caller breaks. This file was not listed in any phase's Owns
+  block at plan time (an omission, since Phase 1 created the interface); treated here as an
+  append-only extension point on Phase-1-created code, matching the `apps/web/src/lib/api.ts`
+  convention.
+- `tests/unit/test_ads_stub_501.py` — **(appended 26-07-26 at EXECUTE time, same E3 rationale.)**
+  Phase 2 narrows this Phase-1 test from `["meta", "google"]` to `["google"]` and flips the
+  meta leg of `test_ads_stub_501_provider_really_raises_not_implemented` from
+  "raises NotImplementedError" to "returns a real facebook.com OAuth URL". Forced by this
+  phase's own deliverable: the test asserted meta IS a stub, which Phase 2 exists to stop being
+  true. Google's stub-501 coverage is unchanged, and meta's flag-off 501 path stays covered by
+  `tests/unit/test_ads_flag_off_501.py`. No Phase-3 surface touched.
 
 **Hard-forbidden:** `apps/api/services/ads/google.py`, `apps/api/services/ads/linkedin.py`,
 `apps/api/services/ads/base.py`, `apps/api/services/ads/factory.py` (Phase 3 / Phase 1 owned —
@@ -158,7 +188,7 @@ not a blocker to running Phase 2 and Phase 3 in parallel.
 | Phase | Status |
 |---|---|
 | Phase 1 | DONE |
-| Phase 2 | (no field — plan created 25-07-26, not yet executed) |
+| Phase 2 | DONE — EVL green (14 gates), 3 env-only known-gaps (E3 sandbox smoke, AC7 Playwright legs, AC13 error shape); code-complete, not yet ✅ VERIFIED per plan's own Phase Completion Rules |
 | Phase 3 | (no field — plan created 25-07-26, not yet executed) |
 
 Valid status values (written by the orchestrator during execution, per

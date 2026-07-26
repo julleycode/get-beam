@@ -274,7 +274,7 @@ During /goal execution of this phase program:
 |---|---|
 | 0 — Pre-program (plan creation) | 🔨 CODE DONE (this write) |
 | 1 — Foundation | ✅ VERIFIED (2 env-only known-gaps: G1 migration round-trip, G2 Playwright auth harness — see backlog) |
-| 2 — Meta live | ⏳ PLANNED |
+| 2 — Meta live | 🧪 TESTING (code-complete, EVL-green; 3 env-only known-gaps: E3 sandbox smoke, AC7 Playwright legs, AC13 error shape — see backlog) |
 | 3 — Google live | ⏳ PLANNED |
 
 Status values: ⏳ PLANNED | 🔨 CODE DONE | 🧪 TESTING | ✅ VERIFIED | 🚧 BLOCKED | ✅ COMPLETE
@@ -363,24 +363,38 @@ node .claude/skills/vc-audit-vc/scripts/validate-guide-sync.mjs
 
 ## Current Execution State
 
-Last updated: 25-07-26
-Current phase: 2 of 3 (Phase 2 — Meta Live)
-Phase 2 name: Meta Live
+Last updated: 26-07-26
+Current phase: 3 of 3 (Phase 3 — Google Live)
+Phase 3 name: Google Live
+Phase 2 status: 🧪 TESTING (code-complete, EVL-green) — NOT ✅ VERIFIED. Inner-PVL Gate: PASS
+  (cycle 4, `generated-by: inner-pvl: phase-2`). 3 env-only known-gaps: E3 Hybrid Meta sandbox
+  smoke (no real Meta developer app/Business Manager in this environment), AC7 Playwright UI legs
+  (Clerk auth harness gap G2, pre-existing), AC13 exact error code/subcode (Agent-Probe residual,
+  fails safe). All 3 have resolution paths; none block Phase 3 start. (Note: the Phase 2 EVL
+  handoff also flagged T1 conftest fix as "not yet landed on main" — independently re-verified
+  26-07-26 as STALE: T1 is already fixed and committed, `c88444a`. See backlog note's correction.)
+  See backlog
+  note `process/features/ads-audiences/backlog/phase-1-docker-and-auth-known-gaps_NOTE_25-07-26.md`
+  (extended with a Phase 2 section).
+Phase 2 EVL: green — 14 gates: unit 539 full regression + 48 ads-scope, guardrail agent-origin
+  18/18, 5/5 integration files (fresh-schema), frontend typecheck clean, frozen-ads-file drift
+  clean, no-raw-token-logging grep clean, no-live-Meta-calls grep clean, alembic single head
+  `d5b1f7c3a908` (`results.tsv` iteration 5, HALTED_SUCCESS). No regression against Phase 1 surfaces.
+Phase 2 report: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-2-meta-live_REPORT_26-07-26.md`
 Phase 1 status: ✅ VERIFIED — Gate: PASS (cycle 2); 2 named env-only known-gaps (G1 migration
-  round-trip — Docker daemon unavailable, deferred to Docker-gate closure per owned-data-layer
-  precedent; G2 Playwright AC9/AC12 — local Clerk auth harness unconfigured), both with resolution
-  paths, neither a program blocker. See backlog note
-  `process/features/ads-audiences/backlog/phase-1-docker-and-auth-known-gaps_NOTE_25-07-26.md`.
-Phase 1 EVL: green — unit 21/21, guardrail agent-origin 18/18, tsc clean, 4/4 ads integration
-  files, CRM-drift zero (ads-scope), alembic single head `c8e4f2a6b1d9` (`results.tsv` iteration 3,
-  HALTED_SUCCESS)
-Phase 1 report: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-1-foundation_REPORT_25-07-26.md`
-Next phase: Phase 2 — Meta Live, inner-loop Step 1 RESEARCH (pending — not yet spawned). Read
-  Phase 2 plan (`phase-2-meta-live_PLAN_25-07-26.md`) and this umbrella before spawning
-  vc-research-agent.
+  round-trip, G2 Playwright auth harness), unchanged this phase.
+Note: alembic head has moved twice since Phase 1 closeout, both by concurrent programs, not this
+  program — currently `d5b1f7c3a908` (single head, re-verified live 26-07-26 via `alembic heads`).
+  Phase 3's RESEARCH step must re-confirm the head again before any migration work, per the
+  umbrella's Global Constraints check.
+Next phase: Phase 3 — Google Live, inner-loop Step 1 RESEARCH (pending — not yet spawned). Read
+  Phase 3 plan (`phase-3-google-live_PLAN_25-07-26.md`) and this umbrella before spawning
+  vc-research-agent. Phase 3 does not depend on Phase 2 (see Join Conditions) — its Phase 1
+  dependency is already satisfied.
 
-Program Net Gate: IN PROGRESS (1 of 3 phases VERIFIED)
-Latest validator run: 25-07-26 — see this UPDATE PROCESS session's Tier-1 audit results
+Program Net Gate: IN PROGRESS (1 of 3 phases VERIFIED; Phase 2 code-complete/EVL-green pending
+  Hybrid+UI evidence; Phase 3 not started)
+Latest validator run: 26-07-26 — see this UPDATE PROCESS session's Tier-1 audit results
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read this section plus the current phase plan's "## Phase Loop Progress"

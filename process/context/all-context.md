@@ -100,7 +100,11 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   pattern; 3-phase program. Phase 1 Foundation (models, `services/ads/` registry, router, mock-mode
   parity, UI panel) shipped 25-07-26 — mock-mode complete, `ad_audiences_enabled` default OFF, 2
   env-only known-gaps (migration round-trip Docker-gated, Playwright auth harness). Phase 2 (Meta
-  live) next — see
+  live — real OAuth, Custom Audience create/upload, ToS-precondition error surfacing, min-size
+  warning) code-complete + EVL-green 26-07-26 (14 gates, no regression); 3 env-only known-gaps
+  before `✅ VERIFIED`/production-enable: Meta sandbox Hybrid smoke (mandatory pre-enable operator
+  step), AC7 Playwright UI legs (blocked on the same Clerk auth-harness gap as Phase 1), AC13 exact
+  error code/subcode (Agent-Probe residual, fails safe). Phase 3 (Google live) in progress — see
   `process/features/ads-audiences/active/ad-audiences_25-07-26/ad-audiences-umbrella_PLAN_25-07-26.md`
 
 ## Context Group Lifecycle

@@ -1,6 +1,6 @@
 ---
 name: plan:ads-audiences-phase-1-docker-and-auth-known-gaps
-description: "Ad Audiences Phase 1 — G1 (migration round-trip) + G2 (Playwright auth harness) env-only known-gaps and resolution paths"
+description: "Ad Audiences Phase 1+2 — env-only known-gaps and resolution paths (G1/G2 Phase 1; E3/AC7/AC13 Phase 2)"
 date: 25-07-26
 metadata:
   node_type: memory
@@ -9,7 +9,7 @@ metadata:
   phase: phase-1
 ---
 
-# Phase 1 Foundation — Known-Gap Backlog Note (G1, G2)
+# Phase 1 Foundation + Phase 2 Meta Live — Known-Gap Backlog Note
 
 **Status:** open — both gaps are environment-only, not code defects. Neither blocks Phase 1
 `✅ VERIFIED` classification (per the phase plan's own Phase Completion Rules: known gaps with a
@@ -74,9 +74,72 @@ references it for context. See the Phase 1 EXECUTE report
 (`process/features/ads-audiences/active/ad-audiences_25-07-26/phase-1-foundation_REPORT_25-07-26.md`,
 "Test Infra Gaps Found" section) for the original finding.
 
+## Phase 2 (Meta Live) — added 26-07-26
+
+**Status:** open — all 3 gaps are environment-only or a genuinely-unverifiable live-provider fact,
+not code defects. None block Phase 2's code-complete/EVL-green classification; they DO block
+`✅ VERIFIED` per the phase plan's own Phase Completion Rules (every Verification Evidence row
+needs real recorded evidence, and the Hybrid/UI rows below don't have it yet).
+
+### E3 — Meta sandbox Hybrid smoke not run
+
+**What's missing:** the phase plan's "Operator Env-Prereq Checklist" manual smoke against a real
+Meta developer app (LIVE mode) + verified Business Manager — neither exists in this sandbox.
+
+**Resolution path:** this is a **mandatory operator step before any production enable**, not
+optional cleanup. Run the plan's Operator Env-Prereq Checklist
+(`phase-2-meta-live_PLAN_25-07-26.md` §Operator Env-Prereq Checklist) in an environment with a real
+Meta app, then execute the plan's E3 Hybrid smoke procedure and record the result in a phase
+addendum before flipping `ad_audiences_enabled` in any real environment.
+
+### AC7 Playwright UI legs — skipped, not failed
+
+**What's missing:** both legs of `apps/web/e2e/connectors-ads-push-warning.spec.ts` skip (not
+fail) because the connectors page redirects to Clerk sign-in — the same G2 auth-harness gap from
+Phase 1, not a Phase 2 defect. The spec is written to fail loudly (not pass vacuously) if the page
+renders but the warning is missing.
+
+**Resolution path:** unblock when G2 (Playwright/Clerk auth harness) is fixed — see G2 above. The
+backend leg of AC7 (both pre-push and post-push warning wiring) is already fully proven by
+`test_ads_meta_live.py`; only the UI-rendering assertion is unverified.
+
+### AC13 — exact Meta error code/subcode unconfirmed (Agent-Probe residual)
+
+**What's missing:** the real Meta Graph API `code`/`subcode` for an unaccepted Custom-Audience-ToS
+ad account. Docs don't specify it; the message-substring match used in `_is_tos_error` is
+best-effort and fails safe (degrades to the generic sanitized error, never a crash or wrong push).
+
+**Resolution path:** confirm via one live Meta sandbox call (can be batched with E3's smoke), then
+upgrade the `# TODO Agent-Probe:` marker in `services/ads/meta.py` to a real fixture-backed
+assertion in `test_ads_meta.py`. Non-blocking; backend behavior is already correct either way.
+
+### Correction (UPDATE PROCESS, 26-07-26): T1 conftest fix IS already landed on `main`
+
+The Phase 2 EVL handoff summary claimed "T1 conftest fix NOT yet landed on main (verified by
+grep)" — this was stale at closeout time. Independently re-verified 26-07-26: `git log --oneline -1
+-- tests/conftest.py` shows commit `c88444a` ("test(conftest): drop PG native ENUM types in
+test_engine setup+teardown"), and `tests/conftest.py` lines 99-110 confirm the `DROP TYPE ...
+CASCADE` loop runs at BOTH setup and teardown. See the existing memory note
+`integration-conftest-enum-teardown-fixed.md` (2026-07-25, committed and pushed to origin). The
+per-file schema-reset workaround this phase's own EXECUTE/EVL sessions used
+(`DROP SCHEMA public CASCADE; CREATE SCHEMA public;` between integration files) may therefore be a
+residual instability from a *different* cause than the original T1 defect — worth re-checking
+without the workaround the next time this integration suite runs, rather than assuming T1 remains
+open.
+
+### Also carried (non-blocking, deferred to a future phase)
+
+- Promoting a shared `AdsProvider.refresh_tokens` ABC-level default (mirroring
+  `CRMConnector.refresh_tokens`) belongs to whichever phase next touches `services/ads/base.py`
+  (hard-forbidden to Phase 2). Safe to defer — `fresh_access_token`'s `getattr` guard already makes
+  today's omission harmless, and a unit test pins that behavior.
+
 ## Cross-references
 
 - Phase 1 plan: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-1-foundation_PLAN_25-07-26.md`
 - Phase 1 report: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-1-foundation_REPORT_25-07-26.md`
+- Phase 2 plan: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-2-meta-live_PLAN_25-07-26.md`
+- Phase 2 report: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-2-meta-live_REPORT_26-07-26.md`
 - Umbrella plan: `process/features/ads-audiences/active/ad-audiences_25-07-26/ad-audiences-umbrella_PLAN_25-07-26.md`
-- `results.tsv` iteration 3 (EVL confirmation, HALTED_SUCCESS)
+- `results.tsv` iteration 3 (Phase 1 EVL confirmation, HALTED_SUCCESS); iteration 5 (Phase 2 EVL
+  confirmation, HALTED_SUCCESS)
