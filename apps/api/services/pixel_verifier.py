@@ -17,7 +17,7 @@ BROWSER_UA = (
 
 
 class VerifyResult(TypedDict):
-    status: str  # verified | not_found | fetch_error
+    status: str  # verified | wrong_site | not_found | fetch_error
     verified: bool
     message: str
 
@@ -65,10 +65,20 @@ async def verify_pixel(url: str, site_id: str) -> VerifyResult:
     #   src="...tracker.js" data-site="site_abc123"
     #   src="...tracker.js?site=site_abc123"
     has_tracker = bool(re.search(r"tracker\.js", html))
+    # The site id shows up in different shapes depending on how the snippet was
+    # embedded; the raw HTML may never contain a plain data-site attribute:
+    #   plain attr:        data-site="site_abc"  /  data-site='site_abc'
+    #   src query param:   tracker.js?site=site_abc
+    #   Pages Router JSON: "data-site":"site_abc"        (__NEXT_DATA__)
+    #   App Router RSC:    data-site\":\"site_abc\"      (next/script injects the
+    #                      tag client-side; HTML has only the escaped payload)
+    # One windowed pattern covers every data-site shape: the key, a short run of
+    # quote/backslash/colon/equals/space, then the id. The trailing lookahead
+    # keeps site_abc from matching site_abcdef.
+    id_pat = re.escape(site_id)
     has_correct_site = bool(
-        re.search(rf'data-site="{re.escape(site_id)}"', html)
-        or re.search(rf"data-site='{re.escape(site_id)}'", html)
-        or re.search(rf"\?site={re.escape(site_id)}", html)
+        re.search(rf'data-site[\\"\'=:\s]{{1,8}}{id_pat}(?![0-9a-zA-Z])', html)
+        or re.search(rf"\?site={id_pat}(?![0-9a-zA-Z])", html)
     )
 
     if has_tracker and has_correct_site:
