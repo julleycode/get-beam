@@ -2,11 +2,11 @@ import math
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import select, text, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.models.visitor import Visitor
+from apps.api.models.visitor import ResolutionLog, Visitor
 from apps.api.services.ai_referral import classify_ai_source
 
 logger = structlog.get_logger()
@@ -339,6 +339,95 @@ def build_aggregate_sql(since: datetime | None) -> str:
     )
 
 
+async def _snapshot_unresolvable_ips(db: AsyncSession, site_id: str) -> dict[str, str | None]:
+    """Pre-rollup snapshot of `{visitor_id: ip_address}` for unresolvable rows.
+
+    Sites are small (hundreds of rows), so a whole-site snapshot is cheaper than
+    trying to guess which visitors the rollup is about to touch. Fail-open: any
+    error yields an empty snapshot, which makes the revive pass a no-op.
+    """
+    try:
+        result = await db.execute(
+            select(Visitor.visitor_id, Visitor.ip_address).where(
+                Visitor.site_id == site_id,
+                Visitor.identity_status == "unresolvable",
+            )
+        )
+        return {row[0]: row[1] for row in result.all()}
+    except Exception as exc:
+        logger.warning("unresolvable_snapshot_failed", site_id=site_id, error=str(exc))
+        return {}
+
+
+async def revive_returning_unresolvable(
+    db: AsyncSession,
+    site_id: str,
+    pre_snapshot: dict[str, str | None],
+) -> int:
+    """Re-queue `unresolvable` visitors whose IP changed during this rollup.
+
+    A visitor marked `identity_status='unresolvable'` was previously dead forever:
+    the resolution sweep only selects `'anonymous'` rows, so no later visit could
+    ever retry them. That matters because the DB carries a large backlog of rows
+    whose stored IP is a Cloudflare EDGE ip (junk, pre-dating the
+    CF-Connecting-IP fix) — those visitors were never actually resolvable from the
+    IP we had. The moment such a visitor returns and the rollup overwrites
+    `ip_address` with a real address, that is a genuinely NEW provider query and
+    must be retried.
+
+    So: compare the pre-rollup IP against the post-rollup IP; for every visitor
+    whose IP changed (`IS DISTINCT FROM` semantics — NULL → real counts), flip the
+    status back to `anonymous` and purge only that visitor's FAILED
+    `resolution_logs` so the 30-day no-retry gate sees a fresh candidate.
+    Successful rows are NEVER deleted (billing/usage history).
+
+    Fail-open: a failure here logs and returns 0; it never breaks aggregation.
+    """
+    if not pre_snapshot:
+        return 0
+
+    try:
+        ids = list(pre_snapshot.keys())
+        result = await db.execute(
+            select(Visitor.visitor_id, Visitor.ip_address).where(
+                Visitor.site_id == site_id,
+                Visitor.visitor_id.in_(ids),
+            )
+        )
+        changed = [
+            vid for vid, new_ip in result.all()
+            if pre_snapshot.get(vid) != new_ip
+        ]
+        if not changed:
+            return 0
+
+        await db.execute(
+            update(Visitor)
+            .where(
+                Visitor.site_id == site_id,
+                Visitor.visitor_id.in_(changed),
+                # Guard: never clobber a concurrent identify.
+                Visitor.identity_status == "unresolvable",
+            )
+            .values(identity_status="anonymous")
+        )
+        await db.execute(
+            delete(ResolutionLog).where(
+                ResolutionLog.site_id == site_id,
+                ResolutionLog.visitor_id.in_(changed),
+                ResolutionLog.success.is_(False),
+            )
+        )
+        await db.commit()
+        # Count only — never log IPs (PII rule).
+        logger.info("unresolvable_revived", site_id=site_id, revived=len(changed))
+        return len(changed)
+    except Exception as exc:
+        await db.rollback()
+        logger.warning("unresolvable_revive_failed", site_id=site_id, error=str(exc))
+        return 0
+
+
 async def aggregate_visitors_for_site(
     db: AsyncSession,
     site_id: str,
@@ -368,6 +457,11 @@ async def aggregate_visitors_for_site(
     ))
     if not check.scalar():
         return 0
+
+    # Pre-rollup IP snapshot for the unresolvable-revive pass (see
+    # revive_returning_unresolvable): must be read BEFORE the upsert overwrites
+    # ip_address, so a returning visitor's IP change is detectable.
+    unresolvable_pre = await _snapshot_unresolvable_ips(db, site_id)
 
     # Session-aware aggregation using window functions:
     # 1. Detect session boundaries (gap > 30 min between events)
@@ -418,6 +512,10 @@ async def aggregate_visitors_for_site(
         count = await _bulk_upsert_visitors_incremental(db, site_id, rows)
 
     await db.commit()
+
+    # Returning-visitor revive: a fresh IP on a previously unresolvable row is a
+    # genuinely new provider query, so re-queue it for the resolution sweep.
+    await revive_returning_unresolvable(db, site_id, unresolvable_pre)
 
     # Watermark advances ONLY after a successful commit of this run's upserts
     # (checklist item 9). A crash before this point simply re-reads the same
