@@ -33,8 +33,17 @@ class SiteOut(BaseModel):
 
 
 class SiteUpdate(BaseModel):
-    """Partial site update. Only set fields are applied."""
+    """Partial site update. Only set fields are applied.
 
+    ``description`` / ``category`` were missing here even though both columns
+    exist on ``Site`` and are settable at create time via ``SiteCreate`` — a
+    latent bug that made them write-once. Added by agent-gateway Phase 1
+    (the agent profile leans on a real site description). Additive/optional, so
+    no existing caller changes behavior.
+    """
+
+    description: str | None = None
+    category: str | None = None
     auto_identify_enabled: bool | None = None
     hot_alert_enabled: bool | None = None
     tracking_enabled: bool | None = None

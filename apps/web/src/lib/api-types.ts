@@ -124,11 +124,55 @@ export type ConsentMode = "off" | "eu" | "all" | "cmp";
 
 // Partial site update payload — mirrors the backend SiteUpdate schema.
 export interface SiteUpdate {
+  description: string;
+  category: string;
   auto_identify_enabled: boolean;
   hot_alert_enabled: boolean;
   tracking_enabled: boolean;
   consent_mode: ConsentMode;
 }
+
+// ── Agent gateway (agent-facing site content) ─────────────
+
+/** One sellable thing, as authored by the customer in the dashboard. */
+export interface AgentOffer {
+  name: string;
+  price?: string | null;
+  currency?: string | null;
+  billing_period?: string | null;
+  availability?: string | null;
+  url?: string | null;
+}
+
+/** Capabilities an agent may be told this site supports. Closed allowlist —
+ *  mirrors AGENT_CAPABILITIES in apps/api/schemas/agent_profile.py. */
+export type AgentCapability =
+  | "request_demo"
+  | "get_quote"
+  | "join_waitlist"
+  | "start_checkout";
+
+export interface AgentProfile {
+  site_id: string;
+  /** Per-site publish switch. Off (default) => every public agent endpoint 404s,
+   *  regardless of the global agent_gateway_enabled flag. */
+  enabled: boolean;
+  tagline: string | null;
+  long_description: string | null;
+  offers: AgentOffer[];
+  capabilities: AgentCapability[];
+  primary_cta: string | null;
+  privacy_policy_url: string | null;
+  tos_url: string | null;
+  contact_email: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Partial upsert payload — only set fields are applied. */
+export type AgentProfileUpdate = Partial<
+  Omit<AgentProfile, "site_id" | "created_at" | "updated_at">
+>;
 
 export interface FeatureRequest {
   id: string;

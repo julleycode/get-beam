@@ -246,9 +246,13 @@ async def update_site(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> SiteOut:
-    """Partial site update. Currently the auto-identify toggle; owner-scoped."""
+    """Partial site update. Owner-scoped; only set fields are applied."""
     site = await verify_site_access(db, site_id, user)
 
+    if body.description is not None:
+        site.description = body.description
+    if body.category is not None:
+        site.category = body.category
     if body.auto_identify_enabled is not None:
         site.auto_identify_enabled = body.auto_identify_enabled
     if body.hot_alert_enabled is not None:

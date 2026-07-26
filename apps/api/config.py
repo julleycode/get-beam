@@ -310,6 +310,22 @@ class Settings(BaseSettings):
     # pre-EvalLayer (recognized agent UAs fall through to the is_bot() drop).
     agent_detection_enabled: bool = False
 
+    # ─── Agent gateway (agent-gateway Phase 1+2) ───
+    # When true, the public per-site agent-facing read surface is served:
+    # GET /api/v1/agent/{site_id}/manifest.json | /offers.json | /llms.txt and
+    # the read-only JSON-RPC MCP endpoint. Content is customer-authored
+    # (AgentProfile) — no PII, no visitor data, no operational fields.
+    #
+    # TWO gates, both required: this global flag AND the per-site
+    # AgentProfile.enabled. Either off => 404, endpoint not revealed (same
+    # dormant-not-revealed posture as agent_fetch_beacon_enabled). An unknown or
+    # foreign site_id is likewise 404, NEVER 403 — never leak which site_ids exist.
+    #
+    # Defaults OFF until the agent_profiles migration (a4f7c2e9d31b) is
+    # live-applied in prod; flipping it on in a real environment is an explicit
+    # operator action, matching agent_detection_enabled / company_graph_enabled.
+    agent_gateway_enabled: bool = False
+
     # ─── Cadence bot flag ───
     # Fifth, ORTHOGONAL bot layer. The four existing ones (tracker.js webdriver
     # check, bot_filter UA regex, agent_classifier vendor list, ingest_velocity
@@ -464,6 +480,12 @@ class Settings(BaseSettings):
     google_ads_client_id: str = ""
     google_ads_client_secret: str = ""
     google_ads_redirect_uri: str = "http://localhost:8000/api/v1/ads/callback/google"
+    # Google Ads API requires a `developer-token` HTTP header on EVERY call
+    # (docs: developers.google.com/google-ads/api/rest/auth#developer-token).
+    # Obtained from the Google Ads UI API Center under the manager account. A
+    # Test-Account-Access token is enough for the sandbox dev path — Basic
+    # access approval is a separate, later operator action.
+    google_ads_developer_token: str = ""
     # Present for schema symmetry only — LinkedIn stays ready=False, so these are
     # never read while the provider is unsupported.
     linkedin_ads_client_id: str = ""
@@ -549,6 +571,7 @@ class Settings(BaseSettings):
         "google_client_id", "google_client_secret", "google_redirect_uri",
         "meta_ads_client_id", "meta_ads_client_secret", "meta_ads_redirect_uri",
         "google_ads_client_id", "google_ads_client_secret", "google_ads_redirect_uri",
+        "google_ads_developer_token",
         "linkedin_ads_client_id", "linkedin_ads_client_secret", "linkedin_ads_redirect_uri",
         mode="after",
     )

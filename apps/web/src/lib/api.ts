@@ -11,6 +11,8 @@ import type {
   Site,
   SiteUpdate,
   ConsentMode,
+  AgentProfile,
+  AgentProfileUpdate,
   FeatureRequest,
   FeatureBoardItem,
   FeatureBoardResponse,
@@ -364,6 +366,20 @@ class ApiClient {
     return this.request<Site>(`/api/v1/sites/${siteId}`, {
       method: "PATCH",
       body: JSON.stringify({ consent_mode: mode }),
+    });
+  }
+
+  // ── Agent gateway: agent-facing site content (authed, owner-scoped) ──
+  // 404 is expected — and not an error — before the first save: a bare read
+  // never creates a profile row. Callers should treat it as "empty form".
+  async getAgentProfile(siteId: string) {
+    return this.request<AgentProfile>(`/api/v1/agent-profile/${siteId}`);
+  }
+
+  async saveAgentProfile(siteId: string, body: AgentProfileUpdate) {
+    return this.request<AgentProfile>(`/api/v1/agent-profile/${siteId}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
     });
   }
 
@@ -1601,6 +1617,10 @@ export type {
   Site,
   SiteUpdate,
   ConsentMode,
+  AgentProfile,
+  AgentProfileUpdate,
+  AgentOffer,
+  AgentCapability,
   FeatureRequest,
   FeatureBoardItem,
   FeatureBoardResponse,

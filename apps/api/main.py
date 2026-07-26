@@ -36,12 +36,14 @@ from apps.api.models.company_graph import CompanyGraphNode  # noqa: F401 — reg
 from apps.api.models.identity_signal import IdentitySignal  # noqa: F401 — register for create_all
 from apps.api.models.ad_connection import AdConnection  # noqa: F401 — register for create_all
 from apps.api.models.ad_audience_link import AdAudienceLink  # noqa: F401 — register for create_all
+from apps.api.models.agent_profile import AgentProfile  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
 from apps.api.routers import known_contacts, costs, ai, dashboard, crm, changelog, click, open_pixel
 from apps.api.routers import email_sender_oauth, outcomes, referrals, agents, ads
 from apps.api.routers import ingest_health
+from apps.api.routers import agent_profile, agent_gateway, agent_mcp
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
 from slowapi import _rate_limit_exceeded_handler
@@ -290,6 +292,17 @@ app.include_router(api_keys.router, prefix="/api/v1/api-keys", tags=["api-keys"]
 app.include_router(crm.router, prefix="/api/v1/crm", tags=["crm"])
 app.include_router(ads.router, prefix="/api/v1/ads", tags=["ads"])
 app.include_router(privacy.router, prefix="/api/v1/privacy", tags=["privacy"])
+
+# ── Agent gateway (agent-gateway Phase 1+2) ─────────────
+# Authed CRUD for the customer's agent-facing profile.
+app.include_router(
+    agent_profile.router, prefix="/api/v1/agent-profile", tags=["agent-profile"]
+)
+# PUBLIC, unauthenticated, read-only agent surface. Doubly gated by
+# settings.agent_gateway_enabled AND AgentProfile.enabled — both default OFF, so
+# these routes answer 404 (dormant, not revealed) until an operator enables them.
+app.include_router(agent_gateway.router, prefix="/api/v1/agent", tags=["agent-gateway"])
+app.include_router(agent_mcp.router, prefix="/api/v1/agent", tags=["agent-mcp"])
 
 # ── EasyEngage routers ──────────────────────────────────
 app.include_router(social_auth.router, prefix="/api/v1/social", tags=["social-auth"])
