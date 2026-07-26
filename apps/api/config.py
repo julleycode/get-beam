@@ -52,6 +52,44 @@ class Settings(BaseSettings):
     # PostgreSQL
     database_url: str = "postgresql+asyncpg://retarget:retarget_dev@localhost:5432/retarget_agent"
 
+    # ─── DB pool + timeout hardening (capacity-hardening plan Phase 4a/4b / W4) ───
+    # 4a — SERVER-SIDE statement timeout, applied via asyncpg `server_settings`
+    # (so Postgres itself kills the query; a client-side cancel would still leave
+    # the backend running). 0 = DISABLED = today's exact behavior, so this ships
+    # inert; flipping it on is an explicit operator action.
+    # Ordering matters: this must only be raised above 0 AFTER Phase 3's bounded
+    # aggregation queries exist. Setting it earlier would convert the (slow,
+    # correct) full-history recompute into an error path. Suggested first live
+    # value once Phase 3 has soaked: 30_000 ms. NOTE the full-recompute repair
+    # sweep (_aggregation_sweep_job) still runs an unbounded query by design —
+    # size any non-zero value against THAT query, not against request-path SQL.
+    db_statement_timeout_ms: int = 0
+    # 4b — pool sizing. Defaults reproduce the previous hardcoded 3/2 (=5 per
+    # container) exactly, which is correct for the Supabase SESSION pooler
+    # (port 5432, 15-client cap) with one deploy overlap (old+new = 10 peak).
+    #
+    # Pool math (keep this satisfied before raising either value):
+    #   containers x (db_pool_size + db_max_overflow)
+    #     + celery_workers x (worker_pool_size + worker_overflow)
+    #     <= client_cap,      with headroom for ONE deploy overlap.
+    # Also reserve 2 connections for `services/retention.py`, which holds an
+    # outer advisory-lock session plus an inner delete session for the whole
+    # purge (retention.py:116/122 and :177/183).
+    #
+    # OPERATOR MIGRATION (not a code change): moving DATABASE_URL to the
+    # Supabase TRANSACTION pooler on port 6543 lifts the client cap and is what
+    # actually unlocks larger pools. It also FORBIDS session-scoped state —
+    # advisory locks held across statements, SET-based session settings. This
+    # repo holds advisory locks across statements in retention.py, so the port
+    # change is NOT recommended until that audit closes. See
+    # process/general-plans/active/capacity-hardening_25-07-26/
+    # transaction-pooler-advisory-lock-audit_NOTE_25-07-26.md
+    # The pool code below is port-aware and safe under EITHER pooler; only the
+    # defaults differ, and the non-5432 default is deliberately identical to the
+    # 5432 one until an operator raises it.
+    db_pool_size: int = 3
+    db_max_overflow: int = 2
+
     # ClickHouse
     clickhouse_host: str = "localhost"
     clickhouse_port: int = 8123
