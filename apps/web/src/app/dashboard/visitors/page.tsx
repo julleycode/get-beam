@@ -700,6 +700,14 @@ export default function VisitorsPage() {
                           Bot-suspect
                         </span>
                       )}
+                      {v.is_internal_suspect && (
+                        <span
+                          className="shrink-0 rounded bg-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-warning"
+                          title="Unusually high activity — is this you? This visitor's traffic volume is a statistical outlier for this site. A suggestion to review, not a verdict: open the visitor to confirm. Until then they are still fully contactable and fully counted."
+                        >
+                          High activity?
+                        </span>
+                      )}
                       {v.handoff_confidence && (
                         <span
                           className="shrink-0 rounded bg-info-muted px-1.5 py-0.5 text-[10px] font-medium text-info"

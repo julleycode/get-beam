@@ -221,8 +221,44 @@ def build_daily_email(
     return subject, html
 
 
-async def _site_day_stats(db, site_id: str, cutoff: datetime) -> DailyStats:
-    """Window counts. Agent-derived/synthetic rows are excluded everywhere."""
+async def _site_day_stats(
+    db, site_id: str, cutoff: datetime, damping_enabled: bool = False
+) -> DailyStats:
+    """Window counts. Agent-derived/synthetic rows are excluded everywhere.
+
+    When ``damping_enabled`` (the site's ``internal_damping_enabled`` toggle,
+    default OFF), visitors the CUSTOMER HAS CONFIRMED are their own
+    (``internal_override == "internal"``) are excluded from the cross-visitor
+    count and pageview SUM below. This is THE aggregate the outlier-damping
+    feature targets: measured live 27-07-26, 3 of 4 sites drew 89-95% of their
+    90-day events from fewer than 20 visitors, so a single owner-shaped visitor
+    can dominate the "here's your last 24h" number the customer reads every
+    morning.
+
+    SUGGESTION-ONLY AUTOMATION (calibrated live 27-07-26). The automatic
+    ``is_internal_suspect`` flag deliberately does NOT appear in this query. At
+    the measured production distribution the auto-scorer would have flagged 34
+    visitors at 20x/3d — 5 of which were ALREADY identified with a real email,
+    out of only 28 identified visitors in the entire system. Auto-excluding
+    would therefore have silently hidden ~18% of every customer's real leads.
+    No threshold separates "owner who browses 30k times" from "extremely engaged
+    prospect", and the two error types are wildly asymmetric: hiding a real lead
+    destroys the thing the customer pays for, silently; failing to hide an owner
+    merely leaves a slightly noisy dashboard. So only an explicit human
+    confirmation may cause exclusion. The machine suggests; the human decides.
+
+    ``is_distinct_from("internal")`` (not ``!=``) so NULL — the never-reviewed
+    default — is correctly kept IN the aggregate rather than dropping out on
+    three-valued logic.
+
+    Flag-but-store: the visitor's row is untouched and still fully visible in the
+    dashboard — only this cross-visitor rollup skips them. With the toggle off
+    (the default) the query is byte-identical to its pre-feature form.
+    """
+    visitor_filters = [Visitor.site_id == site_id, human_only_visitor_filter()]
+    if damping_enabled:
+        visitor_filters.append(Visitor.internal_override.is_distinct_from("internal"))
+
     visitor_row = (
         await db.execute(
             select(
@@ -235,7 +271,7 @@ async def _site_day_stats(db, site_id: str, cutoff: datetime) -> DailyStats:
                 ),
             )
             .select_from(Visitor)
-            .where(Visitor.site_id == site_id, human_only_visitor_filter())
+            .where(*visitor_filters)
         )
     ).one()
     identified = (
@@ -464,7 +500,13 @@ async def send_daily_digests() -> int:
         try:
             rows = (
                 await db.execute(
-                    select(Site.site_id, Site.name, Site.user_id, User.email)
+                    select(
+                        Site.site_id,
+                        Site.name,
+                        Site.user_id,
+                        User.email,
+                        Site.internal_damping_enabled,
+                    )
                     .join(User, User.id == Site.user_id)
                     .where(
                         Site.pixel_verified.is_(True),
@@ -479,11 +521,13 @@ async def send_daily_digests() -> int:
             ).all()
 
             sender = EmailSender()
-            for site_id, site_name, user_id, owner_email in rows:
+            for site_id, site_name, user_id, owner_email, damping_enabled in rows:
                 if not owner_email:
                     continue
                 try:
-                    stats = await _site_day_stats(db, site_id, cutoff)
+                    stats = await _site_day_stats(
+                        db, site_id, cutoff, damping_enabled
+                    )
                     actions = await _site_actions(db, site_id, user_id)
                     visitors, total = await _visitor_details(
                         db, site_id, cutoff, settings.daily_digest_max_visitors

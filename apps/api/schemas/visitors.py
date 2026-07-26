@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -50,6 +51,15 @@ class VisitorOut(BaseModel):
     # sessions are pageview-only. VISIBILITY-ONLY badge — never affects
     # emailability, aggregates, or resolution. Batch-computed, default False.
     is_bot_suspect: bool = False
+    # Outlier / internal-traffic damping. True when this visitor's event volume
+    # is a statistical outlier for THIS site, sustained across days, with real
+    # engagement. Inferred, never proven — UI copy must say "unusually high
+    # activity" and must never assert the visitor's identity. Never affects
+    # emailability; when the site opts in it damps aggregates + resolution order.
+    is_internal_suspect: bool = False
+    # The human's manual call: None / "internal" / "not_internal". Always wins
+    # over the automatic scorer, in both directions.
+    internal_override: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -127,6 +137,17 @@ class VisitorAiSourceOut(BaseModel):
 
     ai_source: str
     count: int
+
+
+class InternalOverrideRequest(BaseModel):
+    """The human's call on whether a visitor is internal traffic.
+
+    ``None`` clears the manual call and hands the visitor back to the automatic
+    scorer. ``"internal"`` / ``"not_internal"`` are permanent until changed: the
+    sweep skips any visitor with a non-NULL override, in BOTH directions.
+    """
+
+    override: Literal["internal", "not_internal"] | None = None
 
 
 class ManualIdentifyRequest(BaseModel):

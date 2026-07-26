@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
@@ -32,6 +32,7 @@ from apps.api.routers.visitors_helpers import (
     _run_social_resolution_job,
 )
 from apps.api.schemas.visitors import (
+    InternalOverrideRequest,
     ManualIdentifyRequest,
     VisitorAiSourceOut,
     VisitorCountryOut,
@@ -904,6 +905,66 @@ async def resolve_one_visitor(
         "vpn_filtered": "Skipped — visitor is behind a VPN/proxy.",
     }
     return {"status": status, "message": messages.get(status, "Not resolved.")}
+
+
+@router.post("/{site_id}/{visitor_id}/internal-override")
+async def set_internal_override(
+    site_id: str,
+    visitor_id: str,
+    body: InternalOverrideRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Record the human's call on whether this visitor is internal traffic.
+
+    The automatic outlier scorer is a statistical inference and can be wrong in
+    both directions, so the human always wins — permanently. The sweep skips any
+    visitor with a non-NULL ``internal_override``, which means:
+      * ``"internal"``     — never un-flagged by a later sweep
+      * ``"not_internal"`` — never re-flagged by a later sweep
+      * ``None``           — clears the manual call, back to automatic
+
+    ``is_internal_suspect`` is written here too, so the dashboard and the
+    aggregates reflect the decision immediately rather than waiting for the next
+    sweep tick. Clearing genuinely restores the visitor: back into the site-level
+    digest aggregate and back to the front of the resolution queue.
+
+    DELIBERATELY UNGATED by ``Site.internal_damping_enabled``. A single-visitor
+    manual call has zero blast radius, and a customer wary of the automatic
+    scorer must still be able to mark a known team member.
+    """
+    await _verify_site_access(db, site_id, user)
+
+    result = await db.execute(
+        select(Visitor).where(
+            Visitor.site_id == site_id, Visitor.visitor_id == visitor_id
+        )
+    )
+    visitor = result.scalar_one_or_none()
+    if not visitor:
+        raise HTTPException(status_code=404, detail="Visitor not found")
+
+    visitor.internal_override = body.override
+    if body.override is not None:
+        visitor.is_internal_suspect = body.override == "internal"
+
+    # Keep the mirrored identity row in sync so aggregates reading either table
+    # agree. No-op when the visitor has never been identified.
+    await db.execute(
+        update(IdentifiedVisitor)
+        .where(
+            IdentifiedVisitor.site_id == site_id,
+            IdentifiedVisitor.visitor_id == visitor_id,
+        )
+        .values(is_internal_suspect=visitor.is_internal_suspect)
+    )
+    await db.commit()
+
+    return {
+        "visitor_id": visitor_id,
+        "internal_override": visitor.internal_override,
+        "is_internal_suspect": visitor.is_internal_suspect,
+    }
 
 
 @router.post("/{site_id}/{visitor_id}/identify")

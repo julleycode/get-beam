@@ -98,6 +98,10 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
     mutationFn: (enabled: boolean) => api.updateSite(siteId, { tracking_enabled: enabled }),
     onSettled: invalidateSite,
   });
+  const dampingMut = useMutation({
+    mutationFn: (enabled: boolean) => api.setInternalDamping(siteId, enabled),
+    onSettled: invalidateSite,
+  });
   const verifyMut = useMutation({
     mutationFn: () => api.verifyPixel(siteId),
     onSuccess: (r) => {
@@ -297,6 +301,42 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
                 : site.tracking_enabled
                   ? "Pause"
                   : "Resume"}
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      <Separator />
+
+      {/* Damp outlier traffic */}
+      <section className="space-y-2">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="font-medium text-foreground">Damp outlier traffic</p>
+            <p className="text-xs text-muted-foreground">
+              Flags visitors with unusually high activity so you can review them
+              — for example your own team browsing the site. Flagging alone
+              changes nothing: only the ones you confirm are damped in your
+              analytics and identity-resolution budget. Their data is always
+              stored and they stay fully contactable either way.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <StatusBadge
+              status={site.internal_damping_enabled ? "active" : "paused"}
+              label={site.internal_damping_enabled ? "On" : "Off"}
+            />
+            <Button
+              variant={site.internal_damping_enabled ? "outline" : "default"}
+              size="sm"
+              onClick={() => dampingMut.mutate(!site.internal_damping_enabled)}
+              disabled={dampingMut.isPending}
+            >
+              {dampingMut.isPending
+                ? "Saving…"
+                : site.internal_damping_enabled
+                  ? "Turn off"
+                  : "Turn on"}
             </Button>
           </div>
         </div>

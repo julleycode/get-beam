@@ -65,6 +65,39 @@ async def run_resolution_for_site(
 
     boost_ids = await first_win_boost_site_ids(db, [site.site_id])
 
+    # Outlier / internal-traffic damping. Measured live 27-07-26: heavy visitors
+    # are identified at 11.1% vs 2.0% for normal ones purely because they
+    # accumulate huge intent_score and this query sorts by it — on one site 3 of
+    # 8 identified visitors were heavy, i.e. 37.5% of that site's daily budget
+    # spent on (probably) the owner's own traffic.
+    #
+    # SUGGESTION-ONLY AUTOMATION (calibrated live 27-07-26). Only a visitor the
+    # CUSTOMER has confirmed is their own (internal_override == "internal") is
+    # deprioritised. The automatic is_internal_suspect flag deliberately does NOT
+    # appear here: at the measured production distribution it would have flagged
+    # 34 visitors at 20x/3d, 5 of them ALREADY identified with a real email out
+    # of only 28 identified visitors system-wide — i.e. auto-deprioritising would
+    # push ~18% of real leads to the back of the resolution queue on a guess.
+    #
+    # is_distinct_from, so NULL (never reviewed) sorts with the un-confirmed
+    # majority rather than falling out on three-valued logic.
+    #
+    # DEPRIORITISE, NEVER EXCLUDE: False sorts before True, so confirmed-internal
+    # visitors go to the back of the queue but still resolve if budget remains.
+    # Opt-in per site — with the toggle off (the default) the ordering is
+    # byte-identical to its pre-feature form.
+    order_by = (
+        (
+            Visitor.internal_override.is_distinct_from("internal").desc(),
+            Visitor.intent_score.desc(),
+        )
+        # getattr, not attribute access: fails SAFE to "damping off" for any
+        # site object that predates the column (unflushed ORM instance, test
+        # stub). Damping must never switch itself on by accident.
+        if getattr(site, "internal_damping_enabled", False)
+        else (Visitor.intent_score.desc(),)
+    )
+
     result = await db.execute(
         select(Visitor).where(
             Visitor.site_id == site.site_id,
@@ -77,7 +110,7 @@ async def run_resolution_for_site(
             # AC2 (GUARD #2): never re-resolve the synthetic agent-derived rows
             # (they run through resolve() only via the company-resolution sweep).
             human_only_visitor_filter(),
-        ).order_by(Visitor.intent_score.desc()).limit(max_resolve)
+        ).order_by(*order_by).limit(max_resolve)
     )
     visitors = list(result.scalars().all())
     counters = {"processed": 0, "resolved": 0, "enriched": 0, "skipped_plan_limit": 0}

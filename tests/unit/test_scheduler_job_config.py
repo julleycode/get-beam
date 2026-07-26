@@ -173,18 +173,19 @@ class TestAC13IntervalJobHardening:
         assert [c for c in cron if "jitter" in _kwargs(c)] == []
 
     def test_the_asserted_set_is_derived_not_hardcoded(self):
-        """E20 arithmetic: 14 total / 12 interval / 2 cron — all AST-derived.
+        """E20 arithmetic: 15 total / 13 interval / 2 cron — all AST-derived.
 
-        Was 13/12/1; +1 cron job for daily_digest (daily activity digest,
-        26-07-26). Before that 12/11/1 → +1 interval job for
+        Was 14/12/2; +1 interval job for outlier_traffic_damping_sweep
+        (outlier/internal-traffic damping, 27-07-26). Before that 13/12/1 → +1
+        cron job for daily_digest. Before that 12/11/1 → +1 interval job for
         cadence_bot_flag_sweep. Updated per this gate's own instruction to
         re-derive the arithmetic when a job is added — never to relax the
         assertion.
         """
         calls = _add_job_calls()
         interval = [c for c in calls if _is_interval(c)]
-        assert len(calls) == 14, f"expected 14 add_job calls, found {len(calls)}"
-        assert len(interval) == 12, (
-            f"expected 12 interval calls, found {len(interval)}; if a job was "
+        assert len(calls) == 15, f"expected 15 add_job calls, found {len(calls)}"
+        assert len(interval) == 13, (
+            f"expected 13 interval calls, found {len(interval)}; if a job was "
             "added or removed, update E20's arithmetic — do not relax this gate"
         )

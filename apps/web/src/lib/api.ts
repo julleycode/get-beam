@@ -361,6 +361,32 @@ class ApiClient {
     });
   }
 
+  // Toggle per-site outlier/internal-traffic damping on/off.
+  async setInternalDamping(siteId: string, enabled: boolean) {
+    return this.request<Site>(`/api/v1/sites/${siteId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ internal_damping_enabled: enabled }),
+    });
+  }
+
+  // Record the human's call on whether a visitor is internal traffic.
+  // Pass null to clear the manual call and hand the visitor back to the
+  // automatic scorer. The manual call always wins, in both directions.
+  async setInternalOverride(
+    siteId: string,
+    visitorId: string,
+    override: "internal" | "not_internal" | null,
+  ) {
+    return this.request<{
+      visitor_id: string;
+      internal_override: "internal" | "not_internal" | null;
+      is_internal_suspect: boolean;
+    }>(`/api/v1/visitors/${siteId}/${visitorId}/internal-override`, {
+      method: "POST",
+      body: JSON.stringify({ override }),
+    });
+  }
+
   // Set the per-site cookie-consent mode (off | eu | all | cmp).
   async setConsentMode(siteId: string, mode: ConsentMode) {
     return this.request<Site>(`/api/v1/sites/${siteId}`, {

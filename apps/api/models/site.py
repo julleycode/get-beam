@@ -34,6 +34,16 @@ class Site(Base):
     hot_alert_enabled: Mapped[bool] = mapped_column(
         default=True, nullable=False, server_default="true"
     )
+    # When True, outlier/internal-traffic damping (sweep-detected + manual
+    # override) is applied to this site's aggregates and resolution ordering.
+    # Default OFF so a customer can see before/after, and so damping-OFF sites
+    # keep byte-identical digest numbers and resolution ordering.
+    # NOTE: the manual "this is me / my team" override endpoint is deliberately
+    # NOT gated on this flag — a single-visitor manual call has zero blast radius
+    # and must stay available to customers wary of the automatic scorer.
+    internal_damping_enabled: Mapped[bool] = mapped_column(
+        default=False, nullable=False, server_default="false"
+    )
     # When False, the ingest endpoint silently drops events for this site — the
     # offboarding "pause" toggle. Pixel stays installed on the customer's page and
     # the plan/data are left untouched; flip back on to resume collection anytime.

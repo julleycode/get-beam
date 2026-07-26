@@ -84,6 +84,31 @@ class Visitor(Base):
     is_bot_suspect: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # Outlier / internal-traffic damping (see outlier_traffic_damping.py).
+    # Visibility + damping signal: a visitor whose event volume is a statistical
+    # outlier WITHIN this site, sustained across days, WITH engagement present.
+    #
+    # DELIBERATELY NOT STICKY, unlike is_bot_suspect / is_abuse_flagged above.
+    # Those two are one-way OR-merged forever; this one is not, and must never
+    # be OR-merged into an aggregate upsert. A false positive here silently
+    # removes a genuine hot prospect from the customer's dashboard aggregates
+    # AND deprioritises them for identity resolution — so it MUST be reversible.
+    #
+    # Never read by is_emailable_identity(); never affects outreach eligibility.
+    # This is a data-quality signal, not a contactability one.
+    is_internal_suspect: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    # Manual tri-state override on is_internal_suspect. The human's call always
+    # wins over the automatic scorer, PERMANENTLY and in BOTH directions:
+    #   None            — no manual action; the automatic sweep may evaluate.
+    #   "internal"      — user said "this is me / my team". Sweep must never
+    #                     un-set it.
+    #   "not_internal"  — user explicitly rejected an automatic flag. Sweep must
+    #                     never re-flag it.
+    # The sweep skips ANY visitor with a non-NULL override — that skip is the
+    # enforcement mechanism for the both-directions rule.
+    internal_override: Mapped[str | None] = mapped_column(String(20), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -127,6 +152,14 @@ class IdentifiedVisitor(Base):
     # Visitor.is_bot_suspect by the batch sweep. A flagged row stays fully
     # emailable and fully counted — the flag is a dashboard badge, nothing more.
     is_bot_suspect: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    # Outlier / internal-traffic damping — mirrored from Visitor.is_internal_suspect
+    # by the batch sweep (and by the manual-override endpoint). NOT sticky: unlike
+    # is_abuse_flagged above, this column is cleared as well as set, because the
+    # signal must be fully reversible. Never read by is_emailable_identity() — a
+    # flagged row stays exactly as emailable as any other.
+    is_internal_suspect: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
     # Phase 05 (encrypt PII at rest) — added nullable, not yet read/written.

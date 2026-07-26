@@ -384,6 +384,79 @@ class Settings(BaseSettings):
     # "pageview-only" (no click/scroll/time_on_page/conversion). Operator-tunable.
     cadence_bot_flag_max_engagement_ratio: float = 0.05
 
+    # ─── Outlier / internal-traffic damping ───
+    # Damps the influence of statistical-outlier visitors (measured live
+    # 27-07-26: 3 of 4 sites draw 89-95% of their 90-day events from <20
+    # visitors, and those visitors eat the identity-resolution budget because
+    # resolution_runner orders by intent_score desc).
+    #
+    # NOT A GLOBAL FLAG. The on/off switch is PER SITE:
+    # Site.internal_damping_enabled, default False. The settings below are only
+    # the operator-tunable knobs; with no site opted in, the sweep is a no-op.
+    #
+    # ROLLOUT ORDER: (1) live-apply the migration adding
+    # visitors.is_internal_suspect / visitors.internal_override /
+    # identified_visitors.is_internal_suspect / sites.internal_damping_enabled;
+    # (2) tune the two thresholds below against that site's REAL per-visitor
+    # event-count distribution — the defaults are conservative placeholders, not
+    # calibrated values, and must never be shipped live untuned;
+    # (3) only then flip internal_damping_enabled on for one site and compare
+    # before/after. Never enable across all sites at once.
+    #
+    # SUGGESTION-ONLY. is_internal_suspect is a LABEL — a "review these" surface
+    # and a badge. It never by itself excludes a visitor from the daily digest
+    # aggregate and never by itself deprioritises them in resolution_runner.
+    # ONLY an explicit human confirmation (internal_override == "internal")
+    # does either. Calibrated live 27-07-26 against the real per-visitor
+    # distribution:
+    #     >=20x  median & >=3 days -> 34 flagged, 5 already identified w/ email
+    #     >=50x  median & >=3 days -> 21 flagged, 3 already identified w/ email
+    #     >=100x median & >=5 days -> 15 flagged, 2 already identified w/ email
+    # There are only 28 identified visitors in the entire system, so automatic
+    # exclusion at 20x would have silently hidden ~18% of every customer's real
+    # leads. No statistical threshold separates "owner who browses 30k times"
+    # from "extremely engaged prospect" — both are high-volume, multi-day, fully
+    # engaged — and the error types are wildly asymmetric. Hence: the machine
+    # suggests, the human decides.
+    #
+    # REVERSIBILITY: unlike the cadence/abuse flags above, is_internal_suspect is
+    # NOT sticky and a human's internal_override always wins over the sweep, in
+    # both directions. A false positive here would silently hide a real prospect,
+    # so it must always be clearable.
+    outlier_traffic_damping_sweep_interval_minutes: int = 60
+
+    # NON-NEGOTIABLE bounded-read cap, same rationale as
+    # cadence_bot_flag_lookback_days: every sweep query carries
+    # `events.created_at >= now() - outlier_traffic_damping_lookback_days`.
+    outlier_traffic_damping_lookback_days: int = 90
+
+    # Minimum distinct visit-DAY floor per visitor, evaluated before any ratio
+    # math. A single-day burst of 2,000 events is a load test or a one-off
+    # scrape, not the sustained pattern of someone who works on the site daily.
+    # 3 days is the calibrated value (see the 50x/3d row in the table above).
+    outlier_traffic_damping_min_visit_days: int = 3
+
+    # Minimum number of visitors a site must have before ANY of its visitors can
+    # be judged an outlier — you cannot be an outlier against a distribution of
+    # three. Mirrors the sample-size-precondition-first shape used throughout.
+    outlier_traffic_damping_min_site_visitors: int = 20
+
+    # How many times the site's OWN median per-visitor event count a visitor must
+    # exceed. Site-relative and scale-free by construction, so this one number
+    # works for a 29-visitor site and a 532-visitor site alike. 50x is the
+    # CALIBRATED value (measured live 27-07-26): it produces a suggestion list a
+    # customer can review in about a minute (21 visitors across all sites) rather
+    # than the 34 that 20x produced. Because the flag is suggestion-only, this
+    # number sizes a review queue — it never silently hides anyone.
+    outlier_traffic_damping_outlier_threshold: float = 50.0
+
+    # Engagement-ratio FLOOR — note the INVERSE polarity vs
+    # cadence_bot_flag_max_engagement_ratio's ceiling above. A heavy HUMAN
+    # scrolls, clicks and dwells; a heavy SCRAPER does not. Requiring engagement
+    # to be PRESENT is what keeps crawlers out of this flag (they belong to the
+    # cadence/bot layer instead). Operator-tunable; tune before enabling.
+    outlier_traffic_damping_min_engagement_ratio: float = 0.1
+
     # ─── Server-side AI-fetch capture beacon (Handoff Detection H5) ───
     # When true, POST /api/v1/agents/fetch-beacon accepts an authenticated
     # server-side beacon (from the getbeam.fyi edge middleware) that classifies

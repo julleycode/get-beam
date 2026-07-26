@@ -245,6 +245,29 @@ async def _cadence_bot_flag_sweep_job() -> None:
         logger.exception("cadence_bot_flag_sweep_crashed")
 
 
+async def _outlier_traffic_damping_sweep_job() -> None:
+    """Periodic job: outlier / internal-traffic damping.
+
+    run_outlier_traffic_damping_sweep opens its own per-(site, visitor) fail-open
+    iteration; this wrapper opens the session and swallows any top-level crash.
+    Never touches the ingest hot path — detection is batch-only by design.
+
+    Unlike the cadence job above there is no global settings flag to check here:
+    the opt-in is PER SITE (Site.internal_damping_enabled, default False), so the
+    sweep's own first query returns an empty site list and it exits immediately
+    when nobody has opted in.
+    """
+    try:
+        from apps.api.services.outlier_traffic_damping_sweep import (
+            run_outlier_traffic_damping_sweep,
+        )
+
+        async with async_session() as db:
+            await run_outlier_traffic_damping_sweep(db)
+    except Exception:
+        logger.exception("outlier_traffic_damping_sweep_crashed")
+
+
 async def _sweep_one_site(
     site_id: str,
     allow_defer: bool,
@@ -485,6 +508,15 @@ def start_scheduler() -> None:
         "interval",
         minutes=settings.cadence_bot_flag_sweep_interval_minutes,
         id="cadence_bot_flag_sweep",
+        replace_existing=True,
+        jitter=90,
+        misfire_grace_time=300,
+    )
+    scheduler.add_job(
+        _outlier_traffic_damping_sweep_job,
+        "interval",
+        minutes=settings.outlier_traffic_damping_sweep_interval_minutes,
+        id="outlier_traffic_damping_sweep",
         replace_existing=True,
         jitter=90,
         misfire_grace_time=300,

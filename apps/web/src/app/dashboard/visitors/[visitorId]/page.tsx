@@ -244,6 +244,8 @@ export default function VisitorDetailPage() {
   // Recent LinkedIn posts for this visitor, pulled from the feed (source=visitors)
   // and matched on their LinkedIn vanity slug. null = not loaded.
   const [liPosts, setLiPosts] = useState<SocialPost[] | null>(null);
+  // In-flight guard for the internal-traffic override action.
+  const [savingOverride, setSavingOverride] = useState(false);
 
   useEffect(() => {
     if (!siteId || !visitorId) return;
@@ -303,6 +305,32 @@ export default function VisitorDetailPage() {
       cancelled = true;
     };
   }, [liUrl]);
+
+  // Outlier / internal-traffic damping: the human's call always wins over the
+  // automatic scorer, permanently and in both directions. Passing null clears
+  // the manual call and hands the visitor back to the automatic scorer.
+  async function handleInternalOverride(
+    override: "internal" | "not_internal" | null,
+  ) {
+    if (!siteId || !visitorId) return;
+    setSavingOverride(true);
+    try {
+      const result = await api.setInternalOverride(siteId, visitorId, override);
+      setVisitor((prev) =>
+        prev
+          ? {
+              ...prev,
+              internal_override: result.internal_override,
+              is_internal_suspect: result.is_internal_suspect,
+            }
+          : prev,
+      );
+    } catch {
+      // Non-fatal: the badge simply stays as-is until the next load.
+    } finally {
+      setSavingOverride(false);
+    }
+  }
 
   async function handleResolveSocial(force = false) {
     if (!siteId || !visitorId) return;
@@ -483,6 +511,14 @@ export default function VisitorDetailPage() {
                   title="Bot-suspect — this visitor's visit schedule is unusually regular (cron-like) and their sessions are pageview-only, with no scrolling, clicks or dwell time. Visibility signal only: they stay fully contactable and fully counted."
                 >
                   Bot-suspect
+                </span>
+              )}
+              {visitor.is_internal_suspect && (
+                <span
+                  className="rounded-full bg-warning-muted px-2.5 py-0.5 text-xs font-medium text-warning"
+                  title="Unusually high activity — is this you? This visitor's traffic volume is a statistical outlier for this site. It's only a suggestion for you to review: nothing changes unless you confirm below. Until then they stay fully contactable and fully counted."
+                >
+                  Unusually high activity — is this you?
                 </span>
               )}
               {visitor.handoff_vendor && visitor.handoff_confidence && (
@@ -838,6 +874,51 @@ export default function VisitorDetailPage() {
               {visitor.ai_source && <InfoRow label="Arrived via">{aiSourceLabel(visitor.ai_source)}</InfoRow>}
               {visitor.is_bot_suspect && (
                 <InfoRow label="Bot-suspect">Cron-like cadence, pageview-only sessions</InfoRow>
+              )}
+              {(visitor.is_internal_suspect || visitor.internal_override) && (
+                <InfoRow label="Activity volume">
+                  <div className="space-y-1.5">
+                    <p>
+                      {visitor.internal_override === "internal"
+                        ? "You marked this visitor as your own team's traffic."
+                        : visitor.internal_override === "not_internal"
+                          ? "You marked this visitor as a real outside visitor."
+                          : "Unusually high activity for this site — is this you? A statistical outlier, not a confirmed identity. This is a suggestion for you to review: until you confirm, this visitor is counted and prioritised exactly like any other."}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {visitor.internal_override !== "internal" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={savingOverride}
+                          onClick={() => handleInternalOverride("internal")}
+                        >
+                          This is me / my team
+                        </Button>
+                      )}
+                      {visitor.internal_override !== "not_internal" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={savingOverride}
+                          onClick={() => handleInternalOverride("not_internal")}
+                        >
+                          Not me — clear flag
+                        </Button>
+                      )}
+                      {visitor.internal_override && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={savingOverride}
+                          onClick={() => handleInternalOverride(null)}
+                        >
+                          Undo my choice
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </InfoRow>
               )}
               {visitor.handoff_vendor && visitor.handoff_confidence && (
                 <InfoRow label="AI research signal">{handoffCopy(visitor)}</InfoRow>

@@ -26,8 +26,18 @@ class SiteOut(BaseModel):
     auto_identify_enabled: bool
     hot_alert_enabled: bool
     tracking_enabled: bool
+    # Outlier / internal-traffic damping opt-in. Default OFF; when on, visitors
+    # flagged as unusually high-activity are excluded from this site's
+    # cross-visitor aggregates and sorted last for identity resolution.
+    internal_damping_enabled: bool = False
     consent_mode: str
     created_at: datetime
+
+    @field_validator("internal_damping_enabled", mode="before")
+    @classmethod
+    def _damping_defaults_off(cls, v):
+        """None -> False. Fails SAFE for any Site object predating the column."""
+        return False if v is None else v
 
     model_config = {"from_attributes": True}
 
@@ -47,6 +57,7 @@ class SiteUpdate(BaseModel):
     auto_identify_enabled: bool | None = None
     hot_alert_enabled: bool | None = None
     tracking_enabled: bool | None = None
+    internal_damping_enabled: bool | None = None
     consent_mode: str | None = None
 
     @field_validator("consent_mode")

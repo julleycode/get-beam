@@ -113,6 +113,8 @@ export interface Site {
   auto_identify_enabled: boolean;
   hot_alert_enabled: boolean;
   tracking_enabled: boolean;
+  /** Outlier/internal-traffic damping opt-in for this site. Default false. */
+  internal_damping_enabled?: boolean;
   /** Cookie-consent mode emitted into the pixel snippet: off | eu | all | cmp. */
   consent_mode: ConsentMode;
   /** Optional — backend SiteOut may not return it; callers fall back to "unknown". */
@@ -129,6 +131,7 @@ export interface SiteUpdate {
   auto_identify_enabled: boolean;
   hot_alert_enabled: boolean;
   tracking_enabled: boolean;
+  internal_damping_enabled: boolean;
   consent_mode: ConsentMode;
 }
 
@@ -251,6 +254,12 @@ export interface Visitor {
   // pageview-only. VISIBILITY-ONLY badge — never affects emailability,
   // aggregates, or resolution.
   is_bot_suspect?: boolean;
+  // Outlier / internal-traffic damping: this visitor's traffic volume is a
+  // statistical outlier for THIS site. Inferred, never proven — copy must say
+  // "unusually high activity" and must never assert who they are.
+  is_internal_suspect?: boolean;
+  // The human's manual call, which always wins over the automatic scorer.
+  internal_override?: "internal" | "not_internal" | null;
 }
 
 export interface VisitorDetail extends Visitor {
