@@ -147,6 +147,15 @@
   }
 
   var visitorId = getVisitorId();
+  // Phantom-visitor guard: in an embedded subframe with unwritable storage
+  // (third-party cookies blocked + partitioned/blocked localStorage) every
+  // tracker instance mints a fresh visitor_id and usually delivers only its
+  // pagehide beacon — creating zero-pageview ghost visitors. No durable id is
+  // possible there, so do not track at all. Top-level pages keep tracking
+  // even with storage blocked: their pageviews are real.
+  var inSubframe = false;
+  try { inSubframe = window.self !== window.top; } catch (e) { inSubframe = true; }
+  if (inSubframe && !getCookie(COOKIE_NAME) && !lsGet(COOKIE_NAME)) return;
   var fingerprint = getFingerprint();
   var QUEUE_KEY = "_rta_q";
   var queue = [];
