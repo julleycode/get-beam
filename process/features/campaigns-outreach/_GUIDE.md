@@ -27,6 +27,13 @@ Everything from enriched visitors to outreach: AI segmentation (10+ enriched vis
 
 Status: stable — agentic-lite upgrade shipped 20-07-26 (JSON self-correction live; `/ai/ask` tool loop live with fallback; planner tool loop gated OFF pending live-model validation).
 
+**Active:** `linkedin-extension_25-07-26` — Chrome/Edge MV3 browser extension (`apps/extension/`)
+replacing manual DevTools `li_at` cookie-copy with one-click LinkedIn outreach connect; "dumb pipe"
+to the dashboard tab, zero backend change. CODE DONE 25-07-26 (all gates re-confirmed green except
+3 dev-stack-gated web-e2e cases + Postgres-gated regression — see task folder REPORT + backlog
+note). Kept in `active/` pending human VERIFIED sign-off against a real LinkedIn session — see
+`process/features/campaigns-outreach/active/linkedin-extension_25-07-26/`.
+
 ## Folder Contents
 
 ```

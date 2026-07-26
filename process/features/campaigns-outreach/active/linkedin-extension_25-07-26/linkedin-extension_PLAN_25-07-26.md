@@ -9,7 +9,14 @@ phase: "n/a — single COMPLEX plan"
 # LinkedIn Outreach Connect Extension — PLAN
 
 Date: 25-07-26
-Status: VALIDATED — PASS (see Validate Contract below)
+Status: CODE DONE — in testing (keep active). RESEARCH/SPEC/INNOVATE/PLAN/VALIDATE(Gate: PASS)/
+EXECUTE/EVL all complete (25-07-26); shipped in commits `89d924d` (feat) + `646689e` (process).
+Remaining before archival: human VERIFIED sign-off against a real LinkedIn session, 3 dev-stack-gated
+`apps/web/e2e` cases (AC6 dashboard leg/AC7/AC9), the Postgres-gated backend regression, real
+`KNOWN_EXTENSION_ID` + icon, and Chrome Web Store submission (Step 9). See
+`linkedin-extension_REPORT_25-07-26.md` (UPDATE PROCESS closeout, 25-07-26) and backlog note
+`process/features/campaigns-outreach/backlog/linkedin-extension-dev-stack-gates_NOTE_25-07-26.md`
+for full detail. Do NOT archive to `completed/` until those residuals clear.
 Complexity: **COMPLEX** (new user-facing runtime surface — a browser extension — security-sensitive cross-origin messaging, multi-file, new test infra, Chrome Web Store submission workstream).
 Spec: `process/features/campaigns-outreach/active/linkedin-extension_25-07-26/linkedin-extension_SPEC_25-07-26.md`
 
