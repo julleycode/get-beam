@@ -6,9 +6,14 @@ HTTP 501, never an unhandled 500.
 
 Phase 2 note (26-07-26): `meta` is no longer a stub — its real Graph API path
 landed, so it no longer raises NotImplementedError and is out of these
-assertions. `google` remains the stub until Phase 3 wires it, and keeps proving
-the router's 501 mapping. The meta 501-on-flag-off path is unaffected and still
-covered by test_ads_flag_off_501.py.
+assertions.
+
+Phase 3 note (26-07-26): `google` is no longer a stub either. No READY provider
+raises NotImplementedError any more, so the router's 501 mapping is now proven
+against a SYNTHETIC stub provider instead of a real one — the mapping itself is
+still live code that must not regress. Both real providers' contract flips are
+asserted rather than assumed below. The flag-off 501 path is unaffected and
+still covered by test_ads_flag_off_501.py.
 
 Pure unit test: the endpoint coroutine is called directly with the site-ownership
 and OAuth-state seams stubbed, so no DB or Redis is touched.
@@ -48,27 +53,36 @@ def stubbed_seams(monkeypatch):
     monkeypatch.setattr(settings, "google_ads_client_secret", "secret")
 
 
-@pytest.mark.parametrize("provider", ["google"])  # meta is implemented (Phase 2)
-async def test_ads_stub_501_connect_returns_501_not_500(stubbed_seams, provider):
+async def test_ads_stub_501_connect_returns_501_not_500(stubbed_seams, monkeypatch):
+    """A provider that still raises NotImplementedError must surface as 501.
+
+    Driven through a synthetic stub because every READY provider is now
+    implemented — the router mapping is what is under test, not the provider.
+    """
+    class _StubProvider:
+        async def get_oauth_url(self, state):
+            raise NotImplementedError("stub")
+
+    monkeypatch.setattr(ads_router, "get_provider", lambda name: _StubProvider())
+
     with pytest.raises(HTTPException) as exc:
-        await ads_router.connect_oauth("site_x", provider, user=_User(), db=None)
+        await ads_router.connect_oauth("site_x", "google", user=_User(), db=None)
     assert exc.value.status_code == 501
     assert exc.value.detail == "Provider not yet implemented"
 
 
-async def test_ads_stub_501_provider_really_raises_not_implemented(stubbed_seams):
-    """Guards against a vacuous pass: the 501 above must come from the stub
-    raising, not from the provider quietly succeeding."""
+async def test_implemented_providers_no_longer_raise_not_implemented(stubbed_seams):
+    """Contract flips asserted, not assumed. If either starts raising again,
+    that provider has regressed back to a stub."""
     from apps.api.services.ads.factory import get_provider
 
-    with pytest.raises(NotImplementedError):
-        await get_provider("google").get_oauth_url("state")
-
-    # Phase 2 contract flip, asserted rather than assumed: meta no longer
-    # raises here. If this ever starts raising again, the Meta provider has
-    # regressed back to a stub.
+    # Phase 2 flip.
     assert (await get_provider("meta").get_oauth_url("state")).startswith(
         "https://www.facebook.com/"
+    )
+    # Phase 3 flip.
+    assert (await get_provider("google").get_oauth_url("state")).startswith(
+        "https://accounts.google.com/"
     )
 
 

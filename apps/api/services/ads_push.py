@@ -41,6 +41,43 @@ MIN_AUDIENCE_SIZE = 1000
 # explains both numbers (D1).
 MIN_AUDIENCE_MATCHABLE = 100
 
+# ── Phase 3 / SPEC OQ4 decision (c): blanket EEA exclusion for Google ────────
+# Google requires per-user ad_user_data / ad_personalization consent signals for
+# EEA-region users and silently drops rows that lack them. Beam has no
+# per-visitor consent record today, so v1 never sends an EEA row to Google at
+# all. Static ISO-3166 alpha-2 list of the 27 EU member states + the 3 EEA/EFTA
+# members (IS, LI, NO); UK is not in the EEA post-Brexit and is not listed here.
+# There is no other EEA constant in apps/api/ to reuse — this is the single
+# source of truth. Applies to the GOOGLE push path ONLY: Meta's payload path is
+# untouched by this filter.
+EEA_COUNTRY_CODES = frozenset(
+    {
+        "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR",
+        "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK",
+        "SI", "ES", "SE",  # EU-27
+        "IS", "LI", "NO",  # EEA/EFTA
+    }
+)
+
+
+def exclude_eea_rows(rows: list[dict]) -> list[dict]:
+    """Drop every row that is — or might be — in the EEA. FAIL CLOSED.
+
+    A null/empty ``country`` means the resolution provider returned no country
+    for that visitor (``identity_resolver`` has no guaranteed non-null source).
+    An unknown country is treated as EEA-ambiguous and EXCLUDED, never assumed
+    safe: failing open would risk shipping a real EEA visitor's hashed PII to
+    Google without a meaningful consent determination, which is the exact
+    opposite of the blanket-exclusion decision this implements.
+    """
+    kept: list[dict] = []
+    for row in rows:
+        country = (row.get("country") or "").strip().upper()
+        if not country or country in EEA_COUNTRY_CODES:
+            continue
+        kept.append(row)
+    return kept
+
 
 @dataclass
 class PushSegmentOutcome:
@@ -126,6 +163,10 @@ async def fresh_access_token(db: AsyncSession, conn: AdConnection) -> str:
     Meta note: the refresher takes the CURRENT access token (Meta has no
     separate refresh secret), so this must run BEFORE the stored token expires.
 
+    Google note: the refresher takes the stored REFRESH secret instead — see
+    ``GoogleAdsProvider.refresh_tokens``. The two shapes are not
+    interchangeable, hence the provider-aware branch below.
+
     On refresh failure the connection is marked ``status="error"`` with a
     sanitized ``last_error`` — the panel's existing Reconnect affordance
     surfaces it. Never logs or returns a raw token.
@@ -142,8 +183,19 @@ async def fresh_access_token(db: AsyncSession, conn: AdConnection) -> str:
     if refresher is None or not token:
         return token
 
+    # Provider-aware credential selection. Meta's refresher consumes the CURRENT
+    # ACCESS token (it has no separate refresh secret); Google's consumes the
+    # stored REFRESH secret and would reject an access token outright.
+    if conn.provider == "google":
+        refresh_secret = decrypt_token(conn.refresh_token) if conn.refresh_token else ""
+        if not refresh_secret:
+            return token
+        credential = refresh_secret
+    else:
+        credential = token
+
     try:
-        tokens = await refresher(token)
+        tokens = await refresher(credential)
     except Exception as exc:  # noqa: BLE001 — persist a sanitized, PII-free error
         conn.status = "error"
         conn.is_valid = False
@@ -218,6 +270,10 @@ async def push_segment_to_ads(
     # Identical safety-filter chain to the CSV export and the CRM push:
     # do_not_email, non-emailable identity (incl. agent-derived), do_not_sell.
     rows = await _get_segment_visitors(db, segment_id, exclude_known=False)
+    # Phase 3, Google ONLY: drop EEA (and unknown-country) rows after the shared
+    # safety-filter chain above. Excluded rows fall out as ordinary "skipped".
+    if provider == "google":
+        rows = exclude_eea_rows(rows)
     contacts = build_hashed_contacts(rows)
     skipped = max(0, member_count - len(contacts))
 
