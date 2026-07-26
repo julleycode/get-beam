@@ -117,11 +117,14 @@ class TestPixelConsent:
 class TestPixelSize:
     """Pixel should be small and efficient."""
 
-    def test_source_under_20kb(self, pixel_code: str):
-        # Source raw grew past 16KB with the consent banner; this is only a
-        # sanity guard. The binding budget applies to the SERVED (minified)
-        # tracker.min.js at <5KB gzipped — see test_pixel_fingerprint.py.
-        assert len(pixel_code.encode()) < 20000, f"Pixel source is {len(pixel_code.encode())} bytes, should be under 20KB"
+    def test_source_under_32kb(self, pixel_code: str):
+        # Raw source has grown twice: past 16KB with the consent banner, then
+        # past 20KB with the first-party email capture expansion (value-based
+        # field matching, mailto/URL-param, shadow-DOM/iframe). This is only a
+        # sanity guard against someone dumping something huge into the source.
+        # The binding budget applies to the SERVED (minified) tracker.min.js at
+        # <5KB gzipped — see test_pixel_fingerprint.py.
+        assert len(pixel_code.encode()) < 32000, f"Pixel source is {len(pixel_code.encode())} bytes, should be under 32KB"
 
     def test_is_iife(self, pixel_code: str):
         """Should be wrapped in an IIFE for isolation."""
