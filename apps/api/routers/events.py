@@ -142,6 +142,12 @@ async def ingest_events(
     # A recognized AI-agent UA (classification is not None) skips this drop even
     # if it also matches _BOT_PATTERN (e.g. "gptbot"), so it can be classified.
     if classification is None and is_bot(request_ua):
+        # Mark the drop for the admin request log. Without this the response is
+        # an ordinary 204, indistinguishable from a successful ingest by status
+        # alone — this marker is the ONLY way the log viewer can explain a
+        # silent drop. Setting request.state is inert when the log flag is off.
+        request.state.log_reason = "bot_drop"
+        request.state.log_reason_detail = f"is_bot() matched UA: {request_ua[:200]}"
         return Response(status_code=204)
 
     try:
@@ -310,6 +316,16 @@ async def ingest_events(
         except Exception as exc:
             # Fail-open: velocity detection must never block a real visitor.
             logger.warning("ingest_velocity_unavailable", error=str(exc))
+
+    # Admin request log markers. `stash_site_id` only populates state.site_id when
+    # the site-ceiling limiter is enabled, so set it here too — the log viewer's
+    # per-site facet must work independently of that flag. An abuse-flagged batch
+    # is stored (flag-but-store), so without this marker it would look like an
+    # ordinary 204 in the log.
+    request.state.site_id = batch.site_id
+    if abuse_flagged:
+        request.state.log_reason = "abuse_flag"
+        request.state.log_reason_detail = "site ceiling or ingest velocity flagged this batch"
 
     # Client Hints extraction (best-effort)
     ch_ua = request.headers.get("sec-ch-ua", "")

@@ -31,6 +31,10 @@ _PURGE_LOCK_KEY = "beam_retention_purge"
 # is single-flight independently of the raw-events purge.
 _AGENT_FETCH_PURGE_LOCK_KEY = "beam_agent_fetch_retention_purge"
 
+# Third independent lock: the admin request-log purge runs on a much tighter
+# window (7 days vs 90) and must not be blocked by, or block, the two above.
+_REQUEST_LOG_PURGE_LOCK_KEY = "beam_request_log_retention_purge"
+
 # Per-batch delete size — bounds how long any single statement holds row locks.
 _PURGE_BATCH_SIZE = 10_000
 
@@ -219,3 +223,89 @@ async def purge_agent_fetch_events_older_than(
         finally:
             if acquired:
                 await _release_lock(lock_db, _AGENT_FETCH_PURGE_LOCK_KEY)
+
+
+async def _request_logs_table_exists(db: AsyncSession) -> bool:
+    result = await db.execute(
+        text(
+            "SELECT EXISTS (SELECT FROM information_schema.tables "
+            "WHERE table_name = 'request_logs')"
+        )
+    )
+    return bool(result.scalar())
+
+
+async def _count_old_request_logs(db: AsyncSession, days: int) -> int:
+    result = await db.execute(
+        text(f"SELECT count(*) FROM request_logs WHERE created_at < {_AGENT_FETCH_CUTOFF_SQL}"),
+        {"days": days},
+    )
+    return result.scalar() or 0
+
+
+async def purge_request_logs_older_than(
+    days: int | None = None,
+    dry_run: bool = False,
+    batch_size: int = _PURGE_BATCH_SIZE,
+) -> dict:
+    """Delete admin request_logs older than `days` (default 7).
+
+    Mirrors purge_agent_fetch_events_older_than exactly (own advisory lock,
+    table-exists guard, dry-run counting path, batched delete) and returns the
+    same status-dict shape.
+
+    This purge is the compensating control that makes capturing request bodies
+    acceptable at all: the window is short by design, so a debug capture never
+    becomes a long-lived data store. Do not widen it without revisiting the
+    redaction posture in services/log_redaction.py.
+
+    request_logs.created_at is tz-aware (Base server_default now()), so it uses
+    the tz-aware cutoff, not the naive events one.
+    """
+    days = settings.request_log_retention_days if days is None else days
+
+    async with async_session() as lock_db:
+        acquired = await _try_acquire_lock(lock_db, _REQUEST_LOG_PURGE_LOCK_KEY)
+        if acquired is False:
+            logger.info("request_log_retention_purge_lock_busy")
+            return {"status": "locked", "deleted": 0}
+        try:
+            async with async_session() as db:
+                if not await _request_logs_table_exists(db):
+                    return {"status": "no_table", "deleted": 0}
+
+                if dry_run:
+                    n = await _count_old_request_logs(db, days)
+                    logger.info(
+                        "request_log_retention_purge_dry_run", days=days, would_delete=n
+                    )
+                    return {"status": "dry_run", "would_delete": n}
+
+                total = 0
+                while True:
+                    result = await db.execute(
+                        text(
+                            f"""
+                            DELETE FROM request_logs
+                            WHERE id IN (
+                                SELECT id FROM request_logs
+                                WHERE created_at < {_AGENT_FETCH_CUTOFF_SQL}
+                                LIMIT :lim
+                            )
+                            """
+                        ),
+                        {"days": days, "lim": batch_size},
+                    )
+                    await db.commit()
+                    deleted = result.rowcount or 0
+                    total += deleted
+                    if deleted < batch_size:
+                        break
+
+                logger.info(
+                    "request_log_retention_purge_complete", days=days, deleted=total
+                )
+                return {"status": "ok", "deleted": total}
+        finally:
+            if acquired:
+                await _release_lock(lock_db, _REQUEST_LOG_PURGE_LOCK_KEY)

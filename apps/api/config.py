@@ -728,6 +728,33 @@ class Settings(BaseSettings):
     agent_fetch_event_retention_days: int = 90
     retention_purge_interval_hours: int = 24  # daily purge sweep
 
+    # ─── Admin request/response log (debug observability) ───
+    # Captures full request + response JSON for requests that were DROPPED or
+    # FLAGGED, so an operator can answer "why was this traffic rejected?" without
+    # hand-writing SQL. Default OFF — same operator-gated posture as
+    # agent_detection_enabled / ingest_velocity_enabled.
+    #
+    # PII posture: bodies pass through services/log_redaction.py before storage —
+    # emails become domain-only, credential-shaped keys become "***". This keeps
+    # the guardrail "never log PII" intact while leaving the JSON shape debuggable.
+    # Turning redaction off is deliberately NOT a setting; it would create a new
+    # raw-PII store with no compensating control.
+    request_log_enabled: bool = False
+    # 7 days, deliberately shorter than the 90-day event retention: these rows
+    # carry richer per-request detail, so they earn a tighter window.
+    request_log_retention_days: int = 7
+    # Hard cap per captured body. Anything past this is truncated with a marker —
+    # the middleware never buffers an unbounded response.
+    request_log_max_body_bytes: int = 16_384
+    # Fraction of NON-dropped, NON-flagged (i.e. successful) requests to sample.
+    # 0.0 = log only drops/flags, which is the shipped default. Raise it only to
+    # capture a baseline for comparison; every sampled row costs a write on the
+    # hot path.
+    request_log_sample_rate: float = 0.0
+    # Paths never logged regardless of outcome — health checks and the log
+    # viewer itself (which would otherwise log its own reads in a loop).
+    request_log_exclude_paths: str = "/health,/api/v1/admin/request-logs"
+
     # ─── OSINT account scanner (manual per-visitor; free stacked engines) ───
     enable_osint_scan: bool = False             # master gate — off in prod until explicitly enabled
     osint_engines: str = "user-scanner,holehe,maigret"  # comma-separated engines to run (drop one to disable it). "maigret" is a username-stage engine (social_resolver), not an email-scan adapter.

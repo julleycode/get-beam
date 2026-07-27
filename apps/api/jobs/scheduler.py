@@ -18,6 +18,7 @@ from apps.api.services.resolution_runner import run_resolution_sweep
 from apps.api.services.retention import (
     purge_events_older_than,
     purge_agent_fetch_events_older_than,
+    purge_request_logs_older_than,
 )
 from apps.api.services.sync import sync_all_accounts
 from apps.api.services import blog_service
@@ -76,6 +77,12 @@ async def _retention_purge_job() -> None:
             logger.info("agent_fetch_retention_purge_job_complete", **agent_result)
     except Exception:
         logger.exception("agent_fetch_retention_purge_crashed")
+    try:
+        log_result = await purge_request_logs_older_than()
+        if log_result.get("deleted"):
+            logger.info("request_log_retention_purge_job_complete", **log_result)
+    except Exception:
+        logger.exception("request_log_retention_purge_crashed")
 
 
 async def _publish_scheduled_blog_job() -> None:

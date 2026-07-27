@@ -1,5 +1,8 @@
 import type {
   KnownUploadResult,
+  RequestLogEntry,
+  RequestLogListResponse,
+  RequestLogStats,
   BlogPostAdmin,
   BlogPostListResponse,
   BlogPostAdminListResponse,
@@ -1623,12 +1626,48 @@ class ApiClient {
       body: JSON.stringify({ question, site_id: siteId ?? null }),
     });
   }
+
+  // Admin request/response log (debug capture) — admin-gated server-side.
+  async listRequestLogs(params: {
+    reason?: string;
+    siteId?: string;
+    statusCode?: number;
+    pathContains?: string;
+    hours?: number;
+    limit?: number;
+    offset?: number;
+  } = {}) {
+    const qs = new URLSearchParams();
+    if (params.reason) qs.set("reason", params.reason);
+    if (params.siteId) qs.set("site_id", params.siteId);
+    if (params.statusCode != null) qs.set("status_code", String(params.statusCode));
+    if (params.pathContains) qs.set("path_contains", params.pathContains);
+    qs.set("hours", String(params.hours ?? 24));
+    qs.set("limit", String(params.limit ?? 50));
+    qs.set("offset", String(params.offset ?? 0));
+    return this.request<RequestLogListResponse>(
+      `/api/v1/admin/request-logs?${qs.toString()}`
+    );
+  }
+
+  async getRequestLogStats(hours = 24) {
+    return this.request<RequestLogStats>(
+      `/api/v1/admin/request-logs/stats?hours=${hours}`
+    );
+  }
+
+  async getRequestLog(logId: string) {
+    return this.request<RequestLogEntry>(`/api/v1/admin/request-logs/${logId}`);
+  }
 }
 
 export const api = new ApiClient();
 
 export type {
   KnownUploadResult,
+  RequestLogEntry,
+  RequestLogListResponse,
+  RequestLogStats,
   BlogPost,
   BlogPostAdmin,
   BlogPostListResponse,

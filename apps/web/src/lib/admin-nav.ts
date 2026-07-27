@@ -1,4 +1,4 @@
-import { Receipt, BookOpen, ListChecks, Inbox, Sparkles } from "lucide-react";
+import { Receipt, BookOpen, ListChecks, Inbox, Sparkles, ScrollText } from "lucide-react";
 import type { ComponentType } from "react";
 
 export type AdminTool = {
@@ -41,5 +41,11 @@ export const ADMIN_TOOLS: AdminTool[] = [
     label: "Feature Requests",
     description: "Incoming user feature requests.",
     icon: Inbox,
+  },
+  {
+    href: "/dashboard/admin/request-logs",
+    label: "Request Logs",
+    description: "Full request/response JSON for dropped and flagged traffic.",
+    icon: ScrollText,
   },
 ];

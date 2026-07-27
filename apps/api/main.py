@@ -1,6 +1,9 @@
+import asyncio
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
+from urllib.parse import parse_qsl
 
 import structlog
 from fastapi import FastAPI, Request
@@ -11,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from apps.api.config import settings
 from apps.api.models.database import engine, Base
 from apps.api.models.api_key import UserApiKey  # noqa: F401 — register for create_all
+from apps.api.models.request_log import RequestLog  # noqa: F401 — register for create_all
+from apps.api.services import request_logger
 from apps.api.models.event import Event as EventModel  # noqa: F401 — register for create_all
 from apps.api.models.visitor_email import VisitorEmail  # noqa: F401 — register for create_all
 from apps.api.models.social_account import SocialAccount  # noqa: F401
@@ -43,6 +48,7 @@ from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhook
 from apps.api.routers import known_contacts, costs, ai, dashboard, crm, changelog, click, open_pixel
 from apps.api.routers import email_sender_oauth, outcomes, referrals, agents, ads
 from apps.api.routers import ingest_health
+from apps.api.routers import request_logs
 from apps.api.routers import agent_profile, agent_gateway, agent_mcp
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
@@ -274,11 +280,169 @@ class IngestBodySizeLimitMiddleware:
 
 app.add_middleware(IngestBodySizeLimitMiddleware)
 
+
+# ── Admin request/response capture (debug observability) ──────────
+class RequestResponseLogMiddleware:
+    """Capture request + response JSON for DROPPED or FLAGGED requests.
+
+    Pure ASGI middleware for the same reason as the two above: BaseHTTPMiddleware's
+    anyio task-group wrapping conflicts with asyncpg's event loop under pytest.
+
+    Registered LAST, so it is the OUTERMOST middleware — it sees the final status
+    code every inner layer produced, including the 413 that
+    IngestBodySizeLimitMiddleware synthesizes and the CORS rejections. An inner
+    position would miss exactly the rejections this exists to explain.
+
+    Hot-path cost when ``request_log_enabled`` is False: one boolean check, then
+    straight through. Bodies are only buffered once the flag is on, and only up
+    to ``request_log_max_body_bytes``.
+
+    The write is dispatched as a detached task AFTER the response has been fully
+    sent, so no client ever waits on a log insert.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or not settings.request_log_enabled:
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if request_logger.is_excluded(path):
+            await self.app(scope, receive, send)
+            return
+
+        max_bytes = settings.request_log_max_body_bytes
+        started = time.perf_counter()
+        captured = {
+            "req": bytearray(),
+            "res": bytearray(),
+            "status": 500,
+            "res_headers": {},
+        }
+
+        def _absorb(body: bytes) -> None:
+            """Append into the capture buffer, never past the cap + 1 sentinel byte.
+
+            The extra byte is what lets decode_body detect truncation from length
+            alone, so nothing else has to track a separate flag.
+            """
+            if body and len(captured["req"]) <= max_bytes:
+                captured["req"].extend(body[: max_bytes + 1 - len(captured["req"])])
+
+        # Pre-buffer the request body BEFORE calling the app.
+        #
+        # Passively wrapping receive() is not enough: the ingest bot filter returns
+        # 204 before anything reads the body, so a wrapped receive() is never
+        # invoked and the payload of the very request we most want to explain is
+        # lost. Reading it up front is the only way to capture a body the app
+        # rejected unread.
+        #
+        # Bounded on purpose: we stop buffering once past the cap and let the
+        # remainder stream through untouched. This middleware is OUTSIDE the
+        # body-size guard, so an unbounded pre-read here would buffer a hostile
+        # 100MB body before that guard could reject it.
+        prebuffered: list[dict] = []
+        if scope.get("method") in ("POST", "PUT", "PATCH", "DELETE"):
+            total = 0
+            while True:
+                message = await receive()
+                prebuffered.append(message)
+                if message["type"] != "http.request":
+                    break  # http.disconnect — nothing more is coming
+                chunk = message.get("body", b"")
+                _absorb(chunk)
+                total += len(chunk)
+                if not message.get("more_body", False) or total > max_bytes:
+                    break
+
+        replay = iter(prebuffered)
+
+        async def capturing_receive():
+            # Replay what we pre-read, then fall through to the live stream for
+            # anything past the cap.
+            message = next(replay, None)
+            if message is not None:
+                return message
+            message = await receive()
+            if message["type"] == "http.request":
+                _absorb(message.get("body", b""))
+            return message
+
+        async def capturing_send(message):
+            if message["type"] == "http.response.start":
+                captured["status"] = message.get("status", 500)
+                captured["res_headers"] = {
+                    k.decode("latin-1"): v.decode("latin-1")
+                    for k, v in message.get("headers", [])
+                }
+            elif message["type"] == "http.response.body":
+                body = message.get("body", b"")
+                if body and len(captured["res"]) <= max_bytes:
+                    captured["res"].extend(body[: max_bytes + 1 - len(captured["res"])])
+            await send(message)
+
+        try:
+            await self.app(scope, capturing_receive, capturing_send)
+        finally:
+            # `finally`, not the happy path: an unhandled exception propagating
+            # out of the app is precisely the case worth capturing, and Starlette
+            # will still have sent a 500 through capturing_send.
+            try:
+                state = scope.get("state") or {}
+                reason = request_logger.should_log(
+                    captured["status"],
+                    path,
+                    explicit_reason=state.get("log_reason"),
+                )
+                if reason:
+                    headers = {
+                        k.decode("latin-1"): v.decode("latin-1")
+                        for k, v in scope.get("headers", [])
+                    }
+                    query = scope.get("query_string", b"").decode("latin-1")
+                    asyncio.ensure_future(
+                        request_logger.persist_log(
+                            method=scope.get("method", ""),
+                            path=path,
+                            query_params=(
+                                dict(parse_qsl(query, keep_blank_values=True))
+                                if query
+                                else None
+                            ),
+                            status_code=captured["status"],
+                            duration_ms=(time.perf_counter() - started) * 1000,
+                            reason=reason,
+                            reason_detail=state.get("log_reason_detail"),
+                            site_id=state.get("site_id"),
+                            user_id=state.get("log_user_id"),
+                            client_ip=(
+                                headers.get("cf-connecting-ip")
+                                or headers.get("x-forwarded-for", "").split(",")[0].strip()
+                                or (scope.get("client") or ("", 0))[0]
+                            ),
+                            user_agent=headers.get("user-agent"),
+                            headers=headers,
+                            request_body_raw=bytes(captured["req"]),
+                            response_body_raw=bytes(captured["res"]),
+                        )
+                    )
+            except Exception:
+                logger.warning("request_log_dispatch_failed", path=path)
+
+
+app.add_middleware(RequestResponseLogMiddleware)
+
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(events.router, prefix="/api/v1/events", tags=["events"])
 app.include_router(sites.router, prefix="/api/v1/sites", tags=["sites"])
 app.include_router(known_contacts.router, prefix="/api/v1/sites", tags=["known-contacts"])
 app.include_router(ingest_health.router, prefix="/api/v1/sites", tags=["ingest-health"])
+app.include_router(
+    request_logs.router, prefix="/api/v1/admin/request-logs", tags=["admin-request-logs"]
+)
 app.include_router(visitors.router, prefix="/api/v1/visitors", tags=["visitors"])
 app.include_router(agents.router, prefix="/api/v1/agents", tags=["agents"])
 app.include_router(costs.router, prefix="/api/v1/costs", tags=["costs"])

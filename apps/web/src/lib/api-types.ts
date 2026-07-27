@@ -983,3 +983,48 @@ export interface CancelSubscriptionResponse {
   portal_url: string | null;
   message: string | null;
 }
+
+// ─── Admin request/response log (debug capture) ───
+
+/** One captured request. Bodies are present only on the detail fetch — the list
+ *  endpoint omits them because they dominate the payload size. */
+export interface RequestLogEntry {
+  id: string;
+  created_at: string | null;
+  method: string;
+  path: string;
+  status_code: number;
+  duration_ms: number;
+  reason: string;
+  reason_detail: string | null;
+  site_id: string | null;
+  client_ip: string | null;
+  user_agent: string | null;
+  truncated: boolean;
+  // Detail-only fields.
+  query_params?: Record<string, unknown> | null;
+  request_headers?: Record<string, unknown> | null;
+  request_body?: unknown;
+  response_body?: unknown;
+  user_id?: string | null;
+}
+
+export interface RequestLogListResponse {
+  enabled: boolean;
+  retention_days: number;
+  total: number;
+  limit: number;
+  offset: number;
+  logs: RequestLogEntry[];
+}
+
+export interface RequestLogStats {
+  enabled: boolean;
+  retention_days: number;
+  sample_rate: number;
+  window_hours: number;
+  total: number;
+  by_reason: { reason: string; count: number }[];
+  by_status: { status_code: number; count: number }[];
+  by_site: { site_id: string; count: number }[];
+}
