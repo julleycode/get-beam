@@ -754,6 +754,18 @@ class Settings(BaseSettings):
     # Paths never logged regardless of outcome — health checks and the log
     # viewer itself (which would otherwise log its own reads in a loop).
     request_log_exclude_paths: str = "/health,/api/v1/admin/request-logs"
+    # Status codes that never produce a row on their own.
+    #
+    # 401 by default: the dashboard's Clerk token has a ~60s TTL, so the API
+    # client's normal refresh path (401 -> fetch fresh token -> retry -> 200)
+    # emits a 401 on routine page loads. Logging those buries real signal under
+    # the app's own healthy behaviour. 403 is deliberately NOT ignored —
+    # authenticated-but-denied is worth seeing (permission bug, or probing).
+    #
+    # Set to "" to capture 401s during an auth-probing investigation. An explicit
+    # route marker (request.state.log_reason) still wins over this list, so a
+    # deliberately-flagged request is never silenced by it.
+    request_log_ignore_statuses: str = "401"
 
     # ─── OSINT account scanner (manual per-visitor; free stacked engines) ───
     enable_osint_scan: bool = False             # master gate — off in prod until explicitly enabled

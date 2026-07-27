@@ -143,6 +143,74 @@ def test_4xx_is_http_error():
     assert rl.classify(413) == rl.REASON_HTTP_ERROR
 
 
+# ── Policy: ignored statuses ──
+
+
+def test_401_is_ignored_by_default():
+    """The dashboard's Clerk refresh path (401 -> fresh token -> retry -> 200)
+    emits a 401 on routine page loads; logging it buries real signal."""
+    assert rl.classify(401) is None
+
+
+def test_403_is_still_logged():
+    """Authenticated-but-denied is the interesting half of the pair — a
+    permission bug or probing — so it must NOT share 401's exemption."""
+    assert rl.classify(403) == rl.REASON_HTTP_ERROR
+
+
+def test_explicit_marker_beats_the_ignore_list():
+    """A route that deliberately flagged a request is never silenced."""
+    assert rl.classify(401, explicit_reason="abuse_flag") == "abuse_flag"
+
+
+def test_ignore_list_is_configurable(monkeypatch):
+    from apps.api.config import settings
+
+    monkeypatch.setattr(settings, "request_log_ignore_statuses", "")
+    assert rl.classify(401) == rl.REASON_HTTP_ERROR
+
+    monkeypatch.setattr(settings, "request_log_ignore_statuses", "404,410")
+    assert rl.classify(404) is None
+    assert rl.classify(410) is None
+    assert rl.classify(401) == rl.REASON_HTTP_ERROR
+
+
+def test_malformed_ignore_list_does_not_raise(monkeypatch):
+    """A typo in an env var must not take the ingest path down."""
+    from apps.api.config import settings
+
+    monkeypatch.setattr(settings, "request_log_ignore_statuses", "401, oops, ,404")
+    assert rl.ignored_statuses() == frozenset({401, 404})
+
+
+# ── site_id fallback ──
+
+
+def test_site_id_extracted_from_body():
+    """A bot-dropped ingest returns 204 before the batch is parsed, so state
+    never carries site_id — the body is the only source left."""
+    assert rl.site_id_from_body({"site_id": "beam_x", "events": []}) == "beam_x"
+
+
+def test_site_id_from_body_is_trimmed():
+    assert rl.site_id_from_body({"site_id": "  beam_x  "}) == "beam_x"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [None, [], "a string", {}, {"site_id": ""}, {"site_id": "   "}, {"site_id": 42}],
+)
+def test_site_id_from_body_returns_none_for_anything_else(body):
+    assert rl.site_id_from_body(body) is None
+
+
+def test_site_id_survives_redaction():
+    """site_id is neither credential-shaped nor email-shaped, so the redaction
+    pass must leave it intact — otherwise the fallback reads a masked value."""
+    body, _ = rl.decode_body(b'{"site_id":"beam_getbeam_fyi","email":"a@b.com"}', 1000)
+    assert rl.site_id_from_body(body) == "beam_getbeam_fyi"
+
+
 def test_success_is_not_logged_at_default_sample_rate():
     """Default request_log_sample_rate is 0.0 — clean traffic writes nothing."""
     assert rl.classify(200, sample_roll=0.0) is None

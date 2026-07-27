@@ -43,6 +43,21 @@ def excluded_paths() -> frozenset[str]:
     return frozenset(p.strip() for p in raw.split(",") if p.strip())
 
 
+def ignored_statuses() -> frozenset[int]:
+    """Status codes that never produce a row on their own.
+
+    Non-numeric entries are skipped rather than raising: a typo in an env var
+    must not take the ingest path down.
+    """
+    raw = settings.request_log_ignore_statuses or ""
+    out = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            out.add(int(part))
+    return frozenset(out)
+
+
 def is_excluded(path: str) -> bool:
     """Prefix match, not exact match.
 
@@ -71,6 +86,13 @@ def classify(
     """
     if explicit_reason:
         return explicit_reason
+
+    # Checked AFTER the explicit marker so a route that deliberately flagged a
+    # request is never silenced by the ignore list, and BEFORE the status rules
+    # so the list can silence any code the operator chooses.
+    if status_code in ignored_statuses():
+        return None
+
     if status_code >= 500:
         return REASON_EXCEPTION
     if status_code == 429:
@@ -134,6 +156,23 @@ def decode_body(raw: bytes | None, max_bytes: int) -> tuple[Any, bool]:
     return redacted, truncated
 
 
+def site_id_from_body(body: Any) -> str | None:
+    """Best-effort ``site_id`` from an already-decoded request body.
+
+    Pure and total: returns None for anything that is not a dict carrying a
+    non-empty string ``site_id``. The value is attacker-controlled (it is just
+    whatever the client posted), so it is treated as a display label only —
+    length-capped at the column width by the caller, never used for a lookup or
+    an authorization decision.
+    """
+    if not isinstance(body, dict):
+        return None
+    candidate = body.get("site_id")
+    if isinstance(candidate, str) and candidate.strip():
+        return candidate.strip()
+    return None
+
+
 async def persist_log(
     *,
     method: str,
@@ -159,6 +198,13 @@ async def persist_log(
         max_bytes = settings.request_log_max_body_bytes
         req_body, req_trunc = decode_body(request_body_raw, max_bytes)
         res_body, res_trunc = decode_body(response_body_raw, max_bytes)
+
+        # Fall back to the body for site_id. A bot-dropped ingest returns 204
+        # before the batch is ever parsed, so request.state.site_id is unset on
+        # exactly the rows where grouping by site matters most. The value is in
+        # the captured body — it just never reached the column.
+        if site_id is None:
+            site_id = site_id_from_body(req_body)
 
         async with async_session() as db:
             db.add(
