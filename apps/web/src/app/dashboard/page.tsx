@@ -331,7 +331,20 @@ function DashboardContent({
   useEffect(() => {
     const settle = (sites: Site[]) => {
       onSitesLoaded(sites);
-      if (sites.length === 0) router.push("/dashboard/onboarding");
+      if (sites.length === 0) {
+        // First-run funnel: land zero-site users on onboarding. But skip it when
+        // they deliberately hit "Exit to dashboard" from onboarding — otherwise
+        // the two features fight and the user is trapped in an onboarding loop
+        // with no site yet. The flag is sticky for the tab session (set on exit),
+        // so the empty dashboard stays reachable.
+        let exited = false;
+        try {
+          exited = sessionStorage.getItem("beam_exit_onboarding") === "1";
+        } catch {
+          /* storage blocked — fall through to the default redirect */
+        }
+        if (!exited) router.push("/dashboard/onboarding");
+      }
     };
     // One round-trip: sites + per-site stats. Seed the ["visitor-stats", id]
     // cache so SiteCard and TodayActions read it instead of refetching.

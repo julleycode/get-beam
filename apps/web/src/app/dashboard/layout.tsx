@@ -510,6 +510,18 @@ export default function DashboardLayout({
           </h1>
           <Link
             href="/dashboard"
+            onClick={() => {
+              // Mark this as a deliberate exit so the dashboard's zero-site
+              // auto-redirect doesn't bounce the user straight back here — the
+              // trap that made "Exit to dashboard" a no-op for users who hadn't
+              // created a site yet. Sticky for the tab session, not consumed on
+              // first read, so repeat /dashboard visits stay reachable too.
+              try {
+                sessionStorage.setItem("beam_exit_onboarding", "1");
+              } catch {
+                /* storage blocked — redirect guard just won't apply */
+              }
+            }}
             className="text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             Exit to dashboard
