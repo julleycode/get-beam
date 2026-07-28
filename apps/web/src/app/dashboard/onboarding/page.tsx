@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { PixelInstallGuide } from "@/components/pixel-install-guide";
+import { OnboardingWelcomeChat } from "@/components/onboarding-welcome-chat";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -177,72 +178,21 @@ function OnboardingFlow() {
       </div>
       )}
 
-      {/* Step 0: Welcome intro (first-run only) */}
+      {/* Step 0: Welcome intro (first-run only) — conversational chat ported
+          from /beam/onboarding.html; "let's do it" hands off to the add-site
+          form below. */}
       {step === "welcome" && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Welcome to Beam</CardTitle>
-            <CardDescription>
-              Beam turns your anonymous website traffic into people you can
-              actually reach — then drafts the outreach for you.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-3 text-sm">
-              <li className="flex items-start gap-3">
-                <span className="mt-0.5 flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-bold">
-                  1
-                </span>
-                <span>
-                  <span className="font-medium text-foreground">
-                    Identify visitors
-                  </span>{" "}
-                  <span className="text-muted-foreground">
-                    — see the real people and companies browsing your site.
-                  </span>
-                </span>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="mt-0.5 flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-bold">
-                  2
-                </span>
-                <span>
-                  <span className="font-medium text-foreground">
-                    Enrich profiles
-                  </span>{" "}
-                  <span className="text-muted-foreground">
-                    — LinkedIn, role, and company details, added automatically.
-                  </span>
-                </span>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="mt-0.5 flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-bold">
-                  3
-                </span>
-                <span>
-                  <span className="font-medium text-foreground">
-                    Draft outreach
-                  </span>{" "}
-                  <span className="text-muted-foreground">
-                    — AI writes the email and social follow-ups; you approve and
-                    send.
-                  </span>
-                </span>
-              </li>
-            </ul>
-            <Button
-              type="button"
-              className="w-full mt-6"
-              size="lg"
-              onClick={() => setStep("create")}
-            >
-              Get started
-            </Button>
-            <p className="mt-3 text-center text-xs text-muted-foreground">
-              Takes about a minute — add your site, then drop in one snippet.
-            </p>
-          </CardContent>
-        </Card>
+        <OnboardingWelcomeChat
+          onDone={() => setStep("create")}
+          onExit={() => {
+            try {
+              localStorage.setItem("beam_onboarded_v1", "1");
+            } catch {
+              /* storage blocked — worst case the funnel re-offers next visit */
+            }
+            router.push("/dashboard");
+          }}
+        />
       )}
 
       {/* Step 1: Create site */}

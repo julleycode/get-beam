@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { OnboardingTour } from "@/components/onboarding-tour";
+import { TabIntro } from "@/components/tab-intro";
 import { ExpiringConnectionBanner } from "@/components/expiring-connection-banner";
 import { TOUR_STEPS } from "@/lib/tour-steps";
 
@@ -450,7 +451,6 @@ export default function DashboardLayout({
   const pathname = usePathname();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
-  const autoLaunchTried = useRef(false);
 
   // Shared ["me"] cache with the Overview page — one /auth/me request, not two.
   const { data: me, isError: meError } = useQuery({
@@ -484,20 +484,10 @@ export default function DashboardLayout({
     }
   }, []);
 
-  // Auto-launch the tour once on a user's first dashboard visit. Waits for
-  // /auth/me so admin-only steps resolve and we know the session is authed
-  // (getMe carries the token). Never runs on the onboarding setup flow.
-  useEffect(() => {
-    if (isOnboarding || !me || autoLaunchTried.current) return;
-    autoLaunchTried.current = true;
-    let done = false;
-    try {
-      done = localStorage.getItem(TOUR_DONE_KEY) === "1";
-    } catch {
-      return; // storage blocked — don't auto-launch
-    }
-    if (!done) setTourOpen(true);
-  }, [me, isOnboarding]);
+  // The full spotlight tour no longer auto-launches on first load — dumping all
+  // sections at once was heavy. Each tab now introduces itself just-in-time via
+  // <TabIntro> the first time it's opened. The full tour stays available on
+  // demand from the Help button in the sidebar (onReplayTour → setTourOpen).
 
   if (isOnboarding) {
     return (
@@ -589,11 +579,13 @@ export default function DashboardLayout({
           {HAS_CLERK ? (
             <ClerkTokenGate>
               <ExpiringConnectionBanner />
+              <TabIntro pathname={pathname} isAdmin={isAdmin} />
               {children}
             </ClerkTokenGate>
           ) : (
             <>
               <ExpiringConnectionBanner />
+              <TabIntro pathname={pathname} isAdmin={isAdmin} />
               {children}
             </>
           )}
