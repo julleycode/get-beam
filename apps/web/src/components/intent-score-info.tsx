@@ -17,7 +17,11 @@ export function IntentScoreInfo() {
         </li>
         <li>
           <span className="font-medium text-foreground">Engagement:</span> scrolled 75%+ → +15;
-          avg 60s+ per page → +10
+          avg over 60s per page → +10
+        </li>
+        <li>
+          <span className="font-medium text-foreground">Pages read:</span> 15+ → +15, 7+ → +10,
+          3+ → +5
         </li>
         <li>
           <span className="font-medium text-foreground">Return cadence:</span> back within 2 days
@@ -37,7 +41,8 @@ export function IntentScoreInfo() {
         </li>
       </ul>
       <p className="text-muted-foreground">
-        <span className="font-medium text-foreground">40+</span> unlocks identity resolution ·{" "}
+        <span className="font-medium text-foreground">20+</span> unlocks identity resolution ·{" "}
+        <span className="font-medium text-foreground">40+</span> flags a hot lead (instant alert) ·{" "}
         <span className="font-medium text-foreground">60+</span> triggers social intelligence.
       </p>
     </div>
