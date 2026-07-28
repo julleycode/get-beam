@@ -119,18 +119,17 @@ vendor sẽ làm hỏng thống kê vendor đang có. Đây là lựa chọn có
 |---|---|---|---|
 | F12 | Không có trạng thái `spoofed` — chỉ nâng cấp, không phát hiện lệch | HIGH | `agent_verification.py` |
 | F2 | Không có marker → "người sau AI" là suy đoán thời gian | HIGH | `services/agent_gateway.py` |
-| F13 | Dải IP nhỏ, gộp vendor, tĩnh, không làm mới | MEDIUM | `data/agent_ip_ranges/` |
 | F14 | Chưa có Web Bot Auth (RFC 9421) — chữ ký mã hoá, miễn phí, mạnh nhất hiện có | MEDIUM | — |
 | F10 | `agent_fetch_events` không có ràng buộc chống trùng | MEDIUM | `models/agent_fetch_event.py` |
+| F2 | Không có marker → "người sau AI" là suy đoán thời gian | HIGH | `services/agent_gateway.py` |
 
-Bốn cái còn lại đều **không phải sửa lỗi thuần tuý**, mỗi cái vướng một thứ khác nhau:
+Ba cái này **chưa làm**, và mỗi cái vướng một thứ khác nhau:
 
 | Mã | Vướng ở đâu |
 |---|---|
-| F2 marker | Quyết định sản phẩm — link dài thêm, đổi định dạng offers feed |
-| F12 spoofed | Quyết định ngữ nghĩa — phát hiện lệch rồi làm gì? Ẩn khỏi dashboard? Gắn cờ? Thêm giá trị enum = có thể cần migration |
-| F10 dedup | Cần migration + quyết định khoá trùng gồm cột nào + dọn dữ liệu trùng đang có trên prod trước khi tạo constraint |
-| F13/F14 | Năng lực mới, không phải sửa lỗi. F14 (Web Bot Auth) là implement RFC từ đầu |
+| F2 + F10 | Cả hai cần **cùng một migration** trên `agent_fetch_events`: F2 cần cột lưu marker, F10 cần unique constraint. Nên làm chung một lần. F10 còn phải dọn dữ liệu trùng trên prod TRƯỚC (còn dòng trùng thì tạo constraint sẽ fail) và đổi đường ghi sang `ON CONFLICT DO NOTHING` — mà đó là đường fail-open đang chạy production |
+| F2 (thêm) | Chạm 5 lớp: mint marker → lưu → nhúng vào offers feed → **bắt ở phía click trong `tracker.js`** → khớp tất định trong sweep. Lớp `tracker.js` chưa từng đọc trong phiên này |
+| F14 | Implement RFC 9421 từ đầu: đọc header `Signature-Agent`, lấy public key tại `/.well-known/http-message-signatures-directory`, verify chữ ký + timestamp, cache key. Nhiều ngày, cần plan riêng |
 
 **F14 đáng chú ý nhất về mặt cơ hội:** Web Bot Auth đã được Anthropic, OpenAI, Perplexity,
 Common Crawl hỗ trợ. Nó là chữ ký mã hoá, tất định, miễn phí, không phụ thuộc tier Cloudflare —
@@ -157,6 +156,21 @@ nhưng **có** ký).
 - **F6 — chặn khối lượng query ứng viên.** Lọc `referrer` rỗng ngay trong SQL (phần lớn pageview
   không có referrer, và ứng viên không có referrer chắc chắn bị loại ở bước sau) + cap 500 dòng,
   sắp xếp cũ trước nên click gần fetch nhất luôn nằm trong cap.
+- **F12 — nay phát hiện được UA giả mạo.** `verify_ip()` trả **ba** kết quả thay vì hai:
+  `ip-verified` / `ip-mismatch` / `None`. `ip-mismatch` = agent có công bố dải IP nhưng traffic đến
+  từ ngoài tất cả → đúng hình dạng của UA giả. `None` = **không kết luận được** (Anthropic không
+  công bố gì, hoặc chưa fetch dữ liệu). Hai cái này **cố ý tách bạch**: không công bố dải IP không
+  phải bằng chứng giả mạo, gộp lại là bịa ra bằng chứng.
+  **Chỉ ghi nhận, không hành động** — không chặn, không xoá, không đụng emailability, không loại
+  khỏi correlation. Lý do trong mục dưới.
+- **F13 — dải IP tự làm mới, tách theo từng agent.** Phát hiện lúc làm: dữ liệu commit trong repo
+  **sai hẳn**, không chỉ cũ — GPTBot thật công bố `132.196.86.0/24` còn repo ghi `23.98.142.176/28`.
+  Nghĩa là nếu chỉ thêm F12 mà không có F13, GPTBot **thật** sẽ bị gắn `ip-mismatch`. Job chạy 24h/lần
+  fetch lại từng document vendor, fail-open (fetch lỗi → giữ nguyên dữ liệu cũ).
+  Khoá theo **token từng agent**, không gộp vendor: OpenAI công bố 3 file riêng cho GPTBot /
+  OAI-SearchBot / ChatGPT-User. Gộp lại sẽ trả lời "ừ, đó là OpenAI" cho trường hợp GPTBot đến từ
+  dải của ChatGPT-User — mất luôn một bất thường đáng thấy. File ship kèm repo để **rỗng**: rỗng =
+  không kết luận, an toàn hơn là kết luận sai.
 - **F8 — thêm `google` vào `_VENDOR_FAMILY_MAP`.** Chưa dùng tới (google toàn index-tier), nhưng
   nếu sau này promote lên on-demand thì thiếu key sẽ khiến sweep trả 0 link **im lặng**.
 
