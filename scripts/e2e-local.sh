@@ -19,7 +19,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 # ── Force the LOCAL stack (env vars take precedence over .env / .env.local) ──
-export DATABASE_URL="postgresql+asyncpg://retarget:retarget_dev@localhost:5432/retarget_agent"
+export DATABASE_URL="postgresql+asyncpg://retarget:retarget_dev@localhost:5433/retarget_agent"
 export REDIS_URL="redis://localhost:6379/0"
 export APP_ENV="development"
 export NEXT_PUBLIC_API_URL="http://localhost:8000"
@@ -41,15 +41,15 @@ echo "[e2e-local] API=$NEXT_PUBLIC_API_URL   (local only ✓)"
 
 # ── Bring up local postgres + redis if not already running ──
 pg_ready() {
-  if command -v pg_isready >/dev/null 2>&1; then pg_isready -h localhost -p 5432 >/dev/null 2>&1
-  else nc -z localhost 5432 >/dev/null 2>&1; fi
+  if command -v pg_isready >/dev/null 2>&1; then pg_isready -h localhost -p 5433 >/dev/null 2>&1
+  else nc -z localhost 5433 >/dev/null 2>&1; fi
 }
 if ! pg_ready; then
   echo "[e2e-local] starting docker postgres + redis..."
   docker compose -f infra/docker-compose.yml up -d postgres redis
   for _ in $(seq 1 30); do pg_ready && break; sleep 1; done
 fi
-pg_ready || { echo "ABORT: local postgres not reachable on :5432 (is Docker running?)." >&2; exit 1; }
+pg_ready || { echo "ABORT: local postgres not reachable on :5433 (is Docker running?)." >&2; exit 1; }
 
 # ── Playwright browser (first run installs chromium) ──
 ( cd apps/web && (npx playwright install --check chromium >/dev/null 2>&1 || npx playwright install chromium) )

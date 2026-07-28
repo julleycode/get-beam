@@ -3,6 +3,9 @@
 .env.local
 .env.*.local
 
+# Graphify knowledge graph (generated)
+**/graphify-out/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -50,5 +53,14 @@ apps/web/public/beam/launch.src.mp4
 .claude/worktrees/
 .env.*
 **/.env
+# Templates must stay trackable (negate after `.env.*` above)
+!.env.example
+!**/.env.example
+!infra/.env.example
 .vibecode-backup*/
 .claude/hooks/.logs/
+
+# Local helper runtime files
+.dev-local.pids
+.dev-local-*.log
+apps/web/.env.local

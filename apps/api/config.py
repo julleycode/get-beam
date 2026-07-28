@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
 
     # PostgreSQL
-    database_url: str = "postgresql+asyncpg://retarget:retarget_dev@localhost:5432/retarget_agent"
+    database_url: str = "postgresql+asyncpg://retarget:retarget_dev@localhost:5433/retarget_agent"
 
     # ─── DB pool + timeout hardening (capacity-hardening plan Phase 4a/4b / W4) ───
     # 4a — SERVER-SIDE statement timeout, applied via asyncpg `server_settings`
