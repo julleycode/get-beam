@@ -74,8 +74,8 @@ export default function CostsPage() {
             API Costs
           </h2>
           <p className="text-sm text-muted-foreground">
-            Estimated spend on paid API calls — identity, enrichment & OSINT.
-            Email & AI are on free tiers and not tracked yet.
+            Estimated spend on paid API calls: identity, enrichment, OSINT.
+            Email and AI are on free tiers, not tracked yet.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -99,7 +99,7 @@ export default function CostsPage() {
         </p>
       ) : isError ? (
         <ErrorBanner
-          message={`Couldn't load costs — ${
+          message={`Couldn't load costs: ${
             error instanceof Error ? error.message : "unknown error"
           }`}
           onRetry={() => refetch()}
@@ -165,7 +165,7 @@ export default function CostsPage() {
             <Card>
               <CardContent className="py-10 text-center text-sm text-muted-foreground">
                 No API spend recorded in this window. Identity resolution writes
-                a cost row per provider call — run an identify to see data here.
+                a cost row per provider call. Run an identify to see data here.
               </CardContent>
             </Card>
           ) : (

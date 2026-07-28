@@ -112,7 +112,7 @@ export default function SegmentsPage() {
         <CardGridSkeleton cards={4} cols={2} />
       ) : isError ? (
         <ErrorBanner
-          message={`Couldn't load segments — ${error instanceof Error ? error.message : "unknown error"}`}
+          message={`Couldn't load segments: ${error instanceof Error ? error.message : "unknown error"}`}
           onRetry={() => refetch()}
         />
       ) : segments.length === 0 ? (

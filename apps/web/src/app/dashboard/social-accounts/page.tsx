@@ -55,7 +55,7 @@ function SocialAccountsPageInner() {
       const notConfigured = /credential/i.test(error.message);
       alert(
         notConfigured
-          ? `${name} isn't available to connect yet — its API keys haven't been set up. An admin needs to add them before you can connect ${name}.`
+          ? `${name} isn't available to connect yet. Its API keys haven't been set up. An admin needs to add them before you can connect ${name}.`
           : error.message || `Couldn't connect ${name}. Please try again in a moment.`
       );
     },
@@ -128,7 +128,7 @@ function SocialAccountsPageInner() {
         <ListCardSkeleton rows={3} leading />
       ) : isError ? (
         <ErrorBanner
-          message={`Couldn't load accounts — ${error?.message ?? "request failed"}`}
+          message={`Couldn't load accounts: ${error?.message ?? "request failed"}`}
           onRetry={() => refetch()}
         />
       ) : accounts && accounts.length > 0 ? (
@@ -236,7 +236,7 @@ function SocialAccountsPageInner() {
           <p className="text-sm text-muted-foreground">
             Lets Beam send real LinkedIn connection requests from your account
             for a campaign&apos;s LinkedIn step. Your login key is stored
-            encrypted in the outreach service — Beam never keeps a copy and never
+            encrypted in the outreach service. Beam never keeps a copy and never
             shows it again.
           </p>
           <LinkedInTosWarning />
@@ -250,7 +250,7 @@ function SocialAccountsPageInner() {
                 Guided setup (about a minute)
               </p>
               <p className="text-xs text-muted-foreground">
-                Walks you through it step by step — no copying anything by hand.
+                Walks you through it step by step. No copying anything by hand.
               </p>
               <Button type="button" onClick={() => setWizardOpen(true)}>
                 {outreachStatus?.outreach_connected
@@ -269,7 +269,7 @@ function SocialAccountsPageInner() {
                 Beam extension detected
               </p>
               <p className="text-xs text-muted-foreground">
-                Skip the manual steps below — connect your LinkedIn session in
+                Skip the manual steps below. Connect your LinkedIn session in
                 one click.
               </p>
               <Button
@@ -358,7 +358,7 @@ function SocialAccountsPageInner() {
                     Press <kbd className="rounded border border-border bg-background px-1 font-mono">F12</kbd>{" "}
                     (Windows) or{" "}
                     <kbd className="rounded border border-border bg-background px-1 font-mono">⌥⌘I</kbd>{" "}
-                    (Mac) — a technical panel opens. Don&apos;t worry, you can&apos;t break anything.
+                    (Mac). A technical panel opens. Don&apos;t worry, you can&apos;t break anything.
                   </li>
                   <li>
                     At the top of that panel, click the{" "}
@@ -377,7 +377,7 @@ function SocialAccountsPageInner() {
             </div>
             <details className="text-xs text-muted-foreground">
               <summary className="cursor-pointer select-none">
-                Browser details — filled in automatically
+                Browser details (filled in automatically)
               </summary>
               <div className="mt-2 space-y-1.5">
                 <Label htmlFor="li-ua">Browser User-Agent</Label>
@@ -398,7 +398,7 @@ function SocialAccountsPageInner() {
 
             {outreachMut.isError && (
               <p className="text-sm text-destructive">
-                Couldn&apos;t connect LinkedIn outreach —{" "}
+                Couldn&apos;t connect LinkedIn outreach:{" "}
                 {(outreachMut.error as Error)?.message ?? "request failed"}
               </p>
             )}

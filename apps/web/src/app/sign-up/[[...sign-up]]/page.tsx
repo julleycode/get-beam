@@ -65,7 +65,7 @@ export default function SignUpPage() {
         <div className="flex max-w-sm items-center gap-2.5 rounded-lg border border-border bg-secondary px-4 py-3 text-sm">
           <Gift className="h-4 w-4 shrink-0 text-primary" />
           <span>
-            <strong>{referrerName}</strong> invited you — you both get +10
+            <strong>{referrerName}</strong> invited you. You both get +10
             identified visitors/month once your pixel goes live.
           </span>
         </div>

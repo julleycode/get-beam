@@ -36,7 +36,7 @@ export default function AdminPage() {
       <div>
         <h1 className="font-serif text-2xl font-semibold tracking-tight">Admin</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Internal tools and management, all in one place.
+          Internal tools and management.
         </p>
       </div>
 

@@ -215,13 +215,13 @@ function BillingContent() {
                     Includes{" "}
                     <span className="font-medium text-primary">
                       +{billing.bonus_monthly_quota}/mo referral bonus
-                    </span>{" "}
-                    —{" "}
+                    </span>
+                    .{" "}
                     <Link
                       href="/dashboard/referrals"
                       className="underline underline-offset-2 hover:text-foreground"
                     >
-                      earn more
+                      Earn more
                     </Link>
                   </p>
                 )}

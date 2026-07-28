@@ -5,10 +5,10 @@ import { SITE_URL } from "@/lib/blog-fetch";
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "Blog — Beam",
+    default: "Beam Blog",
     // Short suffix keeps post <title> under ~60 chars for SERP display; the
     // per-post meta_title still owns the leading text.
-    template: "%s — Beam",
+    template: "%s | Beam",
   },
   description:
     "Guides on website visitor identification, retargeting, and turning anonymous traffic into pipeline.",
@@ -33,7 +33,7 @@ export default function BlogLayout({ children }: { children: React.ReactNode }) 
       <main className="mx-auto max-w-3xl px-5 py-10">{children}</main>
       <footer className="border-t border-[rgba(43,37,48,0.08)]">
         <div className="mx-auto max-w-3xl px-5 py-8 text-sm text-muted-foreground">
-          © Beam — visitor identification &amp; retargeting for indie makers.
+          © Beam. Visitor identification &amp; retargeting for indie makers.
         </div>
       </footer>
     </div>

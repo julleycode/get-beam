@@ -27,7 +27,7 @@ export function GmailSenderBanner() {
     const connected = searchParams.get("gmail_connected");
     const error = searchParams.get("gmail_error");
     if (connected) {
-      setNotice(`Connected — campaigns will now send from ${connected}.`);
+      setNotice(`Connected. Campaigns will now send from ${connected}.`);
       queryClient.invalidateQueries({ queryKey: ["email-sender-status"] });
     } else if (error) {
       setNotice(error);

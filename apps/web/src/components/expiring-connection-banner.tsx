@@ -58,7 +58,7 @@ export function ExpiringConnectionBanner() {
     <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 px-4 py-3">
       <div className="flex items-center gap-2.5 text-sm text-warning">
         <AlertTriangle className="h-4 w-4 shrink-0" />
-        <span>{label} — reconnect to keep replies sending.</span>
+        <span>{label}. Reconnect to keep replies sending.</span>
       </div>
       <div className="flex items-center gap-1">
         <Link

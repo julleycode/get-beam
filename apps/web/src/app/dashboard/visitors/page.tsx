@@ -119,9 +119,9 @@ export default function VisitorsPage() {
   const dateWarning =
     (firstFrom && firstTo && firstFrom > firstTo) ||
     (lastFrom && lastTo && lastFrom > lastTo)
-      ? "Ngày bắt đầu đang sau ngày kết thúc — không có khách nào khớp."
+      ? "Ngày bắt đầu đang sau ngày kết thúc. Không có khách nào khớp."
       : firstFrom && lastTo && lastTo < firstFrom
-        ? "“Last seen đến” đang trước “First seen từ” — bất khả thi (lần cuối luôn sau lần đầu)."
+        ? "“Last seen đến” đang trước “First seen từ”: bất khả thi (lần cuối luôn sau lần đầu)."
         : null;
 
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -528,7 +528,7 @@ export default function VisitorsPage() {
           <div className="flex flex-col gap-1">
             <label
               className="text-xs font-medium text-muted-foreground"
-              title="By number of visits Beam has seen — not whether they're in your CRM."
+              title="By number of visits Beam has seen, not whether they're in your CRM."
             >
               Visitor type
             </label>
@@ -600,7 +600,7 @@ export default function VisitorsPage() {
         <TableSkeleton cols={7} rows={10} />
       ) : isError ? (
         <ErrorBanner
-          message={`Couldn't load visitors — ${error instanceof Error ? error.message : "unknown error"}`}
+          message={`Couldn't load visitors: ${error instanceof Error ? error.message : "unknown error"}`}
           onRetry={() => refetch()}
         />
       ) : (
@@ -679,7 +679,7 @@ export default function VisitorsPage() {
                       {v.total_sessions > 1 && (
                         <span
                           className="shrink-0 rounded bg-info-muted px-1.5 py-0.5 text-[10px] font-medium text-info"
-                          title={`Returning — ${v.total_sessions} visits Beam has seen (not your CRM)`}
+                          title={`Returning: ${v.total_sessions} visits Beam has seen (not your CRM)`}
                         >
                           Returning
                         </span>
@@ -687,7 +687,7 @@ export default function VisitorsPage() {
                       {v.ai_source && (
                         <span
                           className="shrink-0 rounded bg-info-muted px-1.5 py-0.5 text-[10px] font-medium text-info"
-                          title={`Arrived via ${aiSourceLabel(v.ai_source)} — clicked an AI answer-engine citation`}
+                          title={`Arrived via ${aiSourceLabel(v.ai_source)}, from an AI answer-engine citation`}
                         >
                           via {aiSourceLabel(v.ai_source)}
                         </span>
@@ -695,7 +695,7 @@ export default function VisitorsPage() {
                       {v.is_bot_suspect && (
                         <span
                           className="shrink-0 rounded bg-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-warning"
-                          title="Bot-suspect — cron-like visit cadence and pageview-only sessions. Visibility signal only: still fully contactable and fully counted."
+                          title="Bot-suspect: cron-like visit cadence and pageview-only sessions. Visibility signal only: still fully contactable and fully counted."
                         >
                           Bot-suspect
                         </span>
@@ -703,7 +703,7 @@ export default function VisitorsPage() {
                       {v.is_internal_suspect && (
                         <span
                           className="shrink-0 rounded bg-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-warning"
-                          title="Unusually high activity — is this you? This visitor's traffic volume is a statistical outlier for this site. A suggestion to review, not a verdict: open the visitor to confirm. Until then they are still fully contactable and fully counted."
+                          title="Unusually high activity for this site. Is this you? This visitor's traffic volume is a statistical outlier. A suggestion to review, not a verdict: open the visitor to confirm. Until then they stay fully contactable and fully counted."
                         >
                           High activity?
                         </span>
@@ -711,7 +711,7 @@ export default function VisitorsPage() {
                       {v.handoff_confidence && (
                         <span
                           className="shrink-0 rounded bg-info-muted px-1.5 py-0.5 text-[10px] font-medium text-info"
-                          title={`Likely the human behind recent AI-agent research — ${v.handoff_confidence} confidence. Correlated signal, not a certainty.`}
+                          title={`Likely the human behind recent AI-agent research. ${v.handoff_confidence} confidence. Correlated signal, not a certainty.`}
                         >
                           AI research
                         </span>
@@ -727,7 +727,7 @@ export default function VisitorsPage() {
                       {v.identity_level === "company" && (
                         <span
                           className="shrink-0 rounded bg-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-warning"
-                          title="Company-level guess: matched to this company via IP, then an employee was inferred. This is likely NOT the actual visitor — don't email them."
+                          title="Company-level guess: matched to this company via IP, then an employee was inferred. This is likely NOT the actual visitor, so don't email them."
                         >
                           Company-level
                         </span>

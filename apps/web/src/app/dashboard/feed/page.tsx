@@ -91,7 +91,7 @@ export default function FeedPage() {
       setGeneratingFor(null);
       const message =
         error.name === "AbortError"
-          ? "Reply generation took too long. The AI provider may be slow — please try again."
+          ? "Reply generation took too long. The AI provider may be slow. Please try again."
           : error.message || "Failed to generate draft.";
       setToast({ message, type: "error" });
     },
@@ -140,7 +140,7 @@ export default function FeedPage() {
       const message = noLongerPending
         ? "This draft is no longer available (already used, replaced, or expired). Generate a new reply to try again."
         : sendFailed
-          ? "Reply approved but couldn't be sent — reconnect your account in Social Accounts and try again."
+          ? "Reply approved but couldn't be sent. Reconnect your account in Social Accounts and try again."
           : rawMsg;
       setToast({ message, type: "error" });
     } finally {

@@ -195,7 +195,7 @@ function handoffCopy(visitor: VisitorDetail): string {
   const secs = visitor.handoff_delta_seconds ?? 0;
   const mins = Math.max(1, Math.round(secs / 60));
   return (
-    `${vendor} fetched this page about ${mins} min before this visit — ` +
+    `${vendor} fetched this page about ${mins} min before this visit. ` +
     `${visitor.handoff_confidence} confidence this human may be the person behind that AI research. ` +
     `Correlated signal, not a certainty.`
   );
@@ -500,7 +500,7 @@ export default function VisitorDetailPage() {
               {visitor.ai_source && (
                 <span
                   className="rounded-full bg-info-muted px-2.5 py-0.5 text-xs font-medium text-info"
-                  title={`Arrived via ${aiSourceLabel(visitor.ai_source)} — clicked an AI answer-engine citation`}
+                  title={`Arrived via ${aiSourceLabel(visitor.ai_source)}, from an AI answer-engine citation`}
                 >
                   via {aiSourceLabel(visitor.ai_source)}
                 </span>
@@ -508,7 +508,7 @@ export default function VisitorDetailPage() {
               {visitor.is_bot_suspect && (
                 <span
                   className="rounded-full bg-warning-muted px-2.5 py-0.5 text-xs font-medium text-warning"
-                  title="Bot-suspect — this visitor's visit schedule is unusually regular (cron-like) and their sessions are pageview-only, with no scrolling, clicks or dwell time. Visibility signal only: they stay fully contactable and fully counted."
+                  title="Bot-suspect: this visitor's visit schedule is unusually regular (cron-like) and their sessions are pageview-only, with no scrolling, clicks or dwell time. Visibility signal only: they stay fully contactable and fully counted."
                 >
                   Bot-suspect
                 </span>
@@ -516,9 +516,9 @@ export default function VisitorDetailPage() {
               {visitor.is_internal_suspect && (
                 <span
                   className="rounded-full bg-warning-muted px-2.5 py-0.5 text-xs font-medium text-warning"
-                  title="Unusually high activity — is this you? This visitor's traffic volume is a statistical outlier for this site. It's only a suggestion for you to review: nothing changes unless you confirm below. Until then they stay fully contactable and fully counted."
+                  title="Unusually high activity for this site. Is this you? This visitor's traffic volume is a statistical outlier. It's only a suggestion for you to review: nothing changes unless you confirm below. Until then they stay fully contactable and fully counted."
                 >
-                  Unusually high activity — is this you?
+                  Unusually high activity. Is this you?
                 </span>
               )}
               {visitor.handoff_vendor && visitor.handoff_confidence && (
@@ -611,7 +611,7 @@ export default function VisitorDetailPage() {
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
           <p>
             <span className="font-semibold">Company-level match.</span> This visitor&apos;s IP maps
-            to this company and an employee was inferred from it — likely{" "}
+            to this company and an employee was inferred from it, likely{" "}
             <span className="font-semibold">not</span> the actual person who visited. Treat as an
             account signal, not a verified contact; don&apos;t email this address.
           </p>
@@ -732,7 +732,7 @@ export default function VisitorDetailPage() {
                 </div>
               ) : posts.length === 0 ? (
                 <p className="text-xs italic text-muted-foreground">
-                  No recent posts pulled yet — sync the EasyEngage feed to load @
+                  No recent posts pulled yet. Sync the EasyEngage feed to load @
                   {visitor.twitter_handle}&apos;s posts.
                 </p>
               ) : (
@@ -813,7 +813,7 @@ export default function VisitorDetailPage() {
                 {confirmedProfiles.length > 0 && (
                   <div>
                     <p className="mb-1 text-xs font-semibold text-success">
-                      Verified ({confirmedProfiles.length}) — same person
+                      Verified ({confirmedProfiles.length}): same person
                     </p>
                     {confirmedProfiles.map(renderProfileRow)}
                   </div>
@@ -822,7 +822,7 @@ export default function VisitorDetailPage() {
                 {likelyProfiles.length > 0 && (
                   <div>
                     <p className="mb-1 text-xs font-semibold text-warning">
-                      Likely — unverified ({likelyProfiles.length})
+                      Likely, unverified ({likelyProfiles.length})
                     </p>
                     {likelyProfiles.map(renderProfileRow)}
                   </div>
@@ -883,7 +883,7 @@ export default function VisitorDetailPage() {
                         ? "You marked this visitor as your own team's traffic."
                         : visitor.internal_override === "not_internal"
                           ? "You marked this visitor as a real outside visitor."
-                          : "Unusually high activity for this site — is this you? A statistical outlier, not a confirmed identity. This is a suggestion for you to review: until you confirm, this visitor is counted and prioritised exactly like any other."}
+                          : "Unusually high activity for this site. Is this you? A statistical outlier, not a confirmed identity. This is a suggestion for you to review: until you confirm, this visitor is counted and prioritised exactly like any other."}
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {visitor.internal_override !== "internal" && (
@@ -903,7 +903,7 @@ export default function VisitorDetailPage() {
                           disabled={savingOverride}
                           onClick={() => handleInternalOverride("not_internal")}
                         >
-                          Not me — clear flag
+                          Not me, clear flag
                         </Button>
                       )}
                       {visitor.internal_override && (

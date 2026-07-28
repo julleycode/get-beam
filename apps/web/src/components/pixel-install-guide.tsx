@@ -259,12 +259,12 @@ export function PixelInstallGuide({
                 onChange={(e) => handleConsentChange(e.target.value as ConsentMode)}
               >
                 <option value="off">No banner (default)</option>
-                <option value="eu">Yes — EU/EEA visitors only (recommended)</option>
+                <option value="eu">Yes, EU/EEA visitors only (recommended)</option>
                 <option value="all">Show a banner to everyone</option>
                 <option value="cmp">I use my own consent tool (CMP)</option>
               </select>
               <p className="text-xs text-muted-foreground">
-                Beam builds the banner — no popup to code. You&apos;re still
+                Beam builds the banner, no popup to code. You&apos;re still
                 responsible for your privacy policy; this isn&apos;t legal advice.
               </p>
             </div>
@@ -291,7 +291,7 @@ export function PixelInstallGuide({
                 {promptCopied ? "Prompt copied ✓" : "Copy prompt to Claude"}
               </Button>
               <p className="text-xs text-muted-foreground">
-                Paste into Cursor, Claude Code, or any AI coding agent — it has
+                Paste into Cursor, Claude Code, or any AI coding agent. It has
                 the snippet plus the install steps for your site.
               </p>
             </div>

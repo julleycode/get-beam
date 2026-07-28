@@ -71,9 +71,9 @@ const SPARK = `<svg viewBox="0 0 100 64" xmlns="http://www.w3.org/2000/svg" aria
 // The scripted welcome, matching onboarding-steps.js §WELCOME copy but ending
 // in the add-site handoff instead of the demo.
 const LINES = [
-  { html: `<p class="lead">hey — i'm beam 👋</p>`, delay: 500 },
-  { html: `the stupidly easy way to know who's actually on your site, and engage them tastefully.` },
-  { html: `let's get your first site connected — takes about a minute. ready?` },
+  { html: `<p class="lead">hey, i'm beam 👋</p>`, delay: 500 },
+  { html: `the stupidly easy way to know who's on your site, and engage them tastefully.` },
+  { html: `let's get your first site connected. takes about a minute, ready?` },
 ];
 
 export function OnboardingWelcomeChat({

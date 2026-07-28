@@ -135,7 +135,7 @@ export function TrafficFitCard({ siteId, period, onPeriodChange }: { siteId: str
               <p className="mt-1">
                 Estimated share beam can put a name to. Person-level
                 identification is US-only, so this ≈ your US traffic share (
-                {pct(data.us_share)}) × the US match rate — non-US visitors
+                {pct(data.us_share)}) × the US match rate. Non-US visitors
                 won’t resolve no matter how long the pixel runs.
               </p>
             </InfoTooltip>

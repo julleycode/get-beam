@@ -22,7 +22,7 @@ const PLANS = [
     yearly: 0,
     limit: "10 identified visitors/mo",
     features: [
-      "See who they are — name, job, company",
+      "See who they are: name, job, company",
       "Their LinkedIn & Twitter profiles",
       "AI writes the reply for you",
       "Basic visitor analytics",
@@ -66,7 +66,7 @@ const PLANS = [
 const FAQ = [
   {
     q: "How does visitor identification work?",
-    a: "Beam uses a lightweight tracking pixel on your site. When a visitor matches our identity graph, we enrich their profile with LinkedIn, job title, company, and more — so you can follow up on their turf.",
+    a: "Beam uses a lightweight tracking pixel on your site. When a visitor matches our identity graph, we enrich their profile with LinkedIn, job title, company, and more, so you can follow up on their turf.",
   },
   {
     q: "What counts as an \"identified visitor\"?",
@@ -82,7 +82,7 @@ const FAQ = [
   },
   {
     q: "How do I cancel?",
-    a: "Cancel anytime — open your Beam billing page and click Manage, and we'll take you to Gumroad to cancel in a click. No lock-in, no cancellation fees. You keep access until the end of your billing period.",
+    a: "Cancel anytime. Open your Beam billing page and click Manage, and we'll take you to Gumroad to cancel in a click. No lock-in, no cancellation fees. You keep access until the end of your billing period.",
   },
 ];
 

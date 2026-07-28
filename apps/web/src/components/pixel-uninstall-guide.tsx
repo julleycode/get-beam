@@ -50,7 +50,7 @@ const REMOVAL_GUIDES: Record<string, RemovalGuide> = {
           "Shopify Admin → Apps → remove the Beam app. The ScriptTag is removed automatically.",
       },
     ],
-    note: "No code changes needed — removing the app deletes the pixel from every page.",
+    note: "No code changes needed. Removing the app deletes the pixel from every page.",
   },
   wordpress: {
     name: "WordPress",
@@ -148,7 +148,7 @@ export function PixelUninstallGuide({
       } else {
         setCheckResult({
           status: "still-present",
-          message: "Pixel still detected — try again after removing it from your site.",
+          message: "Pixel still detected. Try again after removing it from your site.",
         });
       }
     } catch {
@@ -230,7 +230,7 @@ export function PixelUninstallGuide({
                 {promptCopied ? "Prompt copied ✓" : "Copy prompt to Claude"}
               </Button>
               <p className="text-xs text-muted-foreground">
-                Paste it into Cursor, Claude Code, or any AI coding agent — it
+                Paste it into Cursor, Claude Code, or any AI coding agent. It
                 will find and delete the Beam script from your site.
               </p>
             </div>

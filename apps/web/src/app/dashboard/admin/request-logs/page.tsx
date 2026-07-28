@@ -285,7 +285,7 @@ export default function RequestLogsPage() {
         <p className="py-12 text-center text-sm text-muted-foreground">
           {stats?.enabled
             ? "No matching requests in this window."
-            : "Nothing recorded — capture is off."}
+            : "Nothing recorded. Capture is off."}
         </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border">

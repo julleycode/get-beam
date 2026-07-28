@@ -226,7 +226,7 @@ export default function OutcomesPage() {
         <EmptyState
           icon={Target}
           title="Pick a site"
-          description="Choose a site to see what your Beam campaigns actually convert."
+          description="Choose a site to see what your Beam campaigns convert."
         />
       ) : goalsLoading || reportLoading ? (
         <TableSkeleton cols={5} />
@@ -235,7 +235,7 @@ export default function OutcomesPage() {
           icon={Target}
           title="Prove what Beam converts"
           description={
-            'Define a conversion goal — like "visitor reached /thank-you" — and Beam ' +
+            'Define a conversion goal (like "visitor reached /thank-you") and Beam ' +
             "will report how many conversions each campaign drove. Your installed " +
             "pixel does the tracking; nothing new to add to your site."
           }
@@ -279,7 +279,7 @@ export default function OutcomesPage() {
               {(report?.campaigns ?? []).length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   No campaign activity in this period yet. Start a beam from the
-                  Campaigns page — clicks and conversions land here.
+                  Campaigns page. Clicks and conversions land here.
                 </p>
               ) : (
                 <Table>
@@ -392,7 +392,7 @@ export default function OutcomesPage() {
                 </TableBody>
               </Table>
               <p className="mt-3 text-xs text-muted-foreground">
-                Goals match the page URL your visitors land on — your installed Beam
+                Goals match the page URL your visitors land on. Your installed Beam
                 pixel does the tracking. Conversions without a recent campaign click
                 are counted as organic, so the attributed number stays honest.
               </p>
@@ -424,7 +424,7 @@ export default function OutcomesPage() {
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Works anywhere the Beam pixel is installed — no extra script.
+                  Works anywhere the Beam pixel is installed. No extra script.
                 </p>
               </CardContent>
             </Card>
@@ -603,8 +603,8 @@ export default function OutcomesPage() {
           <DialogHeader>
             <DialogTitle>Your webhook secret</DialogTitle>
             <DialogDescription>
-              Copy it now — for safety Beam stores it encrypted and can never show
-              it again. Sign every request body with HMAC-SHA256 using this secret.
+              Copy it now. Beam stores it encrypted and can never show it again.
+              Sign every request body with HMAC-SHA256 using this secret.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -637,7 +637,7 @@ export default function OutcomesPage() {
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => setRevealedSecret(null)}>Done — I copied it</Button>
+            <Button onClick={() => setRevealedSecret(null)}>Done, I copied it</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

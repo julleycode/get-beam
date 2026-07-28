@@ -87,7 +87,7 @@ export function CrmConnectPanel({
   useEffect(() => {
     const crm = searchParams.get("crm");
     if (crm === "connected") setMsg("CRM connected.");
-    else if (crm === "error") setMsg("Couldn't connect that CRM — please try again.");
+    else if (crm === "error") setMsg("Couldn't connect that CRM. Please try again.");
   }, [searchParams]);
 
   const connectionFor = (provider: CrmProvider) =>
@@ -161,9 +161,9 @@ export function CrmConnectPanel({
       const r = await api.pushSegmentToCrm(siteId, provider, pushSegment);
       setMsg(
         r.queued
-          ? "Push queued — running in the background."
+          ? "Push queued, running in the background."
           : `Pushed ${r.pushed}, failed ${r.failed}, skipped ${r.skipped}` +
-              (r.errors.length ? ` — ${r.errors[0]}` : "") +
+              (r.errors.length ? ` (${r.errors[0]})` : "") +
               "."
       );
       load();
@@ -199,7 +199,7 @@ export function CrmConnectPanel({
         <EmptyState
           icon={Plug}
           title="No CRM connected yet"
-          description="Connect a CRM below to push identified visitors straight into your pipeline — no CSV round-trips."
+          description="Connect a CRM below to push identified visitors straight into your pipeline, no CSV round-trips."
         />
       )}
 
@@ -276,7 +276,7 @@ export function CrmConnectPanel({
                   ? `${name} connected`
                   : ready
                     ? `Connect ${name}`
-                    : `${name} — coming soon`}
+                    : `${name} (coming soon)`}
               </Button>
             );
           })}

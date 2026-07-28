@@ -157,7 +157,7 @@ export default function AgentProfilePage() {
         // E6: the public agent surface shares the llms.txt / ai-plugin.json cache
         // header (s-maxage=3600, stale-while-revalidate=86400). Say so plainly
         // rather than letting a customer think a save didn't take.
-        "Saved. Your dashboard is up to date immediately — public agent-facing content is cached, so it can take up to ~24 hours to fully propagate everywhere."
+        "Saved. Your dashboard updates immediately. Public agent-facing content is cached, so changes can take up to ~24 hours to propagate everywhere."
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save. Try again.");
@@ -364,7 +364,7 @@ ${JSON.stringify(
             <CardHeader>
               <CardTitle>What agents may ask for</CardTitle>
               <CardDescription>
-                These are published as declarations only for now — an agent is
+                These are published as declarations only for now. An agent is
                 told what you support, and nothing is actioned automatically.
               </CardDescription>
             </CardHeader>

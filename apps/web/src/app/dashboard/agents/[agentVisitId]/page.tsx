@@ -93,7 +93,7 @@ export default function AgentDetailPage() {
       <div className="space-y-6">
         {backLink}
         <ErrorBanner
-          message={`Couldn't load agent — ${error instanceof Error ? error.message : "not found"}`}
+          message={`Couldn't load agent: ${error instanceof Error ? error.message : "not found"}`}
           onRetry={() => refetch()}
         />
       </div>

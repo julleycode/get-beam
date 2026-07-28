@@ -236,7 +236,7 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
         <p className="font-medium text-foreground">Cookie consent</p>
         <p className="text-xs text-muted-foreground">
           Show visitors a cookie banner before Beam collects data. Beam builds
-          the banner for you — no popup to code.
+          the banner for you, no popup to code.
         </p>
         <div className="flex flex-col gap-1.5">
           <label htmlFor="consent-mode" className="text-muted-foreground text-xs">
@@ -249,7 +249,7 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
             disabled={consentMut.isPending}
             onChange={(e) => consentMut.mutate(e.target.value as ConsentMode)}
           >
-            <option value="off">Off — no banner (default)</option>
+            <option value="off">Off, no banner (default)</option>
             <option value="eu">EU visitors only (recommended)</option>
             <option value="all">Everyone</option>
             <option value="cmp">Use my own consent tool (CMP)</option>
@@ -259,7 +259,7 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
           {site.consent_mode === "off" &&
             "No banner. Browser opt-out signals (GPC / Do-Not-Track) are still honored."}
           {site.consent_mode === "eu" &&
-            "EU/EEA visitors see an Accept/Decline banner and Beam waits for consent. Everyone else is unchanged — so your US match rate stays intact."}
+            "EU/EEA visitors see an Accept/Decline banner and Beam waits for consent. Everyone else is unchanged, so your US match rate stays intact."}
           {site.consent_mode === "all" &&
             "Every visitor sees the banner and Beam waits for consent before collecting anything."}
           {site.consent_mode === "cmp" &&
@@ -314,8 +314,8 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
           <div>
             <p className="font-medium text-foreground">Damp outlier traffic</p>
             <p className="text-xs text-muted-foreground">
-              Flags visitors with unusually high activity so you can review them
-              — for example your own team browsing the site. Flagging alone
+              Flags visitors with unusually high activity (for example your own
+              team browsing the site) so you can review them. Flagging alone
               changes nothing: only the ones you confirm are damped in your
               analytics and identity-resolution budget. Their data is always
               stored and they stay fully contactable either way.
@@ -357,7 +357,7 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
         <div>
           <p className="font-medium text-foreground">Remove pixel</p>
           <p className="text-xs text-muted-foreground">
-            A guide to take the snippet off your site — reinstall any time.
+            A guide to take the snippet off your site. Reinstall any time.
           </p>
         </div>
         <Button

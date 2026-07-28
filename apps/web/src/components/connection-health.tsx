@@ -42,13 +42,13 @@ const META: Record<
     label: "Expiring soon",
     chip: "bg-warning/15 text-warning",
     dot: "bg-warning",
-    hint: "This connection expires soon — reconnect to keep sending.",
+    hint: "This connection expires soon. Reconnect to keep sending.",
   },
   reconnect: {
     label: "Reconnect needed",
     chip: "bg-destructive/15 text-destructive",
     dot: "bg-destructive",
-    hint: "This connection expired — reconnect to keep sending.",
+    hint: "This connection expired. Reconnect to keep sending.",
   },
 };
 

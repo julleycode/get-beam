@@ -169,7 +169,7 @@ export default function CampaignDetailPage() {
         <>
           {outreachJob.dry_run && (
             <p className="font-medium text-warning">
-              Dry run — nothing was sent.
+              Dry run: nothing was sent.
             </p>
           )}
           <p>
@@ -189,7 +189,7 @@ export default function CampaignDetailPage() {
         <>
           {scheduleResult.dry_run ? (
             <p className="font-medium text-warning">
-              Dry run — nothing was scheduled.
+              Dry run: nothing was scheduled.
             </p>
           ) : (
             scheduleResult.campaign_id && (

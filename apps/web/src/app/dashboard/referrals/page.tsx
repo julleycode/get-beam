@@ -72,8 +72,8 @@ export default function ReferralsPage() {
                 <strong className="text-foreground">
                   both earn +{data.bonus_per_activation} identified
                   visitors/month
-                </strong>{" "}
-                — permanently, up to +{data.bonus_cap}.
+                </strong>
+                , permanently, up to +{data.bonus_cap}.
               </p>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <Input
@@ -117,7 +117,7 @@ export default function ReferralsPage() {
             <EmptyState
               icon={UserPlus}
               title="No referrals yet"
-              description="Share your link with other founders and growth folks — a referral from someone who ships is worth more than any ad."
+              description="Share your link with other founders and growth folks. A referral from someone who ships is worth more than any ad."
             />
           ) : (
             <Card>
@@ -164,7 +164,7 @@ export default function ReferralsPage() {
                 <li>
                   The moment their pixel records real traffic, you both get +
                   {data.bonus_per_activation} identified visitors/month for
-                  good. No cash, no coupons — just more Beam.
+                  good. No cash, no coupons, just more Beam.
                 </li>
               </ol>
             </CardContent>

@@ -18,7 +18,7 @@ const PROVIDERS = [
   {
     id: "openrouter",
     name: "OpenRouter",
-    description: "AI replies — 100+ models (Grok, Llama, GPT-4o-mini, etc.)",
+    description: "AI replies across 100+ models (Grok, Llama, GPT-4o-mini, etc.)",
     docsUrl: "https://openrouter.ai/keys",
     color: "text-primary",
   },
@@ -116,7 +116,7 @@ export function ApiKeysCard() {
       <CardContent className="space-y-4">
         {keysLoadError ? (
           <ErrorBanner
-            message={`Couldn't load API keys — ${keysLoadError}`}
+            message={`Couldn't load API keys: ${keysLoadError}`}
             onRetry={loadApiKeys}
           />
         ) : apiKeys.length > 0 ? (
@@ -165,7 +165,7 @@ export function ApiKeysCard() {
                 {PROVIDERS.filter((p) => !apiKeys.find((k) => k.provider === p.id)).map(
                   (p) => (
                     <option key={p.id} value={p.id}>
-                      {p.name} — {p.description}
+                      {p.name}: {p.description}
                     </option>
                   )
                 )}

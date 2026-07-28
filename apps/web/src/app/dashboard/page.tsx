@@ -79,7 +79,7 @@ function SiteCard({
       onDeleted(site.site_id);
     } catch (err) {
       setDeleteError(
-        err instanceof Error ? err.message : "Couldn't delete the site — try again."
+        err instanceof Error ? err.message : "Couldn't delete the site. Try again."
       );
       setDeleting(false);
     }
@@ -111,10 +111,10 @@ function SiteCard({
       const result = await api.verifyPixel(site.site_id);
       setPixelVerified(result.verified);
       if (!result.verified) {
-        setVerifyMessage(result.message || "Pixel not detected yet — check the install snippet in Settings.");
+        setVerifyMessage(result.message || "Pixel not detected yet. Check the install snippet in Settings.");
       }
     } catch (err) {
-      setVerifyMessage(err instanceof Error ? err.message : "Verification failed — try again.");
+      setVerifyMessage(err instanceof Error ? err.message : "Verification failed. Try again.");
     } finally {
       setVerifying(false);
     }
@@ -244,7 +244,7 @@ function SiteCard({
             <DialogTitle>Delete this site?</DialogTitle>
             <DialogDescription>
               This permanently deletes <span className="font-medium text-foreground">{site.name}</span>{" "}
-              and all of its data — every visitor, identity, segment, campaign, and event.
+              and all of its data: every visitor, identity, segment, campaign, and event.
               This can&apos;t be undone.
             </DialogDescription>
           </DialogHeader>
@@ -404,7 +404,7 @@ export default function DashboardPage() {
       />
       {error ? (
         <ErrorBanner
-          message={`Couldn't load your sites — ${error}`}
+          message={`Couldn't load your sites: ${error}`}
           onRetry={() => {
             setError(null);
             setRetryKey((k) => k + 1);

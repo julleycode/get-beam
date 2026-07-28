@@ -58,7 +58,7 @@ export function AskAi({ siteId }: { siteId?: string }) {
       const res = await api.askAI(trimmed, siteId);
       setAnswer(res.answer);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Something went wrong — try again.");
+      setError(e instanceof Error ? e.message : "Something went wrong. Try again.");
     } finally {
       setLoading(false);
     }

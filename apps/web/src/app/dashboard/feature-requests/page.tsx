@@ -119,7 +119,7 @@ export default function FeatureRequestsPage() {
         <div>
           <h1 className="text-2xl font-serif font-semibold tracking-tight">Feature Requests</h1>
           <p className="text-muted-foreground">
-            What people are asking for from the landing page — {total} total.
+            What people are asking for from the landing page ({total} total).
           </p>
         </div>
         <div className="flex items-center gap-2">

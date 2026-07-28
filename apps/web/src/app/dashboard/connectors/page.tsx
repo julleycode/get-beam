@@ -211,7 +211,7 @@ export default function ConnectorsPage() {
             <CardHeader>
               <CardTitle className="text-base">Known contacts</CardTitle>
               <CardDescription>
-                Upload a CSV of people you already know — existing customers, prior
+                Upload a CSV of people you already know: existing customers, prior
                 leads, or a CRM export. Beam flags matching visitors as “Known” so
                 you can filter them out of net-new targeting. Emails are stored
                 hashed; we never keep your plaintext list.

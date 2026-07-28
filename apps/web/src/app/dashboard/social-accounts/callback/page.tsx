@@ -28,12 +28,12 @@ function CallbackContent() {
           </p>
           {postReady === "true" && (
             <p className="text-sm font-medium text-green-600">
-              ✓ Ready to post — this account can send replies.
+              ✓ Ready to post. This account can send replies.
             </p>
           )}
           {postReady === "false" && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-left text-sm text-amber-800">
-              Connected, but this account can&apos;t post yet — its app
+              Connected, but this account can&apos;t post yet. Its app
               permissions look read-only. Check the {platform} app&apos;s write
               access, then reconnect.
             </div>

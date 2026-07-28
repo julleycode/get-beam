@@ -166,8 +166,8 @@ export function LinkedInConnectWizard({
               you&apos;re using a different browser.
             </p>
             <p className="text-sm text-muted-foreground">
-              You can still set LinkedIn up here — use the manual option instead.
-              It takes about a minute.
+              You can still set LinkedIn up here. Use the manual option instead,
+              it takes about a minute.
             </p>
             <Button type="button" variant="outline" onClick={showManualForm}>
               Use the manual option
@@ -219,7 +219,7 @@ export function LinkedInConnectWizard({
             <p className="text-xs text-muted-foreground">
               &quot;Get the add-on&quot; opens the Chrome Web Store in a new tab.
               Once it&apos;s added, come back here and click &quot;I&apos;ve
-              installed it&quot; — that refreshes this page so Beam can see it.
+              installed it&quot; to refresh this page so Beam can see it.
             </p>
             <button
               type="button"
@@ -235,7 +235,7 @@ export function LinkedInConnectWizard({
         {currentStepIndex === WIZARD_STEP_SIGNIN && (
           <div className="space-y-3" data-testid="wizard-step-signin">
             <p className="text-sm text-foreground">
-              Sign in to LinkedIn, then come back to this tab — we&apos;ll pick
+              Sign in to LinkedIn, then come back to this tab. We&apos;ll pick
               up right where you left off.
             </p>
             <Button
@@ -282,7 +282,7 @@ export function LinkedInConnectWizard({
             ) : (
               <>
                 <p className="text-sm text-foreground">
-                  You&apos;re all set — {alreadyConnected ? "refresh" : "finish"}{" "}
+                  You&apos;re all set. {alreadyConnected ? "Refresh" : "Finish"}{" "}
                   the connection and Beam can start sending LinkedIn steps for
                   your campaigns.
                 </p>

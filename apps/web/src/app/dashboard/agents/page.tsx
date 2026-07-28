@@ -275,7 +275,7 @@ export default function AgentsPage() {
         <TableSkeleton cols={5} rows={10} />
       ) : isError ? (
         <ErrorBanner
-          message={`Couldn't load agents — ${error instanceof Error ? error.message : "unknown error"}`}
+          message={`Couldn't load agents: ${error instanceof Error ? error.message : "unknown error"}`}
           onRetry={() => refetch()}
         />
       ) : (
@@ -287,7 +287,7 @@ export default function AgentsPage() {
             <EmptyState
               icon={Bot}
               title="No agent visits yet"
-              description="When AI agents (crawlers, assistants) hit your site, they'll show up here — kept separate from your human visitors."
+              description="When AI agents (crawlers, assistants) hit your site, they show up here, kept separate from your human visitors."
             />
           ) : (
             <Table>

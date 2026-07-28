@@ -14,7 +14,7 @@ function decodeTag(raw: string): string {
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const tag = decodeTag(params.tag);
   const title = `Posts tagged “${tag}”`;
-  const description = `Beam blog articles about ${tag} — visitor identification, retargeting, and turning anonymous traffic into pipeline.`;
+  const description = `Beam blog articles about ${tag}: visitor identification, retargeting, and turning anonymous traffic into pipeline.`;
   return {
     title,
     description,

@@ -218,7 +218,7 @@ export function TodayActions({ sites }: { sites: Site[] }) {
                   type="button"
                   onClick={() => ignore(a.key)}
                   aria-label="Ignore this"
-                  title="Ignore — don't show again"
+                  title="Ignore, won't show again"
                   className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
                 >
                   <X className="h-3 w-3" />

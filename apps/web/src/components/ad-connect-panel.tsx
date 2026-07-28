@@ -91,7 +91,7 @@ export function AdConnectPanel({
     const ads = searchParams.get("ads");
     if (ads === "connected") setMsg("Ad account connected.");
     else if (ads === "error")
-      setMsg("Couldn't connect that ad account — please try again.");
+      setMsg("Couldn't connect that ad account. Please try again.");
   }, [searchParams]);
 
   const connectionFor = (provider: AdProvider) =>
@@ -160,14 +160,14 @@ export function AdConnectPanel({
         : r.below_minimum
           ? ` This audience is below the ~${(
               r.minimum_threshold || MIN_AUDIENCE_SIZE
-            ).toLocaleString()} matched contacts ad platforms typically need for reliable targeting — the push still went through.`
+            ).toLocaleString()} matched contacts ad platforms typically need for reliable targeting, but the push still went through.`
           : "";
       setMsg(
         r.queued
-          ? "Push queued — running in the background."
+          ? "Push queued, running in the background."
           : `Pushed ${r.pushed}, failed ${r.failed}, skipped ${r.skipped}.` +
               sizeNote +
-              (r.errors.length ? ` — ${r.errors[0]}` : "")
+              (r.errors.length ? ` (${r.errors[0]})` : "")
       );
       load();
     } catch (err) {
@@ -200,7 +200,7 @@ export function AdConnectPanel({
         <EmptyState
           icon={Megaphone}
           title="No ad account connected yet"
-          description="Connect an ad account below to push a segment straight into a custom audience — no CSV round-trips. Only hashed identifiers ever leave Beam."
+          description="Connect an ad account below to push a segment straight into a custom audience, no CSV round-trips. Only hashed identifiers ever leave Beam."
         />
       )}
 
@@ -275,7 +275,7 @@ export function AdConnectPanel({
                   ? `${name} connected`
                   : ready
                     ? `Connect ${name}`
-                    : `${name} — coming soon`}
+                    : `${name} (coming soon)`}
               </Button>
             );
           })}
@@ -304,7 +304,7 @@ export function AdConnectPanel({
           {selectedSegmentSmall && (
             <p className="text-sm text-amber-600" role="alert" data-testid="ads-pre-push-warning">
               Heads up: this segment has about{" "}
-              {selectedSegmentSmall.visitor_count.toLocaleString()} visitors —
+              {selectedSegmentSmall.visitor_count.toLocaleString()} visitors,
               below the ~{MIN_AUDIENCE_SIZE.toLocaleString()} that ad platforms
               usually need for reliable targeting, and the matched count after
               filtering will be lower still. You can push anyway, or cancel and

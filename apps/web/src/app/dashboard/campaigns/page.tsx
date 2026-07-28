@@ -132,7 +132,7 @@ export default function CampaignsPage() {
         if (s.skipped_suppressed) parts.push(`${s.skipped_suppressed} unsubscribed/bounced skipped`);
         if (s.skipped_already_sent) parts.push(`${s.skipped_already_sent} already sent`);
         if (s.skipped_no_email) parts.push(`${s.skipped_no_email} without email`);
-        if (s.throttled) parts.push(`${s.throttled} deferred by hourly cap — send again later`);
+        if (s.throttled) parts.push(`${s.throttled} deferred by hourly cap (send again later)`);
         if (s.failed) parts.push(`${s.failed} failed`);
         setSendResult(`"${campaignName}": ${parts.join(", ")} (audience ${s.total_audience}).`);
       } else {
@@ -319,7 +319,7 @@ export default function CampaignsPage() {
             <DialogTitle>Start &ldquo;{confirmCampaign?.name}&rdquo;?</DialogTitle>
             <DialogDescription>
               {confirmCampaign?.isEmail
-                ? "This approves the campaign and sends real emails to its audience now. Unsubscribed and bounced contacts are skipped automatically."
+                ? "This approves the campaign and sends real emails to its audience now. Unsubscribed and bounced contacts are skipped."
                 : "This approves and activates the campaign."}
             </DialogDescription>
           </DialogHeader>
@@ -406,8 +406,8 @@ export default function CampaignsPage() {
             <DialogTitle>Delete &ldquo;{confirmDelete?.name}&rdquo;?</DialogTitle>
             <DialogDescription>
               This permanently deletes the campaign and its send/open/click
-              history. This cannot be undone. To keep it out of the way without
-              losing data, use Archive instead.
+              history and cannot be undone. To keep it without losing data, use
+              Archive instead.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

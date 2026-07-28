@@ -251,7 +251,7 @@ export function DraftPicker({
           disabled={loading}
           className="text-xs px-3 py-1.5 rounded-md border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
         >
-          Reject All — Write My Own
+          Reject All & Write My Own
         </button>
       </div>
     </div>

@@ -144,7 +144,7 @@ export function KpiStrip({ siteId, period, onPeriodChange }: { siteId: string; p
         {view === "graph" ? (
           seriesError ? (
             <p className="py-8 text-center text-xs text-destructive">
-              Couldn&apos;t load the chart — try again.
+              Couldn&apos;t load the chart. Try again.
             </p>
           ) : seriesLoading && !series ? (
             <p className="py-8 text-center text-xs text-muted-foreground">Loading…</p>

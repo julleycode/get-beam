@@ -96,7 +96,7 @@ export default function FeatureBoardPage() {
         </Button>
       </div>
       <p className="text-sm text-muted-foreground mb-6">
-        Upvote what you need most — the top of this board ships first.
+        Upvote what you need most. The top of this board ships first.
       </p>
 
       {showForm && (
@@ -114,7 +114,7 @@ export default function FeatureBoardPage() {
               onChange={(e) => setDetail(e.target.value)}
               maxLength={2000}
               rows={3}
-              placeholder="Any details — what problem does it solve? (optional)"
+              placeholder="Any details? What problem does it solve? (optional)"
               className="w-full rounded-md border border-[rgba(43,37,48,0.12)] bg-background px-3 py-2 text-sm"
             />
             <div className="flex items-center gap-2 text-sm">
@@ -148,12 +148,12 @@ export default function FeatureBoardPage() {
         <ListCardSkeleton rows={4} leading />
       ) : isError ? (
         <ErrorBanner
-          message={`Couldn't load the board — ${error?.message ?? "request failed"}`}
+          message={`Couldn't load the board: ${error?.message ?? "request failed"}`}
           onRetry={() => refetch()}
         />
       ) : !data || data.items.length === 0 ? (
         <p className="text-muted-foreground">
-          Nothing here yet — request the first feature.
+          Nothing here yet. Request the first feature.
         </p>
       ) : (
         <div className="space-y-3">
