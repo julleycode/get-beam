@@ -44,6 +44,39 @@ function intentColor(score: number): string {
   return "text-muted-foreground";
 }
 
+// A calm on/off toggle for the toolbar: always an outline button, state shown
+// by a leading status dot (green = on) rather than a loud filled fill. Keeps
+// the two automation toggles visible without them shouting over the filters.
+function ToggleChip({
+  label,
+  on,
+  pending,
+  onToggle,
+  title,
+}: {
+  label: string;
+  on: boolean;
+  pending: boolean;
+  onToggle: () => void;
+  title: string;
+}) {
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={pending}
+      onClick={onToggle}
+      title={title}
+      aria-pressed={on}
+    >
+      <span
+        className={`mr-1.5 h-2 w-2 rounded-full ${on ? "bg-success" : "bg-muted-foreground/40"}`}
+      />
+      {label}
+    </Button>
+  );
+}
+
 // "YYYY-MM-DD" → next calendar day, computed in UTC so a +07 browser tz can't
 // shift the date. Used to make the date range's upper bound inclusive of the
 // chosen end day (backend filters first/last_seen < this value).
@@ -285,6 +318,18 @@ export default function VisitorsPage() {
     onSettled: refreshRows,
   });
 
+  const autoMut = useMutation({
+    mutationFn: (enabled: boolean) => api.setAutoIdentify(siteId, enabled),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["site", siteId] }),
+  });
+
+  const hotMut = useMutation({
+    mutationFn: (enabled: boolean) => api.setHotAlert(siteId, enabled),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["site", siteId] }),
+  });
+
   useEffect(() => {
     if (!siteId) {
       setAutoPromptSeenForSite(null);
@@ -391,6 +436,24 @@ export default function VisitorsPage() {
                   Outcomes
                 </Link>
               </Button>
+            )}
+            {siteId && site && (
+              <ToggleChip
+                label="Auto-identify"
+                on={!!site.auto_identify_enabled}
+                pending={autoMut.isPending}
+                onToggle={() => autoMut.mutate(!site.auto_identify_enabled)}
+                title="On = tự động nhận diện khách intent cao. Off = bấm Identify từng người."
+              />
+            )}
+            {siteId && site && (
+              <ToggleChip
+                label="Hot alerts"
+                on={!!site.hot_alert_enabled}
+                pending={hotMut.isPending}
+                onToggle={() => hotMut.mutate(!site.hot_alert_enabled)}
+                title="On = email báo ngay khi có khách US intent cao được nhận diện."
+              />
             )}
             <Select value={filter} onValueChange={(v) => { setFilter(v); setPage(1); }}>
               <SelectTrigger className="w-[140px]">

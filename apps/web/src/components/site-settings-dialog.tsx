@@ -94,14 +94,6 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
       queryClient.invalidateQueries({ queryKey: ["snippet", siteId] });
     },
   });
-  const autoMut = useMutation({
-    mutationFn: (enabled: boolean) => api.setAutoIdentify(siteId, enabled),
-    onSettled: invalidateSite,
-  });
-  const hotMut = useMutation({
-    mutationFn: (enabled: boolean) => api.setHotAlert(siteId, enabled),
-    onSettled: invalidateSite,
-  });
   const pauseMut = useMutation({
     mutationFn: (enabled: boolean) => api.updateSite(siteId, { tracking_enabled: enabled }),
     onSettled: invalidateSite,
@@ -214,66 +206,6 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
             {verifyResult.message}
           </p>
         )}
-      </section>
-
-      <Separator />
-
-      {/* Automation */}
-      <section className="space-y-4">
-        <p className="font-medium text-foreground">Automation</p>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-foreground">Auto-identify</p>
-            <p className="text-xs text-muted-foreground">
-              Automatically identify high-intent visitors. Off = you click
-              Identify on each one.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <StatusBadge
-              status={site.auto_identify_enabled ? "active" : "paused"}
-              label={site.auto_identify_enabled ? "On" : "Off"}
-            />
-            <Button
-              variant={site.auto_identify_enabled ? "outline" : "default"}
-              size="sm"
-              onClick={() => autoMut.mutate(!site.auto_identify_enabled)}
-              disabled={autoMut.isPending}
-            >
-              {autoMut.isPending
-                ? "Saving…"
-                : site.auto_identify_enabled
-                  ? "Turn off"
-                  : "Turn on"}
-            </Button>
-          </div>
-        </div>
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-foreground">Hot alerts</p>
-            <p className="text-xs text-muted-foreground">
-              Email you the moment a high-intent US visitor is identified.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <StatusBadge
-              status={site.hot_alert_enabled ? "active" : "paused"}
-              label={site.hot_alert_enabled ? "On" : "Off"}
-            />
-            <Button
-              variant={site.hot_alert_enabled ? "outline" : "default"}
-              size="sm"
-              onClick={() => hotMut.mutate(!site.hot_alert_enabled)}
-              disabled={hotMut.isPending}
-            >
-              {hotMut.isPending
-                ? "Saving…"
-                : site.hot_alert_enabled
-                  ? "Turn off"
-                  : "Turn on"}
-            </Button>
-          </div>
-        </div>
       </section>
 
       <Separator />
