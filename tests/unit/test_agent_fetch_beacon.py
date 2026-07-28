@@ -1,7 +1,8 @@
 """Unit tests for Handoff Detection H5 — server-side AI-fetch capture beacon.
 
 Covers (all DB mocked — no live Postgres):
-- record_fetch_beacon classify gating (on-demand writes both; index/junk → noop)
+- record_fetch_beacon classify gating (allowlisted UA writes both rows with the
+  right tier; junk UA → noop)
 - multi-tenancy (unknown site_id → noop, never 403)
 - token → mint-timestamp decode passed as event_time (invalid → None)
 - persist_agent_fetch_event event_time → created_at (E1)
@@ -81,15 +82,38 @@ async def test_on_demand_writes_both_rows(monkeypatch):
 
 
 @pytest.mark.unit
-async def test_index_crawler_noop(monkeypatch):
-    """AC-H5-2: index-tier crawler (gptbot) → noop, nothing persisted."""
+async def test_index_crawler_is_recorded_as_index_tier(monkeypatch):
+    """Index-tier crawler (gptbot) is persisted, tagged index — crawlers run no
+    JS so the pixel never sees them, and the tier column (not a dropped row) is
+    what keeps them out of the handoff correlation sweep."""
     calls = _capture_persist(monkeypatch)
     db = _mock_db(site_found=True)
     result = await afb.record_fetch_beacon(
         db, FetchBeaconIn(site_id="site_1", user_agent=GPTBOT_UA, path="/pricing", token=None)
     )
-    assert result == "noop"
-    assert calls == {}
+    assert result == "written"
+    assert calls["visit"]["vendor"] == "openai"
+    assert calls["event"]["tier"] == "index"
+
+
+@pytest.mark.unit
+async def test_searchbot_is_index_tier_not_on_demand(monkeypatch):
+    """OAI-SearchBot is a search-indexing crawler per OpenAI's own docs, so it
+    must never be tagged on-demand — an on-demand tag would let the correlation
+    sweep invent a human-behind-the-agent link from crawler traffic."""
+    calls = _capture_persist(monkeypatch)
+    db = _mock_db(site_found=True)
+    result = await afb.record_fetch_beacon(
+        db,
+        FetchBeaconIn(
+            site_id="site_1",
+            user_agent="Mozilla/5.0 (compatible; OAI-SearchBot/1.0; +https://openai.com/searchbot)",
+            path="/pricing",
+            token=None,
+        ),
+    )
+    assert result == "written"
+    assert calls["event"]["tier"] == "index"
 
 
 @pytest.mark.unit
@@ -105,8 +129,8 @@ async def test_junk_ua_noop(monkeypatch):
 
 
 @pytest.mark.unit
-async def test_google_index_tier_noop(monkeypatch):
-    """H5/E5: the conservative google vendor is INDEX-tier → noop (never mislabeled on-demand)."""
+async def test_google_is_index_tier(monkeypatch):
+    """H5/E5: the conservative google vendor stays INDEX-tier (never mislabeled on-demand)."""
     calls = _capture_persist(monkeypatch)
     db = _mock_db(site_found=True)
     result = await afb.record_fetch_beacon(
@@ -115,8 +139,8 @@ async def test_google_index_tier_noop(monkeypatch):
             site_id="site_1", user_agent="Google-CloudVertexBot/1.0", path="/pricing", token=None
         ),
     )
-    assert result == "noop"
-    assert calls == {}
+    assert result == "written"
+    assert calls["event"]["tier"] == "index"
 
 
 @pytest.mark.unit

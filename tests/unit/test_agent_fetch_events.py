@@ -28,10 +28,13 @@ from apps.api.services.agent_visit_persistence import persist_agent_fetch_event
 # Locked tier map (mirror of the plan's LOCKED Decisions table). The
 # completeness test asserts this is exactly the union of _VENDOR_TOKENS.
 _EXPECTED_ON_DEMAND = {
-    "chatgpt-user", "oai-searchbot", "claude-user", "claude-searchbot", "perplexity-user",
+    "chatgpt-user", "claude-user", "perplexity-user",
 }
 _EXPECTED_INDEX = {
     "gptbot", "claudebot", "anthropic-ai", "perplexitybot", "bytespider",
+    # Both vendors document these as search-indexing crawlers, not per-query
+    # live fetches, so they must never carry a human-intent signal.
+    "oai-searchbot", "claude-searchbot",
     # H5 (D-A): google/Gemini added conservatively as INDEX-tier — the real
     # on-demand fetch UA is unverified (KG-3), so it must never be on-demand.
     "google-cloudvertexbot",

@@ -51,11 +51,15 @@ VERIFICATION_METHODS: tuple[str, ...] = ("ua-only", "ip-verified", "rdns-verifie
 # Conservative asymmetry: only tokens KNOWN to be user-driven live fetches are
 # on-demand; the default (else-branch) is "index". Mislabeling a crawler as
 # on-demand would fabricate a human-intent signal, so the safe default is index.
-# Notably ``claude-searchbot`` is on-demand (Anthropic's live user-query fetch,
-# analogous to oai-searchbot/perplexity-user) while ``anthropic-ai`` — a distinct
-# token in the same "anthropic" vendor set — is the crawler/index token.
+#
+# The three ``*-user`` tokens are the only per-query fetches their vendors
+# document. The ``*-searchbot`` tokens are NOT: OpenAI describes OAI-SearchBot as
+# "used to surface websites in search results in ChatGPT's search features" — an
+# automatic crawler, not a live fetch — and Anthropic describes Claude-SearchBot
+# as crawling to build an indexed corpus for search. Both are index-tier.
+# ``anthropic-ai`` is the crawler token of the same "anthropic" vendor set.
 _ON_DEMAND_TOKENS: frozenset[str] = frozenset({
-    "chatgpt-user", "oai-searchbot", "claude-user", "claude-searchbot", "perplexity-user",
+    "chatgpt-user", "claude-user", "perplexity-user",
 })
 
 
