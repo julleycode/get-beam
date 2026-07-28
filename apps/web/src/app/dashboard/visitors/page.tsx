@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { aiSourceLabel } from "@/lib/ai-sources";
-import { SlidersHorizontal, SearchX, Target } from "lucide-react";
+import { SlidersHorizontal, SearchX, Target, ChevronDown } from "lucide-react";
 import { TableSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { EmptyState } from "@/components/empty-state";
@@ -115,6 +115,8 @@ export default function VisitorsPage() {
   // "all" | "__any__" | a concrete ai_source label — AI-referral Source facet.
   // Attribution-only; never affects emailability.
   const [source, setSource] = useState("all");
+  // Filters panel starts collapsed to keep the page calm; opens on demand.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // Shared Last 30 days / Lifetime window: drives the insight widgets AND the
   // visitor list below. A view window, not a filter chip — it's deliberately
   // excluded from hasFilters / clearFilters.
@@ -221,13 +223,15 @@ export default function VisitorsPage() {
     return list;
   })();
 
-  const hasFilters =
-    filter !== "all" ||
-    country !== "all" ||
-    visitorType !== "all" ||
-    knownFilter !== "all" ||
-    source !== "all" ||
-    !!(firstFrom || firstTo || lastFrom || lastTo);
+  const activeFilterCount =
+    (filter !== "all" ? 1 : 0) +
+    (country !== "all" ? 1 : 0) +
+    (visitorType !== "all" ? 1 : 0) +
+    (knownFilter !== "all" ? 1 : 0) +
+    (source !== "all" ? 1 : 0) +
+    (firstFrom || firstTo ? 1 : 0) +
+    (lastFrom || lastTo ? 1 : 0);
+  const hasFilters = activeFilterCount > 0;
 
   function clearFilters() {
     setFilter("all");
@@ -493,11 +497,26 @@ export default function VisitorsPage() {
       )}
 
       {siteId && (
-        <div className="mb-4 flex flex-wrap items-end gap-4 rounded-lg border bg-muted/30 p-3">
-          <div className="flex w-full items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="mb-4 rounded-lg border bg-muted/30">
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((o) => !o)}
+            aria-expanded={filtersOpen}
+            className="flex w-full items-center gap-2 px-3 py-2.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+          >
             <SlidersHorizontal className="h-3.5 w-3.5" />
             Filters
-          </div>
+            {activeFilterCount > 0 && (
+              <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium normal-case text-primary">
+                {activeFilterCount} active
+              </span>
+            )}
+            <ChevronDown
+              className={`ml-auto h-4 w-4 transition-transform ${filtersOpen ? "rotate-180" : ""}`}
+            />
+          </button>
+          {filtersOpen && (
+            <div className="flex flex-wrap items-end gap-4 border-t p-3">
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-muted-foreground">First seen</label>
             <div className="flex items-center gap-1">
@@ -622,6 +641,8 @@ export default function VisitorsPage() {
           {dateWarning && (
             <p className="w-full text-xs font-medium text-warning">{dateWarning}</p>
           )}
+            </div>
+          )}
         </div>
       )}
 
@@ -660,6 +681,7 @@ export default function VisitorsPage() {
               }
             />
           ) : (
+          <div className="overflow-hidden rounded-lg border bg-card">
           <Table>
             <TableHeader>
               <TableRow>
@@ -789,6 +811,7 @@ export default function VisitorsPage() {
               ))}
             </TableBody>
           </Table>
+          </div>
           )}
 
           {total > 50 && (
