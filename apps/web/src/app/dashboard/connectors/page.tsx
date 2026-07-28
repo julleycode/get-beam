@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { api, Segment } from "@/lib/api";
 import { SiteSelector } from "@/components/site-selector";
 import { PageHeader } from "@/components/page-header";
+import { ConnectorsHelp } from "@/components/page-help";
 import { CrmConnectPanel } from "@/components/crm-connect-panel";
 import { AdConnectPanel } from "@/components/ad-connect-panel";
 import { Button } from "@/components/ui/button";
@@ -127,6 +128,7 @@ export default function ConnectorsPage() {
     <div className="max-w-lg space-y-6">
       <PageHeader
         title="Connectors"
+        info={<ConnectorsHelp />}
         actions={<SiteSelector value={siteId} onChange={setSiteId} />}
       />
 

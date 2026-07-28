@@ -21,6 +21,7 @@ const FLAG_PREFIX = "beam_tab_intro_v1_";
 const ROUTE_STEP: Record<string, string> = {
   "/dashboard": "overview",
   "/dashboard/visitors": "visitors",
+  "/dashboard/agents": "agents",
   "/dashboard/segments": "segments",
   "/dashboard/campaigns": "campaigns",
   "/dashboard/connectors": "connectors",

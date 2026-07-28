@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { FileText } from "lucide-react";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { DraftsHelp } from "@/components/page-help";
 import { api, type DraftStatus } from "@/lib/api";
 import { ListCardSkeleton } from "@/components/skeletons";
 import { DraftCard } from "@/components/draft-card";
@@ -63,7 +65,12 @@ export default function DraftsPage() {
 
   return (
     <div className="max-w-3xl space-y-4">
-      <h1 className="text-2xl font-serif font-semibold tracking-tight">Drafts</h1>
+      <h1 className="flex items-center gap-1.5 text-2xl font-serif font-semibold tracking-tight">
+        Drafts
+        <InfoTooltip label="About Drafts" align="start">
+          <DraftsHelp />
+        </InfoTooltip>
+      </h1>
 
       <Tabs
         value={tab ?? "all"}

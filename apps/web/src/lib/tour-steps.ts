@@ -35,6 +35,12 @@ export const TOUR_STEPS: TourStep[] = [
     body: "Every captured visitor with an intent score. Identify and enrich high-intent people here.",
   },
   {
+    id: "agents",
+    target: "agents",
+    title: "Agents — AI crawlers on your site",
+    body: "Visits from AI agents like GPTBot, ClaudeBot and PerplexityBot — tracked separately from human visitors, never as a contactable lead.",
+  },
+  {
     id: "segments",
     target: "segments",
     title: "Segments — group your audience",

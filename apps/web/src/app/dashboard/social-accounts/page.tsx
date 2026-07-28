@@ -3,6 +3,8 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { SocialAccountsHelp } from "@/components/page-help";
 import { api, type Platform } from "@/lib/api";
 import { LinkedInConnectWizard } from "@/components/linkedin-connect-wizard";
 import { LinkedInTosWarning } from "@/components/linkedin-tos-warning";
@@ -122,7 +124,12 @@ function SocialAccountsPageInner() {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <h1 className="text-2xl font-serif font-semibold tracking-tight">Connected Accounts</h1>
+      <h1 className="flex items-center gap-1.5 text-2xl font-serif font-semibold tracking-tight">
+        Connected Accounts
+        <InfoTooltip label="About Connected Accounts" align="start">
+          <SocialAccountsHelp />
+        </InfoTooltip>
+      </h1>
 
       {isLoading ? (
         <ListCardSkeleton rows={3} leading />

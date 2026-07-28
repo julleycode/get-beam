@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Rss } from "lucide-react";
+import { InfoTooltip } from "@/components/ui/info-tooltip";
+import { FeedHelp } from "@/components/page-help";
 import { api, type Platform, type GenerateMultiDraftResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ListCardSkeleton } from "@/components/skeletons";
@@ -258,7 +260,12 @@ export default function FeedPage() {
       )}
 
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-serif font-semibold tracking-tight">Feed</h1>
+        <h1 className="flex items-center gap-1.5 text-2xl font-serif font-semibold tracking-tight">
+          Feed
+          <InfoTooltip label="About Feed" align="start">
+            <FeedHelp />
+          </InfoTooltip>
+        </h1>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => setShowImport(!showImport)}>
             + Import Post

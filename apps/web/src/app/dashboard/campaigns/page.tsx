@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import { TableSkeleton } from "@/components/skeletons";
 import { SiteSelector } from "@/components/site-selector";
 import { PageHeader } from "@/components/page-header";
+import { CampaignsHelp } from "@/components/page-help";
 import { GmailSenderBanner } from "@/components/gmail-sender-banner";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -174,6 +175,7 @@ export default function CampaignsPage() {
     <div>
       <PageHeader
         title="Campaigns"
+        info={<CampaignsHelp />}
         actions={<SiteSelector value={siteId} onChange={setSiteId} />}
       />
 

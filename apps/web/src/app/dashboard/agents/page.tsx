@@ -11,6 +11,7 @@ import { ErrorBanner } from "@/components/error-banner";
 import { EmptyState } from "@/components/empty-state";
 import { SiteSelector } from "@/components/site-selector";
 import { PageHeader } from "@/components/page-header";
+import { AgentsHelp } from "@/components/page-help";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import {
@@ -239,6 +240,7 @@ export default function AgentsPage() {
     <div>
       <PageHeader
         title="Agents"
+        info={<AgentsHelp />}
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <SiteSelector value={siteId} onChange={handleSiteChange} />

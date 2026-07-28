@@ -14,6 +14,7 @@ import { SiteSelector } from "@/components/site-selector";
 import { VisitorWidgets } from "@/components/visitor-widgets";
 import { type Period } from "@/components/ui/period-toggle";
 import { PageHeader } from "@/components/page-header";
+import { VisitorsHelp } from "@/components/page-help";
 import { UsageWarningBanner } from "@/components/usage-warning-banner";
 import { UpgradeModal } from "@/components/upgrade-modal";
 import { useBillingStatus } from "@/lib/use-billing";
@@ -391,6 +392,7 @@ export default function VisitorsPage() {
     <div>
       <PageHeader
         title="Visitors"
+        info={<VisitorsHelp />}
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <SiteSelector value={siteId} onChange={handleSiteChange} />

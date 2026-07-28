@@ -9,6 +9,7 @@ import { CardGridSkeleton } from "@/components/skeletons";
 import { ErrorBanner } from "@/components/error-banner";
 import { SiteSelector } from "@/components/site-selector";
 import { PageHeader } from "@/components/page-header";
+import { SegmentsHelp } from "@/components/page-help";
 import { EmptyState } from "@/components/empty-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -88,6 +89,7 @@ export default function SegmentsPage() {
     <div>
       <PageHeader
         title="Segments"
+        info={<SegmentsHelp />}
         actions={
           <>
             <SiteSelector value={siteId} onChange={setSiteId} />
