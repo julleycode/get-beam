@@ -170,7 +170,9 @@ class ApiClient {
       if (!this.clerkToken) {
         this.clearToken();
         if (typeof window !== "undefined") {
-          window.location.href = "/sign-in";
+          // No Clerk key → local JWT login at /login; otherwise Clerk /sign-in.
+          const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+          window.location.href = hasClerk ? "/sign-in" : "/login";
         }
       }
       throw new Error("Unauthorized");

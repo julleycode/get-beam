@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { SignUp } from "@clerk/nextjs";
 import { Gift } from "lucide-react";
 import { api } from "@/lib/api";
 
 // Rendering <SignUp> without a ClerkProvider (publishable key missing) throws
-// at render and white-screens signup — same failure mode as the past
-// NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY outage. Guard like layout.tsx.
+// at render. Without Clerk, local JWT signup lives at /signup.
 const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 // Read by dashboard/layout.tsx after first sign-in to claim the referral.
@@ -21,9 +21,14 @@ const REFERRAL_CODE_KEY = "beam_ref";
 const INVITE_TOKEN_KEY = "beam_invite";
 
 export default function SignUpPage() {
+  const router = useRouter();
   const [referrerName, setReferrerName] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!HAS_CLERK) {
+      router.replace("/signup");
+      return;
+    }
     // window.location instead of useSearchParams: no Suspense boundary needed
     // at build time, and this only has to run client-side anyway.
     let code: string | null = null;
@@ -47,14 +52,13 @@ export default function SignUpPage() {
         // validation is cosmetic (banner only); the claim after sign-in is
         // what actually counts, so a failed check here is not an error state
       });
-  }, []);
+  }, [router]);
 
   if (!HAS_CLERK) {
     return (
       <div className="flex min-h-screen items-center justify-center p-4">
         <p className="text-muted-foreground text-sm text-center max-w-sm">
-          Sign-up is temporarily unavailable (authentication is not
-          configured). Please try again shortly or contact hello@getbeam.fyi.
+          Redirecting to local signup…
         </p>
       </div>
     );
