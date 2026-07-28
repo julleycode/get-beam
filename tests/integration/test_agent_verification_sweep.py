@@ -1,7 +1,7 @@
 """Integration test — EvalLayer Phase 4 verification sweep end-to-end.
 
 Docker known-gap: requires a real (test) Postgres. Proves the sweep query and
-``upgrade_verification_method`` UPDATE execute correctly against the real
+``set_verification_method`` UPDATE execute correctly against the real
 schema — the property unit tests (mocked AsyncSession) cannot prove.
 
 Runs under ``MOCK_EXTERNAL_APIS=true`` so the mock CIDR (10.99.0.0/24 for

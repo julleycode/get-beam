@@ -51,7 +51,17 @@ _VENDOR_TOKENS: dict[str, tuple[str, ...]] = {
 # Verification tiers. Phase 1 always returns "ua-only"; Phase 4 adds the other
 # tiers. Forward-declared contract for Phase 4 to import and validate against —
 # not consumed for validation within Phase 1.
-VERIFICATION_METHODS: tuple[str, ...] = ("ua-only", "ip-verified", "rdns-verified")
+# ``ip-mismatch`` is a CONCLUSION, not a lower rank: the UA claims a vendor that
+# publishes IP ranges, and the observed IP is in none of them. It is only ever
+# assignable for a vendor that actually has a published dataset — a vendor with
+# no dataset (Anthropic) can never be judged, because absence of evidence is not
+# evidence of forgery.
+VERIFICATION_METHODS: tuple[str, ...] = (
+    "ua-only",
+    "ip-verified",
+    "rdns-verified",
+    "ip-mismatch",
+)
 
 # On-demand vs index tier split (Handoff Detection H1). "on-demand" tokens are
 # live-fetch-on-user-query bots — a real human is behind the request right now

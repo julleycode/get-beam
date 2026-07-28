@@ -166,13 +166,15 @@ async def persist_agent_fetch_event(
         return None
 
 
-async def upgrade_verification_method(db: AsyncSession, id, method: str) -> None:
-    """Upgrade one ``agent_visits`` row's ``verification_method`` by primary key.
+async def set_verification_method(db: AsyncSession, id, method: str) -> None:
+    """Record one ``agent_visits`` row's ``verification_method`` by primary key.
 
-    Called by the Phase 4 verification sweep (``agent_verification`` service)
-    after a CIDR match, never on the ingest hot path. Fail-open: on any error,
-    roll back, log keys-only (``id``/``method`` — NEVER ip/UA/PII), and swallow;
-    the caller treats the upgrade as best-effort.
+    Called by the verification sweep (``agent_verification`` service) once it
+    reaches a conclusion about the row's IP, never on the ingest hot path. Not
+    only an upgrade: ``ip-mismatch`` is also written here, and it is a different
+    conclusion rather than a higher one. Fail-open: on any error, roll back, log
+    keys-only (``id``/``method`` — NEVER ip/UA/PII), and swallow; the caller
+    treats the write as best-effort.
     """
     try:
         await db.execute(

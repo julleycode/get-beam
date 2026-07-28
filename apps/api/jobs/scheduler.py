@@ -165,6 +165,22 @@ async def _daily_digest_job() -> None:
         logger.exception("daily_digest_crashed")
 
 
+async def _agent_ip_range_refresh_job() -> None:
+    """Periodic job: re-fetch the published per-agent IP-range datasets.
+
+    Verification is only as good as the freshness of what it checks against: a
+    rotated range that is not picked up turns a real agent into an ``ip-mismatch``
+    — the same verdict a forged UA gets. Fail-open throughout; a failed refresh
+    leaves the existing datasets in place.
+    """
+    try:
+        from apps.api.services.agent_ip_range_refresh import refresh_agent_ip_ranges
+
+        await refresh_agent_ip_ranges()
+    except Exception:
+        logger.exception("agent_ip_range_refresh_crashed")
+
+
 async def _agent_verification_sweep_job() -> None:
     """Periodic job: upgrade eligible ua-only agent visits to ip-verified.
 
@@ -480,6 +496,20 @@ def start_scheduler() -> None:
         # session plus an inner delete session — retention.py:116/122, :177/183).
         # That 2-connection reservation is documented in the config.py 4b pool
         # math; the wide jitter keeps it off the boot burst.
+        jitter=600,
+        misfire_grace_time=3600,
+    )
+    scheduler.add_job(
+        _agent_ip_range_refresh_job,
+        "interval",
+        hours=settings.agent_ip_range_refresh_interval_hours,
+        id="agent_ip_range_refresh",
+        replace_existing=True,
+        # Seed an early run: the shipped datasets are empty placeholders, so
+        # until the first refresh lands no visit can be verified at all. The
+        # in-memory job store recomputes the first fire from boot on every
+        # restart, which would otherwise leave a whole interval with no data.
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=60),
         jitter=600,
         misfire_grace_time=3600,
     )

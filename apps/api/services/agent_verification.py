@@ -1,10 +1,22 @@
 """IP-range verification for recognized AI-agent visits (EvalLayer Phase 4).
 
-Upgrades an agent-visit's confidence from ``ua-only`` to ``ip-verified`` by
-cross-checking a small, checked-in static set of published vendor CIDR ranges
-(OpenAI, Perplexity) against the recorded visitor IP, on a periodic best-effort
-sweep — NEVER on the ingest hot path (``routers/events.py`` must never import
-this module; see Phase 4 Step F).
+Judges an agent-visit's recorded IP against published vendor CIDR ranges
+(OpenAI, Perplexity) on a periodic best-effort sweep — NEVER on the ingest hot
+path (``routers/events.py`` must never import this module; see Phase 4 Step F).
+
+The sweep produces one of three verdicts (see ``verify_ip``): ``ip-verified``,
+``ip-mismatch``, or no conclusion. ``ip-mismatch`` is what a forged User-Agent
+looks like: the UA claims a vendor that publishes ranges, and the traffic came
+from outside all of them.
+
+**A mismatch is recorded, not acted on.** It does not block the visit, does not
+delete it, does not touch emailability, and does not exclude the row from
+handoff correlation. The published range datasets are the weak link — they go
+stale between refreshes and a real agent on a newly-added range would be
+labelled a mismatch through no fault of its own. Enforcing on that would drop
+legitimate agents silently, which is worse than the problem. Excluding
+mismatches from correlation is the natural next step, but only once the refresh
+has been observed to keep the datasets complete.
 
 Anthropic (Claude) publishes no IP ranges and must NEVER exceed ``ua-only``
 confidence, structurally: no ``anthropic.json`` dataset entry exists, so
@@ -32,13 +44,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.models.agent_visit import AgentVisit
-from apps.api.services.agent_visit_persistence import upgrade_verification_method
+from apps.api.services.agent_ip_range_refresh import PUBLISHED_RANGE_SOURCES
+from apps.api.services.agent_visit_persistence import set_verification_method
 
 logger = structlog.get_logger()
 
-# Vendors with a published static CIDR dataset. Anthropic is intentionally
-# absent — its absence IS the structural ceiling (never exceeds ua-only).
-_VENDORS: tuple[str, ...] = ("openai", "perplexity")
+# Agent tokens with a published CIDR dataset, one file each. Keyed per AGENT,
+# not per vendor: OpenAI publishes GPTBot, OAI-SearchBot and ChatGPT-User as
+# three separate documents with different ranges, and merging them would hide
+# GPTBot showing up on ChatGPT-User's range — an anomaly that only remains
+# visible while the sets are kept apart.
+#
+# Every Anthropic token is intentionally absent: Anthropic publishes no ranges,
+# so its visits can never be judged either way. That absence IS the ceiling.
+_AGENT_TOKENS: tuple[str, ...] = tuple(PUBLISHED_RANGE_SOURCES)
 
 # Directory holding ``{vendor}.json`` (real) and ``mock/{vendor}.json`` (mock).
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "agent_ip_ranges"
@@ -49,54 +68,78 @@ _SWEEP_BATCH_LIMIT = 500
 
 
 def load_ip_ranges() -> dict[str, list[str]]:
-    """Return ``{vendor: [CIDR, ...]}`` from the static dataset. Fail-open.
+    """Return ``{agent_token: [CIDR, ...]}`` from the datasets. Fail-open.
 
     Reads the ``mock/`` subdirectory when ``settings.mock_external_apis`` is
-    true, otherwise the real dataset. Any missing file, JSON parse error, or
-    malformed shape for a vendor is skipped (logged, never raised); a total
-    failure yields ``{}``. Read fresh every call — no caching.
+    true, otherwise the live dataset kept fresh by
+    ``agent_ip_range_refresh``. Any missing file, JSON parse error, or malformed
+    shape is skipped (logged, never raised); a total failure yields ``{}``, which
+    makes every verdict "no conclusion" rather than a wrong one.
+
+    An empty range list is dropped rather than stored: an agent with no usable
+    ranges must produce no conclusion, never a mismatch.
+
+    Read fresh every call — no caching. The files are small, the sweep is
+    periodic, and a cache would serve pre-refresh data to the sweep that runs
+    right after a refresh.
     """
     base = _DATA_DIR / "mock" if settings.mock_external_apis else _DATA_DIR
     ranges: dict[str, list[str]] = {}
-    for vendor in _VENDORS:
-        path = base / f"{vendor}.json"
+    for token in _AGENT_TOKENS:
+        path = base / f"{token}.json"
         try:
             with path.open("r", encoding="utf-8") as fh:
                 data = json.load(fh)
             cidrs = data.get("ranges")
             if isinstance(cidrs, list) and all(isinstance(c, str) for c in cidrs):
-                ranges[vendor] = cidrs
+                if cidrs:
+                    ranges[token] = cidrs
             else:
-                logger.warning("agent_ip_ranges_malformed", vendor=vendor)
+                logger.warning("agent_ip_ranges_malformed", agent=token)
         except FileNotFoundError:
-            logger.warning("agent_ip_ranges_missing", vendor=vendor)
+            logger.warning("agent_ip_ranges_missing", agent=token)
         except Exception as exc:
-            logger.warning("agent_ip_ranges_load_failed", vendor=vendor, error=str(exc))
+            logger.warning("agent_ip_ranges_load_failed", agent=token, error=str(exc))
     return ranges
 
 
-def verify_ip(vendor: str, ip: str) -> str | None:
-    """Return ``"ip-verified"`` if ``ip`` is within any CIDR for ``vendor``.
+def verify_ip(agent_token: str, ip: str) -> str | None:
+    """Judge ``ip`` against the published CIDRs for one agent token.
 
-    Pure aside from calling ``load_ip_ranges`` internally. A vendor with no
-    loaded ranges (including Anthropic) always returns ``None``. Malformed ``ip``
-    or CIDR values return ``None`` — never raise (fail-open).
+    Three outcomes, and the difference between the last two is the whole point:
+
+    - ``"ip-verified"`` — the IP falls inside a published range.
+    - ``"ip-mismatch"`` — the vendor publishes ranges and the IP is in none of
+      them. The User-Agent claims to be this agent while the traffic did not
+      come from its published ranges, which is what a forged UA looks like.
+    - ``None`` — no conclusion is possible: the agent publishes nothing
+      (every Anthropic token), the dataset has not been fetched yet, or the IP
+      is unusable. Never inferred as a mismatch, because "we cannot check" and
+      "we checked and it failed" are different facts and collapsing them would
+      invent evidence.
+
+    Pure aside from calling ``load_ip_ranges`` internally. Never raises.
     """
     ranges = load_ip_ranges()
-    cidrs = ranges.get(vendor)
+    cidrs = ranges.get(agent_token)
     if not cidrs:
         return None
     try:
         addr = ipaddress.ip_address(ip)
     except (ValueError, TypeError):
         return None
+    checked_any = False
     for cidr in cidrs:
         try:
-            if addr in ipaddress.ip_network(cidr, strict=False):
-                return "ip-verified"
+            network = ipaddress.ip_network(cidr, strict=False)
         except (ValueError, TypeError):
             continue
-    return None
+        checked_any = True
+        if addr in network:
+            return "ip-verified"
+    # Only a dataset that actually parsed can support a mismatch verdict; if
+    # every CIDR was malformed nothing was really checked.
+    return "ip-mismatch" if checked_any else None
 
 
 async def run_verification_sweep(db: AsyncSession) -> None:
@@ -113,7 +156,7 @@ async def run_verification_sweep(db: AsyncSession) -> None:
         select(AgentVisit)
         .where(
             AgentVisit.verification_method == "ua-only",
-            AgentVisit.vendor.in_(_VENDORS),
+            AgentVisit.product_or_ua_token.in_(_AGENT_TOKENS),
             AgentVisit.last_seen_at > cutoff,
         )
         .order_by(AgentVisit.last_seen_at.desc())
@@ -124,9 +167,13 @@ async def run_verification_sweep(db: AsyncSession) -> None:
         try:
             if not row.ip_address:
                 continue
-            method = verify_ip(row.vendor, row.ip_address)
+            method = verify_ip(row.product_or_ua_token, row.ip_address)
             if method:
-                await upgrade_verification_method(db, row.id, method)
+                await set_verification_method(db, row.id, method)
         except Exception:
             # Per-row fail-open (Resolved Design Decision 7c): log keys only.
-            logger.exception("agent_verification_row_failed", id=str(row.id), vendor=row.vendor)
+            logger.exception(
+                "agent_verification_row_failed",
+                id=str(row.id),
+                agent=row.product_or_ua_token,
+            )

@@ -28,22 +28,27 @@ def mock_mode(monkeypatch):
 
 
 def test_verify_ip_matches_mock_cidr_returns_ip_verified(mock_mode):
-    assert agent_verification.verify_ip("openai", "10.99.0.5") == "ip-verified"
+    assert agent_verification.verify_ip("gptbot", "10.99.0.5") == "ip-verified"
 
 
-def test_verify_ip_non_matching_returns_none(mock_mode):
-    assert agent_verification.verify_ip("openai", "8.8.8.8") is None
+def test_verify_ip_outside_published_ranges_is_a_mismatch(mock_mode):
+    """A UA claiming a vendor that publishes ranges, from an IP in none of them,
+    is what a forged User-Agent looks like — and it has to be distinguishable
+    from "not checked yet"."""
+    assert agent_verification.verify_ip("gptbot", "8.8.8.8") == "ip-mismatch"
 
 
-def test_verify_ip_anthropic_always_none(mock_mode):
-    # Structural ceiling: no anthropic dataset entry exists, so even an IP that
-    # would match openai's mock block returns None for anthropic.
-    assert agent_verification.verify_ip("anthropic", "10.99.0.5") is None
+def test_verify_ip_anthropic_is_never_judged(mock_mode):
+    # Structural ceiling: no anthropic dataset entry exists. It must return None
+    # (no conclusion), NEVER "ip-mismatch" — absence of published ranges is not
+    # evidence of forgery, and conflating them would invent evidence.
+    assert agent_verification.verify_ip("claudebot", "10.99.0.5") is None
+    assert agent_verification.verify_ip("claudebot", "8.8.8.8") is None
 
 
 def test_verify_ip_malformed_ip_returns_none(mock_mode):
-    assert agent_verification.verify_ip("openai", "not-an-ip") is None
-    assert agent_verification.verify_ip("openai", "") is None
+    assert agent_verification.verify_ip("gptbot", "not-an-ip") is None
+    assert agent_verification.verify_ip("gptbot", "") is None
 
 
 def test_verify_ip_malformed_cidr_returns_none(monkeypatch):
@@ -51,33 +56,42 @@ def test_verify_ip_malformed_cidr_returns_none(monkeypatch):
     monkeypatch.setattr(
         agent_verification,
         "load_ip_ranges",
-        lambda: {"openai": ["garbage/99", "10.99.0.0/24"]},
+        lambda: {"gptbot": ["garbage/99", "10.99.0.0/24"]},
     )
     # Still matches the valid entry after skipping the malformed one.
-    assert agent_verification.verify_ip("openai", "10.99.0.5") == "ip-verified"
+    assert agent_verification.verify_ip("gptbot", "10.99.0.5") == "ip-verified"
     # And a non-matching IP with only a malformed CIDR present → None, no raise.
+    # Only a malformed CIDR present → nothing was really checked, so the verdict
+    # must be "no conclusion", never a mismatch.
     monkeypatch.setattr(
-        agent_verification, "load_ip_ranges", lambda: {"openai": ["garbage/99"]}
+        agent_verification, "load_ip_ranges", lambda: {"gptbot": ["garbage/99"]}
     )
-    assert agent_verification.verify_ip("openai", "10.99.0.5") is None
+    assert agent_verification.verify_ip("gptbot", "10.99.0.5") is None
 
 
 # ─── load_ip_ranges ──────────────────────────────────────────────────────────
 
 
-def test_load_ip_ranges_mock_branch(mock_mode):
+def test_load_ip_ranges_is_keyed_per_agent_not_per_vendor(mock_mode):
+    """OpenAI publishes a separate document per agent. Keeping them apart is what
+    makes "GPTBot arrived on ChatGPT-User's range" observable; a merged per-vendor
+    set would silently answer "yes, that's OpenAI" and lose the anomaly."""
     ranges = agent_verification.load_ip_ranges()
-    assert ranges.get("openai") == ["10.99.0.0/24"]
-    assert "anthropic" not in ranges  # structural ceiling
+    assert ranges.get("gptbot") == ["10.99.0.0/16"]
+    assert ranges.get("chatgpt-user") == ["10.99.0.0/16"]
+    assert "openai" not in ranges  # never a merged vendor bucket
+    assert "claudebot" not in ranges  # Anthropic publishes nothing
 
 
-def test_load_ip_ranges_real_branch(monkeypatch):
+def test_load_ip_ranges_real_branch_is_empty_until_refreshed(monkeypatch):
+    """The shipped datasets are placeholders — real ranges arrive from the
+    refresh job. Empty must mean "no conclusion", so an unfetched agent is
+    dropped from the mapping entirely rather than presenting an empty range list
+    that would read as "checked, matched nothing"."""
     monkeypatch.setattr(settings, "mock_external_apis", False)
     ranges = agent_verification.load_ip_ranges()
-    # Real dataset present with published ranges; anthropic never present.
-    assert ranges.get("openai")
-    assert ranges.get("perplexity")
-    assert "anthropic" not in ranges
+    assert ranges == {}
+    assert agent_verification.verify_ip("gptbot", "8.8.8.8") is None
 
 
 def test_load_ip_ranges_fail_open_on_load_error(monkeypatch):
@@ -97,18 +111,18 @@ def test_load_ip_ranges_fail_open_on_load_error(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_run_verification_sweep_isolates_per_row_failure(mock_mode, monkeypatch):
-    # Three fake rows: one openai match, one anthropic (structural no-match, not
-    # even queried by vendor filter but included here to prove verify_ip → None),
-    # one openai whose upgrade call is forced to raise. Sweep must complete
+    # Three fake rows: one gptbot match, one Anthropic token (never judged --
+    # not even reached by the token filter, included to prove verify_ip → None),
+    # one gptbot whose write call is forced to raise. Sweep must complete
     # without raising and still process the other rows.
     good = SimpleNamespace(
-        id=uuid.uuid4(), vendor="openai", ip_address="10.99.0.5",
+        id=uuid.uuid4(), product_or_ua_token="gptbot", ip_address="10.99.0.5",
     )
     anthro = SimpleNamespace(
-        id=uuid.uuid4(), vendor="anthropic", ip_address="10.99.0.5",
+        id=uuid.uuid4(), product_or_ua_token="claudebot", ip_address="10.99.0.5",
     )
     boom = SimpleNamespace(
-        id=uuid.uuid4(), vendor="openai", ip_address="10.99.0.9",
+        id=uuid.uuid4(), product_or_ua_token="gptbot", ip_address="10.99.0.9",
     )
 
     db = MagicMock(spec_set=["execute"])
@@ -118,17 +132,17 @@ async def test_run_verification_sweep_isolates_per_row_failure(mock_mode, monkey
 
     calls: list = []
 
-    async def fake_upgrade(_db, row_id, method):
+    async def fake_set(_db, row_id, method):
         calls.append((row_id, method))
         if row_id == boom.id:
             raise RuntimeError("simulated per-row upgrade failure")
 
-    monkeypatch.setattr(agent_verification, "upgrade_verification_method", fake_upgrade)
+    monkeypatch.setattr(agent_verification, "set_verification_method", fake_set)
 
     # Must not raise despite the boom row failing.
     await agent_verification.run_verification_sweep(db)
 
-    # good + boom both matched openai's mock CIDR → both attempted; anthropic
+    # good + boom both matched gptbot's mock CIDR → both attempted; anthropic
     # never upgraded (structural ceiling).
     upgraded_ids = {c[0] for c in calls}
     assert good.id in upgraded_ids

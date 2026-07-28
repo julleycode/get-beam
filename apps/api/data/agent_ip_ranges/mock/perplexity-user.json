@@ -1,0 +1,5 @@
+{
+  "agent": "perplexity-user",
+  "_note": "Test fixture. Not real vendor data.",
+  "ranges": ["10.99.0.0/16"]
+}

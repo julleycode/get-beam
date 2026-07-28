@@ -717,6 +717,7 @@ class Settings(BaseSettings):
     sync_interval_minutes: int = 60
     resolution_sweep_interval_minutes: int = 30  # APScheduler identity-resolution sweep cadence
     agent_verification_sweep_interval_minutes: int = 15  # APScheduler agent IP-verification sweep cadence
+    agent_ip_range_refresh_interval_hours: int = 24  # Re-fetch published per-agent IP-range datasets; stale ranges make real agents look like forged ones
     handoff_correlation_sweep_interval_minutes: int = 10  # APScheduler fetch↔click handoff correlation sweep cadence (H2)
     intent_signal_sweep_interval_minutes: int = 10  # APScheduler live commercial-page intent-signal + spike sweep cadence (H3)
     aggregation_sweep_interval_minutes: int = 60  # APScheduler full-recompute aggregation repair sweep cadence
