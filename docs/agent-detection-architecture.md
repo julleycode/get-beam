@@ -122,11 +122,15 @@ vendor sẽ làm hỏng thống kê vendor đang có. Đây là lựa chọn có
 | F13 | Dải IP nhỏ, gộp vendor, tĩnh, không làm mới | MEDIUM | `data/agent_ip_ranges/` |
 | F14 | Chưa có Web Bot Auth (RFC 9421) — chữ ký mã hoá, miễn phí, mạnh nhất hiện có | MEDIUM | — |
 | F10 | `agent_fetch_events` không có ràng buộc chống trùng | MEDIUM | `models/agent_fetch_event.py` |
-| F3 | Phân loại không tất định (`frozenset` + hash ngẫu nhiên mỗi process) | MEDIUM | `agent_classifier.py` |
-| F4 | Khớp chuỗi con không có biên từ | MEDIUM | `agent_classifier.py:90` |
-| F5 | Sweep ghi link quá sớm, khoá mất bản khớp tốt hơn | MEDIUM | `agent_handoff_correlation.py` |
-| F6 | Query ứng viên không `LIMIT`, trong vòng lặp 20 lần | MEDIUM | `agent_handoff_correlation.py` |
-| F8 | `_VENDOR_FAMILY_MAP` thiếu key `google` — bẫy ngầm khi mở rộng | LOW |
+
+Bốn cái còn lại đều **không phải sửa lỗi thuần tuý**, mỗi cái vướng một thứ khác nhau:
+
+| Mã | Vướng ở đâu |
+|---|---|
+| F2 marker | Quyết định sản phẩm — link dài thêm, đổi định dạng offers feed |
+| F12 spoofed | Quyết định ngữ nghĩa — phát hiện lệch rồi làm gì? Ẩn khỏi dashboard? Gắn cờ? Thêm giá trị enum = có thể cần migration |
+| F10 dedup | Cần migration + quyết định khoá trùng gồm cột nào + dọn dữ liệu trùng đang có trên prod trước khi tạo constraint |
+| F13/F14 | Năng lực mới, không phải sửa lỗi. F14 (Web Bot Auth) là implement RFC từ đầu |
 
 **F14 đáng chú ý nhất về mặt cơ hội:** Web Bot Auth đã được Anthropic, OpenAI, Perplexity,
 Common Crawl hỗ trợ. Nó là chữ ký mã hoá, tất định, miễn phí, không phụ thuộc tier Cloudflare —
@@ -139,6 +143,22 @@ nhưng **có** ký).
 
 - **F11 — surface agent-facing nay có ghi lại** (xem mục 4.3). Manifest, offers, llms.txt và MCP
   đều ghi vào `agent_visits` + `agent_fetch_events`; nhãn MCP mang theo tên tool.
+- **F3 — phân loại nay tất định.** `_VENDOR_TOKENS` đổi từ `frozenset` sang tuple có thứ tự
+  (dài nhất trước). Thứ tự duyệt set phụ thuộc hash chuỗi mà Python random hoá mỗi process, nên
+  UA đa token từng trả token khác nhau giữa các lần restart → tier lật → sweep chạy hay không
+  cũng lật. Chứng minh: chạy với `PYTHONHASHSEED` = 0/1/42/12345/99999 đều ra cùng kết quả.
+- **F4 — khớp token chính xác.** Bỏ URL tự mô tả trong UA trước khi khớp, và yêu cầu token phải
+  đứng trọn vẹn (không phải mảnh của chuỗi dài hơn). Trước đây một scanner có UA chứa
+  `+http://example.com/gptbot-detector` bị nhận nhầm là GPTBot.
+- **F5 — chờ cửa sổ đóng mới nối link.** Fetch chỉ được xét sau khi đủ 30 phút. Trước đó sweep
+  chốt bản khớp đang có tại thời điểm chạy rồi khoá vĩnh viễn (`~link_exists`), nên một click yếu
+  ở T+3′ ghi `medium` sẽ chặn mất click đúng trang ở T+12′ lẽ ra phải là `high`. Lookback nới từ
+  60 lên 180 phút để một lần sweep lỗi không làm fetch hết hạn.
+- **F6 — chặn khối lượng query ứng viên.** Lọc `referrer` rỗng ngay trong SQL (phần lớn pageview
+  không có referrer, và ứng viên không có referrer chắc chắn bị loại ở bước sau) + cap 500 dòng,
+  sắp xếp cũ trước nên click gần fetch nhất luôn nằm trong cap.
+- **F8 — thêm `google` vào `_VENDOR_FAMILY_MAP`.** Chưa dùng tới (google toàn index-tier), nhưng
+  nếu sau này promote lên on-demand thì thiếu key sẽ khiến sweep trả 0 link **im lặng**.
 
 - **Tier searchbot** — `oai-searchbot` và `claude-searchbot` từng bị xếp `on-demand` ("có người
   thật đứng sau"). Doc vendor nói cả hai là crawler index. 32% lượng on-demand trên prod là
