@@ -472,8 +472,17 @@ block) — all default OFF/permissive, same operator-gated posture as `agent_det
   `process/features/pixel/backlog/cadence-bot-flag-deferred-gates_NOTE_26-07-26.md` (open:
   migration live round-trip; AC-14 live-crawler validation; AC-8/AC-9 Agent-Probe manual render
   check; Playwright auth-harness leg)
-- Successor program planned: "Handoff Detection" (human-behind-the-agent correlation) — not yet
-  scaffolded on disk; see `evallayer-umbrella_PLAN_22-07-26.md` §Program-Level Closeout
+- "Handoff Detection" (human-behind-the-agent correlation) is **built, not planned** — this entry
+  previously said "not yet scaffolded on disk", which was stale. Shipped on disk with tests:
+  `agent_handoff_correlation.py` (fetch↔click sweep), `agent_fetch_beacon.py` (edge beacon),
+  `agent_intent_signals.py` (H3 commercial-intent), `agent_gateway.py` + `agent_mcp.py` +
+  `agent_profile.py` (agent-facing gateway), models `agent_fetch_event` / `agent_handoff_link` /
+  `agent_profile`. Architecture assessment, open gaps, and what is deliberately NOT solved:
+  `docs/agent-detection-architecture.md` (read this before touching the agents surface).
+- Two correlation caveats worth knowing before reading any handoff number: the link is a
+  probabilistic vendor+page+30-minute match with no identifying marker, and the agent-facing
+  gateway records no visits of its own — so an AI calling the MCP server leaves no trace in the
+  Agents tab. Both are open items in the doc above.
 
 ## Scan Metadata
 
