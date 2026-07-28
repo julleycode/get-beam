@@ -17,6 +17,7 @@ ids exist.
 """
 
 import uuid
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -212,6 +213,55 @@ def build_ask_tools(db: AsyncSession, user: User) -> list[ToolSpec]:
         profiles = await build_visitor_profiles(db, seg.site_id, visitors)
         return {"visitors": sanitize_profiles(profiles)}
 
+    async def get_recent_visitors(
+        site_id: str = "", days: int = 7, limit: int = 5
+    ) -> dict:
+        site = await _owned_site(db, user, site_id)
+        if site is None:
+            return {"error": "site not found"}
+        try:
+            days_n = max(1, min(int(days), 90))
+        except (TypeError, ValueError):
+            days_n = 7
+        try:
+            limit_n = max(1, min(int(limit), 10))
+        except (TypeError, ValueError):
+            limit_n = 5
+        since = datetime.utcnow() - timedelta(days=days_n)
+        visitors = list(
+            (
+                await db.execute(
+                    select(Visitor)
+                    .where(
+                        Visitor.site_id == site.site_id,
+                        Visitor.last_seen >= since,
+                        Visitor.is_abuse_flagged.is_(False),
+                        Visitor.is_agent_derived.is_(False),
+                    )
+                    .order_by(Visitor.intent_score.desc())
+                    .limit(limit_n)
+                )
+            ).scalars().all()
+        )
+        total = (
+            await db.execute(
+                select(func.count())
+                .select_from(Visitor)
+                .where(
+                    Visitor.site_id == site.site_id,
+                    Visitor.last_seen >= since,
+                    Visitor.is_abuse_flagged.is_(False),
+                    Visitor.is_agent_derived.is_(False),
+                )
+            )
+        ).scalar() or 0
+        profiles = await build_visitor_profiles(db, site.site_id, visitors)
+        return {
+            "window_days": days_n,
+            "total_in_window": int(total),
+            "visitors": sanitize_profiles(profiles),
+        }
+
     async def get_pending_drafts_count() -> dict:
         pending = (
             await db.execute(
@@ -282,6 +332,36 @@ def build_ask_tools(db: AsyncSession, user: User) -> list[ToolSpec]:
                 "required": ["segment_id"],
             },
             handler=get_segment_visitors,
+        ),
+        ToolSpec(
+            name="get_recent_visitors",
+            description=(
+                "Sample the site's most recent visitors within a time window "
+                "(default last 7 days), ranked by intent score. Returns "
+                "total_in_window plus a sample of enriched profiles. Bot / "
+                "abuse-flagged and AI-agent-derived visitors are excluded. Use "
+                "this to summarize recent visitor activity when no segment is "
+                "specified."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "site_id": {
+                        "type": "string",
+                        "description": "The site_id (from the seed context or list_sites).",
+                    },
+                    "days": {
+                        "type": "integer",
+                        "description": "Look-back window in days (1-90, default 7).",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max profiles to return (1-10, default 5).",
+                    },
+                },
+                "required": ["site_id"],
+            },
+            handler=get_recent_visitors,
         ),
         ToolSpec(
             name="get_pending_drafts_count",
