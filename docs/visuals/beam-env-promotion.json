@@ -1,0 +1,29 @@
+{
+  "template_type": "flowchart",
+  "style": 1,
+  "width": 1120,
+  "height": 520,
+  "title": "Beam Env Promotion",
+  "subtitle": "Local → UAT → PROD on main (recommended)",
+  "nodes": [
+    { "id": "local", "kind": "rect", "x": 60, "y": 160, "width": 180, "height": 90, "label": "LOCAL", "sublabel": "APP_ENV=development\nDocker PG+Redis", "fill": "#eff6ff", "stroke": "#93c5fd" },
+    { "id": "ci", "kind": "rect", "x": 320, "y": 160, "width": 180, "height": 90, "label": "CI on main", "sublabel": "unit + integration + e2e\nAPP_ENV=test", "fill": "#f0fdf4", "stroke": "#86efac" },
+    { "id": "uat", "kind": "rect", "x": 580, "y": 160, "width": 200, "height": 90, "label": "UAT", "sublabel": "APP_ENV=production\nisolated DB/keys", "fill": "#faf5ff", "stroke": "#c084fc" },
+    { "id": "prod", "kind": "rect", "x": 860, "y": 160, "width": 180, "height": 90, "label": "PROD", "sublabel": "APP_ENV=production\nlive providers", "fill": "#fff7ed", "stroke": "#fdba74" },
+    { "id": "gate", "kind": "diamond", "x": 620, "y": 320, "width": 140, "height": 80, "label": "Smoke OK?", "fill": "#fef2f2", "stroke": "#fca5a5" }
+  ],
+  "arrows": [
+    { "source": "local", "target": "ci", "source_port": "right", "target_port": "left", "flow": "control", "label": "push / PR" },
+    { "source": "ci", "target": "uat", "source_port": "right", "target_port": "left", "flow": "data", "label": "auto-deploy" },
+    { "source": "uat", "target": "gate", "source_port": "bottom", "target_port": "top", "flow": "read", "label": "migrate + smoke" },
+    { "source": "gate", "target": "prod", "source_port": "right", "target_port": "bottom", "flow": "write", "label": "manual promote" }
+  ],
+  "legend": [
+    { "flow": "control", "label": "Code path" },
+    { "flow": "data", "label": "Deploy UAT" },
+    { "flow": "write", "label": "Promote PROD" }
+  ],
+  "legend_position": "bottom-left",
+  "legend_y": 450,
+  "footer": "Never set APP_ENV=uat/staging without secrets — config treats unknown envs as production-strict."
+}
