@@ -89,6 +89,12 @@ class AgentAnalyticsResponse(BaseModel):
     # Handoff Detection H2 (AC-H2-4): count of fetch↔click handoff links for the
     # site — how many agent fetches were correlated to a human AI-referral click.
     handoff_links_count: int
+    # Context that makes a handoff count of 0 readable. The split separates exact
+    # near-instant matches ("high") from looser in-window ones ("medium"); the
+    # denominator is how many on-demand fetches could have produced a link at all,
+    # so "no agent traffic" is distinguishable from "traffic but no human click".
+    handoff_confidence: dict[str, int] = {}
+    on_demand_fetch_count: int = 0
     # Handoff Detection H3 (AC-H3-3): companies that appeared shortly after an AI
     # agent fetched a commercial page. Read-only metadata, never an outreach feed.
     recent_ai_researched_companies: list[RecentAiResearchEntry] = []

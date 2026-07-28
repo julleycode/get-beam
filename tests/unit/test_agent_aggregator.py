@@ -116,6 +116,10 @@ def test_empty_rows_yield_empty_aggregates():
         "top_pages": [],
         "by_verification": {},
         "handoff_links_count": 0,
+        # Context for the link count — empty/zero by default, so an empty site
+        # reports "0 of 0" rather than a bare, unreadable 0.
+        "handoff_confidence": {},
+        "on_demand_fetch_count": 0,
         # Handoff Detection H3 (AC-H3-3): additive echoed field, empty by default.
         "recent_ai_researched_companies": [],
     }

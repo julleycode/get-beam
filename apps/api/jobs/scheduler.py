@@ -498,6 +498,12 @@ def start_scheduler() -> None:
         minutes=settings.handoff_correlation_sweep_interval_minutes,
         id="handoff_correlation_sweep",
         replace_existing=True,
+        # The job store is in-memory, so every restart recomputes the first fire
+        # as boot + interval. A process recycled more often than the interval
+        # would therefore never run this sweep at all. Seed an early first run
+        # (same pattern as the resolution sweep above); the sweep is cheap and
+        # bounded, so an extra run right after boot costs nothing.
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30),
         jitter=60,
         misfire_grace_time=300,
     )

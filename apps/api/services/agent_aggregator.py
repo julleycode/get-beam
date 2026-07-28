@@ -72,6 +72,43 @@ async def fetch_handoff_links_count(db: AsyncSession, site_id: str) -> int:
     return int(result.scalar() or 0)
 
 
+async def fetch_handoff_denominator(db: AsyncSession, site_id: str) -> int:
+    """Count on-demand agent fetches for a site — the pool handoff links draw from.
+
+    Without it a ``handoff_links_count`` of 0 is unreadable: it cannot distinguish
+    "no agent ever fetched this site" from "agents fetched but no human click
+    followed" from "the correlation is broken". Pairing the link count with the
+    number of fetches that were eligible to produce one makes the zero legible.
+
+    SELECTs only ``agent_fetch_events`` filtered by ``site_id`` — no join, no
+    ``Visitor``/``Event`` reference (same isolation as the sibling fetches).
+    """
+    query = select(func.count()).select_from(AgentFetchEvent).where(
+        AgentFetchEvent.site_id == site_id,
+        AgentFetchEvent.tier == "on-demand",
+    )
+    result = await db.execute(query)
+    return int(result.scalar() or 0)
+
+
+async def fetch_handoff_confidence_split(
+    db: AsyncSession, site_id: str
+) -> dict[str, int]:
+    """Break a site's handoff links down by confidence tier.
+
+    The sweep writes both ``high`` and ``medium`` links, so a single total mixes
+    an exact-page match seconds after the fetch with a page mismatch half an hour
+    later. Callers surface the split rather than one number.
+    """
+    query = (
+        select(AgentHandoffLink.confidence, func.count())
+        .where(AgentHandoffLink.site_id == site_id)
+        .group_by(AgentHandoffLink.confidence)
+    )
+    result = await db.execute(query)
+    return {str(confidence): int(count) for confidence, count in result.all()}
+
+
 async def fetch_recent_ai_researched_companies(
     db: AsyncSession, site_id: str
 ) -> list[dict]:
@@ -152,13 +189,17 @@ def aggregate_agent_analytics(
     handoff_links_count: int,
     recent_ai_researched_companies: list[dict] | None = None,
     top_n: int = 10,
+    handoff_confidence: dict[str, int] | None = None,
+    on_demand_fetch_count: int = 0,
 ) -> dict:
     """Pure aggregation over agent-visit rows — no DB, no I/O, unit-testable.
 
-    ``handoff_links_count`` and ``recent_ai_researched_companies`` are passed in by
-    the caller (fetched via the sibling ``fetch_handoff_links_count`` /
-    ``fetch_recent_ai_researched_companies`` DB reads) and echoed into the result
-    dict, keeping this function's pure/no-DB contract intact.
+    ``handoff_links_count``, ``handoff_confidence``, ``on_demand_fetch_count`` and
+    ``recent_ai_researched_companies`` are passed in by the caller (fetched via the
+    sibling ``fetch_handoff_links_count`` / ``fetch_handoff_confidence_split`` /
+    ``fetch_handoff_denominator`` / ``fetch_recent_ai_researched_companies`` DB
+    reads) and echoed into the result dict, keeping this function's pure/no-DB
+    contract intact.
 
     Returns a dict with the vendor/page/verification aggregates plus the two
     echoed fields:
@@ -207,6 +248,11 @@ def aggregate_agent_analytics(
         "top_pages": top_pages,
         "by_verification": by_verification,
         "handoff_links_count": handoff_links_count,
+        # Context for the link count: how it splits by confidence, and how many
+        # on-demand fetches it was drawn from. Without these a count of 0 cannot
+        # be told apart from a correlation that never ran.
+        "handoff_confidence": handoff_confidence or {},
+        "on_demand_fetch_count": on_demand_fetch_count,
         # Echoed straight through (fetched via the sibling DB-read
         # fetch_recent_ai_researched_companies), keeping this function pure/no-DB.
         "recent_ai_researched_companies": recent_ai_researched_companies or [],

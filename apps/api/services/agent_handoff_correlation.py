@@ -190,6 +190,10 @@ async def run_handoff_correlation_sweep(
     )
     fetch_events = list(result.scalars().all())
     if not fetch_events:
+        # Still log. An empty sweep and a sweep that never ran are otherwise
+        # indistinguishable in the logs, which makes "zero handoff links"
+        # impossible to diagnose without querying the database by hand.
+        logger.info("agent_handoff_correlation_sweep_done", **counters)
         return counters
 
     for fetch_event in fetch_events:
