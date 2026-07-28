@@ -87,11 +87,29 @@ khách tự soạn, chống dò `site_id` (5 trường hợp lỗi đều trả 
 **Thiếu đầu ra:** link trong offers feed là URL trần — không mang mã nào để nhận ra khi có người
 click vào.
 
-**Thiếu đầu vào:** toàn bộ surface agent-facing (`agent_gateway.py`, `agent_mcp.py`,
-`agent_profile.py`) **không ghi lại một lượt truy cập nào** — không có bất kỳ lời gọi
-`persist_agent_visit` / `persist_agent_fetch_event` nào. Một AI gọi MCP server — tín hiệu chủ động
-và rõ ràng nhất có thể về việc "một AI đang nghiên cứu doanh nghiệp này" — **không để lại dấu vết
-nào trên tab Agents**.
+**Đầu vào — đã sửa 29-07 (F11).** Trước đó toàn bộ surface agent-facing không ghi lại một lượt
+truy cập nào. Nay `record_gateway_visit()` trong `services/agent_gateway.py` ghi vào đúng hai bảng
+agent-only, gắn nhãn theo surface:
+
+| Route | Nhãn lưu vào `page_path` |
+|---|---|
+| `manifest.json` | `/agent/manifest.json` |
+| `offers.json` | `/agent/offers.json` |
+| `llms.txt` | `/agent/llms.txt` |
+| MCP `tools/list` | `/agent/mcp/tools-list` |
+| MCP gọi tool | `/agent/mcp/{tên_tool}` — biết được AI **hỏi gì** |
+
+Ghi đặt **sau** cổng allowlist nên lệnh gọi bị từ chối không bao giờ lọt vào bảng, và nhãn luôn là
+hằng số hoặc key đã kiểm trong `MCP_TOOLS` — không bao giờ là text do người gọi kiểm soát. Bọc
+try/except toàn bộ vì đây là route đọc công khai không auth: lỗi ghi sổ không được biến một lượt
+fetch manifest thành 500.
+
+`routers/agent_profile.py` **không** nằm trong phạm vi này — nó là CRUD của chủ site
+(`Depends(get_current_user)`), không phải surface cho agent.
+
+**Giới hạn còn lại (known gap):** chỉ ghi khi UA khớp allowlist vendor. Một MCP client có UA
+chung chung (phần lớn client MCP) vẫn vô hình — vì không có vendor nào để quy về, và bịa ra một
+vendor sẽ làm hỏng thống kê vendor đang có. Đây là lựa chọn có ý thức, không phải bỏ sót.
 
 ---
 
@@ -99,7 +117,6 @@ nào trên tab Agents**.
 
 | Mã | Vấn đề | Mức | File |
 |---|---|---|---|
-| F11 | Surface agent-facing không ghi lại lượt truy cập nào | HIGH | `routers/agent_{gateway,mcp,profile}.py` |
 | F12 | Không có trạng thái `spoofed` — chỉ nâng cấp, không phát hiện lệch | HIGH | `agent_verification.py` |
 | F2 | Không có marker → "người sau AI" là suy đoán thời gian | HIGH | `services/agent_gateway.py` |
 | F13 | Dải IP nhỏ, gộp vendor, tĩnh, không làm mới | MEDIUM | `data/agent_ip_ranges/` |
@@ -118,7 +135,10 @@ nhưng **có** ký).
 
 ---
 
-## 6. Đã sửa (28-07)
+## 6. Đã sửa (28-07 → 29-07)
+
+- **F11 — surface agent-facing nay có ghi lại** (xem mục 4.3). Manifest, offers, llms.txt và MCP
+  đều ghi vào `agent_visits` + `agent_fetch_events`; nhãn MCP mang theo tên tool.
 
 - **Tier searchbot** — `oai-searchbot` và `claude-searchbot` từng bị xếp `on-demand` ("có người
   thật đứng sau"). Doc vendor nói cả hai là crawler index. 32% lượng on-demand trên prod là

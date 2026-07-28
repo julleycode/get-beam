@@ -13,8 +13,11 @@ site_id => 404 as well, NEVER 403: the response must not tell a caller whether
 a site_id exists. All five failure modes funnel through
 ``resolve_public_profile`` and produce one identical 404, by construction.
 
-Nothing here writes. Nothing here reads visitor, identity, or PII data — only
-the customer-authored ``AgentProfile`` plus the site's own public name/url.
+The only write is the agent-visit bookkeeping in ``record_gateway_visit``, which
+touches the two agent-only tables and nothing else — without it a recognized
+agent could read this whole surface without ever appearing on the Agents
+dashboard. Nothing here reads visitor, identity, or PII data — only the
+customer-authored ``AgentProfile`` plus the site's own public name/url.
 
 Phase 3 extends THIS file with the action endpoint. It is not present yet.
 """
@@ -27,9 +30,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.models.database import get_db
 from apps.api.services.agent_gateway import (
     AGENT_CACHE_CONTROL,
+    SURFACE_LLMS_TXT,
+    SURFACE_MANIFEST,
+    SURFACE_OFFERS,
     build_llms_txt,
     build_manifest,
     build_offers,
+    record_gateway_visit,
     resolve_public_profile,
 )
 from apps.api.services.rate_limiter import limiter
@@ -62,6 +69,7 @@ async def get_manifest(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     site, profile = await _profile_or_404(db, site_id)
+    await record_gateway_visit(db, request, site_id, SURFACE_MANIFEST)
     manifest = build_manifest(site, profile)
     return Response(
         content=manifest.model_dump_json(),
@@ -78,6 +86,7 @@ async def get_offers(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     site, profile = await _profile_or_404(db, site_id)
+    await record_gateway_visit(db, request, site_id, SURFACE_OFFERS)
     feed = build_offers(site, profile)
     return Response(
         content=feed.model_dump_json(),
@@ -94,6 +103,7 @@ async def get_llms_txt(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     site, profile = await _profile_or_404(db, site_id)
+    await record_gateway_visit(db, request, site_id, SURFACE_LLMS_TXT)
     return PlainTextResponse(
         content=build_llms_txt(site, profile),
         headers={"Cache-Control": AGENT_CACHE_CONTROL},

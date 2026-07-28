@@ -445,3 +445,91 @@ def test_mcp_route_is_rate_limited():
     mcp_src = inspect.getsource(mcp_router)
     assert "@limiter.limit(" in mcp_src
     assert mcp_router.MCP_RATE_LIMIT == rest_router.PUBLIC_READ_LIMIT
+
+
+# ── Gateway visit recording ──────────────────────────────────────────
+#
+# Before this, an agent could call every tool here and leave no trace on the
+# Agents dashboard — the surface built to attract AI agents was invisible to
+# Beam's own agent detection.
+
+CHATGPT_UA = "Mozilla/5.0 (compatible; ChatGPT-User/1.0; +https://openai.com/bot)"
+
+
+@pytest.fixture
+def captured_visits(monkeypatch):
+    """Capture what record_gateway_visit would persist, without a database."""
+    from apps.api.services import agent_gateway as gw
+
+    calls: list[dict] = []
+
+    async def fake_visit(db, site_id, classification, ip_address, path):
+        calls.append(
+            {"kind": "visit", "vendor": classification.vendor, "path": path}
+        )
+
+    async def fake_event(
+        db, site_id, classification, tier, ip_address, page_path, event_time=None
+    ):
+        calls.append({"kind": "event", "tier": tier, "path": page_path})
+
+    monkeypatch.setattr(gw, "persist_agent_visit", fake_visit)
+    monkeypatch.setattr(gw, "persist_agent_fetch_event", fake_event)
+    return calls
+
+
+async def test_tool_call_by_a_recognized_agent_records_the_tool_name(
+    gateway_on, captured_visits
+):
+    """An MCP tool call is the most deliberate "an AI is researching this
+    business" signal available, so it must reach both agent tables labelled with
+    which question was actually asked."""
+    try:
+        async with _client((_site(), _profile())) as client:
+            resp = await client.post(
+                MCP_PATH,
+                json=_rpc("tools/call", {"name": "get_pricing"}),
+                headers={"user-agent": CHATGPT_UA},
+            )
+        assert resp.status_code == 200
+        assert [c["path"] for c in captured_visits] == [
+            "/agent/mcp/get_pricing",
+            "/agent/mcp/get_pricing",
+        ]
+        assert captured_visits[0]["vendor"] == "openai"
+        assert captured_visits[1]["tier"] == "on-demand"
+    finally:
+        _reset()
+
+
+async def test_unrecognized_caller_records_nothing(gateway_on, captured_visits):
+    """There is no vendor to attribute the row to, and inventing one would
+    corrupt the vendor rollup — a generic MCP client stays invisible."""
+    try:
+        async with _client((_site(), _profile())) as client:
+            resp = await client.post(
+                MCP_PATH,
+                json=_rpc("get_offers"),
+                headers={"user-agent": "curl/8.4.0"},
+            )
+        assert resp.status_code == 200
+        assert captured_visits == []
+    finally:
+        _reset()
+
+
+async def test_rejected_tool_name_records_nothing(gateway_on, captured_visits):
+    """Recording sits past the allow-list gate, so a rejected call never lands
+    in the agent tables and the stored label is never caller-controlled text."""
+    try:
+        async with _client((_site(), _profile())) as client:
+            resp = await client.post(
+                MCP_PATH,
+                json=_rpc("tools/call", {"name": "delete_everything"}),
+                headers={"user-agent": CHATGPT_UA},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["error"]["code"] == -32601
+        assert captured_visits == []
+    finally:
+        _reset()
