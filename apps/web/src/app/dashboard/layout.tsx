@@ -511,13 +511,13 @@ export default function DashboardLayout({
           <Link
             href="/dashboard"
             onClick={() => {
-              // Mark this as a deliberate exit so the dashboard's zero-site
-              // auto-redirect doesn't bounce the user straight back here — the
-              // trap that made "Exit to dashboard" a no-op for users who hadn't
-              // created a site yet. Sticky for the tab session, not consumed on
-              // first read, so repeat /dashboard visits stay reachable too.
+              // A deliberate exit means "I've seen onboarding, don't force me
+              // back." Persist it so the dashboard's zero-site auto-redirect
+              // never bounces the user into onboarding again — across reloads
+              // and future logins, not just this tab. First-run users (no flag)
+              // still get routed through welcome → add site.
               try {
-                sessionStorage.setItem("beam_exit_onboarding", "1");
+                localStorage.setItem("beam_onboarded_v1", "1");
               } catch {
                 /* storage blocked — redirect guard just won't apply */
               }

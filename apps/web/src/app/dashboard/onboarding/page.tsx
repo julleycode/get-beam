@@ -16,13 +16,19 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-type Step = "create" | "install";
+type Step = "welcome" | "create" | "install";
 
 function OnboardingFlow() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [step, setStep] = useState<Step>("create");
+  // First-run users arrive with ?welcome=1 (from the dashboard's zero-site
+  // redirect) and see the welcome intro before add site. The "Add site" button
+  // for existing users links here without the param, dropping them straight on
+  // the create form.
+  const [step, setStep] = useState<Step>(
+    searchParams.get("welcome") === "1" ? "welcome" : "create",
+  );
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [description, setDescription] = useState("");
@@ -71,6 +77,13 @@ function OnboardingFlow() {
     try {
       const site = await api.createSite(name, url, description || undefined);
       setSiteId(site.site_id);
+      // Completing onboarding counts as onboarded: never force the welcome
+      // → add-site funnel again, even if every site is later deleted.
+      try {
+        localStorage.setItem("beam_onboarded_v1", "1");
+      } catch {
+        /* storage blocked — worst case the funnel re-offers next visit */
+      }
 
       const pixel = await api.getPixelSnippet(site.site_id);
       setSnippet(pixel.snippet);
@@ -111,7 +124,8 @@ function OnboardingFlow() {
 
   return (
     <div className="max-w-2xl mx-auto">
-      {/* Progress bar */}
+      {/* Progress bar — hidden on the welcome intro */}
+      {step !== "welcome" && (
       <div className="flex items-center gap-2 mb-8">
         {steps.map((s, i) => (
           <div key={s.key} className="flex items-center gap-2 flex-1">
@@ -161,6 +175,75 @@ function OnboardingFlow() {
           </div>
         ))}
       </div>
+      )}
+
+      {/* Step 0: Welcome intro (first-run only) */}
+      {step === "welcome" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Welcome to Beam</CardTitle>
+            <CardDescription>
+              Beam turns your anonymous website traffic into people you can
+              actually reach — then drafts the outreach for you.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ul className="space-y-3 text-sm">
+              <li className="flex items-start gap-3">
+                <span className="mt-0.5 flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-bold">
+                  1
+                </span>
+                <span>
+                  <span className="font-medium text-foreground">
+                    Identify visitors
+                  </span>{" "}
+                  <span className="text-muted-foreground">
+                    — see the real people and companies browsing your site.
+                  </span>
+                </span>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="mt-0.5 flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-bold">
+                  2
+                </span>
+                <span>
+                  <span className="font-medium text-foreground">
+                    Enrich profiles
+                  </span>{" "}
+                  <span className="text-muted-foreground">
+                    — LinkedIn, role, and company details, added automatically.
+                  </span>
+                </span>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="mt-0.5 flex-shrink-0 flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary font-bold">
+                  3
+                </span>
+                <span>
+                  <span className="font-medium text-foreground">
+                    Draft outreach
+                  </span>{" "}
+                  <span className="text-muted-foreground">
+                    — AI writes the email and social follow-ups; you approve and
+                    send.
+                  </span>
+                </span>
+              </li>
+            </ul>
+            <Button
+              type="button"
+              className="w-full mt-6"
+              size="lg"
+              onClick={() => setStep("create")}
+            >
+              Get started
+            </Button>
+            <p className="mt-3 text-center text-xs text-muted-foreground">
+              Takes about a minute — add your site, then drop in one snippet.
+            </p>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Step 1: Create site */}
       {step === "create" && (

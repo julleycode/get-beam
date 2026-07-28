@@ -332,18 +332,18 @@ function DashboardContent({
     const settle = (sites: Site[]) => {
       onSitesLoaded(sites);
       if (sites.length === 0) {
-        // First-run funnel: land zero-site users on onboarding. But skip it when
-        // they deliberately hit "Exit to dashboard" from onboarding — otherwise
-        // the two features fight and the user is trapped in an onboarding loop
-        // with no site yet. The flag is sticky for the tab session (set on exit),
-        // so the empty dashboard stays reachable.
-        let exited = false;
+        // First-run funnel: route a brand-new, zero-site user through onboarding
+        // (welcome → add site). Once they've been through it — either they
+        // created a site, or they deliberately hit "Exit to dashboard" — the
+        // persistent flag stops the redirect for good, so exiting isn't undone
+        // on the next reload/login and the empty dashboard stays reachable.
+        let onboarded = false;
         try {
-          exited = sessionStorage.getItem("beam_exit_onboarding") === "1";
+          onboarded = localStorage.getItem("beam_onboarded_v1") === "1";
         } catch {
           /* storage blocked — fall through to the default redirect */
         }
-        if (!exited) router.push("/dashboard/onboarding");
+        if (!onboarded) router.push("/dashboard/onboarding?welcome=1");
       }
     };
     // One round-trip: sites + per-site stats. Seed the ["visitor-stats", id]
