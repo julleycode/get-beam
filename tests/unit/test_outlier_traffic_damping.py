@@ -236,7 +236,7 @@ def test_sweep_write_is_not_sticky_and_writes_both_directions():
     — one-way forever. This sweep must write the CURRENT verdict instead, or a
     false positive could never be undone by the automatic path.
     """
-    source = _SWEEP_MODULE.read_text()
+    source = _SWEEP_MODULE.read_text(encoding="utf-8")
     assert "is_internal_suspect.is_(False)" not in source, (
         "sticky one-way guard found — is_internal_suspect must be reversible"
     )
@@ -256,7 +256,7 @@ def test_sweep_skips_any_visitor_with_a_manual_override_in_either_direction():
     never re-flagged. This test exercises that exact selection logic against a
     simulated sweep tick whose raw verdict would DISAGREE with both overrides.
     """
-    source = _SWEEP_MODULE.read_text()
+    source = _SWEEP_MODULE.read_text(encoding="utf-8")
     assert "internal_override.isnot(None)" in source
     assert "skipped_override" in source
     # Defence in depth at the SQL level too.
@@ -287,7 +287,7 @@ def test_sweep_skips_any_visitor_with_a_manual_override_in_either_direction():
 
 def test_override_endpoint_is_not_gated_on_the_site_toggle():
     """The manual action is standalone — usable even with damping off."""
-    tree = ast.parse((_REPO_ROOT / "apps/api/routers/visitors.py").read_text())
+    tree = ast.parse((_REPO_ROOT / "apps/api/routers/visitors.py").read_text(encoding="utf-8"))
     fn = next(
         n
         for n in ast.walk(tree)
@@ -311,7 +311,7 @@ def test_override_endpoint_is_not_gated_on_the_site_toggle():
 
 
 def test_pure_module_has_no_io_or_db_imports():
-    tree = ast.parse(_PURE_MODULE.read_text())
+    tree = ast.parse(_PURE_MODULE.read_text(encoding="utf-8"))
     imported: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -343,7 +343,7 @@ def test_emailability_never_reads_the_new_flag():
     """Hard Safety Constraint #2 — data quality, never outreach eligibility."""
     from apps.api.services.identity_classification import is_emailable_identity
 
-    source = (_REPO_ROOT / "apps/api/services/identity_classification.py").read_text()
+    source = (_REPO_ROOT / "apps/api/services/identity_classification.py").read_text(encoding="utf-8")
     assert "is_internal_suspect" not in source
     assert "internal_override" not in source
     assert len(inspect.signature(is_emailable_identity).parameters) == 3
@@ -351,20 +351,20 @@ def test_emailability_never_reads_the_new_flag():
 
 def test_visitor_aggregator_is_untouched_by_this_feature():
     """VALIDATE correction: the per-visitor events-scoped SQL stays unchanged."""
-    source = (_REPO_ROOT / "apps/api/services/visitor_aggregator.py").read_text()
+    source = (_REPO_ROOT / "apps/api/services/visitor_aggregator.py").read_text(encoding="utf-8")
     assert "is_internal_suspect" not in source
     assert "internal_override" not in source
 
 
 def test_digest_exclusion_is_gated_and_does_not_couple_to_emailability():
-    source = (_REPO_ROOT / "apps/api/services/daily_digest.py").read_text()
+    source = (_REPO_ROOT / "apps/api/services/daily_digest.py").read_text(encoding="utf-8")
     assert 'Visitor.internal_override.is_distinct_from("internal")' in source
     assert "damping_enabled" in source
     assert "is_emailable_identity" not in source
 
 
 def test_resolution_deprioritises_and_never_excludes():
-    source = (_REPO_ROOT / "apps/api/services/resolution_runner.py").read_text()
+    source = (_REPO_ROOT / "apps/api/services/resolution_runner.py").read_text(encoding="utf-8")
     assert 'Visitor.internal_override.is_distinct_from("internal").desc()' in source, (
         "must sort on the human's confirmation, not filter"
     )
@@ -394,7 +394,7 @@ def test_auto_flagged_but_unconfirmed_visitor_is_still_fully_counted_in_the_dige
     A visitor with is_internal_suspect=True and internal_override=NULL is
     indistinguishable from any other visitor to this query.
     """
-    source = (_REPO_ROOT / "apps/api/services/daily_digest.py").read_text()
+    source = (_REPO_ROOT / "apps/api/services/daily_digest.py").read_text(encoding="utf-8")
     assert "Visitor.is_internal_suspect" not in source, (
         "the auto flag must never gate the digest aggregate — only the human's "
         "internal_override may exclude a visitor"
@@ -406,7 +406,7 @@ def test_auto_flagged_but_unconfirmed_visitor_is_still_fully_counted_in_the_dige
 
 def test_auto_flagged_but_unconfirmed_visitor_keeps_normal_resolution_order():
     """The automatic flag must be absent from the resolution ordering entirely."""
-    source = (_REPO_ROOT / "apps/api/services/resolution_runner.py").read_text()
+    source = (_REPO_ROOT / "apps/api/services/resolution_runner.py").read_text(encoding="utf-8")
     assert "Visitor.is_internal_suspect" not in source, (
         "the auto flag must never affect resolution priority — only the human's "
         "internal_override may deprioritise"
@@ -423,7 +423,7 @@ def test_default_threshold_is_the_calibrated_suggestion_list_size():
 
 
 def test_sweep_read_is_bounded_and_per_site_opt_in():
-    source = _SWEEP_MODULE.read_text()
+    source = _SWEEP_MODULE.read_text(encoding="utf-8")
     assert "outlier_traffic_damping_lookback_days" in source
     assert "Event.created_at >= cutoff" in source
     assert "Site.internal_damping_enabled.is_(True)" in source
@@ -437,6 +437,6 @@ def test_user_facing_copy_never_asserts_the_visitors_identity():
         "apps/web/src/app/dashboard/visitors/page.tsx",
         "apps/web/src/components/site-settings-dialog.tsx",
     ):
-        source = (_REPO_ROOT / rel_path).read_text().lower()
+        source = (_REPO_ROOT / rel_path).read_text(encoding="utf-8").lower()
         for phrase in banned:
             assert phrase not in source, f"{rel_path} asserts identity: {phrase!r}"

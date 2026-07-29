@@ -23,7 +23,7 @@ PIXEL_PATH = pathlib.Path(__file__).parent.parent.parent / "apps" / "pixel" / "s
 @pytest.fixture
 def pixel_code() -> str:
     assert PIXEL_PATH.exists(), f"Pixel file not found at {PIXEL_PATH}"
-    return PIXEL_PATH.read_text()
+    return PIXEL_PATH.read_text(encoding="utf-8")
 
 
 class TestPixelOptoutSignal:

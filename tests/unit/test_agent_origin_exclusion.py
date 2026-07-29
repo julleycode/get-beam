@@ -223,7 +223,7 @@ def test_source_agent_visit_id_literal_field_name_tripwire(rel_path):
     # Pure text search — no imports, cannot be broken by mocking. If any future
     # change renames the field in one file without updating the others, this
     # fails loudly instead of silently reopening the AC10 outreach hole.
-    text = (_REPO_ROOT / rel_path).read_text()
+    text = (_REPO_ROOT / rel_path).read_text(encoding="utf-8")
     assert "source_agent_visit_id" in text, (
         f"{rel_path} is missing the literal field name 'source_agent_visit_id' — "
         "a rename here silently disables the AC10 agent-origin outreach guard."

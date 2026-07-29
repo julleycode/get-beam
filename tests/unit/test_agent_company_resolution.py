@@ -522,7 +522,7 @@ _AC2_FILES = [
 
 @pytest.mark.parametrize("rel_path", _MARKER_FILES)
 def test_source_agent_visit_id_literal_present(rel_path):
-    text = (_REPO_ROOT / rel_path).read_text()
+    text = (_REPO_ROOT / rel_path).read_text(encoding="utf-8")
     assert "source_agent_visit_id" in text, (
         f"{rel_path} lost the literal 'source_agent_visit_id' — a rename silently "
         "reopens the AC10 agent-origin outreach guard."
@@ -531,7 +531,7 @@ def test_source_agent_visit_id_literal_present(rel_path):
 
 @pytest.mark.parametrize("rel_path", _AC2_FILES)
 def test_ac2_filter_referenced_at_every_site(rel_path):
-    text = (_REPO_ROOT / rel_path).read_text()
+    text = (_REPO_ROOT / rel_path).read_text(encoding="utf-8")
     assert "human_only_visitor_filter" in text, (
         f"{rel_path} no longer references human_only_visitor_filter — an AC2 "
         "exclusion site regressed and agent rows can pollute human data."

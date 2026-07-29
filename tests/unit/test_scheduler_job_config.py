@@ -23,7 +23,7 @@ SCHEDULER_PATH = (
 
 
 def _add_job_calls() -> list[ast.Call]:
-    tree = ast.parse(SCHEDULER_PATH.read_text())
+    tree = ast.parse(SCHEDULER_PATH.read_text(encoding="utf-8"))
     return [
         node
         for node in ast.walk(tree)
