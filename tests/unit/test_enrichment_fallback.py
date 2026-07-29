@@ -218,6 +218,18 @@ class TestEnrichTier1FallbackWiring:
             kcm, "is_known_contact", AsyncMock(return_value=(False, None))
         )
 
+    @pytest.fixture(autouse=True)
+    def _pdl_key_configured(self, monkeypatch):
+        """A SECOND gate sits ahead of the waterfall: with no PDL key,
+        enrich_tier1 returns early and leaves the visitor retryable rather than
+        401-ing and marking it permanently failed. Tests here are about what
+        happens once a provider answers, so the key has to be present — without
+        it every case below exits at that gate and passes or fails for the wrong
+        reason. The providers themselves are mocked, so no key is ever used."""
+        from apps.api.config import settings
+
+        monkeypatch.setattr(settings, "people_data_labs_api_key", "test-key")
+
     def _enricher_with(self, pdl=None, apollo=None):
         e = Enricher(db=AsyncMock())
         e._enrich_pdl = AsyncMock(return_value=pdl)
