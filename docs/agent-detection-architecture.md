@@ -84,8 +84,9 @@ không cặp nào từng thoả điều kiện.
 Đã có: `llms.txt`, agent manifest, offers feed, MCP JSON-RPC server (3 tool đọc), agent profile do
 khách tự soạn, chống dò `site_id` (5 trường hợp lỗi đều trả 404 giống nhau).
 
-**Thiếu đầu ra:** link trong offers feed là URL trần — không mang mã nào để nhận ra khi có người
-click vào.
+**Đầu ra — đã sửa 29-07 (F2).** Trước đó link trong offers feed là URL trần, không mang mã nào để
+nhận ra khi có người click. Nay mỗi URL cùng host mang `?_bam=<marker>` mã hoá id của chính lượt
+fetch đã phát nó ra (chi tiết + 4 ràng buộc: mục 6). Cờ `agent_marker_enabled`, mặc định TẮT.
 
 **Đầu vào — đã sửa 29-07 (F11).** Trước đó toàn bộ surface agent-facing không ghi lại một lượt
 truy cập nào. Nay `record_gateway_visit()` trong `services/agent_gateway.py` ghi vào đúng hai bảng
@@ -120,14 +121,11 @@ vendor sẽ làm hỏng thống kê vendor đang có. Đây là lựa chọn có
 | F12 | Không có trạng thái `spoofed` — chỉ nâng cấp, không phát hiện lệch | HIGH | `agent_verification.py` |
 | F2 | Không có marker → "người sau AI" là suy đoán thời gian | HIGH | `services/agent_gateway.py` |
 | F14 | Chưa có Web Bot Auth (RFC 9421) — chữ ký mã hoá, miễn phí, mạnh nhất hiện có | MEDIUM | — |
-| F2 | Không có marker → "người sau AI" là suy đoán thời gian | HIGH | `services/agent_gateway.py` |
 
-Hai cái này **chưa làm**, và mỗi cái vướng một thứ khác nhau:
+Còn lại một cái **chưa làm**:
 
 | Mã | Vướng ở đâu |
 |---|---|
-| F2 | Chạm 3 lớp (không phải 5): mint marker → nhúng vào offers feed → khớp tất định trong sweep. **Không cần sửa `tracker.js`** — pixel đã gửi `url: window.location.href` trong mọi pageview, nên server đọc marker từ query string y như `_tp_from_url()` đang làm cho campaign touchpoint. Không cần migration nếu token tự mô tả (ký Fernet, tái dùng `link_decorator`) |
-| F2 (chặn thật) | `AGENT_CACHE_CONTROL` cho offers feed là `s-maxage=3600, stale-while-revalidate=86400` → CDN phát **một** body cho mọi agent tới sau. Marker theo từng lượt fetch sẽ **gán sai người** (người sau agent B nối vào fetch của agent A), tệ hơn cách đoán thời gian hiện tại. Đã chốt hướng: bỏ cache riêng cho `offers.json` |
 | F14 | Implement RFC 9421 từ đầu: đọc header `Signature-Agent`, lấy public key tại `/.well-known/http-message-signatures-directory`, verify chữ ký + timestamp, cache key. Nhiều ngày, cần plan riêng |
 
 **F14 đáng chú ý nhất về mặt cơ hội:** Web Bot Auth đã được Anthropic, OpenAI, Perplexity,
@@ -138,6 +136,29 @@ nhưng **có** ký).
 ---
 
 ## 6. Đã sửa (28-07 → 29-07)
+
+- **F2 — "người sau AI" nay tất định, không còn đoán theo thời gian.** Khi agent kéo
+  `offers.json`, lượt fetch đó đã được ghi thành một dòng `agent_fetch_events`; id của nó được
+  **mã hoá Fernet** thành marker và đóng vào từng `offer.url`. Người click link đó đáp xuống site
+  có pixel kèm `?_bam=...`, server đọc marker từ URL pageview y như `_tp_from_url()` đang làm, giải
+  mã ngược về **đúng** lượt fetch, ghi `agent_handoff_links` với `method="marker"`,
+  `confidence="high"`. Không cần migration, **không sửa `tracker.js`**, cờ `agent_marker_enabled`
+  mặc định TẮT. Bốn ràng buộc cố ý:
+  1. **Bật cờ = đổi luôn posture cache của `offers.json`** sang `private, no-store`. Marker là
+     theo-từng-lượt-fetch, mà `AGENT_CACHE_CONTROL` đang là `s-maxage=3600,
+     stale-while-revalidate=86400` → shared cache sẽ phát marker của agent đầu cho mọi agent phía
+     sau và **gán sai người** — tệ hơn hẳn cái đoán mà nó thay thế. `manifest.json` và `llms.txt`
+     giữ nguyên cache vì không mang marker (có test chặn rò rỉ chéo — `llms.txt` render cùng
+     `build_offers`).
+  2. **Chỉ đóng dấu URL cùng host với site.** Link bên thứ ba không chạy pixel Beam nên marker ở
+     đó không bao giờ đọc lại được.
+  3. **Marker hết hạn sau 7 ngày** (TTL của Fernet, không cần lưu state). Link forward lại sau
+     nhiều tuần giải mã ra rỗng thay vì bịa một attribution.
+  4. **Marker định danh một LƯỢT FETCH, không phải một người.** Nó được mint trước khi có người
+     nào, giống hệt nhau cho mọi người nhận câu trả lời của agent đó; unique constraint
+     `uq_agent_handoff_links_fetch_event` khiến "click đầu thắng" thành ràng buộc cấu trúc.
+  Marker **ghi đè** link tạm do sweep đoán ra (nó là sự thật mà sweep đang xấp xỉ), nhưng không
+  bao giờ ghi đè một marker link khác.
 
 - **F10 — `agent_fetch_events` nay chống ghi trùng.** Cột `dedup_key` (sha256, nullable) +
   **partial** unique index `WHERE dedup_key IS NOT NULL`, migration `c1e7a94f3d28`.
@@ -216,9 +237,13 @@ nhưng **có** ký).
 
 ## 8. Cờ tính năng — tất cả mặc định TẮT
 
-`agent_detection_enabled`, `agent_gateway_enabled`, `cadence_bot_flag_enabled`,
-`site_ingest_limit_enabled`, `ingest_velocity_enabled`, `company_graph_enabled`,
-`identity_signals_enabled`.
+`agent_detection_enabled`, `agent_gateway_enabled`, `agent_marker_enabled`,
+`cadence_bot_flag_enabled`, `site_ingest_limit_enabled`, `ingest_velocity_enabled`,
+`company_graph_enabled`, `identity_signals_enabled`.
+
+`agent_marker_enabled` khác các cờ còn lại ở một điểm: bật nó **đổi header cache** của
+`offers.json` (sang `private, no-store`), không chỉ bật thêm đường ghi. Nó cũng cần
+`ENCRYPTION_KEY` — thiếu key thì feed vẫn phục vụ bình thường nhưng không có marker nào.
 
 Bật cờ **trước khi** apply migration lên production sẽ crash. Không có guard nào ở code chặn
 việc này — đây là quy trình vận hành thủ công.
@@ -227,11 +252,13 @@ việc này — đây là quy trình vận hành thủ công.
 
 ## Câu hỏi chưa giải quyết
 
-1. **F11 và F2 nên gộp làm một không?** Cả hai đều là chuyện "surface agent-facing chưa khép vòng":
-   một đầu không ghi lại, một đầu không định danh được. Sửa rời sẽ chạm cùng file.
+1. **AI có giữ nguyên query param khi hiển thị link cho người dùng không?** Đây là giả định F2
+   đang đứng trên và **không kiểm chứng được bằng code** — một số surface có thể strip param hoặc
+   viết lại URL. Cần test thật với agent thật. Nếu bị strip, F2 âm thầm về mức 0 link (không sai,
+   chỉ là không có), sweep thời gian vẫn chạy như cũ.
 2. **Có làm Web Bot Auth (F14) không?** Đây là thay đổi lớn nhất về năng lực nhưng cũng là việc
    mới hoàn toàn, không phải sửa lỗi.
-3. **Dải IP tĩnh làm mới thế nào?** Hiện commit trong repo. Cron kéo về, hay chấp nhận cũ?
+3. **Dải IP tĩnh làm mới thế nào?** Hiện commit trong repo — xem mục 5 dưới đây.
 4. `routers/visitors.py` (1314 dòng) và 2 trang dashboard mới đọc phần giao với agent, **chưa
    review từng dòng**. Đánh giá trên chưa phủ tab Visitors ở mức chi tiết.
 5. **Dải IP ship kèm repo đang có dữ liệu thật, trái với thiết kế đã ghi.** Mục F13 nói file ship
