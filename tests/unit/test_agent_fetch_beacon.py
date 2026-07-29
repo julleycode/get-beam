@@ -57,8 +57,16 @@ def _capture_persist(monkeypatch) -> dict:
     async def fake_visit(db, site_id, classification, ip_address, path):
         calls["visit"] = {"site_id": site_id, "vendor": classification.vendor, "path": path}
 
-    async def fake_event(db, site_id, classification, tier, ip_address, page_path, event_time=None):
-        calls["event"] = {"tier": tier, "event_time": event_time, "path": page_path}
+    async def fake_event(
+        db, site_id, classification, tier, ip_address, page_path,
+        event_time=None, dedup_key=None,
+    ):
+        calls["event"] = {
+            "tier": tier,
+            "event_time": event_time,
+            "path": page_path,
+            "dedup_key": dedup_key,
+        }
 
     monkeypatch.setattr(afb, "persist_agent_visit", fake_visit)
     monkeypatch.setattr(afb, "persist_agent_fetch_event", fake_event)
@@ -197,6 +205,62 @@ def test_decode_token_mint_ts_edge_cases():
     assert decode_token_mint_ts(_mint_token(1_700_000_000)) == datetime.fromtimestamp(
         1_700_000_000, tz=timezone.utc
     )
+
+
+# ─────────────────────────── replay guard: dedup_key ───────────────────────────
+
+@pytest.mark.unit
+async def test_beacon_token_becomes_dedup_key(monkeypatch):
+    """A re-delivered beacon carries the same mint token → the same dedup key, so
+    the duplicate insert is suppressed instead of logging the fetch twice."""
+    token = _mint_token(1_700_000_000)
+    keys = []
+    for _ in range(2):
+        calls = _capture_persist(monkeypatch)
+        await afb.record_fetch_beacon(
+            db := _mock_db(site_found=True),
+            FetchBeaconIn(
+                site_id="site_1", user_agent=CHATGPT_UA, path="/pricing", token=token
+            ),
+        )
+        assert db is not None
+        keys.append(calls["event"]["dedup_key"])
+
+    assert keys[0] is not None
+    assert keys[0] == keys[1]
+
+
+@pytest.mark.unit
+async def test_same_token_different_agents_stay_distinct(monkeypatch):
+    """A CACHED page render serves one token to every fetcher that receives it.
+    The key must still separate two vendors, or the second agent's fetch would be
+    silently swallowed as a replay of the first."""
+    token = _mint_token(1_700_000_000)
+
+    calls = _capture_persist(monkeypatch)
+    await afb.record_fetch_beacon(
+        _mock_db(site_found=True),
+        FetchBeaconIn(site_id="site_1", user_agent=CHATGPT_UA, path="/p", token=token),
+    )
+    openai_key = calls["event"]["dedup_key"]
+
+    calls = _capture_persist(monkeypatch)
+    await afb.record_fetch_beacon(
+        _mock_db(site_found=True),
+        FetchBeaconIn(site_id="site_1", user_agent=GPTBOT_UA, path="/p", token=token),
+    )
+    assert calls["event"]["dedup_key"] != openai_key
+
+
+@pytest.mark.unit
+async def test_tokenless_beacon_makes_no_dedup_claim(monkeypatch):
+    """No token → no retry-stable identity → None, and the row inserts freely."""
+    calls = _capture_persist(monkeypatch)
+    await afb.record_fetch_beacon(
+        _mock_db(site_found=True),
+        FetchBeaconIn(site_id="site_1", user_agent=CHATGPT_UA, path="/p", token=None),
+    )
+    assert calls["event"]["dedup_key"] is None
 
 
 # ─────────────────────────── persistence: event_time → created_at (E1) ───────────────────────────

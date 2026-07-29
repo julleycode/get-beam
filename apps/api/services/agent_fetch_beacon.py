@@ -26,6 +26,7 @@ from apps.api.models.site import Site
 from apps.api.schemas.agents import FetchBeaconIn
 from apps.api.services.agent_classifier import classify_agent, classify_tier
 from apps.api.services.agent_visit_persistence import (
+    build_dedup_key,
     persist_agent_fetch_event,
     persist_agent_visit,
 )
@@ -99,6 +100,12 @@ async def record_fetch_beacon(db: AsyncSession, payload: FetchBeaconIn) -> str:
     # No fetcher IP is available server-side (the middleware forwards none, and
     # logging/storing an IP is a PII guardrail) — pass empty/None.
     await persist_agent_visit(db, payload.site_id, classification, "", payload.path)
+    # The token is minted once per page render, so every re-delivery of the same
+    # beacon (edge retry, at-least-once forwarding) carries it unchanged — making
+    # it the retry-stable identity for this path. It is NOT unique on its own: a
+    # cached render serves one token to every fetcher that receives it, which is
+    # why build_dedup_key folds the agent identity in alongside it. A beacon with
+    # no token falls back to storing unconditionally.
     await persist_agent_fetch_event(
         db,
         payload.site_id,
@@ -107,6 +114,13 @@ async def record_fetch_beacon(db: AsyncSession, payload: FetchBeaconIn) -> str:
         None,
         payload.path,
         event_time=mint_ts,
+        dedup_key=build_dedup_key(
+            site_id=payload.site_id,
+            vendor=classification.vendor,
+            raw_ua_token=classification.product_or_ua_token,
+            page_path=payload.path,
+            natural_key=payload.token,
+        ),
     )
     logger.info(
         "fetch_beacon_written",

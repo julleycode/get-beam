@@ -10,10 +10,11 @@ Structurally separate from Visitor/Event (SPEC D1) — agent traffic never touch
 human visitor data.
 """
 
+import hashlib
 from datetime import datetime, timezone
 
 import structlog
-from sqlalchemy import insert, select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,6 +41,46 @@ def _append_capped_path(paths: list[str], new_path: str | None, cap: int = 50) -
     if len(result) > cap:
         result = result[-cap:]
     return result
+
+
+def build_dedup_key(
+    *,
+    site_id: str,
+    vendor: str,
+    raw_ua_token: str,
+    page_path: str | None,
+    natural_key: str | None,
+) -> str | None:
+    """Digest identifying one agent fetch for replay suppression, or ``None``.
+
+    ``natural_key`` is the calling path's own retry-stable token — the pixel
+    batch's client-minted ``event_id``, the edge beacon's mint token. Absent it
+    (the gateway surfaces, and older pixel builds that predate ``event_id``)
+    there is nothing that distinguishes a retry from a second genuine fetch, so
+    this returns ``None`` and the row is stored unconditionally. Guessing a key
+    would silently discard real fetches, which is the worse failure for a
+    dashboard whose whole job is counting agent traffic.
+
+    The digest deliberately covers more than the natural key:
+
+    - ``site_id`` keeps the key space per-tenant, so a client-supplied
+      ``event_id`` replayed against another site cannot occupy that site's key.
+    - ``vendor`` + ``raw_ua_token`` keep two DIFFERENT agents distinct even when
+      they share one natural key. The beacon's token is minted by the page
+      render, and a cached render hands the same token to every fetcher that
+      receives it — without the agent identity in the digest, ClaudeBot's fetch
+      would be swallowed as a replay of GPTBot's.
+    - ``page_path`` separates one agent's fetches of different pages.
+
+    Hashing (rather than storing the tuple) bounds the key at 64 chars however
+    long ``page_path`` runs, keeping it indexable.
+    """
+    if not natural_key:
+        return None
+    material = "|".join(
+        (site_id, vendor, raw_ua_token, page_path or "", natural_key)
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 async def persist_agent_visit(
@@ -124,13 +165,20 @@ async def persist_agent_fetch_event(
     ip_address: str | None,
     page_path: str | None,
     event_time: datetime | None = None,
+    dedup_key: str | None = None,
 ) -> None:
     """Insert one append-only ``agent_fetch_events`` row. Fail-open.
 
     Isolated from the ``persist_agent_visit`` rollup call — this insert has its
     own try/except and its own commit, so its failure never affects (and is
-    never affected by) the rollup upsert. Plain ``insert()`` — append-only, no
-    upsert/conflict semantics needed.
+    never affected by) the rollup upsert.
+
+    Append-only, with one narrow exception: when the caller supplies a
+    ``dedup_key`` (see ``build_dedup_key``) the insert is a no-op if that exact
+    key was already stored, so a retried or replayed write does not become a
+    second fetch row. The conflict target is the PARTIAL unique index, so a
+    ``None`` key cannot conflict with anything — including another ``None`` —
+    and those rows keep their unconditional-insert behavior.
 
     ``event_time`` (H5 E1) — when provided (e.g. a mint-time decoded from a
     ``/pricing-overview/{token}`` beacon), it is written explicitly to
@@ -148,10 +196,20 @@ async def persist_agent_fetch_event(
             "page_path": page_path,
             "ip_address": ip_address or None,
             "verification_method": classification.verification_method,
+            "dedup_key": dedup_key,
         }
         if event_time is not None:
             values["created_at"] = event_time
-        await db.execute(insert(AgentFetchEvent).values(**values))
+        await db.execute(
+            pg_insert(AgentFetchEvent)
+            .values(**values)
+            .on_conflict_do_nothing(
+                index_elements=["dedup_key"],
+                # Must mirror the partial index's predicate exactly, or Postgres
+                # cannot infer that index as the arbiter.
+                index_where=text("dedup_key IS NOT NULL"),
+            )
+        )
         await db.commit()
     except Exception as exc:
         # Fail-open: log keys/vendor/site_id only (NO raw UA, NO IP — PII/GDPR

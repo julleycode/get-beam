@@ -13,7 +13,7 @@ from apps.api.models.database import get_db, async_session
 from apps.api.models.event import Event
 from apps.api.schemas.events import EventBatch
 from apps.api.services.agent_classifier import classify_agent, classify_tier
-from apps.api.services.agent_visit_persistence import persist_agent_visit, persist_agent_fetch_event
+from apps.api.services.agent_visit_persistence import build_dedup_key, persist_agent_visit, persist_agent_fetch_event
 from apps.api.services.bot_filter import is_bot
 from apps.api.services.ip_resolution import resolve_client_ip
 from apps.api.services.link_decorator import decode_bid
@@ -247,14 +247,28 @@ async def ingest_events(
     # traffic is never re-dropped by the datacenter/proxy filters). Only the first
     # event's page_path in a multi-event batch is recorded this phase.
     if classification is not None:
-        agent_path = batch.events[0].page_path if batch.events else None
+        first_agent_event = batch.events[0] if batch.events else None
+        agent_path = first_agent_event.page_path if first_agent_event else None
         await persist_agent_visit(db, batch.site_id, classification, ip_address, agent_path)
         # H1: also capture this hit as its own append-only, tier-tagged fetch
         # event (isolated fail-open write — a failure here never affects the
         # rollup above nor the 204 response).
         tier = classify_tier(classification.product_or_ua_token)
+        # The pixel keeps its queue on any non-2xx and re-sends the same batch on
+        # the next interval, carrying the same client-minted event_ids — so a
+        # transient failure downstream of this write would otherwise log the one
+        # fetch again on every retry. Reuse the batch's own idempotency key, the
+        # same one the human Event insert dedupes on. Older pixel builds send no
+        # event_id; those keep inserting unconditionally.
         await persist_agent_fetch_event(
-            db, batch.site_id, classification, tier, ip_address, agent_path
+            db, batch.site_id, classification, tier, ip_address, agent_path,
+            dedup_key=build_dedup_key(
+                site_id=batch.site_id,
+                vendor=classification.vendor,
+                raw_ua_token=classification.product_or_ua_token,
+                page_path=agent_path,
+                natural_key=first_agent_event.event_id if first_agent_event else None,
+            ),
         )
         return Response(status_code=204)
 
