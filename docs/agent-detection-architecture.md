@@ -120,15 +120,14 @@ vendor sẽ làm hỏng thống kê vendor đang có. Đây là lựa chọn có
 | F12 | Không có trạng thái `spoofed` — chỉ nâng cấp, không phát hiện lệch | HIGH | `agent_verification.py` |
 | F2 | Không có marker → "người sau AI" là suy đoán thời gian | HIGH | `services/agent_gateway.py` |
 | F14 | Chưa có Web Bot Auth (RFC 9421) — chữ ký mã hoá, miễn phí, mạnh nhất hiện có | MEDIUM | — |
-| F10 | `agent_fetch_events` không có ràng buộc chống trùng | MEDIUM | `models/agent_fetch_event.py` |
 | F2 | Không có marker → "người sau AI" là suy đoán thời gian | HIGH | `services/agent_gateway.py` |
 
-Ba cái này **chưa làm**, và mỗi cái vướng một thứ khác nhau:
+Hai cái này **chưa làm**, và mỗi cái vướng một thứ khác nhau:
 
 | Mã | Vướng ở đâu |
 |---|---|
-| F2 + F10 | Cả hai cần **cùng một migration** trên `agent_fetch_events`: F2 cần cột lưu marker, F10 cần unique constraint. Nên làm chung một lần. F10 còn phải dọn dữ liệu trùng trên prod TRƯỚC (còn dòng trùng thì tạo constraint sẽ fail) và đổi đường ghi sang `ON CONFLICT DO NOTHING` — mà đó là đường fail-open đang chạy production |
-| F2 (thêm) | Chạm 5 lớp: mint marker → lưu → nhúng vào offers feed → **bắt ở phía click trong `tracker.js`** → khớp tất định trong sweep. Lớp `tracker.js` chưa từng đọc trong phiên này |
+| F2 | Chạm 3 lớp (không phải 5): mint marker → nhúng vào offers feed → khớp tất định trong sweep. **Không cần sửa `tracker.js`** — pixel đã gửi `url: window.location.href` trong mọi pageview, nên server đọc marker từ query string y như `_tp_from_url()` đang làm cho campaign touchpoint. Không cần migration nếu token tự mô tả (ký Fernet, tái dùng `link_decorator`) |
+| F2 (chặn thật) | `AGENT_CACHE_CONTROL` cho offers feed là `s-maxage=3600, stale-while-revalidate=86400` → CDN phát **một** body cho mọi agent tới sau. Marker theo từng lượt fetch sẽ **gán sai người** (người sau agent B nối vào fetch của agent A), tệ hơn cách đoán thời gian hiện tại. Đã chốt hướng: bỏ cache riêng cho `offers.json` |
 | F14 | Implement RFC 9421 từ đầu: đọc header `Signature-Agent`, lấy public key tại `/.well-known/http-message-signatures-directory`, verify chữ ký + timestamp, cache key. Nhiều ngày, cần plan riêng |
 
 **F14 đáng chú ý nhất về mặt cơ hội:** Web Bot Auth đã được Anthropic, OpenAI, Perplexity,
@@ -139,6 +138,22 @@ nhưng **có** ký).
 ---
 
 ## 6. Đã sửa (28-07 → 29-07)
+
+- **F10 — `agent_fetch_events` nay chống ghi trùng.** Cột `dedup_key` (sha256, nullable) +
+  **partial** unique index `WHERE dedup_key IS NOT NULL`, migration `c1e7a94f3d28`.
+  Hai điều chỉnh so với hình dung ban đầu:
+  1. **Không cần dọn dữ liệu prod trước.** Trong Postgres NULL không xung đột với nhau, mà mọi
+     dòng cũ đều có key NULL → index không thể fail khi tạo. Thứ tự "dọn rồi mới khoá" không còn
+     áp dụng.
+  2. **Khoá tổ hợp trên cột sẵn có sẽ vô dụng.** `created_at` mặc định `now()` ở mức micro-giây,
+     nên bản ghi bị replay rơi vào timestamp khác và lọt qua mọi constraint chứa nó. Khoá phải
+     lấy từ token retry-ổn định của chính đường ghi.
+  Ba đường ghi, hai đường có khoá tự nhiên: pixel ingest dùng `event_id` do pixel mint (pixel giữ
+  queue và gửi lại nguyên batch khi gặp non-2xx — đây mới là nguồn trùng lớn nhất, không phải
+  beacon); beacon dùng mint token. Gateway surface không có khoá → để NULL, ghi vô điều kiện như cũ.
+  Digest gộp cả `site_id` + `vendor` + `raw_ua_token`: một page render bị cache phát **cùng một**
+  token cho mọi fetcher, nên nếu chỉ khoá theo token thì lượt fetch của ClaudeBot sẽ bị nuốt như
+  bản replay của GPTBot.
 
 - **F11 — surface agent-facing nay có ghi lại** (xem mục 4.3). Manifest, offers, llms.txt và MCP
   đều ghi vào `agent_visits` + `agent_fetch_events`; nhãn MCP mang theo tên tool.
@@ -219,3 +234,10 @@ việc này — đây là quy trình vận hành thủ công.
 3. **Dải IP tĩnh làm mới thế nào?** Hiện commit trong repo. Cron kéo về, hay chấp nhận cũ?
 4. `routers/visitors.py` (1314 dòng) và 2 trang dashboard mới đọc phần giao với agent, **chưa
    review từng dòng**. Đánh giá trên chưa phủ tab Visitors ở mức chi tiết.
+5. **Dải IP ship kèm repo đang có dữ liệu thật, trái với thiết kế đã ghi.** Mục F13 nói file ship
+   để rỗng ("rỗng = không kết luận"), nhưng commit `889013b` commit luôn dải thật vào
+   `apps/api/data/agent_ip_ranges/*.json`. Test `test_load_ip_ranges_real_branch_is_empty_until_refreshed`
+   đang **fail** vì đúng lý do đó. Hệ quả: F12 armed sẵn bằng một snapshot sẽ cũ dần thay vì chờ
+   job refresh — đúng kiểu hỏng mà F13 sinh ra để tránh. Cần chọn: (a) xoá rỗng file cho khớp
+   thiết kế, hay (b) đổi ý sang "ship seed snapshot" rồi sửa test + doc. Rủi ro hiện thấp
+   (chỉ ghi nhận, `agent_detection_enabled` mặc định TẮT).
