@@ -335,6 +335,23 @@ class Settings(BaseSettings):
     # operator action, matching agent_detection_enabled / company_graph_enabled.
     agent_gateway_enabled: bool = False
 
+    # ─── Agent link marker (Handoff Detection F2) ───
+    # When true, offers.json stamps each same-host offer URL with an opaque
+    # per-fetch marker, so a human arriving on that link is tied to the exact
+    # agent fetch that surfaced it — replacing the 30-minute temporal guess with
+    # a deterministic match.
+    #
+    # Turning this on CHANGES THE CACHE POSTURE of offers.json: the response goes
+    # private/no-store, because a marker is per-fetch and a shared cache would
+    # hand one agent's marker to every later agent — attributing the human to the
+    # wrong fetch, which is worse than the guess it replaces. manifest.json and
+    # llms.txt are untouched and keep AGENT_CACHE_CONTROL; they carry no marker.
+    #
+    # Defaults OFF, matching agent_detection_enabled / agent_gateway_enabled.
+    # Requires no migration: the marker is self-describing, and the deterministic
+    # link lands in the existing agent_handoff_links table.
+    agent_marker_enabled: bool = False
+
     # ─── Cadence bot flag ───
     # Fifth, ORTHOGONAL bot layer. The four existing ones (tracker.js webdriver
     # check, bot_filter UA regex, agent_classifier vendor list, ingest_velocity

@@ -27,9 +27,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.config import settings
 from apps.api.models.database import get_db
 from apps.api.services.agent_gateway import (
     AGENT_CACHE_CONTROL,
+    AGENT_OFFERS_MARKED_CACHE_CONTROL,
     SURFACE_LLMS_TXT,
     SURFACE_MANIFEST,
     SURFACE_OFFERS,
@@ -39,6 +41,7 @@ from apps.api.services.agent_gateway import (
     record_gateway_visit,
     resolve_public_profile,
 )
+from apps.api.services.agent_marker import mint_marker, stamp_marker
 from apps.api.services.rate_limiter import limiter
 
 router = APIRouter()
@@ -86,12 +89,27 @@ async def get_offers(
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     site, profile = await _profile_or_404(db, site_id)
-    await record_gateway_visit(db, request, site_id, SURFACE_OFFERS)
+    fetch_event_id = await record_gateway_visit(db, request, site_id, SURFACE_OFFERS)
     feed = build_offers(site, profile)
+
+    # F2: tie the links this agent is about to surface back to THIS fetch, so a
+    # human clicking one is matched deterministically instead of guessed at by
+    # the 30-minute temporal sweep. The whole surface drops to no-store while the
+    # flag is on, not just the marked responses: a mixed posture would leave a
+    # shared cache holding an unmarked body and silently losing attribution for
+    # every agent behind it, for a caching win worth nothing at this volume.
+    cache_control = AGENT_CACHE_CONTROL
+    if settings.agent_marker_enabled:
+        cache_control = AGENT_OFFERS_MARKED_CACHE_CONTROL
+        marker = mint_marker(fetch_event_id)
+        if marker:
+            for offer in feed.offers:
+                offer.url = stamp_marker(offer.url, marker, site.url)
+
     return Response(
         content=feed.model_dump_json(),
         media_type="application/json",
-        headers={"Cache-Control": AGENT_CACHE_CONTROL},
+        headers={"Cache-Control": cache_control},
     )
 
 

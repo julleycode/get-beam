@@ -430,6 +430,27 @@ async def ingest_events(
     # Process identification signal events (form email capture + UTM _bid)
     await _process_signal_events(db, batch, svid)
 
+    # Agent handoff attribution (F2): an offers-feed link carries _bam=<marker>
+    # naming the exact agent fetch that surfaced it, so the human who clicked it
+    # is matched deterministically instead of guessed at by the 30-minute
+    # temporal sweep. Read off the landing URL the pixel already sends, the same
+    # way _tp is — no tracker change is involved. Site-scoped inside the service,
+    # so a marker replayed at another tenant writes nothing.
+    #
+    # Kept OUT of _process_signal_events deliberately: that function leaves
+    # fingerprint/svid updates pending until its own commit, and this write owns
+    # its transaction (it rolls back on failure), which would discard them.
+    if _settings.agent_marker_enabled:
+        from apps.api.services.agent_marker import (
+            marker_from_url,
+            record_marker_handoff,
+        )
+
+        for _marker in {m for m in (marker_from_url(e.url) for e in batch.events) if m}:
+            await record_marker_handoff(
+                db, site_id=batch.site_id, visitor_id=batch.visitor_id, marker=_marker
+            )
+
     # Conversion goal matching (best-effort — never blocks the 204). Runs AFTER
     # signal processing so a landing pageview that carries _tp has its
     # campaign_clicks link committed before attribution looks for it.

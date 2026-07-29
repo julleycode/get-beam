@@ -22,6 +22,8 @@ agent's call to a gateway surface into the two agent-only tables, so the surface
 built to attract AI agents is visible to Beam's own agent detection.
 """
 
+import uuid
+
 import structlog
 from fastapi import Request
 from sqlalchemy import select
@@ -54,6 +56,14 @@ logger = structlog.get_logger()
 # isolation — that would diverge the two surfaces.
 AGENT_CACHE_CONTROL = "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400"
 
+# Cache posture for offers.json while link markers are enabled. A marker is
+# minted per fetch, so a SHARED cache would serve the first agent's marker to
+# every agent behind it and attribute the human to the wrong fetch -- a worse
+# answer than the temporal guess the marker replaces. Only offers.json carries
+# markers, so only offers.json pays this; manifest.json and llms.txt keep
+# AGENT_CACHE_CONTROL above.
+AGENT_OFFERS_MARKED_CACHE_CONTROL = "private, no-store"
+
 # Surface labels stored as the ``page_path`` of a gateway visit. Fixed literals,
 # never the raw request path -- the real path embeds the site_id, which would
 # make every row unique and destroy the rollup. The MCP labels carry the tool
@@ -76,8 +86,12 @@ def mcp_tool_surface(tool_name: str) -> str:
 
 async def record_gateway_visit(
     db: AsyncSession, request: Request, site_id: str, surface: str
-) -> None:
+) -> uuid.UUID | None:
     """Record a recognized AI agent's call to a public gateway surface.
+
+    Returns the ``agent_fetch_events`` row id when one was written, else ``None``
+    (unrecognized UA, or a failed best-effort write). The offers route mints its
+    per-fetch link marker from it; every other caller ignores it.
 
     Without this the gateway is invisible to Beam's own agent detection: an agent
     could read the manifest, pull the offers feed and query the MCP server, and
@@ -99,11 +113,11 @@ async def record_gateway_visit(
     try:
         classification = classify_agent(request.headers.get("user-agent"))
         if classification is None:
-            return
+            return None
         tier = classify_tier(classification.product_or_ua_token)
         ip_address = resolve_client_ip(request)
         await persist_agent_visit(db, site_id, classification, ip_address, surface)
-        await persist_agent_fetch_event(
+        return await persist_agent_fetch_event(
             db, site_id, classification, tier, ip_address, surface
         )
     except Exception:
@@ -111,6 +125,7 @@ async def record_gateway_visit(
         logger.warning(
             "agent_gateway_visit_record_failed", site_id=site_id, surface=surface
         )
+        return None
 
 CAPABILITY_VERSION = "1"
 

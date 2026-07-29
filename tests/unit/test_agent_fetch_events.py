@@ -78,9 +78,14 @@ class TestTierMapCompleteness:
             assert tier == expected, f"{token} misclassified as {tier}"
 
 
-def _mock_session():
+def _mock_session(inserted_id=None):
     db = AsyncMock()
-    db.execute = AsyncMock()
+    # execute() is awaited, but the Result it yields is synchronous — a bare
+    # AsyncMock here would make .scalar_one_or_none() hand back an un-awaited
+    # coroutine instead of the inserted id.
+    result = Mock()
+    result.scalar_one_or_none = Mock(return_value=inserted_id)
+    db.execute = AsyncMock(return_value=result)
     db.commit = AsyncMock()
     db.rollback = AsyncMock()
     return db
@@ -246,6 +251,33 @@ class TestInsertIsReplaySafe:
         assert "ON CONFLICT" in sql and "DO NOTHING" in sql
         # Predicate must mirror the partial index or Postgres cannot infer it.
         assert "dedup_key IS NOT NULL" in sql
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_returns_new_row_id_for_the_marker_path(self):
+        """The agent-gateway marker names the fetch it stamps onto a link, so the
+        insert has to hand its id back."""
+        import uuid as _uuid
+
+        new_id = _uuid.uuid4()
+        db = _mock_session(inserted_id=new_id)
+        classification = AgentClassification("openai", "gptbot", "ua-only")
+
+        assert await persist_agent_fetch_event(
+            db, "site_abc", classification, "index", None, "/x"
+        ) == new_id
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_suppressed_replay_returns_no_id(self):
+        """A conflict writes nothing, so there is no row to name — the caller must
+        not receive an id that would attribute a link to a discarded insert."""
+        db = _mock_session(inserted_id=None)
+        classification = AgentClassification("openai", "gptbot", "ua-only")
+
+        assert await persist_agent_fetch_event(
+            db, "site_abc", classification, "index", None, "/x", dedup_key="k" * 64
+        ) is None
 
     @pytest.mark.asyncio
     @pytest.mark.unit

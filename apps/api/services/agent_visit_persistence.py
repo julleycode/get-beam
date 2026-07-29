@@ -11,6 +11,7 @@ human visitor data.
 """
 
 import hashlib
+import uuid
 from datetime import datetime, timezone
 
 import structlog
@@ -166,8 +167,13 @@ async def persist_agent_fetch_event(
     page_path: str | None,
     event_time: datetime | None = None,
     dedup_key: str | None = None,
-) -> None:
+) -> uuid.UUID | None:
     """Insert one append-only ``agent_fetch_events`` row. Fail-open.
+
+    Returns the new row's id, or ``None`` when nothing was written — a failed
+    insert, or a ``dedup_key`` conflict that suppressed a replay. Callers that
+    only log the visit ignore it; the agent-gateway marker path needs it to name
+    the fetch it is stamping onto a link.
 
     Isolated from the ``persist_agent_visit`` rollup call — this insert has its
     own try/except and its own commit, so its failure never affects (and is
@@ -200,7 +206,7 @@ async def persist_agent_fetch_event(
         }
         if event_time is not None:
             values["created_at"] = event_time
-        await db.execute(
+        result = await db.execute(
             pg_insert(AgentFetchEvent)
             .values(**values)
             .on_conflict_do_nothing(
@@ -209,8 +215,11 @@ async def persist_agent_fetch_event(
                 # cannot infer that index as the arbiter.
                 index_where=text("dedup_key IS NOT NULL"),
             )
+            .returning(AgentFetchEvent.id)
         )
+        new_id = result.scalar_one_or_none()
         await db.commit()
+        return new_id
     except Exception as exc:
         # Fail-open: log keys/vendor/site_id only (NO raw UA, NO IP — PII/GDPR
         # guardrail), roll back, and swallow. Never raise into the ingest path.
