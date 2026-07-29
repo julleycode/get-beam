@@ -157,6 +157,13 @@ nhưng **có** ký).
   4. **Marker định danh một LƯỢT FETCH, không phải một người.** Nó được mint trước khi có người
      nào, giống hệt nhau cho mọi người nhận câu trả lời của agent đó; unique constraint
      `uq_agent_handoff_links_fetch_event` khiến "click đầu thắng" thành ràng buộc cấu trúc.
+  5. **Fetch phải thuộc đúng site báo click** — kiểm tra bằng query, không suy đoán. Giải mã được
+     chỉ chứng minh marker do deployment này mint, KHÔNG chứng minh mint cho tenant này. Thiếu
+     kiểm tra, marker lấy từ offers feed công khai của site A rồi replay trên trang site B sẽ ghi
+     link dưới site B trỏ vào fetch của site A — và vì mỗi fetch chỉ giữ được một link, nó còn
+     **chiếm luôn chỗ** mà click hợp lệ của site A cần, không click nào sau đó gỡ được. Cùng luật
+     `AC-H2-5` mà sweep đã thực thi. Lỗi này do integration test bắt được; unit test mock session
+     nên về cấu trúc không thể phát hiện.
   Marker **ghi đè** link tạm do sweep đoán ra (nó là sự thật mà sweep đang xấp xỉ), nhưng không
   bao giờ ghi đè một marker link khác.
 
@@ -175,6 +182,11 @@ nhưng **có** ký).
   Digest gộp cả `site_id` + `vendor` + `raw_ua_token`: một page render bị cache phát **cùng một**
   token cho mọi fetcher, nên nếu chỉ khoá theo token thì lượt fetch của ClaudeBot sẽ bị nuốt như
   bản replay của GPTBot.
+  **Đã verify trên Postgres thật (29-07)**, không chỉ offline `--sql`: full chain apply sạch tới
+  head, round-trip `head → -1 → head` sạch, và ba luận điểm thiết kế được chứng minh bằng dữ liệu —
+  nhiều dòng `dedup_key IS NULL` cùng tồn tại (nên dòng cũ không thể vi phạm → **không cần dọn
+  prod**), replay có `ON CONFLICT` bị chặn (`INSERT 0`), và cùng key mà bỏ `ON CONFLICT` thì lỗi
+  cứng (chứng minh index thực sự enforce, không phải inert).
 
 - **F11 — surface agent-facing nay có ghi lại** (xem mục 4.3). Manifest, offers, llms.txt và MCP
   đều ghi vào `agent_visits` + `agent_fetch_events`; nhãn MCP mang theo tên tool.
@@ -261,10 +273,9 @@ việc này — đây là quy trình vận hành thủ công.
 3. **Dải IP tĩnh làm mới thế nào?** Hiện commit trong repo — xem mục 5 dưới đây.
 4. `routers/visitors.py` (1314 dòng) và 2 trang dashboard mới đọc phần giao với agent, **chưa
    review từng dòng**. Đánh giá trên chưa phủ tab Visitors ở mức chi tiết.
-5. **Dải IP ship kèm repo đang có dữ liệu thật, trái với thiết kế đã ghi.** Mục F13 nói file ship
-   để rỗng ("rỗng = không kết luận"), nhưng commit `889013b` commit luôn dải thật vào
-   `apps/api/data/agent_ip_ranges/*.json`. Test `test_load_ip_ranges_real_branch_is_empty_until_refreshed`
-   đang **fail** vì đúng lý do đó. Hệ quả: F12 armed sẵn bằng một snapshot sẽ cũ dần thay vì chờ
-   job refresh — đúng kiểu hỏng mà F13 sinh ra để tránh. Cần chọn: (a) xoá rỗng file cho khớp
-   thiết kế, hay (b) đổi ý sang "ship seed snapshot" rồi sửa test + doc. Rủi ro hiện thấp
-   (chỉ ghi nhận, `agent_detection_enabled` mặc định TẮT).
+5. ~~Dải IP ship kèm repo có dữ liệu thật, trái thiết kế~~ — **đã xử lý 29-07.** Đã reset 5 file
+   `apps/api/data/agent_ip_ranges/*.json` về `ranges: []`. Căn cứ quyết định: job refresh bắn
+   **60 giây sau boot**, nên ship snapshot chỉ mua được ~1 phút coverage; đổi lại, refresh là
+   fail-open giữ nguyên dữ liệu cũ khi fetch lỗi → snapshot hỏng sẽ phát verdict `ip-mismatch`
+   vĩnh viễn, im lặng, nhắm vào agent thật trên dải mới. Rỗng = không phát verdict nào cho tới khi
+   có dữ liệu thật, là khẳng định yếu hơn và an toàn hơn.
