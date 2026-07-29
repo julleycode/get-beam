@@ -31,13 +31,20 @@ async def test_sweep_links_real_fetch_to_real_click(test_db):
     )
     from sqlalchemy import select
 
+    # The sweep only considers a fetch once its 30-minute correlation window has
+    # CLOSED, so it can see the complete candidate set before committing to a
+    # match. created_at defaults to now(), which is permanently too recent to be
+    # eligible — the fetch has to be backdated or the sweep correctly ignores it
+    # and the test measures nothing.
     now = datetime.now(timezone.utc)
+    fetch_at = now - timedelta(minutes=45)
     fetch = AgentFetchEvent(
         site_id="site-int",
         vendor="openai",
         raw_ua_token="gptbot",
         tier="on-demand",
         page_path="/pricing",
+        created_at=fetch_at,
     )
     test_db.add(fetch)
     await test_db.commit()
@@ -51,7 +58,8 @@ async def test_sweep_links_real_fetch_to_real_click(test_db):
             referrer="https://chatgpt.com/",
             # Event.created_at is a naive column (models/event.py DateTime without
             # tz), matching how prod stores events. Strip tz so asyncpg accepts it.
-            created_at=(now + timedelta(seconds=120)).replace(tzinfo=None),
+            # 120s after the fetch — inside the 300s "high confidence" ceiling.
+            created_at=(fetch_at + timedelta(seconds=120)).replace(tzinfo=None),
         )
     )
     await test_db.commit()
@@ -75,13 +83,17 @@ async def test_sweep_is_idempotent_unique_constraint(test_db):
     )
     from sqlalchemy import func, select
 
+    # Backdated past the 30-minute correlation window, as above — an eligible
+    # fetch is a precondition for testing that the sweep links it only once.
     now = datetime.now(timezone.utc)
+    fetch_at = now - timedelta(minutes=45)
     fetch = AgentFetchEvent(
         site_id="site-int2",
         vendor="openai",
         raw_ua_token="gptbot",
         tier="on-demand",
         page_path="/x",
+        created_at=fetch_at,
     )
     test_db.add(fetch)
     await test_db.commit()
@@ -93,7 +105,7 @@ async def test_sweep_is_idempotent_unique_constraint(test_db):
             page_path="/x",
             referrer="https://chatgpt.com/",
             # Naive Event.created_at (see prod column type) — strip tz for asyncpg.
-            created_at=(now + timedelta(seconds=60)).replace(tzinfo=None),
+            created_at=(fetch_at + timedelta(seconds=60)).replace(tzinfo=None),
         )
     )
     await test_db.commit()
