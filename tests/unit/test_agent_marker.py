@@ -89,6 +89,121 @@ class TestMarkerIsNotTrusted:
         assert decode_marker(token) is None
 
 
+class TestDecodeReason:
+    """The reason is what makes a zero-link dashboard diagnosable, so the split
+    between 'worked but old' and 'never valid' has to be real."""
+
+    @pytest.mark.unit
+    def test_ok(self, key):
+        fetch_id = uuid.uuid4()
+        assert agent_marker.decode_marker_with_reason(mint_marker(fetch_id)) == (
+            fetch_id,
+            "ok",
+        )
+
+    @pytest.mark.unit
+    def test_absent(self, key):
+        assert agent_marker.decode_marker_with_reason(None)[1] == "absent"
+        assert agent_marker.decode_marker_with_reason("")[1] == "absent"
+
+    @pytest.mark.unit
+    def test_expired_is_not_reported_as_invalid(self, key, monkeypatch):
+        """An expired marker proves the whole chain works and the click was just
+        old — the opposite operational conclusion from a forged one."""
+        token = mint_marker(uuid.uuid4())
+        monkeypatch.setattr(agent_marker, "MARKER_TTL_SECONDS", -1)
+        assert agent_marker.decode_marker_with_reason(token) == (None, "expired")
+
+    @pytest.mark.unit
+    def test_forged_and_foreign_key_are_invalid(self, key):
+        assert agent_marker.decode_marker_with_reason("garbage")[1] == "invalid"
+        foreign = (
+            Fernet(Fernet.generate_key()).encrypt(str(uuid.uuid4()).encode()).decode()
+        )
+        assert agent_marker.decode_marker_with_reason(foreign)[1] == "invalid"
+
+    @pytest.mark.unit
+    def test_no_key(self, monkeypatch):
+        from apps.api.services import link_decorator
+
+        monkeypatch.setattr(link_decorator.settings, "encryption_key", "")
+        assert agent_marker.decode_marker_with_reason("x")[1] == "no_key"
+
+    @pytest.mark.unit
+    def test_valid_token_that_is_not_a_uuid_is_malformed(self, key):
+        from apps.api.services.link_decorator import _get_fernet
+
+        token = _get_fernet().encrypt(b"not-a-uuid").decode()
+        assert agent_marker.decode_marker_with_reason(token) == (None, "malformed")
+
+
+class TestDiagnosticLogging:
+    """Zero links must be diagnosable from logs alone — the precedent the
+    correlation sweep already set for itself."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_seen_is_logged_even_when_the_marker_is_unusable(
+        self, key, monkeypatch
+    ):
+        info = Mock()
+        monkeypatch.setattr(agent_marker.logger, "info", info)
+        db = TestHandoffWrite._db()
+
+        await agent_marker.record_marker_handoff(
+            db, site_id="site_1", visitor_id="visitor-abcdef123", marker="garbage"
+        )
+
+        event, kwargs = info.call_args.args[0], info.call_args.kwargs
+        assert event == "agent_marker_seen"
+        assert kwargs["decoded"] is False
+        assert kwargs["reason"] == "invalid"
+        # PII guard: truncated visitor, and never the marker itself.
+        assert kwargs["visitor_id"] == "visitor-"
+        assert "garbage" not in str(kwargs)
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_success_path_logs_both_events(self, key, monkeypatch):
+        events = []
+        monkeypatch.setattr(
+            agent_marker.logger, "info", lambda e, **kw: events.append((e, kw))
+        )
+        db = TestHandoffWrite._db()
+
+        await agent_marker.record_marker_handoff(
+            db, site_id="site_1", visitor_id="v1", marker=mint_marker(uuid.uuid4())
+        )
+
+        names = [e for e, _ in events]
+        assert names == ["agent_marker_seen", "agent_marker_handoff_written"]
+        assert dict(events[0][1])["reason"] == "ok"
+        assert dict(events[1][1])["written"] is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_already_linked_is_logged_as_written_false_not_an_error(
+        self, key, monkeypatch
+    ):
+        """Someone else clicked the shared link first. Expected, not a failure —
+        it must stay visible instead of looking like a silent drop."""
+        warn = Mock()
+        events = []
+        monkeypatch.setattr(agent_marker.logger, "warning", warn)
+        monkeypatch.setattr(
+            agent_marker.logger, "info", lambda e, **kw: events.append((e, kw))
+        )
+        db = TestHandoffWrite._db(returned_id=None)
+
+        written = await agent_marker.record_marker_handoff(
+            db, site_id="site_1", visitor_id="v2", marker=mint_marker(uuid.uuid4())
+        )
+
+        assert written is False
+        warn.assert_not_called()
+        assert dict(events[-1][1])["written"] is False
+
+
 class TestStampScope:
     @pytest.mark.unit
     def test_foreign_host_is_never_stamped(self, key):

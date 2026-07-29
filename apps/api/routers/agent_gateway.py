@@ -105,6 +105,19 @@ async def get_offers(
         if marker:
             for offer in feed.offers:
                 offer.url = stamp_marker(offer.url, marker, site.url)
+        # The mint-side half of the F2 audit trail. Paired with agent_marker_seen
+        # on the click side, this is what separates "no agent ever fetched the
+        # feed" from "markers went out but none came back" — the second being the
+        # signal that an AI surface stripped the query parameter, which cannot be
+        # determined from the code. has_fetch distinguishes an unrecognized agent
+        # (no row to name) from a minting failure (no encryption key). Keys only.
+        logger.info(
+            "agent_marker_minted",
+            site_id=site_id,
+            has_fetch=fetch_event_id is not None,
+            minted=marker is not None,
+            offers=len(feed.offers),
+        )
 
     return Response(
         content=feed.model_dump_json(),

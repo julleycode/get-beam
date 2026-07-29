@@ -83,27 +83,50 @@ def mint_marker(fetch_event_id: uuid.UUID | None) -> str | None:
         return None
 
 
-def decode_marker(token: str | None) -> uuid.UUID | None:
-    """Decrypt a marker back to its fetch-event id. ``None`` if unusable.
+def decode_marker_with_reason(token: str | None) -> tuple[uuid.UUID | None, str]:
+    """Decode a marker, and say WHY when it fails.
 
-    ``None`` covers every failure the same way — absent, malformed, forged,
-    expired past ``MARKER_TTL_SECONDS``, or key unconfigured. Never raises: this
-    runs on the ingest path, where a bad marker must degrade to "no deterministic
-    link" and nothing else.
+    The reason is what makes a zero-link dashboard diagnosable. ``expired`` and
+    ``invalid`` are the same ``InvalidToken`` to Fernet but mean opposite things
+    operationally — an expired marker proves the whole chain works and the click
+    was simply old, while an invalid one means the token was forged, truncated by
+    something in the middle, or minted under a different key. Collapsing them
+    would hide which of those is happening.
+
+    Reasons: ``ok`` / ``absent`` / ``no_key`` / ``expired`` / ``invalid`` /
+    ``malformed`` (decrypted cleanly but the plaintext was not a UUID).
     """
     if not token:
-        return None
+        return None, "absent"
     fernet = _get_fernet()
     if fernet is None:
-        return None
+        return None, "no_key"
     try:
         raw = fernet.decrypt(token.encode("ascii"), ttl=MARKER_TTL_SECONDS)
-        return uuid.UUID(raw.decode("utf-8"))
-    except (InvalidToken, ValueError, UnicodeDecodeError):
-        return None
+    except InvalidToken:
+        # Retry without the age limit, on the failure path only. A token that
+        # decrypts now had a valid signature all along, so only its age failed.
+        try:
+            fernet.decrypt(token.encode("ascii"))
+            return None, "expired"
+        except Exception:
+            return None, "invalid"
     except Exception:
         logger.warning("agent_marker_decode_failed")
-        return None
+        return None, "invalid"
+    try:
+        return uuid.UUID(raw.decode("utf-8")), "ok"
+    except (ValueError, UnicodeDecodeError):
+        return None, "malformed"
+
+
+def decode_marker(token: str | None) -> uuid.UUID | None:
+    """Decrypt a marker back to its fetch-event id, or ``None`` if unusable.
+
+    Never raises: this runs on the ingest path, where a bad marker must degrade
+    to "no deterministic link" and nothing else.
+    """
+    return decode_marker_with_reason(token)[0]
 
 
 def marker_from_url(url: str | None) -> str | None:
@@ -171,7 +194,19 @@ async def record_marker_handoff(
     wins, which is what keeps a shared or forwarded link from re-attributing the
     fetch to whoever clicked last.
     """
-    fetch_event_id = decode_marker(marker)
+    fetch_event_id, reason = decode_marker_with_reason(marker)
+    # Always logged, including the boring success. A marker that arrived and
+    # decoded is the ONLY evidence that AI surfaces preserve the query parameter
+    # at all; without this line, "no links" and "no clicks ever carried a marker"
+    # are indistinguishable without reading the database by hand. Keys only —
+    # never the marker itself (it is a token) and never a full visitor id.
+    logger.info(
+        "agent_marker_seen",
+        site_id=site_id,
+        decoded=fetch_event_id is not None,
+        reason=reason,
+        visitor_id=visitor_id[:8],
+    )
     if fetch_event_id is None:
         return False
     try:
@@ -200,6 +235,16 @@ async def record_marker_handoff(
         )
         written = result.scalar_one_or_none() is not None
         await db.commit()
+        # written=False here is NOT an error: the guard held because this fetch
+        # already carries a marker link, i.e. someone else clicked the shared
+        # link first. Logged at info so that expected case stays visible and is
+        # never mistaken for a silent failure.
+        logger.info(
+            "agent_marker_handoff_written",
+            site_id=site_id,
+            written=written,
+            visitor_id=visitor_id[:8],
+        )
         return written
     except Exception:
         # Keys only — never the marker, never the visitor id.
