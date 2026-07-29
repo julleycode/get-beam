@@ -57,7 +57,10 @@ class _FakeResolver:
     def __init__(self, db, redis_client=None):
         self.db = db
 
-    async def resolve(self, visitor):
+    # Mirrors IdentityResolver.resolve's real signature. The endpoint passes
+    # force_retry through, so a stub that only accepts `visitor` fails on the
+    # call itself and never exercises the endpoint behaviour under test.
+    async def resolve(self, visitor, source_agent_visit_id=None, force_retry=False):
         from apps.api.models.visitor import IdentifiedVisitor
 
         visitor.identity_status = "identified"
@@ -75,7 +78,7 @@ class _FakeResolver:
 
 
 class _MissResolver(_FakeResolver):
-    async def resolve(self, visitor):
+    async def resolve(self, visitor, source_agent_visit_id=None, force_retry=False):
         visitor.identity_status = "unresolvable"
         await self.db.commit()
         return None

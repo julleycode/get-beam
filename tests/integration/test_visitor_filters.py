@@ -33,12 +33,17 @@ async def _signup(test_client, email: str) -> str:
 def _visitor(site_id: str, visitor_id: str, **overrides):
     from apps.api.models.visitor import Visitor
 
+    # total_pageviews must be > 0. The visitors list drops "ghost" rows — zero
+    # pageviews AND no identity AND no captured email — so a default-zero fixture
+    # is excluded before any filter under test is even reached, and every
+    # assertion here would be measuring the ghost filter instead.
     defaults = dict(
         site_id=site_id,
         visitor_id=visitor_id,
         first_seen=datetime(2026, 6, 1),
         last_seen=datetime(2026, 6, 1),
-        pages_visited=[],
+        pages_visited=["/"],
+        total_pageviews=1,
         ip_address="203.0.113.7",
         intent_score=0.0,
         identity_status="anonymous",

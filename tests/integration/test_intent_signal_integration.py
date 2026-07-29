@@ -46,10 +46,13 @@ async def test_sweep_alerts_on_real_commercial_fetch(test_db, monkeypatch):
     test_db.add(user)
     await test_db.commit()
 
+    # sites.url is NOT NULL — omitting it fails the insert before any intent
+    # signal is exercised.
     site = Site(
         site_id="site-h3-int",
         user_id=user.id,
         name="Acme",
+        url="https://acme.example.com",
         hot_alert_enabled=True,
     )
     test_db.add(site)
@@ -102,6 +105,7 @@ async def test_sweep_ignores_non_commercial_pages(test_db, monkeypatch):
             site_id="site-h3-int2",
             user_id=user.id,
             name="Beta",
+            url="https://beta.example.com",
             hot_alert_enabled=True,
         )
     )

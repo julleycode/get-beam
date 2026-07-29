@@ -377,7 +377,15 @@ async def _insert_events(db, site_id, visitor_id, count, flagged, base_minute=0)
 
     from apps.api.models.event import Event
 
-    start = datetime(2026, 7, 25, 12, 0, 0) + timedelta(minutes=base_minute)
+    # Anchored to NOW, not a fixed calendar date. The ingest-health endpoint only
+    # counts events inside a window capped at 24 hours, so a hardcoded date makes
+    # these rows invisible to it the day after they were written — the test then
+    # reads "no_traffic" and fails for a reason that has nothing to do with the
+    # flood-vs-organic signal it exists to check. 30 minutes back keeps every row
+    # inside both the 60-minute default and the 1440-minute maximum.
+    start = (
+        datetime.utcnow() - timedelta(minutes=30) + timedelta(minutes=base_minute)
+    )
     for i in range(count):
         db.add(
             Event(
