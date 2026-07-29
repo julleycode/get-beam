@@ -16,9 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 # Force test environment before anything imports settings
 os.environ.setdefault("APP_ENV", "test")
+# Port 5433, matching infra/docker-compose.yml and the config default. Docker
+# Postgres deliberately avoids 5432 because a natively-installed Postgres usually
+# owns it — pointing tests there hits that instance instead and fails on
+# authentication, which reads like a broken test rather than a wrong address.
+# Override by exporting DATABASE_URL to run against a different server.
 os.environ.setdefault(
     "DATABASE_URL",
-    "postgresql+asyncpg://retarget:retarget_dev@localhost:5432/retarget_agent_test",
+    "postgresql+asyncpg://retarget:retarget_dev@localhost:5433/retarget_agent_test",
 )
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")  # Use DB 15 for tests
 # Fernet keys for link/token crypto (unsubscribe + _bid links, BYOK vault).
