@@ -64,3 +64,7 @@ apps/web/public/beam/launch.src.mp4
 .dev-local.pids
 .dev-local-*.log
 apps/web/.env.local
+
+# Published agent IP ranges refetched at runtime. The shipped *.json files stay
+# tracked and empty; the refresh job writes only here so it never dirties git.
+apps/api/data/agent_ip_ranges/runtime/

@@ -44,7 +44,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.models.agent_visit import AgentVisit
-from apps.api.services.agent_ip_range_refresh import PUBLISHED_RANGE_SOURCES
+from apps.api.services.agent_ip_range_refresh import (
+    PUBLISHED_RANGE_SOURCES,
+    _RUNTIME_DIR,
+)
 from apps.api.services.agent_visit_persistence import set_verification_method
 
 logger = structlog.get_logger()
@@ -83,10 +86,21 @@ def load_ip_ranges() -> dict[str, list[str]]:
     periodic, and a cache would serve pre-refresh data to the sweep that runs
     right after a refresh.
     """
-    base = _DATA_DIR / "mock" if settings.mock_external_apis else _DATA_DIR
+    if settings.mock_external_apis:
+        bases = [_DATA_DIR / "mock"]
+    else:
+        # Runtime output first, shipped placeholder second. The refresh job
+        # writes only to ``runtime/`` (it must not dirty git-tracked files), so
+        # a token it has fetched is read from there; a token it has never
+        # fetched falls through to the shipped file, which is empty by design
+        # and therefore yields no verdict rather than a stale one.
+        bases = [_RUNTIME_DIR, _DATA_DIR]
     ranges: dict[str, list[str]] = {}
     for token in _AGENT_TOKENS:
-        path = base / f"{token}.json"
+        path = next(
+            (p for p in ((b / f"{token}.json") for b in bases) if p.is_file()),
+            bases[0] / f"{token}.json",
+        )
         try:
             with path.open("r", encoding="utf-8") as fh:
                 data = json.load(fh)

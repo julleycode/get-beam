@@ -29,6 +29,16 @@ logger = structlog.get_logger()
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "agent_ip_ranges"
 
+# Refreshed data is written HERE, never over the shipped files. Those are
+# git-tracked and deliberately empty ("empty = no conclusion"); a job that
+# overwrites them leaves every developer machine with a permanently dirty
+# working tree and turns the test that guards the empty invariant red forever
+# after the API is run once. Runtime output belongs outside version control.
+# Read back by ``agent_verification.load_ip_ranges``, which prefers this
+# directory and falls through to the shipped files when a token has never been
+# fetched — so an unfetched agent still yields no verdict rather than a wrong one.
+_RUNTIME_DIR = _DATA_DIR / "runtime"
+
 # Agent token -> published range document. Keyed by the same token
 # ``agent_classifier`` returns, so verification can look a row up directly by
 # what it observed rather than going through a vendor grouping that would blur
@@ -78,7 +88,7 @@ def normalize_prefixes(payload: object) -> list[str]:
 
 
 def _write_dataset(token: str, cidrs: list[str]) -> None:
-    path = _DATA_DIR / f"{token}.json"
+    path = _RUNTIME_DIR / f"{token}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps({"agent": token, "ranges": cidrs}, indent=2) + "\n",
