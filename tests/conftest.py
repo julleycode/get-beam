@@ -36,6 +36,20 @@ os.environ.setdefault("TOKEN_ENCRYPTION_KEY", _Fernet.generate_key().decode())
 # agentic /ai/ask path would silently hit the live API before its fallback.
 # Env vars beat dotenv in pydantic-settings, so an empty value forces mocks.
 os.environ.setdefault("GEMINI_API_KEY", "")
+# Same leak, different shape: a developer who turns the agent flags ON in their
+# root .env to exercise the feature locally would flip the DEFAULT every flag
+# test measures against. Two tests assert flag-OFF behaviour explicitly
+# (ingest drops a GPTBot UA; offers.json keeps the shared-cache header), and
+# both go red on that machine while staying green in CI — the worst kind of
+# failure, because it looks like the feature broke rather than the environment.
+# Pinned to the code default here; a test that needs a flag ON sets it itself
+# via monkeypatch, which is unaffected by these values.
+for _flag in (
+    "AGENT_DETECTION_ENABLED",
+    "AGENT_GATEWAY_ENABLED",
+    "AGENT_MARKER_ENABLED",
+):
+    os.environ.setdefault(_flag, "false")
 
 
 def _native_enum_names(metadata) -> list[str]:
