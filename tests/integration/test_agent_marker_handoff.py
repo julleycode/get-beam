@@ -259,15 +259,20 @@ class TestMarkerClickWiring:
         )
         assert resp.status_code == 204
 
-        # The link, if any, must never be filed under the OTHER site.
-        wrong = (
+        # No link at all. Filing one under the other site would both mis-attribute
+        # it AND consume the owning site's single available link for that fetch.
+        assert (
             await test_db.execute(
                 select(AgentHandoffLink).where(AgentHandoffLink.site_id == other_id)
             )
-        ).scalars().all()
-        assert wrong == [] or all(
-            link.agent_fetch_event_id != agent_fetch.id for link in wrong
-        )
+        ).scalars().all() == []
+        assert (
+            await test_db.execute(
+                select(AgentHandoffLink).where(
+                    AgentHandoffLink.agent_fetch_event_id == agent_fetch.id
+                )
+            )
+        ).scalar_one_or_none() is None
 
     @pytest.mark.asyncio
     async def test_flag_off_writes_no_link(

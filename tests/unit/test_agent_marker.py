@@ -254,11 +254,19 @@ class TestMarkerFromUrl:
 
 class TestHandoffWrite:
     @staticmethod
-    def _db(returned_id=uuid.uuid4()):
+    def _db(returned_id="__new__", owned=True):
+        """Two executes happen on the write path — the ownership check, then the
+        insert — so they need distinct results."""
         db = AsyncMock()
-        result = Mock()
-        result.scalar_one_or_none = Mock(return_value=returned_id)
-        db.execute = AsyncMock(return_value=result)
+        ownership = Mock()
+        ownership.scalar_one_or_none = Mock(
+            return_value=uuid.uuid4() if owned else None
+        )
+        insert = Mock()
+        insert.scalar_one_or_none = Mock(
+            return_value=uuid.uuid4() if returned_id == "__new__" else returned_id
+        )
+        db.execute = AsyncMock(side_effect=[ownership, insert])
         db.commit = AsyncMock()
         db.rollback = AsyncMock()
         return db
@@ -307,6 +315,41 @@ class TestHandoffWrite:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
+    async def test_marker_naming_another_tenants_fetch_is_refused(self, key):
+        """Decoding only proves this deployment minted the marker, not that it
+        minted it for THIS site. A marker lifted from another site's public feed
+        must not file a link — it would mis-attribute, and would also consume the
+        owning site's one allowed link for that fetch."""
+        db = self._db(owned=False)
+
+        written = await agent_marker.record_marker_handoff(
+            db, site_id="site_other", visitor_id="v1", marker=mint_marker(uuid.uuid4())
+        )
+
+        assert written is False
+        # Only the ownership SELECT ran — no insert was attempted.
+        assert db.execute.await_count == 1
+        db.commit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_foreign_fetch_is_logged_with_its_own_reason(self, key, monkeypatch):
+        events = []
+        monkeypatch.setattr(
+            agent_marker.logger, "info", lambda e, **kw: events.append((e, kw))
+        )
+        await agent_marker.record_marker_handoff(
+            self._db(owned=False),
+            site_id="site_other",
+            visitor_id="v1",
+            marker=mint_marker(uuid.uuid4()),
+        )
+        assert events[0][0] == "agent_marker_seen"
+        assert dict(events[0][1])["reason"] == "foreign_site"
+        assert dict(events[0][1])["decoded"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
     async def test_undecodable_marker_writes_nothing(self, key):
         db = self._db()
         written = await agent_marker.record_marker_handoff(
@@ -317,11 +360,13 @@ class TestHandoffWrite:
 
     @pytest.mark.asyncio
     @pytest.mark.unit
-    async def test_write_failure_is_swallowed_and_logs_keys_only(self, key, monkeypatch):
+    async def test_insert_failure_is_swallowed_and_logs_keys_only(self, key, monkeypatch):
         """This runs on the ingest hot path — a failure must never reach the 204,
         and must never log the marker or the visitor."""
         db = self._db()
-        db.execute = AsyncMock(side_effect=RuntimeError("boom"))
+        ownership = Mock()
+        ownership.scalar_one_or_none = Mock(return_value=uuid.uuid4())
+        db.execute = AsyncMock(side_effect=[ownership, RuntimeError("boom")])
         warn = Mock()
         monkeypatch.setattr(agent_marker.logger, "warning", warn)
 
@@ -334,6 +379,30 @@ class TestHandoffWrite:
         _args, kwargs = warn.call_args
         assert set(kwargs.keys()) == {"site_id"}
         assert "secret-visitor" not in str(kwargs)
+
+    @pytest.mark.asyncio
+    @pytest.mark.unit
+    async def test_ownership_check_failure_never_reaches_the_caller(
+        self, key, monkeypatch
+    ):
+        """The tenancy check is a database round trip on the ingest path. If it
+        raises, the pageview must still succeed — unverified simply means no
+        link, and the temporal sweep can still match later."""
+        db = self._db()
+        db.execute = AsyncMock(side_effect=RuntimeError("boom"))
+        events = []
+        monkeypatch.setattr(agent_marker.logger, "warning", Mock())
+        monkeypatch.setattr(
+            agent_marker.logger, "info", lambda e, **kw: events.append((e, kw))
+        )
+
+        written = await agent_marker.record_marker_handoff(
+            db, site_id="site_1", visitor_id="v1", marker=mint_marker(uuid.uuid4())
+        )
+
+        assert written is False
+        db.rollback.assert_awaited_once()
+        assert dict(events[0][1])["reason"] == "check_failed"
 
 
 class TestEmailabilitySeparation:

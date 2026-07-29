@@ -36,13 +36,15 @@ import uuid
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 import structlog
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import InvalidToken
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Single source of Fernet key handling for the whole app — deliberately reused
 # rather than re-implemented, so key parsing and the "unconfigured key" fallback
 # cannot drift between the email link decorator and this module.
+from apps.api.models.agent_fetch_event import AgentFetchEvent
 from apps.api.models.agent_handoff_link import AgentHandoffLink
 from apps.api.services.link_decorator import _get_fernet
 
@@ -184,9 +186,14 @@ async def record_marker_handoff(
     marker that does not decode, or any write failure, simply yields no link —
     the temporal sweep still runs and the pageview itself is unaffected.
 
-    Site-scoped on the way in (the link is only written under the site that
-    served the click) so a marker replayed against another tenant cannot create a
-    cross-site link.
+    The decoded fetch MUST belong to the site reporting the click, and that is
+    checked against the database rather than assumed. Decoding only proves the
+    marker was minted by this deployment, not that it was minted for this tenant:
+    without the check, a marker lifted from one site's public offers feed and
+    replayed on another site's page would file a link under the second site
+    pointing at the first site's fetch — and because one fetch may hold only one
+    link, it would also permanently occupy the slot the owning site's own click
+    needed. Same rule the correlation sweep enforces (AC-H2-5).
 
     A marker link REPLACES an existing temporal one for the same fetch: the
     sweep's match is a probabilistic guess and this is the ground truth it was
@@ -195,6 +202,30 @@ async def record_marker_handoff(
     fetch to whoever clicked last.
     """
     fetch_event_id, reason = decode_marker_with_reason(marker)
+    if fetch_event_id is not None:
+        # Wrapped like every other statement here: this runs on the ingest hot
+        # path, so a database hiccup during the check must cost the link, never
+        # the pageview. Unverified means not written — the temporal sweep is
+        # still free to make its own match later.
+        try:
+            owns_fetch = (
+                await db.execute(
+                    select(AgentFetchEvent.id)
+                    .where(
+                        AgentFetchEvent.id == fetch_event_id,
+                        AgentFetchEvent.site_id == site_id,
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if owns_fetch is None:
+                # Decoded fine, but names another tenant's fetch (or one that no
+                # longer exists — retention purges these at 90 days).
+                fetch_event_id, reason = None, "foreign_site"
+        except Exception:
+            await db.rollback()
+            logger.warning("agent_marker_ownership_check_failed", site_id=site_id)
+            fetch_event_id, reason = None, "check_failed"
     # Always logged, including the boring success. A marker that arrived and
     # decoded is the ONLY evidence that AI surfaces preserve the query parameter
     # at all; without this line, "no links" and "no clicks ever carried a marker"
