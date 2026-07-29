@@ -42,14 +42,22 @@ async def test_sweep_alerts_on_real_commercial_fetch(test_db, monkeypatch):
 
     import uuid as _uuid
 
-    user = User(email="owner-int@example.com")
+    # Fresh ids per run. The alert path holds a per-site/page cooldown, so a fixed
+    # site_id makes this pass exactly once against a given database and report
+    # "alerted: 0" on every run after — a failure that says nothing about the
+    # behaviour under test. Every other integration file here randomises for the
+    # same reason.
+    suffix = _uuid.uuid4().hex[:8]
+    site_id = f"site-h3-int-{suffix}"
+
+    user = User(email=f"owner-int-{suffix}@example.com")
     test_db.add(user)
     await test_db.commit()
 
     # sites.url is NOT NULL — omitting it fails the insert before any intent
     # signal is exercised.
     site = Site(
-        site_id="site-h3-int",
+        site_id=site_id,
         user_id=user.id,
         name="Acme",
         url="https://acme.example.com",
@@ -61,7 +69,7 @@ async def test_sweep_alerts_on_real_commercial_fetch(test_db, monkeypatch):
     for _ in range(4):
         test_db.add(
             AgentFetchEvent(
-                site_id="site-h3-int",
+                site_id=site_id,
                 vendor="openai",
                 raw_ua_token="gptbot",
                 tier="on-demand",
@@ -73,11 +81,15 @@ async def test_sweep_alerts_on_real_commercial_fetch(test_db, monkeypatch):
 
     counters = await run_intent_signal_sweep(test_db)
     assert counters["alerted"] >= 1
-    assert len(sent) >= 1
 
-    body = sent[0]["body_html"]
+    # The sweep covers every site in the database, so pick THIS site's alert
+    # rather than whichever happened to be sent first — other rows left by
+    # neighbouring tests would otherwise decide what gets asserted here.
+    bodies = [k["body_html"] for k in sent if "Acme" in k.get("body_html", "")]
+    assert bodies, "no intent alert was sent for this test's site"
+    body = bodies[0]
     # SITE-level only — never the owner's email or a person identifier.
-    assert "owner-int@example.com" not in body
+    assert f"owner-int-{suffix}@example.com" not in body
     assert "Acme" in body
 
 
@@ -97,14 +109,21 @@ async def test_sweep_ignores_non_commercial_pages(test_db, monkeypatch):
 
     monkeypatch.setattr(hot_alert, "EmailSender", _FakeSender)
 
-    user = User(email="owner-int2@example.com")
+    import uuid as _uuid
+
+    # Fresh ids per run, as above.
+    suffix = _uuid.uuid4().hex[:8]
+    site_id = f"site-h3-int2-{suffix}"
+    site_name = f"Beta-{suffix}"
+
+    user = User(email=f"owner-int2-{suffix}@example.com")
     test_db.add(user)
     await test_db.commit()
     test_db.add(
         Site(
-            site_id="site-h3-int2",
+            site_id=site_id,
             user_id=user.id,
-            name="Beta",
+            name=site_name,
             url="https://beta.example.com",
             hot_alert_enabled=True,
         )
@@ -112,7 +131,7 @@ async def test_sweep_ignores_non_commercial_pages(test_db, monkeypatch):
     now = datetime.now(timezone.utc)
     test_db.add(
         AgentFetchEvent(
-            site_id="site-h3-int2",
+            site_id=site_id,
             vendor="openai",
             raw_ua_token="gptbot",
             tier="on-demand",
@@ -122,6 +141,8 @@ async def test_sweep_ignores_non_commercial_pages(test_db, monkeypatch):
     )
     await test_db.commit()
 
-    counters = await run_intent_signal_sweep(test_db)
-    assert counters["alerted"] == 0
-    assert sent == []
+    await run_intent_signal_sweep(test_db)
+    # Scoped to THIS site. A global "alerted == 0" would be asserting that no
+    # other site in the database has commercial traffic, which is not this test's
+    # claim and is false as soon as another test leaves a row behind.
+    assert not [k for k in sent if site_name in k.get("body_html", "")]
