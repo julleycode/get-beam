@@ -230,6 +230,35 @@ async def test_no_write_or_action_tool_is_exposed_in_phase_2():
         assert forbidden not in MCP_TOOLS
 
 
+# ── WS3: initialize lifecycle handshake ───────────────────────────────
+
+
+async def test_initialize_returns_static_handshake(gateway_on):
+    from apps.api.routers.agent_mcp import (
+        MCP_PROTOCOL_VERSION,
+        MCP_SERVER_NAME,
+        MCP_SERVER_VERSION,
+    )
+
+    try:
+        async with _client((_site(), _profile())) as client:
+            resp = await client.post(MCP_PATH, json=_rpc("initialize"))
+        body = resp.json()
+        result = body["result"]
+        assert result["protocolVersion"] == MCP_PROTOCOL_VERSION
+        assert result["capabilities"] == {"tools": {}}
+        assert result["serverInfo"] == {
+            "name": MCP_SERVER_NAME,
+            "version": MCP_SERVER_VERSION,
+        }
+        # No internal/version/build-hash leak: only the static site-generic name.
+        assert MCP_SERVER_NAME == "beam-agent-concierge"
+        # serverInfo carries exactly name + version, nothing dynamic.
+        assert set(result["serverInfo"].keys()) == {"name", "version"}
+    finally:
+        _reset()
+
+
 # ── AC9b: method allow-list ───────────────────────────────────────────
 
 
@@ -238,7 +267,9 @@ async def test_no_write_or_action_tool_is_exposed_in_phase_2():
     [
         "resources/read",
         "prompts/list",
-        "initialize",
+        # NOTE: "initialize" is now a VALID MCP lifecycle method (WS3) and is
+        # covered by test_initialize_returns_static_handshake — it must NOT be in
+        # this rejected-methods list anymore.
         "eval",
         "get_visitors",
         "__import__",

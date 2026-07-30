@@ -42,6 +42,8 @@ from apps.api.models.identity_signal import IdentitySignal  # noqa: F401 — reg
 from apps.api.models.ad_connection import AdConnection  # noqa: F401 — register for create_all
 from apps.api.models.ad_audience_link import AdAudienceLink  # noqa: F401 — register for create_all
 from apps.api.models.agent_profile import AgentProfile  # noqa: F401 — register for create_all
+from apps.api.models.agent_lead import AgentLead  # noqa: F401 — register for create_all
+from apps.api.models.agent_tool_call import AgentToolCall  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
