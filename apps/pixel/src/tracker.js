@@ -158,14 +158,24 @@
   if (inSubframe && !getCookie(COOKIE_NAME) && !lsGet(COOKIE_NAME)) return;
   var fingerprint = getFingerprint();
   var QUEUE_KEY = "_rta_q";
+  // Hard cap on queued events. Without it a prolonged API outage grows the queue
+  // until localStorage hits its quota — and lsSet() swallows that exception, so
+  // tracking would silently degrade with no signal. On overflow we drop the
+  // OLDEST events and keep the newest: recent behavior is what intent scoring
+  // needs, and an unbounded queue risks losing everything.
+  var QUEUE_MAX = 500;
   var queue = [];
+
+  function capQueue() {
+    if (queue.length > QUEUE_MAX) queue = queue.slice(queue.length - QUEUE_MAX);
+  }
 
   // Honor GPC (CCPA opt-out) + DNT → server marks visitor do_not_resolve.
   var OPTOUT = (function(){try{if(navigator.globalPrivacyControl===true)return true;var d=navigator.doNotTrack||window.doNotTrack||navigator.msDoNotTrack;return d==="1"||d==="yes"||d===true;}catch(e){return false;}})();
 
   try {
     var saved = lsGet(QUEUE_KEY);
-    if (saved) { queue = JSON.parse(saved); lsDel(QUEUE_KEY); }
+    if (saved) { queue = JSON.parse(saved); capQueue(); lsDel(QUEUE_KEY); }
   } catch(e) { queue = []; }
 
   function pushEvent(evt) {
@@ -175,6 +185,7 @@
     // Idempotency key — server drops duplicate event_ids (retry/replay safe).
     evt.event_id = uuid();
     queue.push(evt);
+    capQueue();
     lsSet(QUEUE_KEY, JSON.stringify(queue));
   }
 
@@ -193,7 +204,6 @@
   // stops; DEAD short-circuits pushEvent/flush against any late listeners.
   var DEAD = false;
   var flushTimer = null;
-  var firstFlush = true; // first flush goes via readable XHR to catch 403/410
 
   function selfDestruct() {
     DEAD = true;
@@ -217,12 +227,17 @@
       events: batch
     });
 
-    // Prefer sendBeacon (survives unload) EXCEPT the first flush of the session,
-    // which goes via readable XHR so a deleted-site 403/410 is visible and can
-    // trigger selfDestruct(). On unload always beacon. sendBeacon returns true
-    // once the browser accepts the payload; false (too large / too many beacons)
-    // falls through to XHR.
-    if ((onUnload || !firstFlush) && navigator.sendBeacon &&
+    // sendBeacon ONLY on unload. It returns true as soon as the *browser* accepts
+    // the payload for background delivery — it says nothing about the server's
+    // response, so a 5xx (e.g. an API redeploy) still returned true and we used to
+    // confirmSent() the batch away permanently. While the page is alive we always
+    // use the readable XHR below, which keeps the queue on any non-2xx and retries
+    // on the next interval, and which is also what makes a deleted-site 403/410
+    // visible to selfDestruct(). On unload there is no alternative: the JS context
+    // is about to die, so no response could be acted on anyway. Retry is safe —
+    // every event carries a uuid event_id and the server drops duplicates.
+    // sendBeacon returning false (too large / too many beacons) falls through to XHR.
+    if (onUnload && navigator.sendBeacon &&
         navigator.sendBeacon(ENDPOINT, new Blob([payload], { type: "text/plain" }))) {
       confirmSent(batch.length);
       return;
@@ -237,7 +252,6 @@
     xhr.setRequestHeader("Content-Type", "text/plain");
     xhr.onload = function() {
       xhrInFlight = false;
-      firstFlush = false;
       // Site deleted → server answers 403 (gone) / 410. Wipe our cookies + stop.
       if (xhr.status === 403 || xhr.status === 410) { selfDestruct(); return; }
       if (xhr.status >= 200 && xhr.status < 300) confirmSent(batch.length);

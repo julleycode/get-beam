@@ -753,6 +753,14 @@ export default function VisitorsPage() {
                           Bot-suspect
                         </span>
                       )}
+                      {v.is_agent_operated && (
+                        <span
+                          className="shrink-0 rounded bg-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-warning"
+                          title="Agent-operated: human-shaped session likely driven by an AI browser or automation. Visibility signal only: still fully contactable and fully counted."
+                        >
+                          Agent-operated
+                        </span>
+                      )}
                       {v.is_internal_suspect && (
                         <span
                           className="shrink-0 rounded bg-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-warning"

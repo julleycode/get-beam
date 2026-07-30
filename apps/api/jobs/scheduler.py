@@ -252,6 +252,33 @@ async def _cadence_bot_flag_sweep_job() -> None:
         logger.exception("cadence_bot_flag_sweep_crashed")
 
 
+async def _ws2_classifier_sweep_job() -> None:
+    """Periodic job: agent-driven session classifier (WS2 is_agent_operated).
+
+    run_ws2_classifier_sweep opens its own per-(site, visitor) fail-open
+    iteration; this wrapper opens the session and swallows any top-level crash.
+    Never touches the ingest hot path — detection is batch-only by design.
+
+    The enabled-check lives here AND inside the sweep, mirroring the cadence job:
+    the job is registered unconditionally because `events` rows exist regardless
+    of the flag (retroactive detection is the point), but with the flag off this
+    returns before opening a session or issuing a single query.
+    """
+    from apps.api.config import settings
+
+    if not settings.ws2_classifier_enabled:
+        return
+    try:
+        from apps.api.services.ws2_session_classifier_sweep import (
+            run_ws2_classifier_sweep,
+        )
+
+        async with async_session() as db:
+            await run_ws2_classifier_sweep(db)
+    except Exception:
+        logger.exception("ws2_classifier_sweep_crashed")
+
+
 async def _outlier_traffic_damping_sweep_job() -> None:
     """Periodic job: outlier / internal-traffic damping.
 
@@ -515,6 +542,15 @@ def start_scheduler() -> None:
         "interval",
         minutes=settings.cadence_bot_flag_sweep_interval_minutes,
         id="cadence_bot_flag_sweep",
+        replace_existing=True,
+        jitter=90,
+        misfire_grace_time=300,
+    )
+    scheduler.add_job(
+        _ws2_classifier_sweep_job,
+        "interval",
+        minutes=settings.ws2_classifier_sweep_interval_minutes,
+        id="ws2_classifier_sweep",
         replace_existing=True,
         jitter=90,
         misfire_grace_time=300,

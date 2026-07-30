@@ -51,6 +51,11 @@ class VisitorOut(BaseModel):
     # sessions are pageview-only. VISIBILITY-ONLY badge — never affects
     # emailability, aggregates, or resolution. Batch-computed, default False.
     is_bot_suspect: bool = False
+    # WS2 agent-driven-session flag: this visitor's session looked human-SHAPED
+    # but agent-OPERATED (Comet, Claude-in-Chrome, Playwright/CDP). VISIBILITY-ONLY
+    # badge — never affects emailability, aggregates, or resolution. Batch-computed,
+    # default False. Populated via model_validate from the ORM column.
+    is_agent_operated: bool = False
     # Outlier / internal-traffic damping. True when this visitor's event volume
     # is a statistical outlier for THIS site, sustained across days, with real
     # engagement. Inferred, never proven — UI copy must say "unusually high
