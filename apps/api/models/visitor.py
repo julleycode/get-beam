@@ -84,6 +84,16 @@ class Visitor(Base):
     is_bot_suspect: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # WS2 agent-driven-session flag (visibility-only, see
+    # ws2_session_classifier.py) — labels a human-SHAPED but agent-OPERATED
+    # session (Comet, Claude-in-Chrome, Playwright/CDP). Structurally independent
+    # of is_bot_suspect / is_abuse_flagged; never read by is_emailable_identity();
+    # never excluded from any aggregate FILTER clause. Set by the batch sweep only
+    # (ws2_session_classifier_sweep.py), never on the ingest hot path. Sticky:
+    # OR-merged, a later clean session never un-flags.
+    is_agent_operated: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     # Outlier / internal-traffic damping (see outlier_traffic_damping.py).
     # Visibility + damping signal: a visitor whose event volume is a statistical
     # outlier WITHIN this site, sustained across days, WITH engagement present.
@@ -152,6 +162,15 @@ class IdentifiedVisitor(Base):
     # Visitor.is_bot_suspect by the batch sweep. A flagged row stays fully
     # emailable and fully counted — the flag is a dashboard badge, nothing more.
     is_bot_suspect: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    # WS2 agent-driven-session flag (visibility-only, see
+    # ws2_session_classifier.py) — structurally independent of is_bot_suspect /
+    # is_abuse_flagged; never read by is_emailable_identity(); never excluded from
+    # any aggregate FILTER clause. Mirrored from Visitor.is_agent_operated by the
+    # batch sweep. A flagged row stays fully emailable and fully counted — the
+    # flag is a dashboard badge, nothing more.
+    is_agent_operated: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
     # Outlier / internal-traffic damping — mirrored from Visitor.is_internal_suspect

@@ -87,6 +87,48 @@ jobs:
         run: |
           PYTHONPATH=. python -m pytest tests/integration/ -v --tb=short -m integration
 
+  # ─── Pixel: size budget + capture e2e ─────────────────────
+  # Net-new job (AC-WS2-6): apps/pixel had no CI job before WS2. The size gate is
+  # zero-dependency (esbuild build + gzip|wc -c) and HARD-FAILS the build if the
+  # compiled tracker.min.js exceeds the documented 5,120-byte gzip ceiling
+  # (apps/pixel/package.json "must stay <5KB gzipped").
+  pixel:
+    name: Pixel (size budget + e2e)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install pixel dev dependencies
+        working-directory: apps/pixel
+        run: npm install --no-audit
+
+      - name: Build minified tracker
+        working-directory: apps/pixel
+        run: npm run build
+
+      - name: Enforce tracker size budget (gzip <= 5120 bytes)
+        working-directory: apps/pixel
+        run: |
+          SIZE=$(gzip -c src/tracker.min.js | wc -c | tr -d ' ')
+          echo "tracker.min.js gzip size: ${SIZE} bytes (ceiling 5120)"
+          if [ "$SIZE" -gt 5120 ]; then
+            echo "::error::tracker.min.js is ${SIZE} bytes gzipped, over the 5120-byte budget"
+            exit 1
+          fi
+
+      - name: Install Playwright (chromium)
+        working-directory: apps/pixel
+        run: npx playwright install --with-deps chromium
+
+      - name: Run pixel capture e2e (chromium)
+        working-directory: apps/pixel
+        run: npx playwright test --project=chromium
+
   # ─── Frontend E2E Tests (Playwright) ──────────────────────
   e2e:
     name: E2E Tests (Playwright)

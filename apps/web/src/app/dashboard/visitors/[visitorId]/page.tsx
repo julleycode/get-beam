@@ -513,6 +513,14 @@ export default function VisitorDetailPage() {
                   Bot-suspect
                 </span>
               )}
+              {visitor.is_agent_operated && (
+                <span
+                  className="rounded-full bg-warning-muted px-2.5 py-0.5 text-xs font-medium text-warning"
+                  title="Agent-operated: this session looked human-shaped but was likely driven by an AI browser or automation (e.g. Comet, Claude-in-Chrome, or a headless/CDP driver). Visibility signal only: they stay fully contactable and fully counted."
+                >
+                  Agent-operated
+                </span>
+              )}
               {visitor.is_internal_suspect && (
                 <span
                   className="rounded-full bg-warning-muted px-2.5 py-0.5 text-xs font-medium text-warning"
@@ -874,6 +882,9 @@ export default function VisitorDetailPage() {
               {visitor.ai_source && <InfoRow label="Arrived via">{aiSourceLabel(visitor.ai_source)}</InfoRow>}
               {visitor.is_bot_suspect && (
                 <InfoRow label="Bot-suspect">Cron-like cadence, pageview-only sessions</InfoRow>
+              )}
+              {visitor.is_agent_operated && (
+                <InfoRow label="Agent-operated">Human-shaped session, likely AI-browser / automation driven</InfoRow>
               )}
               {(visitor.is_internal_suspect || visitor.internal_override) && (
                 <InfoRow label="Activity volume">
