@@ -1,0 +1,38 @@
+# Beam Lab — explicitly open to AI fetchers. That is the whole point of the site.
+#
+# This file must exist as a REAL file. Cloudflare Pages serves index.html with a
+# 200 for any unmatched path, so without it /robots.txt answered with HTML — and a
+# robots.txt that is HTML cannot be parsed, which fetchers treat conservatively.
+# That silence is what made ChatGPT report it "could not read the page".
+
+User-agent: *
+Allow: /
+
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+Sitemap: https://beamlab.nhantown.com/sitemap.xml

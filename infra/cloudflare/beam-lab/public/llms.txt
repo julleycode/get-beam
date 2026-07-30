@@ -1,0 +1,29 @@
+# Beam Lab
+
+> Trang thử nghiệm cho lớp phát hiện AI-agent của Beam. Mục đích duy nhất: kiểm chứng
+> rằng khi một trợ lý AI đọc trang này, lượt đọc đó xuất hiện trên bảng điều khiển Beam.
+
+Beam là công cụ phân tích website trả lời câu hỏi mà analytics thông thường bỏ trống:
+có trợ lý AI nào đang đọc trang của bạn không, và ai là người đứng sau nó.
+
+## Vì sao trang này tồn tại
+
+Pixel của Beam là JavaScript. Các trình thu thập theo yêu cầu (ChatGPT-User, Claude-User,
+Perplexity-User) tải HTML rồi rời đi mà không chạy script, nên pixel không bao giờ thấy
+chúng. Việc ghi nhận phải diễn ra ở tầng máy chủ — tại đây là một hàm middleware trên
+Cloudflare Pages.
+
+## Ba lớp đang kiểm chứng
+
+- Pixel JavaScript — người thật dùng trình duyệt.
+- Middleware phía máy chủ — trợ lý AI tải trang theo yêu cầu của một người.
+- Đối chiếu dải IP — phát hiện User-Agent giả mạo tự xưng là AI của hãng lớn.
+
+## Quyền riêng tư
+
+Không cookie quảng cáo, không bán dữ liệu. Tôn trọng Do Not Track và Global Privacy
+Control: khi một trong hai bật, lượt truy cập được đánh dấu từ chối định danh.
+
+## Liên kết
+
+- [Trang chủ](https://beamlab.nhantown.com/): toàn bộ nội dung của site.
