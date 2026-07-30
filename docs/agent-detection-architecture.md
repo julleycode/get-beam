@@ -1,7 +1,7 @@
 # Lớp phát hiện AI-agent — kiến trúc & đánh giá
 
-Cập nhật: 2026-07-29 · Phạm vi: tab **Agents** + **Visitors**
-Nguồn: đọc trực tiếp source (không suy đoán) + 9 query đọc trên Postgres production
+Cập nhật: 2026-07-30 · Phạm vi: tab **Agents** + **Visitors**
+Nguồn: đọc trực tiếp source + kiểm chứng live local (17/17 probe) + ChatGPT-User thật trên beamlab.nhantown.com (29–30/07)
 
 Mục đích: trả lời ba câu hỏi sản phẩm — (1) phân biệt đâu là AI, (2) ai là người đứng sau AI,
 (3) làm sao dẫn người dùng AI click vào site và định danh được họ.
@@ -46,38 +46,57 @@ chạy trên chính getbeam.fyi. Đây là giới hạn cấu trúc, không ph�
 
 ## 3. Ba tầng độ tin cậy định danh
 
-`VERIFICATION_METHODS = ("ua-only", "ip-verified", "rdns-verified")`
+`VERIFICATION_METHODS = ("ua-only", "ip-verified", "rdns-verified")` — cộng thêm trạng thái
+**ghi nhận** `ip-mismatch` (F12, không nằm trong tuple trên vì chỉ dùng nội bộ sweep).
 
-`agent_verification.py` nâng `ua-only` → `ip-verified` bằng cách đối chiếu IP với dải CIDR tĩnh.
+`verify_ip()` trong `agent_verification.py` trả **ba** kết quả:
 
-**Thiếu sót cấu trúc:** hàm chỉ biết **NÂNG**, không bao giờ **HẠ hay gắn cờ lệch**. Một UA giả
-mạo GPTBot đến từ IP bất kỳ sẽ nằm nguyên ở `ua-only` — **không phân biệt được** với:
+| Kết quả | Ý nghĩa |
+|---|---|
+| `ip-verified` | IP nằm trong dải vendor công bố cho token đó |
+| `ip-mismatch` | Vendor **có** công bố dải IP nhưng traffic đến từ ngoài tất cả → hình dạng UA giả |
+| `None` | **Không kết luận** — Anthropic không công bố dải IP, hoặc chưa có dữ liệu refresh |
 
-- Anthropic (không công bố dải IP → vĩnh viễn `ua-only` theo thiết kế)
-- Agent thật nhưng chưa tới lượt sweep quét
+Sweep IP (`sweep_verification_methods`) chỉ cập nhật `agent_visits.verification_method`, **không**
+cập nhật `agent_fetch_events.verification_method` — lệch dữ liệu MEDIUM giữa hai bảng.
 
-Nghĩa là **Beam không phát hiện được UA giả mạo.** Không có trạng thái `spoofed`.
+Dải IP không còn tĩnh trong repo: job F13 (`agent_ip_range_refresh.py`) fetch 24h/lần, ghi vào
+`apps/api/data/agent_ip_ranges/runtime/` (ngoài git). File ship kèm repo để `ranges: []` — rỗng =
+không phát verdict cho tới khi refresh thành công.
+
+**Giới hạn còn lại:** beacon edge không ghi IP → ChatGPT-User trên site công khai không beacon vẫn
+`ua-only`. Anthropic vĩnh viễn `ua-only` nếu không có F14 (Web Bot Auth). F14 chưa implement.
 
 ---
 
 ## 4. Ba câu hỏi sản phẩm — trả lời được tới đâu
 
-### (1) Phân biệt đâu là AI — **một phần**
+### (1) Phân biệt đâu là AI — **phần lớn, có giới hạn**
 
-Nhận diện được 11 token vendor tự khai báo. Không phát hiện được giả mạo (mục 3). Dải IP để
-xác minh chỉ có 5 CIDR OpenAI + 5 IP Perplexity, là file tĩnh commit trong repo, **không có cơ
-chế làm mới**. OpenAI thực tế công bố **3 file riêng** cho GPTBot / OAI-SearchBot / ChatGPT-User;
-Beam gộp thành một vendor `openai` duy nhất → mất khả năng phát hiện bất thường kiểu "GPTBot đến
-từ dải của ChatGPT-User".
+Nhận diện được 11 token vendor tự khai báo. F12 phát hiện `ip-mismatch` cho vendor có dải IP
+công bố (mục 3). F13 tách khoá theo **token từng agent** (GPTBot / OAI-SearchBot / ChatGPT-User
+riêng) và tự làm mới dải IP. Vẫn không kết luận được: Anthropic (không có dải IP), MCP client
+UA chung chung, beacon không ghi IP.
 
-### (2) Ai đứng sau AI — **suy đoán, không định danh**
+### (2) Ai đứng sau AI — **attribution công ty, không định danh cá nhân**
 
-`agent_handoff_correlation.py` nối lượt fetch của agent với click của người theo **ba điều kiện
-mềm**: cùng site + `referrer` khớp họ vendor + click trong 30 phút sau fetch. Không có mã định
-danh nào. Hai người cùng hỏi ChatGPT về cùng trang trong 30 phút → gán nhầm, không phát hiện được.
+Hai khái niệm **tách bạch**:
 
-Đã đo trên prod: 22 lượt fetch, 1 visitor có `ai_source`, **0 link** — và `0` là **đúng**, vì
-không cặp nào từng thoả điều kiện.
+| Khái niệm | Trạng thái | Cơ chế |
+|---|---|---|
+| **Attribution** (AI nào / công ty nào) | **Hoạt động** khi có click | `ai_source` trên visitor; marker F2 → `agent_handoff_links` method=`marker`, confidence=`high` |
+| **Identity** (tên/email người cụ thể) | **Chưa giải** | `identified_visitors` — marker **không** feed waterfall resolution |
+
+Marker chỉ ghi attribution (`ai_source`, handoff link). `resolution_runner.py` xếp hàng theo
+`intent_score` duy nhất — **không** ưu tiên visitor có `ai_source` hay handoff. Provider keys
+(PDL/Proxycurl/FullContact) trống → resolution không identify được dù có marker.
+
+Kỳ vọng đúng: *"ChatGPT đọc pricing cho công ty X"* (cấp công ty), hiếm khi *"John Smith hỏi
+ChatGPT"* trừ khi người đó tự submit email.
+
+Sweep thời gian (`agent_handoff_correlation.py`) vẫn chạy song song: ba điều kiện mềm (cùng site +
+referrer khớp vendor + click trong 30 phút). Marker **ghi đè** link sweep khi có click với `?_bam=`.
+Không có click con người → `handoff_links = 0` (đúng, không phải bug).
 
 ### (3) Dẫn người dùng AI click vào và định danh — **xây xong mặt tiền, thiếu cả hai đầu**
 
@@ -86,7 +105,7 @@ khách tự soạn, chống dò `site_id` (5 trường hợp lỗi đều trả 
 
 **Đầu ra — đã sửa 29-07 (F2).** Trước đó link trong offers feed là URL trần, không mang mã nào để
 nhận ra khi có người click. Nay mỗi URL cùng host mang `?_bam=<marker>` mã hoá id của chính lượt
-fetch đã phát nó ra (chi tiết + 4 ràng buộc: mục 6). Cờ `agent_marker_enabled`, mặc định TẮT.
+fetch đã phát nó ra (chi tiết + 4 ràng buộc: mục 7). Cờ `agent_marker_enabled`, mặc định TẮT.
 
 **Đầu vào — đã sửa 29-07 (F11).** Trước đó toàn bộ surface agent-facing không ghi lại một lượt
 truy cập nào. Nay `record_gateway_visit()` trong `services/agent_gateway.py` ghi vào đúng hai bảng
@@ -114,28 +133,50 @@ vendor sẽ làm hỏng thống kê vendor đang có. Đây là lựa chọn có
 
 ---
 
-## 5. Danh sách vấn đề còn mở
+## 5. Kiểm chứng live (2026-07-29/30)
 
-| Mã | Vấn đề | Mức | File |
-|---|---|---|---|
-| F12 | Không có trạng thái `spoofed` — chỉ nâng cấp, không phát hiện lệch | HIGH | `agent_verification.py` |
-| F2 | Không có marker → "người sau AI" là suy đoán thời gian | HIGH | `services/agent_gateway.py` |
-| F14 | Chưa có Web Bot Auth (RFC 9421) — chữ ký mã hoá, miễn phí, mạnh nhất hiện có | MEDIUM | — |
+Phiên kiểm chứng trên môi trường lab (`beamlab.nhantown.com`) với ChatGPT-User thật (tier=on-demand).
 
-Còn lại một cái **chưa làm**:
+### Kết quả đã chứng minh
 
-| Mã | Vướng ở đâu |
+| Hạng mục | Kết quả |
 |---|---|
-| F14 | Implement RFC 9421 từ đầu: đọc header `Signature-Agent`, lấy public key tại `/.well-known/http-message-signatures-directory`, verify chữ ký + timestamp, cache key. Nhiều ngày, cần plan riêng |
+| API probe local | **17/17 pass** — gateway surfaces, F2 mint/decode, cache posture, cross-tenant replay block, F4/F12/F13, multi-tenant 404 |
+| ChatGPT-User thật | `/` → `/llms.txt` → `/` trong ~7s; ghi nhận fetch gateway |
+| Marker handoff (probe) | Click `?_bam=` → `agent_handoff_links` method=`marker`, confidence=`high` |
+| Không có click người | `handoff_links = 0` — **đúng**, đọc câu trả lời AI không tạo person link |
+| Harness test suite | 1503 pass / 5 fail trước fix; 3 commit harness (53fc573, 486b47a, b5f4311) — không phải lỗi product |
 
-**F14 đáng chú ý nhất về mặt cơ hội:** Web Bot Auth đã được Anthropic, OpenAI, Perplexity,
-Common Crawl hỗ trợ. Nó là chữ ký mã hoá, tất định, miễn phí, không phụ thuộc tier Cloudflare —
-và giải được đúng chỗ Anthropic đang bế tắc (không công bố dải IP nên vĩnh viễn kẹt ở `ua-only`,
-nhưng **có** ký).
+### Khoảng trống còn lại (product/ops, không phải bug detection)
+
+| Gap | Mức | Ghi chú |
+|---|---|---|
+| Marker survival trên AI thật | OPEN | Lab probe chứng minh decode; chưa biết ChatGPT có giữ `?_bam=` khi hiển thị link cho người dùng không |
+| Identity resolution | HIGH | `identified_visitors = 0` sau marker handoff; queue không ưu tiên `ai_source` |
+| `agent_fetch_events.verification_method` | MEDIUM | Sweep IP chỉ cập nhật `agent_visits`, không `agent_fetch_events` |
+| Beacon không có IP | MEDIUM | Public site không beacon → ChatGPT-User ua-only |
+| Provider keys trống | OPS | PDL/Proxycurl/FullContact chưa cấu hình |
+| F14 Web Bot Auth | — | Chưa implement, không có active plan |
+| `pytest -n` parallel | LOW | Shared DB `drop_all` fixture — không an toàn chạy song song |
+| `ENCRYPTION_KEY` trùng trong `.env` | LOW | Vệ sinh ops |
 
 ---
 
-## 6. Đã sửa (28-07 → 29-07)
+## 6. Danh sách vấn đề còn mở
+
+Chỉ còn **một** hạng mục chưa implement:
+
+| Mã | Vấn đề | Mức | Ghi chú |
+|---|---|---|---|
+| F14 | Chưa có Web Bot Auth (RFC 9421) — chữ ký mã hoá, miễn phí | MEDIUM | Implement từ đầu: header `Signature-Agent`, public key tại `/.well-known/http-message-signatures-directory`, verify + cache. Nhiều ngày, cần plan riêng |
+
+**F2 và F12 đã ship** (mục 7). F14 đáng chú ý nhất về mặt cơ hội: Web Bot Auth đã được Anthropic,
+OpenAI, Perplexity, Common Crawl hỗ trợ. Giải đúng chỗ Anthropic bế tắc (không công bố dải IP →
+vĩnh viễn `ua-only`, nhưng **có** ký).
+
+---
+
+## 7. Đã sửa (28-07 → 30-07)
 
 - **F2 — "người sau AI" nay tất định, không còn đoán theo thời gian.** Khi agent kéo
   `offers.json`, lượt fetch đó đã được ghi thành một dòng `agent_fetch_events`; id của nó được
@@ -233,7 +274,7 @@ nhưng **có** ký).
 
 ---
 
-## 7. Điểm làm tốt (không nên đụng vào)
+## 8. Điểm làm tốt (không nên đụng vào)
 
 - **Guardrail loại trừ agent khỏi outreach** thực thi nhất quán: `agent_handoff_correlation.py`
   không import bất kỳ đường ghi identity nào, có test tripwire riêng
@@ -247,7 +288,7 @@ nhưng **có** ký).
 
 ---
 
-## 8. Cờ tính năng — tất cả mặc định TẮT
+## 9. Cờ tính năng — tất cả mặc định TẮT
 
 `agent_detection_enabled`, `agent_gateway_enabled`, `agent_marker_enabled`,
 `cadence_bot_flag_enabled`, `site_ingest_limit_enabled`, `ingest_velocity_enabled`,
@@ -265,17 +306,14 @@ việc này — đây là quy trình vận hành thủ công.
 ## Câu hỏi chưa giải quyết
 
 1. **AI có giữ nguyên query param khi hiển thị link cho người dùng không?** Đây là giả định F2
-   đang đứng trên và **không kiểm chứng được bằng code** — một số surface có thể strip param hoặc
-   viết lại URL. Cần test thật với agent thật. Nếu bị strip, F2 âm thầm về mức 0 link (không sai,
-   chỉ là không có), sweep thời gian vẫn chạy như cũ.
-2. **Có làm Web Bot Auth (F14) không?** Đây là thay đổi lớn nhất về năng lực nhưng cũng là việc
-   mới hoàn toàn, không phải sửa lỗi.
-3. **Dải IP tĩnh làm mới thế nào?** Hiện commit trong repo — xem mục 5 dưới đây.
+   đang đứng trên. Lab probe chứng minh decode khi param còn nguyên; **chưa kiểm chứng trên
+   ChatGPT thật** — một số surface có thể strip param hoặc viết lại URL. Nếu bị strip, F2 âm
+   thầm về mức 0 link (không sai, chỉ là không có), sweep thời gian vẫn chạy như cũ.
+2. **Có làm Web Bot Auth (F14) không?** Thay đổi lớn nhất về năng lực nhưng việc mới hoàn toàn,
+   không phải sửa lỗi. Không có active plan.
+3. ~~**Dải IP tĩnh làm mới thế nào?**~~ — **đã xử lý 29-07 (F13).** Job refresh ghi vào
+   `data/agent_ip_ranges/runtime/` ngoài git; file ship kèm repo để `ranges: []`.
 4. `routers/visitors.py` (1314 dòng) và 2 trang dashboard mới đọc phần giao với agent, **chưa
    review từng dòng**. Đánh giá trên chưa phủ tab Visitors ở mức chi tiết.
-5. ~~Dải IP ship kèm repo có dữ liệu thật, trái thiết kế~~ — **đã xử lý 29-07.** Đã reset 5 file
-   `apps/api/data/agent_ip_ranges/*.json` về `ranges: []`. Căn cứ quyết định: job refresh bắn
-   **60 giây sau boot**, nên ship snapshot chỉ mua được ~1 phút coverage; đổi lại, refresh là
-   fail-open giữ nguyên dữ liệu cũ khi fetch lỗi → snapshot hỏng sẽ phát verdict `ip-mismatch`
-   vĩnh viễn, im lặng, nhắm vào agent thật trên dải mới. Rỗng = không phát verdict nào cho tới khi
-   có dữ liệu thật, là khẳng định yếu hơn và an toàn hơn.
+5. **Identity priority trong resolution queue** — marker/handoff chưa boost `intent_score` hay
+   thứ tự xử lý. Cần quyết định sản phẩm trước khi implement.

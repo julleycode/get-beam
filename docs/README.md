@@ -13,6 +13,7 @@ Human-facing documentation for the Beam monorepo. Agent harness context lives se
 | [code-standards.md](./code-standards.md) | Structure, naming, patterns observed in code |
 | [system-architecture.md](./system-architecture.md) | Components, data flows, diagrams |
 | [agent-detection-architecture.md](./agent-detection-architecture.md) | AI-agent layer: 5 detection layers, confidence tiers, handoff correlation, agent-facing gateway — plus what it cannot do yet. Read before touching Agents/Visitors |
+| [ai-behind-solution-old-vs-new.md](./ai-behind-solution-old-vs-new.md) | Giải pháp “người đứng sau AI”: SA 3 tầng, cách cũ (temporal) vs cách mới (marker F2), phần identity còn thiếu |
 | [project-roadmap.md](./project-roadmap.md) | Shipped vs pending (roadmap + `process/features/`) |
 | [deployment-guide.md](./deployment-guide.md) | Local dev, Docker, Railway, pixel CDN; **Windows verified (port 5433)** |
 | [local-uat-prod.md](./local-uat-prod.md) | Local → UAT → PROD environments |

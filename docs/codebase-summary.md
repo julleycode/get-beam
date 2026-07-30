@@ -1,6 +1,6 @@
 # Codebase Summary
 
-Last updated: 2026-07-28
+Last updated: 2026-07-30
 
 ## Overview
 
@@ -65,9 +65,11 @@ get-beam/
 | AI | `services/gemini_client.py`, `agents/`, `routers/ai.py` |
 | Campaigns | `routers/campaigns.py`, `services/campaign_sender.py` |
 | Billing | `routers/billing.py`, Gumroad webhook |
-| EvalLayer | `services/agent_classifier.py`, `models/agent_visit.py`, `routers/agents.py` |
+| EvalLayer | `services/agent_classifier.py`, `services/agent_gateway.py`, `services/agent_marker.py`, `models/agent_visit.py`, `routers/agents.py` |
 | Ads | `routers/ads.py`, `services/ads/` |
 | Social / EasyEngage | `routers/drafts.py`, `feed.py`, `social_auth.py` |
+
+**EvalLayer notes (Jul 2026):** F2 marker (`agent_marker.py`) mints Fernet `?_bam=` tokens on `offers.json` URLs; click decodes to `agent_handoff_links`. IP sweep (`agent_verification.py`) updates `agent_visits.verification_method` only — `agent_fetch_events.verification_method` stays `ua-only`. All agent flags default OFF. See [agent-detection-architecture.md](./agent-detection-architecture.md).
 
 ## `apps/web` Map
 

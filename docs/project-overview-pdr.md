@@ -1,6 +1,6 @@
 # Beam — Product Overview & PDR
 
-Last updated: 2026-07-28
+Last updated: 2026-07-30
 
 ## Overview
 
@@ -66,7 +66,8 @@ Positioning: simpler and cheaper than enterprise CDPs (Klaviyo, HubSpot) for tea
 ### FR-6 EvalLayer (AI agent traffic)
 - Classify agent bots at ingest; `agent_visits` rollup separate from human visitors
 - Dashboard `/agents` tab; strict guardrail: agent records never emailable
-- Feature flag `agent_detection_enabled` defaults **OFF**
+- Feature flags `agent_detection_enabled`, `agent_gateway_enabled`, `agent_marker_enabled` default **OFF**
+- Marker handoff (F2) provides **attribution** (which AI fetch led to a click), not named person identity — `identified_visitors` is unaffected
 
 ### FR-7 Ads audiences (in progress)
 - Meta Custom Audiences live (flag-off default); Google Phase 3 in progress
