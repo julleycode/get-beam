@@ -9,7 +9,11 @@ phase: "WS3"
 # WS3 — Agent Concierge Kill Test — Plan
 
 Date: 30-07-26
-Status: DRAFTED — VALIDATE required (public unauthenticated API contract extension; new schema)
+Status: CODE DONE, NOT VERIFIED — Steps 1-4 EXECUTE + EVL-green (31-07-26, 1451 unit + 66
+integration, 0 regressions); AC-WS3-5/6 wild kill test is WS0-gated known-gap (see
+`ws3-agent-concierge-phase_REPORT_31-07-26.md` and
+`process/features/agent-native-revenue/backlog/ws3-wild-kill-test_NOTE_31-07-26.md`). Plan stays
+active — do not archive until AC-WS3-5/6 close on real wild data (program guardrail 3).
 Complexity: **COMPLEX** (schema changes ×2, public unauthenticated JSON-RPC contract extension,
 5+ files, 2 non-negotiable security must-fixes, sequential dependent steps)
 
