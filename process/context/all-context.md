@@ -1,6 +1,6 @@
 # Beam - All Context
 
-Last updated: 2026-07-26
+Last updated: 2026-07-30
 
 This file is the root context entrypoint for the repo.
 
@@ -112,6 +112,21 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   step), AC7 Playwright UI legs (blocked on the same Clerk auth-harness gap as Phase 1), AC13 exact
   error code/subcode (Agent-Probe residual, fails safe). Phase 3 (Google live) in progress — see
   `process/features/ads-audiences/active/ad-audiences_25-07-26/ad-audiences-umbrella_PLAN_25-07-26.md`
+- `agent-native-revenue` — reposition Beam from "detect the AI agent" to "greet the agent, identify
+  the company behind it, trade a structured answer for qualification context"; 4-workstream program
+  (WS0 Ops gate → {WS1 AI Evaluation Timeline ∥ WS2 Agent session classifier} → WS3 Agent Concierge
+  kill test; WS4 Network Intel parked, design-note only). WS0/WS1/WS3 not started (WS0 blocked on a
+  user-action HARD STOP — GitHub Actions billing). WS2 code-complete but **DORMANT** 30-07-26 on
+  branch `feat/ws2-agent-session-classifier` (not yet merged to `main`): server-side classifier,
+  sweep, `Visitor.is_agent_operated`/`IdentifiedVisitor.is_agent_operated` columns (migration
+  `f4c1a9e2d3b8`), config, scheduler, and dashboard badges all shipped EVL-green, but client-side
+  `agent_sig` signal collection in `tracker.js` + its persistence path were reverted at EXECUTE
+  (tracker.js real gzip headroom against the enforcing `<5000`-byte test is only ~135 bytes, and no
+  `events.agent_sig` column existed to receive the signal) — the sweep currently flags nobody. See
+  `process/features/agent-native-revenue/backlog/ws2-activation-persistence_NOTE_30-07-26.md` for
+  the 3-item activation follow-up and
+  `process/features/agent-native-revenue/active/agent-native-revenue_30-07-26/` for the umbrella,
+  SPEC, and WS2 plan.
 
 ## Context Group Lifecycle
 

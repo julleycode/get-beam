@@ -405,7 +405,7 @@ stubs are the pre-research scaffold only — do not treat unresolved `OPEN` item
 |---|---|
 | WS0 — Ops Gate | ⏳ PLANNED (HARD STOP: GitHub billing fix pending — user action) |
 | WS1 — AI Evaluation Timeline | ⏳ PLANNED |
-| WS2 — Agent-driven Session Classifier | ⏳ PLANNED |
+| WS2 — Agent-driven Session Classifier | 🔨 CODE DONE — DORMANT (EVL-green 30-07-26, commits `5d4cf02`+`560fe53` on `feat/ws2-agent-session-classifier`, not yet merged to `main`; classifier scaffolding ships but client-side `agent_sig` signal collection + persistence were reverted at EXECUTE for size-budget/non-persistence reasons — sweep flags nobody until activation backlog lands; see `process/features/agent-native-revenue/backlog/ws2-activation-persistence_NOTE_30-07-26.md`) |
 | WS3 — Agent Concierge Kill Test | ⏳ PLANNED |
 | WS4 — Network Intel | ⏸️ PARKED (design-note only) |
 
@@ -499,14 +499,31 @@ the `OPEN — research-pending` items above — writing them now would fabricate
 
 ## Current Execution State
 
-Last updated: 30-07-26
-Completed phases: none (program just chartered)
-Current phase: WS0 — Ops Gate
-Current loop step: RESEARCH (in flight — awaiting user confirmation that the GitHub billing HARD
-STOP is resolved before WS0(b)/(c)/(d) research can produce actionable findings)
-Validate-contract status: pending — none written yet
-Program Net Gate: PENDING
-Latest validator run: not yet run against this program's artifacts
+Last updated: 30-07-26 (WS2 UPDATE PROCESS closeout)
+Completed phases: none archived (WS2 code-complete but kept active — see below)
+Current phase: WS0 — Ops Gate (still blocked on the GitHub billing HARD STOP, a user action);
+WS2 — Agent-driven Session Classifier (code-complete, DORMANT, kept active pending an activation
+follow-up — see `process/features/agent-native-revenue/backlog/ws2-activation-persistence_NOTE_30-07-26.md`)
+Current loop step:
+  - WS0: RESEARCH (in flight — awaiting user confirmation that the GitHub billing HARD STOP is
+    resolved before WS0(b)/(c)/(d) research can produce actionable findings). Not started.
+  - WS1: not started (depends on WS0(b) merge).
+  - WS2: EXECUTE + EVL complete (2 EVL cycles, 5/5 gates green — 1466 unit pass, 16 pixel e2e pass,
+    tracker.min.js 4865B gzip < 5000B real ceiling, migration offline round-trip clean). WS2's own
+    dedicated RESEARCH step (thresholds/UA capture) was not separately run — deferred to the
+    activation follow-up. UPDATE PROCESS run 30-07-26: phase report + backlog note written, a
+    validate-contract text defect fixed (recorded size budget corrected from 5,120 to the real
+    enforcing 5,000 bytes gzip), plan kept ACTIVE (not archived) — feature ships DORMANT, 3 SPEC
+    ACs unmet (AC-WS2-2, AC-WS2-3 lab leg, plus the pre-existing Agent-Probe known-gaps
+    AC-WS2-3 wild leg / AC-WS2-4).
+  - WS3: not started (depends on WS0 exit metric).
+Validate-contract status: WS2 — present, CONDITIONAL (0 FAILs, 5 CONCERNs, all resolved via
+  plan-text corrections + Execute-Agent Instructions). WS0/WS1/WS3 — none written yet.
+Program Net Gate: PENDING (WS2 partial progress; WS0/WS1/WS3 not started; program-level VERIFIED
+  still requires WS0's HARD STOP resolution before any further workstream can complete its exit
+  metric)
+Latest validator run: `vc-audit-plans` inventory validator run 30-07-26 (WS2 UPDATE PROCESS
+  session) — see phase report for result.
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any

@@ -106,7 +106,10 @@ pre-deciding those values; a `Inner Loop Refresh Note` should be added once RESE
     correction below); confirm zero regression on existing human-fixture (true-negative) specs.
 11. CI: author a **new** job (no existing `apps/pixel` job exists in `.github/workflows/test.yml`)
     with a `wc -c`/`npm run size` size-budget gate (gzip, ≤5,120 bytes per `package.json`'s
-    documented ceiling), hard-failing the build on breach.
+    documented ceiling), hard-failing the build on breach. **UPDATE-PROCESS CORRECTION (30-07-26):
+    the real enforcing gate is `<5,000` bytes per `tests/unit/test_pixel_fingerprint.py::test_under_5kb_gzipped`
+    — see the Blast Radius section's UPDATE-PROCESS-CORRECTED note. The shipped CI job still uses
+    5,120; aligning it to 5,000 is an open code-level fix (see WS2 activation backlog note).**
 12. `tests/unit/test_ws2_session_classifier.py` + `tests/unit/test_ws2_zero_import.py` (new); run
     `tests/unit/test_agent_origin_exclusion.py` regression.
 13. `apps/web/.../visitors/[visitorId]/page.tsx` + `.../visitors/page.tsx`: add
@@ -204,21 +207,34 @@ not re-derive or loosen any of them.
 - **No auth, billing, or public-API-contract surface touched.** No auth/billing STRIDE scan
   required (`vc-security` not invoked — out of that trigger's scope).
 
-- **tracker.js size-budget risk — VALIDATE-CORRECTED (see validate-contract Concern C1).** The
-  original draft of this section compared the UNMINIFIED source file (`tracker.js`: 27,576 bytes
-  raw / 10,258 bytes gzip) against a self-cited "≤32,768 bytes raw / ≤12,288 bytes gzip" budget
-  that has **no source anywhere in the repository** (confirmed via repo-wide grep). That is not
-  the real constraint. The artifact actually served in production is the BUILT `tracker.min.js`
-  (measured 30-07-26: **11,629 bytes raw / 4,865 bytes gzip**). The only repo-documented ceiling is
-  `apps/pixel/package.json`'s own description field: **"must stay <5KB gzipped"** (5,120 bytes) —
-  there is no documented raw-byte ceiling at all. **Real headroom is ~255 bytes gzip — not ~2.0KB
-  — over 10x tighter than originally believed.** There is also currently **no CI job at all** for
-  `apps/pixel` (`.github/workflows/test.yml` has only `backend-unit` / `backend-integration`), so
-  AC-WS2-6's CI gate is net-new job authoring, not a step added to an existing job. EXECUTE must
-  measure `cd apps/pixel && npm run build && npm run size` after EVERY signal added (not just at
-  the end) and STOP + report back — rather than silently exceeding the documented 5KB ceiling or
-  silently cutting scope — if 3 signal accumulators + the `agent_sig` payload-assembly code cannot
-  fit inside ~255 bytes gzip.
+- **tracker.js size-budget risk — VALIDATE-CORRECTED (see validate-contract Concern C1), and
+  UPDATE-PROCESS-CORRECTED (30-07-26, see below).** The original draft of this section compared
+  the UNMINIFIED source file (`tracker.js`: 27,576 bytes raw / 10,258 bytes gzip) against a
+  self-cited "≤32,768 bytes raw / ≤12,288 bytes gzip" budget that has **no source anywhere in the
+  repository** (confirmed via repo-wide grep). That is not the real constraint. The artifact
+  actually served in production is the BUILT `tracker.min.js` (measured 30-07-26: **11,629 bytes
+  raw / 4,865 bytes gzip**). There is no documented raw-byte ceiling at all.
+  **Contract-defect fix (UPDATE PROCESS, 30-07-26): the real enforcing gate is
+  `tests/unit/test_pixel_fingerprint.py::test_under_5kb_gzipped`, which asserts `< 5000` bytes
+  gzip — NOT the `5,120` bytes this section (and the CI job, and the validate-contract's test-gate
+  table below) originally recorded.** The `5,120` figure traced back to `apps/pixel/package.json`'s
+  description field ("must stay <5KB gzipped") being read as `5 * 1024 = 5120`, when the actual
+  pytest gate that binds in CI/EXECUTE uses the plain decimal `5000`. **Real headroom against the
+  correct ceiling is ~135 bytes gzip** (4865 used of <5000), not the ~255 bytes this section
+  previously stated against the wrong 5120 figure — tighter still. This defect did not change any
+  shipped result (the actual build, 4865 bytes, passes under either number), but the recorded
+  budget was wrong and should be corrected wherever it appears in this plan, the CI job, and
+  `package.json`'s own description text (the CI/package.json number is a separate, still-open,
+  code-level fix — see the WS2 activation backlog note; this plan-text correction does not itself
+  change any code). There is also currently **no CI job at all** for `apps/pixel` prior to this
+  work (`.github/workflows/test.yml` had only `backend-unit` / `backend-integration`), so
+  AC-WS2-6's CI gate was net-new job authoring, not a step added to an existing job. EXECUTE was
+  instructed to measure `cd apps/pixel && npm run build && npm run size` after EVERY signal added
+  (not just at the end) and STOP + report back — rather than silently exceeding the documented
+  ceiling or silently cutting scope — if signal accumulators + the `agent_sig` payload-assembly
+  code could not fit inside the real headroom. In the event, EXECUTE reverted the client-side
+  signal collection entirely for size-budget + non-persistence reasons (see the phase report and
+  the WS2 activation backlog note) rather than exceeding the ceiling.
 
 - **tracker.js `navigator.webdriver` early-return conflict — VALIDATE-FOUND (see validate-contract
   Concern C2).** `tracker.js` line 4 (`if (navigator.webdriver === true) return;`) is a full,
@@ -255,7 +271,7 @@ not re-derive or loosen any of them.
 | Supplementary FPR check against a real WILD production traffic sample before the label is trusted for any downstream decision | Agent-Probe (needs live traffic sample) | AC-WS2-3 (wild leg) |
 | Manual driven-session journal: real Comet and/or Claude-in-Chrome session, before/after label evidence documented with timestamp | Agent-Probe | AC-WS2-4 |
 | Full `apps/pixel/e2e/` Playwright suite run, 0 new failures after signal collection is added | Fully-Automated | AC-WS2-5 |
-| CI `wc -c`/`npm run size` gate on compiled `tracker.min.js` (gzip, ≤5,120 bytes per `package.json`'s documented ceiling — CORRECTED from the plan's earlier 12KB figure), zero-dependency, hard-fails build on breach; new job, no existing pixel CI job to extend | Fully-Automated | AC-WS2-6 |
+| CI `wc -c`/`npm run size` gate on compiled `tracker.min.js` (gzip, real enforcing ceiling is **<5,000 bytes** per `tests/unit/test_pixel_fingerprint.py::test_under_5kb_gzipped` — CORRECTED 30-07-26 from this plan's earlier 5,120/12KB figures; CI job/package.json still say 5,120, a separate open code-level fix, see WS2 activation backlog note), zero-dependency, hard-fails build on breach; new job, no existing pixel CI job to extend | Fully-Automated | AC-WS2-6 |
 | Network-call-count diff test (pre/post change), asserts unchanged pixel network call count via `interceptIngest().callCount()` | Fully-Automated | AC-WS2-7 |
 | Unit test asserting `is_agent_operated` output is never read by render/redirect/blocking code paths or `is_emailable_identity()`, + config test asserting `ws2_classifier_enabled` defaults `False` | Fully-Automated | AC-WS2-8, AC-G-4 |
 | `tests/unit/test_ws2_zero_import.py` — structural import-graph assertion, zero cross-imports with `cadence_bot_flag.py` / `agent_classifier.py` | Fully-Automated | Constraint (risk #3, INNOVATE decision D2) |
@@ -359,7 +375,7 @@ Test gates (C3 5-column table — ADDITIVE; existing consumers still parse the l
 | AC-WS2-3 (wild leg) | FPR on real WILD production traffic | Agent-Probe (needs live traffic sample) | manual journal entry citing the query + sample count | D |
 | AC-WS2-4 | real Comet/Claude-in-Chrome wild session label, before/after evidence | Agent-Probe | manual driven-session journal, dated | D (already named Known-Gap in this plan) |
 | AC-WS2-5 | zero pixel e2e regression after signal collection is added | Fully-Automated | `cd apps/pixel && npm run test:e2e` (full suite, 0 new failures) | A |
-| AC-WS2-6 | tracker.js size budget (CORRECTED: ≤5,120 bytes gzip per `package.json`; real headroom ~255 bytes) | Fully-Automated | `cd apps/pixel && npm run build && npm run size` — new CI job required, gate at `[ "$SIZE" -le 5120 ]` | B |
+| AC-WS2-6 | tracker.js size budget (RE-CORRECTED 30-07-26: real enforcing gate is `<5,000` bytes gzip per `tests/unit/test_pixel_fingerprint.py::test_under_5kb_gzipped`, not the 5,120 figure this row previously stated; real headroom ~135 bytes) | Fully-Automated | `cd apps/pixel && npm run build && npm run size` — new CI job required; CI job currently gates at `[ "$SIZE" -le 5120 ]` (should be updated to 5000 to match the real pytest gate — open code-level fix, see WS2 activation backlog note) | B |
 | AC-WS2-7 | no new network call added beyond the existing pixel event call | Fully-Automated | new pixel e2e spec asserting `interceptIngest().callCount()` unchanged pre/post | A |
 | AC-WS2-8 / AC-G-4 | `is_agent_operated` never read by render/redirect/blocking or `is_emailable_identity()`; flag defaults OFF | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_ws2_session_classifier.py -m unit -q` (config-default subtest) + grep-based structural assertion in the test file | A |
 | Constraint (zero cross-import, INNOVATE D2) | `ws2_session_classifier*.py` import nothing from `cadence_bot_flag.py`/`agent_classifier.py`, and vice versa | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_ws2_zero_import.py -m unit -q` | A |
@@ -377,7 +393,7 @@ C-4 reconciliation: the `strategy:` column carries ONLY the 3 proving strategies
 
 Legacy line form (retained so existing validate-contract consumers still parse):
 - `apps/api/services/ws2_session_classifier.py`: Fully-automated: `.venv/bin/python3.11 -m pytest tests/unit/test_ws2_session_classifier.py -m unit -q`
-- `apps/pixel/src/tracker.js` + `apps/pixel/e2e/`: Fully-automated: `cd apps/pixel && npm run test:e2e` | Fully-automated: `cd apps/pixel && npm run build && npm run size` (≤5,120 bytes gzip)
+- `apps/pixel/src/tracker.js` + `apps/pixel/e2e/`: Fully-automated: `cd apps/pixel && npm run test:e2e` | Fully-automated: `cd apps/pixel && npm run build && npm run size` (real enforcing ceiling <5,000 bytes gzip; CI job currently checks 5,120 — see Blast Radius UPDATE-PROCESS-CORRECTED note)
 - `apps/api/migrations/versions/<new>`: Fully-automated (offline): `alembic upgrade <live-head>:head --sql` / `downgrade head:<live-head> --sql`
 - Wild FPR + real agentic-browser session: agent-probe: manual journal, needs live traffic/session (known-gap, carried per SPEC)
 

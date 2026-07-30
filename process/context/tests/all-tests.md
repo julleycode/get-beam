@@ -87,6 +87,7 @@ pytest config: `pyproject.toml` — `asyncio_mode=auto`, markers `unit` / `integ
 - Redis async GC prints "Event loop is closed" tracebacks at teardown — noise, not failure; check the pytest summary line
 - Handlers passed to `gemini_agent_loop` share one AsyncSession: sequential only, never commit inside a tool handler
 - Alembic offline `--sql` dry-run needs an EXPLICIT `<from-rev>:<to-rev>` range in this repo — the `upgrade head --sql` / `downgrade -1 --sql` shorthand fails partway through the chain because `b7d3e9f1a4c2_add_ad_connections.py` calls `sa.inspect(bind)`, unsupported against alembic's offline `MockConnection`; use e.g. `alembic upgrade d5b1f7c3a908:head --sql` scoped past that migration (confirmed at cadence-bot-flag EXECUTE, 26-07-26)
+- Verify the REAL enforcing gate for a size/perf budget, not a doc string near it: `apps/pixel/package.json`'s description says "must stay <5KB gzipped" (read as 5,120 bytes), but the binding pytest gate is `tests/unit/test_pixel_fingerprint.py::test_under_5kb_gzipped`, which asserts plain decimal `< 5000` — a plan/CI/`package.json` all cited 5,120 and were wrong (found + corrected at agent-native-revenue WS2 UPDATE PROCESS, 30-07-26; CI job (`.github/workflows/test.yml`) still gates at 5120, an open follow-up). Always `grep` the actual assert, don't infer from a comment/description field.
 
 **Playwright rules (canonical — from repeated CI failures):**
 1. NEVER `waitForTimeout()` + `isVisible()` — use `await expect(locator).toBeVisible({ timeout: 15_000 })` (auto-retry)
