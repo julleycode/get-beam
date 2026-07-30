@@ -357,6 +357,19 @@ class Settings(BaseSettings):
     # the shared 60/min MCP read budget. Prevents an abuser spamming an owner's
     # inbox with up to 60 leads/minute. Enforced only when conversion is enabled.
     agent_concierge_conversion_rate_limit_per_minute: int = 5
+    # M3: coarser per-site DAILY ceiling on COMPLETED conversion calls, on top of
+    # the per-minute limit. The 5/min limit alone still permits ~7200 leads/day/
+    # site sustained; this caps the daily total so a slow-drip abuser cannot flood
+    # an owner's inbox over a full day while staying under the minute bucket.
+    # Generous by design (a real business will not legitimately exceed it); set to
+    # 0 to disable the ceiling entirely. Redis-backed per-UTC-day counter, no
+    # schema change, fail-open (Redis trouble never blocks a lead).
+    agent_concierge_conversion_daily_cap: int = 500
+    # M3: idempotency window (seconds). Two identical complete conversion calls
+    # (same site + tool + qualification params) within this window collapse to ONE
+    # lead + ONE owner email — retries/double-submits do not duplicate. Redis
+    # SET NX EX, no schema change, fail-open. Set to 0 to disable idempotency.
+    agent_concierge_conversion_idempotency_ttl_seconds: int = 90
 
     # ─── Cadence bot flag ───
     # Fifth, ORTHOGONAL bot layer. The four existing ones (tracker.js webdriver

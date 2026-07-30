@@ -22,6 +22,35 @@ import apps.api.main  # noqa: F401 — registers every ORM model
 pytestmark = pytest.mark.unit
 
 
+class _FakeRedis:
+    """Fresh in-memory Redis so the WS3 idempotency guard (added in the review-fix
+    cycle) is deterministic in the unit lane and never touches a stray local
+    :6379 container across runs."""
+
+    def __init__(self):
+        self.store: dict = {}
+
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
+
+    async def incr(self, key):
+        self.store[key] = int(self.store.get(key, 0)) + 1
+        return self.store[key]
+
+    async def expire(self, key, seconds):
+        return True
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_redis(monkeypatch):
+    fake = _FakeRedis()
+    monkeypatch.setattr("apps.api.services.redis_client.get_redis", lambda: fake)
+    return fake
+
+
 def _mock_db():
     db = MagicMock()
     db.add = MagicMock()

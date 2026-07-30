@@ -217,12 +217,38 @@ class IngestBodySizeLimitMiddleware:
 
     Registered AFTER PixelCORSMiddleware so it is the outermost middleware and
     an oversized body is dropped before any other middleware does work.
+
+    Guards TWO body-accepting public surfaces, each with its own cap:
+      - POST /api/v1/events/ingest  → settings.ingest_body_max_bytes
+      - POST /api/v1/agent/{site_id}/mcp → agent_mcp.MAX_MCP_BODY_BYTES (H1 fix)
+    The MCP route reads request.body() internally, which buffers unbounded for a
+    chunked / no-Content-Length request BEFORE its own size check; this ASGI-level
+    running byte-counter aborts receive() before Starlette fully buffers, so a
+    forged/absent Content-Length can never get a large blob into the parser.
     """
 
     _GUARDED_PATHS = {"/api/v1/events/ingest"}
+    _MCP_PREFIX = "/api/v1/agent/"
+    _MCP_SUFFIX = "/mcp"
 
     def __init__(self, app):
         self.app = app
+
+    @classmethod
+    def _cap_for_path(cls, path: str) -> int | None:
+        """Return the body-size cap for a guarded path, or None if unguarded.
+
+        The MCP path carries a dynamic {site_id} segment, so it is matched by
+        prefix+suffix rather than an exact-set membership."""
+        if path in cls._GUARDED_PATHS:
+            return settings.ingest_body_max_bytes
+        if path.startswith(cls._MCP_PREFIX) and path.endswith(cls._MCP_SUFFIX):
+            # Deferred import via the already-loaded router module (registered at
+            # app import time, well before any request reaches this middleware).
+            from apps.api.routers import agent_mcp
+
+            return agent_mcp.MAX_MCP_BODY_BYTES
+        return None
 
     @staticmethod
     async def _reject(send) -> None:
@@ -238,11 +264,14 @@ class IngestBodySizeLimitMiddleware:
         await send({"type": "http.response.body", "body": b"payload too large\n"})
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope.get("path", "") not in self._GUARDED_PATHS:
+        max_bytes = (
+            self._cap_for_path(scope.get("path", ""))
+            if scope["type"] == "http"
+            else None
+        )
+        if max_bytes is None:
             await self.app(scope, receive, send)
             return
-
-        max_bytes = settings.ingest_body_max_bytes
 
         # Fast path: an honest Content-Length lets us reject without reading a
         # single body byte. A forged/absent one falls through to the counter.

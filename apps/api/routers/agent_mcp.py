@@ -206,6 +206,39 @@ def _conversion_rate_limited(site_id: str) -> bool:
         return False
 
 
+async def _conversion_daily_cap_reached(site_id: str) -> bool:
+    """M3: a coarser per-site DAILY ceiling on completed conversion calls, on top
+    of the tighter per-minute limit. The 5/min limit still permits ~7200
+    leads+emails/day/site sustained; this caps the daily total so a slow-drip
+    abuser cannot flood an owner's inbox over a full day while staying under the
+    minute bucket.
+
+    Redis INCR on a per-site, per-UTC-day key (no schema change — preferred over a
+    new column). Fail-open: any Redis trouble returns False (never blocks a
+    legitimate lead), matching every other guard on this path. Only invoked for
+    COMPLETE calls, so incomplete/needs_more_info calls never consume the day's
+    allowance (M4)."""
+    cap = settings.agent_concierge_conversion_daily_cap
+    if cap <= 0:
+        return False  # 0/negative = disabled ceiling (explicit operator opt-out)
+    try:
+        from datetime import datetime, timezone
+
+        from apps.api.services.redis_client import get_redis
+
+        day = datetime.now(timezone.utc).strftime("%Y%m%d")
+        key = f"agent_conv_daily:{site_id}:{day}"
+        redis = get_redis()
+        count = await redis.incr(key)
+        if count == 1:
+            # First hit of the day → expire a little past 24h so the window rolls.
+            await redis.expire(key, 90_000)
+        return count > cap
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_conversion_daily_cap_check_failed", error=str(exc))
+        return False
+
+
 async def _record_tool_call(
     db: AsyncSession,
     site_id: str,
@@ -351,17 +384,39 @@ async def _dispatch_tool(
                 _error(request_id, _METHOD_NOT_FOUND, "Method not found")
             )
         # Malformed (present-but-wrong-typed) params => -32602, distinct from
-        # absent params (handled as needs_more_info inside handle_conversion_tool).
+        # absent params (the needs_more_info case below).
         if has_malformed_qualification_params(args):
             return JSONResponse(_error(request_id, _INVALID_PARAMS, "Invalid params"))
-        # Must-Fix 1: dedicated tighter rate limit, per site.
-        if _conversion_rate_limited(site.site_id):
+        # Must-Fix 2: sanitize at the entry point before anything downstream.
+        clean_args = sanitize_qualification_params(args)
+        # M4: decide completeness BEFORE consuming the tight dedicated budgets. An
+        # incomplete (needs_more_info) call is zero-cost and MUST NOT drain the
+        # 5/min conversion bucket or the daily ceiling — otherwise a public caller
+        # could starve the feature forever with empty request_quote calls (site_id
+        # is public). Incomplete calls stay under the shared 60/min read budget.
+        missing = missing_qualification_params(clean_args)
+        if missing:
+            from apps.api.schemas.agent_gateway import NeedsMoreInfoOut
+
+            await _record_tool_call(
+                db, site.site_id, "tools/call", tool_name, clean_args, True
+            )
+            return JSONResponse(
+                _result(
+                    request_id,
+                    NeedsMoreInfoOut(missing_params=missing).model_dump(),
+                )
+            )
+        # COMPLETE call → NOW consume the tight per-minute budget (Must-Fix 1) and
+        # the coarser per-site daily ceiling (M3). `or` short-circuits so a
+        # minute-limit trip does not also tick the daily counter.
+        if _conversion_rate_limited(site.site_id) or await _conversion_daily_cap_reached(
+            site.site_id
+        ):
             return JSONResponse(
                 _error(request_id, _RATE_LIMITED, "Rate limit exceeded"),
                 status_code=429,
             )
-        # Must-Fix 2: sanitize at the entry point before anything downstream.
-        clean_args = sanitize_qualification_params(args)
         ip_address = resolve_client_ip(request)
         result = await handle_conversion_tool(
             db, site, profile, tool_name, clean_args, ip_address
@@ -381,22 +436,32 @@ async def _dispatch_tool(
         if has_malformed_qualification_params(args):
             return JSONResponse(_error(request_id, _INVALID_PARAMS, "Invalid params"))
         missing = missing_qualification_params(args)
-        await _record_tool_call(
-            db, site.site_id, "tools/call", tool_name, clean_args, True
-        )
         if missing:
             from apps.api.schemas.agent_gateway import NeedsMoreInfoOut
 
+            # No ORM attribute access after this record → ordering is safe here.
+            await _record_tool_call(
+                db, site.site_id, "tools/call", tool_name, clean_args, True
+            )
             return JSONResponse(
                 _result(
                     request_id,
                     NeedsMoreInfoOut(missing_params=missing).model_dump(),
                 )
             )
-        return JSONResponse(
-            _result(request_id, MCP_TOOLS[tool_name](site, profile, clean_args))
+        # M1: compute the tool result BEFORE recording the metric. _record_tool_call
+        # is fail-open and may db.rollback() on a metric-write failure, which
+        # expires the site/profile ORM attrs (rollback expires regardless of
+        # expire_on_commit=False); a tool call issued AFTER that rollback would hit
+        # a sync attribute load → MissingGreenlet → 500. Reading first makes the
+        # metric write strictly the last DB touch.
+        result = MCP_TOOLS[tool_name](site, profile, clean_args)
+        await _record_tool_call(
+            db, site.site_id, "tools/call", tool_name, clean_args, True
         )
+        return JSONResponse(_result(request_id, result))
 
-    # Ungated legacy path — byte-identical to pre-WS3.
+    # Ungated legacy path — byte-identical output; same M1 read-before-record fix.
+    result = MCP_TOOLS[tool_name](site, profile)
     await _record_tool_call(db, site.site_id, "tools/call", tool_name, {}, False)
-    return JSONResponse(_result(request_id, MCP_TOOLS[tool_name](site, profile)))
+    return JSONResponse(_result(request_id, result))

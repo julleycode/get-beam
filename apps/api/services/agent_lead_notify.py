@@ -49,7 +49,13 @@ async def notify_owner_of_lead(db: AsyncSession, site: Site, lead) -> None:
     use_case = lead.use_case or "—"
     company_size = lead.company_size or "—"
     evaluating_against = lead.evaluating_against or "—"
-    company = lead.resolved_company_domain or "unknown"
+    # M2 defense-in-depth: resolved_company_domain is validated to a strict domain
+    # grammar at write time (agent_gateway.sanitize_resolved_domain). Re-validate
+    # here so a legacy row written before that fix — or any future write path —
+    # still cannot inject HTML/angle brackets into the owner email.
+    from apps.api.services.agent_gateway import sanitize_resolved_domain
+
+    company = sanitize_resolved_domain(lead.resolved_company_domain) or "unknown"
     body_html = (
         f"<p>A new <strong>{lead.tool_name}</strong> lead came in via your AI "
         f"agent concierge.</p>"

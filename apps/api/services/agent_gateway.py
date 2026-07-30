@@ -18,6 +18,10 @@ Two hard rules, enforced here rather than at each call site:
    ``user_id``, no internal UUIDs, no counts, no operational Site columns.
 """
 
+import hashlib
+import json
+import re
+
 import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -335,6 +339,71 @@ def has_malformed_qualification_params(params: dict | None) -> bool:
     return False
 
 
+# M2: resolved_company_domain originates from a reverse-DNS PTR record, which is
+# controlled by whoever owns the client IP's rDNS — i.e. attacker-influenceable
+# input that reaches the owner-notification email. A registrable domain is a
+# strict, small grammar; anything that is not a well-formed domain (e.g. an
+# injected "<script>…", an overlong blob) is dropped to None rather than stored
+# or interpolated. Total length <= 253, labels 1-63 chars of [a-z0-9-] not
+# starting/ending with a hyphen, at least two labels.
+_DNS_DOMAIN_RE = re.compile(
+    r"^(?=.{1,253}$)"
+    r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+"
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+)
+
+
+def sanitize_resolved_domain(domain: str | None) -> str | None:
+    """Return ``domain`` iff it is a well-formed registrable domain, else None.
+
+    Applied at the write boundary (Must-Fix / M2) BEFORE the value is stored on
+    AgentLead AND before it is interpolated into the owner email, so a hostile PTR
+    can never reach either. Case-normalized; no angle brackets, no whitespace, no
+    HTML can survive this grammar."""
+    if not isinstance(domain, str):
+        return None
+    candidate = domain.strip().lower()
+    if not candidate or not _DNS_DOMAIN_RE.match(candidate):
+        return None
+    return candidate
+
+
+def _conversion_idempotency_key(site_id: str, tool_name: str, params: dict) -> str:
+    """Stable hash of (site, tool, normalized qualification params). Identical
+    complete calls within the TTL window collapse to one lead/one email (M3)."""
+    norm = json.dumps(
+        {k: params.get(k) for k in sorted(_QUALIFICATION_CAPS)},
+        sort_keys=True,
+        ensure_ascii=True,
+    )
+    digest = hashlib.sha256(f"{site_id}|{tool_name}|{norm}".encode()).hexdigest()
+    return f"agent_conv_idem:{digest}"
+
+
+async def _conversion_is_duplicate(site_id: str, tool_name: str, params: dict) -> bool:
+    """M3: True if an identical conversion call was seen within the TTL window.
+
+    Redis SET NX EX (no schema change — preferred over a new column): the first
+    caller sets the key (returns truthy) and proceeds; a retry within the window
+    finds the key already set and is collapsed. Fail-open: any Redis trouble
+    returns False so a genuine lead is never dropped."""
+    ttl = settings.agent_concierge_conversion_idempotency_ttl_seconds
+    if ttl <= 0:
+        return False  # 0/negative = idempotency disabled (explicit opt-out)
+    try:
+        from apps.api.services.redis_client import get_redis
+
+        redis = get_redis()
+        key = _conversion_idempotency_key(site_id, tool_name, params)
+        was_set = await redis.set(key, "1", nx=True, ex=ttl)
+        # redis-py returns True when the key was newly set, None when NX failed
+        # (already present) → a None means this is a duplicate.
+        return not was_set
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("agent_conversion_idempotency_check_failed", error=str(exc))
+        return False
+
+
 def sanitize_qualification_params(params: dict | None) -> dict:
     """Sanitize the qualification params at the earliest point they enter the
     system (Must-Fix 2). Every string value passes through clean_text with its
@@ -383,6 +452,15 @@ async def handle_conversion_tool(
 
     clean = sanitize_qualification_params(params)
 
+    # M3: idempotency. An identical complete call within the TTL window collapses
+    # to the ORIGINAL lead/email — no duplicate row, no duplicate owner email.
+    # Return the same success ack (the request WAS received) without a second
+    # write. Checked before the DB write + email, after the qualification gate.
+    if await _conversion_is_duplicate(site.site_id, tool_name, clean):
+        from apps.api.schemas.agent_gateway import AgentLeadOut
+
+        return AgentLeadOut(tool_name=tool_name).model_dump()
+
     # Must-Fix 3: FREE-ONLY resolution. resolve_company_cached(ip, db) reads the
     # cached company_graph then falls back to free rDNS — it NEVER calls
     # IdentityResolver.resolve() / the paid provider waterfall. Fail-open.
@@ -392,6 +470,10 @@ async def handle_conversion_tool(
             resolved_domain = await resolve_company_cached(ip_address, db=db)
         except Exception:
             resolved_domain = None
+    # M2: the resolved domain came from an attacker-influenceable rDNS PTR record.
+    # Validate it against the strict domain grammar BEFORE it is stored on the lead
+    # row or reaches the owner email; anything non-conforming is dropped to None.
+    resolved_domain = sanitize_resolved_domain(resolved_domain)
 
     lead = AgentLead(
         site_id=site.site_id,
