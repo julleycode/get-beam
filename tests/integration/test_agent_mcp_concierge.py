@@ -374,6 +374,90 @@ async def test_hostile_params_sanitized_in_lead_and_email(test_client, test_db, 
     assert "<script>" not in captured.get("body_html", "")
 
 
+# ── M3: idempotency collapses duplicate conversion calls (real Redis) ──
+
+
+async def test_idempotent_conversion_creates_one_lead(test_client, test_db, monkeypatch):
+    """Two identical complete calls within the TTL window → ONE lead, ONE email."""
+    _flags(monkeypatch, conversion=True)
+    monkeypatch.setattr(
+        settings, "agent_concierge_conversion_idempotency_ttl_seconds", 90
+    )
+    from apps.api.services import company_resolver
+    from apps.api.services.email_sender import EmailSender
+
+    async def _free(ip, db=None):
+        return None
+
+    monkeypatch.setattr(company_resolver, "resolve_company_cached", _free)
+
+    sends = {"n": 0}
+
+    async def _send(self, **k):
+        sends["n"] += 1
+        return {"id": "x"}
+
+    monkeypatch.setattr(EmailSender, "send", _send)
+
+    site_id = await _seed(test_db)
+    args = {"use_case": "analytics", "company_size": "50-200", "evaluating_against": "clay"}
+    body = _rpc("tools/call", {"name": "request_quote", "arguments": args})
+    r1 = await test_client.post(f"/api/v1/agent/{site_id}/mcp", json=body)
+    r2 = await test_client.post(f"/api/v1/agent/{site_id}/mcp", json=body)
+    assert r1.json()["result"]["lead_created"] is True
+    assert r2.json()["result"]["lead_created"] is True
+    # Only ONE row was written despite two identical calls.
+    rows = (
+        await test_db.execute(select(AgentLead).where(AgentLead.site_id == site_id))
+    ).scalars().all()
+    assert len(rows) == 1
+    assert sends["n"] == 1
+
+
+# ── M4: incomplete calls do not starve the tight conversion budget ─────
+
+
+async def test_incomplete_calls_do_not_consume_conversion_budget(test_client, test_db, monkeypatch):
+    """With a 1/min budget, many empty request_quote calls must NOT exhaust it;
+    a subsequent COMPLETE call still creates a lead."""
+    _flags(monkeypatch, conversion=True, rate=1)
+    monkeypatch.setattr(
+        settings, "agent_concierge_conversion_idempotency_ttl_seconds", 0
+    )  # isolate the rate bucket, not idempotency
+    from apps.api.services import company_resolver
+    from apps.api.services.email_sender import EmailSender
+
+    async def _free(ip, db=None):
+        return None
+
+    monkeypatch.setattr(company_resolver, "resolve_company_cached", _free)
+
+    async def _send(self, **k):
+        return {"id": "x"}
+
+    monkeypatch.setattr(EmailSender, "send", _send)
+
+    site_id = await _seed(test_db)
+    # Fire several INCOMPLETE calls (missing params) — zero-cost, must not starve.
+    for _ in range(5):
+        resp = await test_client.post(
+            f"/api/v1/agent/{site_id}/mcp",
+            json=_rpc("tools/call", {"name": "request_quote", "arguments": {}}),
+        )
+        assert resp.json()["result"]["needs_more_info"] is True
+    # The first COMPLETE call still succeeds (budget was never consumed).
+    good = {"use_case": "x", "company_size": "y", "evaluating_against": "z"}
+    ok = await test_client.post(
+        f"/api/v1/agent/{site_id}/mcp",
+        json=_rpc("tools/call", {"name": "request_quote", "arguments": good}),
+    )
+    assert ok.json()["result"]["lead_created"] is True
+    rows = (
+        await test_db.execute(select(AgentLead).where(AgentLead.site_id == site_id))
+    ).scalars().all()
+    assert len(rows) == 1
+
+
 # ── FLAG: conversion default-off ──────────────────────────────────────
 
 

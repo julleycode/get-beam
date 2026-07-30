@@ -97,4 +97,3 @@ class AgentLeadOut(BaseModel):
     lead_created: bool = True
     tool_name: str
     message: str = "Your request was received. The team will follow up shortly."
-
