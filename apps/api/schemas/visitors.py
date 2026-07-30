@@ -101,6 +101,30 @@ class VisitorDetailOut(VisitorOut):
     handoff_fetch_at: datetime | None = None
 
 
+class AgentTimelineEntry(BaseModel):
+    """WS1 — one AI-agent fetch event in a visitor's evaluation timeline.
+
+    Thin projection of an ``agent_handoff_links`` ⋈ ``agent_fetch_events`` row.
+    PROBABILISTIC attribution only — never a certainty, never affects emailability.
+    ``confidence`` is the handoff link tier ("high"/"medium"; low is never written).
+    """
+
+    page: str | None = None
+    vendor: str
+    timestamp: datetime
+    confidence: str
+
+
+class AgentTimelineOut(BaseModel):
+    """WS1 — chronological (ASC) list of a visitor's AI-agent fetch events.
+
+    Empty ``entries`` is a normal state (visitor with no handoff-linked fetches);
+    the endpoint returns 200 + ``entries: []``, never a 404.
+    """
+
+    entries: list[AgentTimelineEntry]
+
+
 class VisitorStatsResponse(BaseModel):
     total_visitors: int
     identified: int
