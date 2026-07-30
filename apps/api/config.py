@@ -335,6 +335,42 @@ class Settings(BaseSettings):
     # operator action, matching agent_detection_enabled / company_graph_enabled.
     agent_gateway_enabled: bool = False
 
+    # ─── Agent concierge (WS3 — agent-native-revenue kill test) ───
+    # Two orthogonal, default-OFF flags layered on top of agent_gateway_enabled.
+    # Both require the agent_leads/agent_tool_calls + agent_profiles.qualified_content
+    # migrations to be live-applied first, and flipping either on in a real
+    # environment is an explicit operator action (same posture as
+    # agent_gateway_enabled / agent_detection_enabled).
+    #
+    # qualification: gates the param-gating behavior on the 3 existing read tools
+    # (get_offers/get_pricing/check_availability). When OFF the read tools behave
+    # EXACTLY as today (ungated, no needs_more_info). When ON, a caller must supply
+    # use_case/company_size/evaluating_against to get a structured answer; missing
+    # params degrade to a needs_more_info RESULT (never a -32602 error).
+    agent_concierge_qualification_enabled: bool = False
+    # conversion: gates whether the zero-click request_quote/book_demo conversion
+    # tools are exposed in tools/list and callable at all. When OFF they are absent
+    # from tools/list and return -32601 Method not found if called directly.
+    agent_concierge_conversion_enabled: bool = False
+    # Dedicated, TIGHTER rate limit for the conversion tools (Must-Fix 1), keyed on
+    # site_id via a manual limiter.hit() call — distinct from and far tighter than
+    # the shared 60/min MCP read budget. Prevents an abuser spamming an owner's
+    # inbox with up to 60 leads/minute. Enforced only when conversion is enabled.
+    agent_concierge_conversion_rate_limit_per_minute: int = 5
+    # M3: coarser per-site DAILY ceiling on COMPLETED conversion calls, on top of
+    # the per-minute limit. The 5/min limit alone still permits ~7200 leads/day/
+    # site sustained; this caps the daily total so a slow-drip abuser cannot flood
+    # an owner's inbox over a full day while staying under the minute bucket.
+    # Generous by design (a real business will not legitimately exceed it); set to
+    # 0 to disable the ceiling entirely. Redis-backed per-UTC-day counter, no
+    # schema change, fail-open (Redis trouble never blocks a lead).
+    agent_concierge_conversion_daily_cap: int = 500
+    # M3: idempotency window (seconds). Two identical complete conversion calls
+    # (same site + tool + qualification params) within this window collapse to ONE
+    # lead + ONE owner email — retries/double-submits do not duplicate. Redis
+    # SET NX EX, no schema change, fail-open. Set to 0 to disable idempotency.
+    agent_concierge_conversion_idempotency_ttl_seconds: int = 90
+
     # ─── Cadence bot flag ───
     # Fifth, ORTHOGONAL bot layer. The four existing ones (tracker.js webdriver
     # check, bot_filter UA regex, agent_classifier vendor list, ingest_velocity
