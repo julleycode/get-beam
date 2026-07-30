@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode, type SyntheticEvent } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import {
@@ -18,7 +18,7 @@ import {
   Sparkles,
   UserRound,
 } from "lucide-react";
-import { api, OsintAccount, SocialPost, VisitorDetail } from "@/lib/api";
+import { api, AgentTimelineEntry, OsintAccount, SocialPost, VisitorDetail } from "@/lib/api";
 import { aiSourceLabel } from "@/lib/ai-sources";
 import { cn } from "@/lib/utils";
 import { CardGridSkeleton, PageHeaderSkeleton, StatGridSkeleton } from "@/components/skeletons";
@@ -147,15 +147,21 @@ function CollapsibleSection({
   defaultOpen = true,
   children,
   className,
+  onToggle,
 }: {
   title: string;
   icon?: ComponentType<{ className?: string }>;
   defaultOpen?: boolean;
   children: ReactNode;
   className?: string;
+  onToggle?: (e: SyntheticEvent<HTMLDetailsElement>) => void;
 }) {
   return (
-    <details open={defaultOpen} className={cn("group rounded-xl border bg-card shadow-sm", className)}>
+    <details
+      open={defaultOpen}
+      onToggle={onToggle}
+      className={cn("group rounded-xl border bg-card shadow-sm", className)}
+    >
       <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-3.5">
         <span className="flex items-center gap-2 font-serif text-base font-semibold tracking-tight">
           {Icon ? <Icon className="h-4 w-4 text-muted-foreground" /> : null}
@@ -197,6 +203,16 @@ function handoffCopy(visitor: VisitorDetail): string {
   return (
     `${vendor} fetched this page about ${mins} min before this visit. ` +
     `${visitor.handoff_confidence} confidence this human may be the person behind that AI research. ` +
+    `Correlated signal, not a certainty.`
+  );
+}
+
+// WS1 — hedged per-row copy for the AI Evaluation Timeline confidence badge.
+// Same PROBABILISTIC discipline as handoffCopy (AC-H2-4): a correlated signal,
+// never a certainty. Only "high"/"medium" are ever written.
+function timelineConfidenceCopy(confidence: string): string {
+  return (
+    `${confidence} confidence this AI fetch preceded a visit by this human. ` +
     `Correlated signal, not a certainty.`
   );
 }
@@ -246,6 +262,22 @@ export default function VisitorDetailPage() {
   const [liPosts, setLiPosts] = useState<SocialPost[] | null>(null);
   // In-flight guard for the internal-traffic override action.
   const [savingOverride, setSavingOverride] = useState(false);
+
+  // WS1 — AI Evaluation Timeline, lazy-loaded on first expand. null = not yet
+  // fetched. The section itself is only rendered when a handoff link exists
+  // (see below), so a non-empty result is guaranteed in practice.
+  const [agentTimeline, setAgentTimeline] = useState<AgentTimelineEntry[] | null>(null);
+  const [agentTimelineLoading, setAgentTimelineLoading] = useState(false);
+
+  const loadAgentTimeline = () => {
+    if (agentTimeline !== null || agentTimelineLoading) return;
+    setAgentTimelineLoading(true);
+    api
+      .getAgentTimeline(siteId, visitorId)
+      .then((res) => setAgentTimeline(res.entries))
+      .catch(() => setAgentTimeline([]))
+      .finally(() => setAgentTimelineLoading(false));
+  };
 
   useEffect(() => {
     if (!siteId || !visitorId) return;
@@ -857,6 +889,55 @@ export default function VisitorDetailPage() {
                   </p>
                 )}
               </div>
+            </CollapsibleSection>
+          )}
+
+          {/* WS1 — AI Evaluation Timeline. Only rendered when a handoff link
+              exists (same guard as the header pill) so it is never empty; the
+              full chronological list is lazy-loaded on first expand. */}
+          {visitor.handoff_vendor && visitor.handoff_confidence && (
+            <CollapsibleSection
+              title="AI Evaluation Timeline"
+              icon={Sparkles}
+              defaultOpen={false}
+              onToggle={(e) => {
+                if ((e.currentTarget as HTMLDetailsElement).open) loadAgentTimeline();
+              }}
+            >
+              {agentTimelineLoading && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading timeline…
+                </div>
+              )}
+              {agentTimeline && agentTimeline.length > 0 && (
+                <div className="space-y-2">
+                  {agentTimeline.map((entry, i) => (
+                    <div
+                      key={i}
+                      className="flex items-start justify-between gap-3 rounded-lg border border-border/60 p-3 text-sm"
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate font-medium">{entry.page || "(unknown page)"}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {handoffVendorLabel(entry.vendor)} ·{" "}
+                          {new Date(entry.timestamp).toLocaleString()}
+                        </p>
+                      </div>
+                      <span
+                        className="shrink-0 rounded-full bg-info-muted px-2.5 py-0.5 text-xs font-medium text-info"
+                        title={timelineConfidenceCopy(entry.confidence)}
+                      >
+                        {entry.confidence} confidence
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {agentTimeline && agentTimeline.length === 0 && !agentTimelineLoading && (
+                <p className="text-xs italic text-muted-foreground">
+                  No AI-agent fetches recorded for this visitor.
+                </p>
+              )}
             </CollapsibleSection>
           )}
 

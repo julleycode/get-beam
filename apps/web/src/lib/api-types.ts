@@ -296,6 +296,22 @@ export interface VisitorDetail extends Visitor {
   handoff_fetch_at?: string | null;
 }
 
+// WS1 — one AI-agent fetch event in a visitor's evaluation timeline. Thin
+// projection matching the backend AgentTimelineEntry. PROBABILISTIC attribution
+// only — confidence is the handoff link tier ("high" | "medium").
+export interface AgentTimelineEntry {
+  page?: string | null;
+  vendor: string;
+  timestamp: string;
+  confidence: string;
+}
+
+// WS1 — chronological (ASC) list of a visitor's AI-agent fetch events. Empty
+// entries is a normal state (visitor with no handoff-linked fetches).
+export interface AgentTimelineOut {
+  entries: AgentTimelineEntry[];
+}
+
 export interface SocialResolution {
   status: "scanning" | "complete" | "error" | "not_identified";
   resolved_at?: string;
