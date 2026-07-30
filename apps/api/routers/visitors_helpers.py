@@ -20,7 +20,6 @@ from apps.api.models.visitor import (
     RESOLUTION_MIN_INTENT,
     IdentifiedVisitor,
     Visitor,
-    resolution_intent_filter,
 )
 from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 from apps.api.services.billing import check_usage_allowed
@@ -28,6 +27,8 @@ from apps.api.services.known_hash import email_hash
 from apps.api.services.osint_scanner import run_osint_scan
 from apps.api.services.resolution_eligibility import (
     first_win_boost_site_ids,
+    is_resolution_candidate,
+    resolution_candidate_filter,
     site_resolves_all_us,
 )
 from apps.api.services.resolution_runner import run_resolution_for_site
@@ -188,7 +189,11 @@ async def _compute_visitor_stat_counts(db: AsyncSession, site_id: str) -> dict[s
                 .filter(
                     and_(
                         Visitor.identity_status == "anonymous",
-                        resolution_intent_filter(all_us_ids, no_floor_site_ids=boost_ids),
+                        resolution_candidate_filter(
+                            all_us_ids,
+                            no_floor_site_ids=boost_ids,
+                        ),
+                        Visitor.do_not_resolve.is_(False),
                     )
                 )
                 .label("eligible_for_resolution"),
@@ -236,8 +241,12 @@ async def _resolution_skip_reason(
     # usage limit, so it must be reported as such, never as "budget used up".
     if getattr(visitor, "do_not_resolve", False):
         return "privacy_opt_out"
-    if visitor.intent_score < RESOLUTION_MIN_INTENT and not await first_win_boost_site_ids(
-        db, [site.site_id]
+    boost_ids = await first_win_boost_site_ids(db, [site.site_id])
+    if not await is_resolution_candidate(
+        db,
+        visitor,
+        site_url=site.url,
+        no_floor_site_ids=boost_ids,
     ):
         return "below_intent_threshold"
     if not visitor.ip_address:

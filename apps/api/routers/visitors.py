@@ -10,11 +10,9 @@ from apps.api.models.database import get_db
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.user import User
 from apps.api.models.visitor import (
-    RESOLUTION_MIN_INTENT,
     IdentifiedVisitor,
     ResolutionLog,
     Visitor,
-    resolution_intent_filter,
 )
 from apps.api.models.visitor_email import VisitorEmail
 from apps.api.dependencies import get_current_user, verify_site_access as _verify_site_access
@@ -50,6 +48,8 @@ from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.known_hash import email_hash
 from apps.api.services.resolution_eligibility import (
     first_win_boost_site_ids,
+    is_resolution_candidate,
+    resolution_candidate_filter,
     site_resolves_all_us,
 )
 from apps.api.services.usage_limits import (
@@ -804,7 +804,11 @@ async def resolve_one_visitor(
     site = await _verify_site_access(db, site_id, user)
 
     result = await db.execute(
-        select(Visitor).where(Visitor.site_id == site_id, Visitor.visitor_id == visitor_id)
+        select(Visitor).where(
+            Visitor.site_id == site_id,
+            Visitor.visitor_id == visitor_id,
+            human_only_visitor_filter(),
+        )
     )
     visitor = result.scalar_one_or_none()
     if not visitor:
@@ -826,20 +830,18 @@ async def resolve_one_visitor(
     # Privacy opt-out / intent gates BEFORE the paid waterfall: resolve() would
     # bail on these anyway, but bailing here lets us return the real reason (not
     # a canned "budget used up" line) and avoids burning provider calls on the
-    # intent<40 visitors the auto sweep never touches.
+    # visitors the auto sweep never touches.
     if visitor.do_not_resolve:
         return {"status": "anonymous", "skip_reason": "privacy_opt_out",
                 "message": _SKIP_REASON_MESSAGES["privacy_opt_out"]}
-    # Intent gate honours both widenings the sweep applies: on an all-US site
-    # every US visitor qualifies regardless of intent score, and a site inside
-    # the first-win boost window waives the floor entirely.
+    # Shared candidate gate: intent/all-US/first-win eligibility OR AI referral
+    # attribution OR a same-site handoff link.
     boost_ids = await first_win_boost_site_ids(db, [site_id])
-    if (
-        visitor.intent_score < RESOLUTION_MIN_INTENT
-        and site_id not in boost_ids
-        and not (
-            site_resolves_all_us(site.url) and (visitor.country_code or "").upper() == "US"
-        )
+    if not await is_resolution_candidate(
+        db,
+        visitor,
+        site_url=site.url,
+        no_floor_site_ids=boost_ids,
     ):
         return {"status": "anonymous", "skip_reason": "below_intent_threshold",
                 "message": _SKIP_REASON_MESSAGES["below_intent_threshold"]}
@@ -979,7 +981,11 @@ async def manual_identify_visitor(
     await _verify_site_access(db, site_id, user)
 
     result = await db.execute(
-        select(Visitor).where(Visitor.site_id == site_id, Visitor.visitor_id == visitor_id)
+        select(Visitor).where(
+            Visitor.site_id == site_id,
+            Visitor.visitor_id == visitor_id,
+            human_only_visitor_filter(),
+        )
     )
     visitor = result.scalar_one_or_none()
     if not visitor:
@@ -1100,10 +1106,12 @@ async def resolve_site_visitors(
         select(func.count()).select_from(Visitor).where(
             Visitor.site_id == site_id,
             Visitor.identity_status == "anonymous",
-            resolution_intent_filter(
+            resolution_candidate_filter(
                 [site_id] if site_resolves_all_us(site.url) else [],
                 no_floor_site_ids=boost_ids,
             ),
+            Visitor.do_not_resolve.is_(False),
+            human_only_visitor_filter(),
         )
     )
     eligible_raw = count_result.scalar() or 0

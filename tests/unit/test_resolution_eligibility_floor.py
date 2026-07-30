@@ -5,6 +5,8 @@ Covers:
   "hot / high-intent" DISPLAY label (40) used by kpi/hot_alert/conviction/timeseries.
 - ``resolution_intent_filter`` tiering: plain floor, all-US widening, and the
   first-win-boost widening that waives the floor entirely for listed sites.
+- AI-attributable humans bypass the floor and sort before intent, while
+  confirmed-internal damping retains first precedence when enabled.
 - ``first_win_boost_site_ids``: zero-row sites are inside the window, sites at
   the threshold are out, and a non-positive setting disables the boost.
 """
@@ -13,14 +15,18 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import column
 
 # Import the app so ALL mappers register before touching the ORM (same rationale
 # as conftest.test_engine / test_resolution_sweep).
 import apps.api.main  # noqa: F401
 from apps.api.config import settings
 from apps.api.models.visitor import RESOLUTION_MIN_INTENT, resolution_intent_filter
-from apps.api.services import resolution_eligibility
-from apps.api.services.resolution_eligibility import first_win_boost_site_ids
+from apps.api.services import resolution_eligibility, resolution_runner
+from apps.api.services.resolution_eligibility import (
+    first_win_boost_site_ids,
+    resolution_candidate_filter,
+)
 
 
 def _sql(expr) -> str:
@@ -74,6 +80,75 @@ class TestResolutionIntentFilter:
         assert _sql(resolution_intent_filter([None, ""], ["", None])) == _sql(
             resolution_intent_filter()
         )
+
+
+async def _runner_query_sql(monkeypatch, *, internal_damping_enabled=False) -> str:
+    monkeypatch.setattr(
+        resolution_runner,
+        "first_win_boost_site_ids",
+        AsyncMock(return_value=[]),
+    )
+    db = AsyncMock()
+    db.execute.return_value = SimpleNamespace(
+        scalars=lambda: SimpleNamespace(all=lambda: [])
+    )
+    site = SimpleNamespace(
+        site_id="site-current",
+        url="https://example.com",
+        user_id="user-1",
+        internal_damping_enabled=internal_damping_enabled,
+    )
+
+    await resolution_runner.run_resolution_for_site(db, site)
+
+    statement = db.execute.await_args.args[0]
+    return " ".join(_sql(statement).lower().split())
+
+
+class TestAiAttributableResolution:
+    def test_shared_sql_predicate_contains_all_three_candidate_paths(self):
+        sql = " ".join(_sql(resolution_candidate_filter()).lower().split())
+
+        assert "visitors.intent_score >= 20" in sql
+        assert "visitors.ai_source is not null" in sql
+        assert "exists (select agent_handoff_links.id" in sql
+        assert "agent_handoff_links.site_id = visitors.site_id" in sql
+        assert "agent_handoff_links.visitor_id = visitors.visitor_id" in sql
+
+    def test_joined_handoff_boolean_replaces_correlated_exists(self):
+        sql = _sql(
+            resolution_candidate_filter(handoff_linked=column("handoff_linked"))
+        ).lower()
+
+        assert "handoff_linked" in sql
+        assert "exists" not in sql
+        assert "agent_handoff_links" not in sql
+
+    @pytest.mark.asyncio
+    async def test_runner_uses_one_distinct_handoff_join(self, monkeypatch):
+        sql = await _runner_query_sql(monkeypatch)
+
+        assert "left outer join" in sql
+        assert "select distinct agent_handoff_links.visitor_id" in sql
+        assert sql.count("from agent_handoff_links") == 1
+        assert "exists" not in sql
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("internal_damping_enabled", [False, True])
+    async def test_ordering_prioritizes_ai_and_preserves_internal_precedence(
+        self, monkeypatch, internal_damping_enabled
+    ):
+        sql = await _runner_query_sql(
+            monkeypatch,
+            internal_damping_enabled=internal_damping_enabled,
+        )
+        order_sql = sql.split(" order by ", 1)[1].split(" limit ", 1)[0]
+
+        assert order_sql.index("ai_source") < order_sql.index("intent_score")
+        if internal_damping_enabled:
+            assert order_sql.index("internal_override") < order_sql.index("ai_source")
+        else:
+            assert "internal_override" not in order_sql
 
 
 def _db_returning(counts: dict[str, int]):

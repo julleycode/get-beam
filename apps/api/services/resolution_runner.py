@@ -18,14 +18,17 @@ import structlog
 from sqlalchemy import select, text as sql_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.models.agent_handoff_link import AgentHandoffLink
 from apps.api.models.database import async_session
 from apps.api.models.site import Site
-from apps.api.models.visitor import Visitor, resolution_intent_filter
+from apps.api.models.visitor import Visitor
 from apps.api.services.billing import check_usage_allowed, increment_usage
 from apps.api.services.enricher import Enricher
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.resolution_eligibility import (
+    ai_attributable_visitor_filter,
     first_win_boost_site_ids,
+    resolution_candidate_filter,
     site_resolves_all_us,
 )
 from apps.api.services.segmentation_trigger import check_and_trigger_segmentation
@@ -46,17 +49,19 @@ async def run_resolution_for_site(
 ) -> dict[str, int]:
     """Resolve + enrich eligible visitors for one site.
 
-    Eligibility: identity_status == "anonymous" AND the resolution intent
-    gate — intent_score >= RESOLUTION_MIN_INTENT (20), with two widenings:
-    on owner sites whose url matches ``settings.resolve_all_us_domains`` US
-    visitors qualify at any intent_score, and while a site is inside the
-    first-win boost window (fewer than ``settings.first_win_boost_count``
-    identified visitors ever) the floor is waived entirely.
+    Eligibility: identity_status == "anonymous" AND either AI attribution
+    (ai_source or a same-site handoff link) or the resolution intent gate —
+    intent_score >= RESOLUTION_MIN_INTENT (20), with two widenings: on owner
+    sites whose url matches ``settings.resolve_all_us_domains`` US visitors
+    qualify at any intent_score, and while a site is inside the first-win
+    boost window (fewer than ``settings.first_win_boost_count`` identified
+    visitors ever) the floor is waived entirely.
 
-    Highest intent first. Each visitor passes the monthly billing gate
-    (free=10/mo) before resolution; the resolver itself enforces the
-    per-site daily budget and the 30-day no-retry rule. Each visitor is
-    processed in isolation so one failure can't abort the batch.
+    AI-attributable humans first, then highest intent. Each visitor passes
+    the monthly billing gate (free=10/mo) before resolution; the resolver
+    itself enforces the per-site daily budget and the 30-day no-retry rule.
+    Each visitor is processed in isolation so one failure can't abort the
+    batch.
 
     Returns counters: processed (attempted), resolved, enriched,
     skipped_plan_limit (eligible but blocked by the monthly plan limit).
@@ -84,33 +89,53 @@ async def run_resolution_for_site(
     #
     # DEPRIORITISE, NEVER EXCLUDE: False sorts before True, so confirmed-internal
     # visitors go to the back of the queue but still resolve if budget remains.
-    # Opt-in per site — with the toggle off (the default) the ordering is
-    # byte-identical to its pre-feature form.
+    # Opt-in per site — when enabled, confirmed-internal status remains the
+    # first ordering key ahead of AI attribution and intent.
+    handoff_visitor_ids = (
+        select(AgentHandoffLink.visitor_id.label("visitor_id"))
+        .where(AgentHandoffLink.site_id == site.site_id)
+        .distinct()
+        .subquery("handoff_visitor_ids")
+    )
+    handoff_linked = handoff_visitor_ids.c.visitor_id.is_not(None)
+    ai_attributable_human = ai_attributable_visitor_filter(
+        handoff_linked=handoff_linked
+    )
+    candidate_eligible = resolution_candidate_filter(
+        [site.site_id] if site_resolves_all_us(site.url) else [],
+        no_floor_site_ids=boost_ids,
+        handoff_linked=handoff_linked,
+    )
     order_by = (
         (
             Visitor.internal_override.is_distinct_from("internal").desc(),
+            ai_attributable_human.desc(),
             Visitor.intent_score.desc(),
         )
         # getattr, not attribute access: fails SAFE to "damping off" for any
         # site object that predates the column (unflushed ORM instance, test
         # stub). Damping must never switch itself on by accident.
         if getattr(site, "internal_damping_enabled", False)
-        else (Visitor.intent_score.desc(),)
+        else (ai_attributable_human.desc(), Visitor.intent_score.desc())
     )
 
     result = await db.execute(
-        select(Visitor).where(
+        select(Visitor)
+        .outerjoin(
+            handoff_visitor_ids,
+            handoff_visitor_ids.c.visitor_id == Visitor.visitor_id,
+        )
+        .where(
             Visitor.site_id == site.site_id,
             Visitor.identity_status == "anonymous",
-            resolution_intent_filter(
-                [site.site_id] if site_resolves_all_us(site.url) else [],
-                no_floor_site_ids=boost_ids,
-            ),
+            candidate_eligible,
             Visitor.do_not_resolve.is_(False),
             # AC2 (GUARD #2): never re-resolve the synthetic agent-derived rows
             # (they run through resolve() only via the company-resolution sweep).
             human_only_visitor_filter(),
-        ).order_by(*order_by).limit(max_resolve)
+        )
+        .order_by(*order_by)
+        .limit(max_resolve)
     )
     visitors = list(result.scalars().all())
     counters = {"processed": 0, "resolved": 0, "enriched": 0, "skipped_plan_limit": 0}

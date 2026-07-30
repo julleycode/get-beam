@@ -7,7 +7,7 @@ from sqlalchemy import select
 
 from apps.api.models.database import async_session
 from apps.api.models.site import Site
-from apps.api.models.visitor import Visitor, resolution_intent_filter
+from apps.api.models.visitor import Visitor
 from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 from apps.api.services.auto_drafter import AutoDrafter
 from apps.api.services.billing import check_usage_allowed, increment_usage
@@ -15,7 +15,9 @@ from apps.api.services.celery_app import celery_app
 from apps.api.services.enricher import Enricher
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.resolution_eligibility import (
+    ai_attributable_visitor_filter,
     first_win_boost_site_ids,
+    resolution_candidate_filter,
     site_resolves_all_us,
 )
 from apps.api.services.segmentation_trigger import check_and_trigger_segmentation
@@ -60,12 +62,22 @@ async def _process_site(db, site_id: str) -> tuple[int, int]:
     # First-win boost: a site with fewer than settings.first_win_boost_count
     # identified visitors ever waives the intent floor entirely.
     boost_ids = await first_win_boost_site_ids(db, [site_id]) if site else []
+    ai_attributable = ai_attributable_visitor_filter()
+    order_by = (
+        (
+            Visitor.internal_override.is_distinct_from("internal").desc(),
+            ai_attributable.desc(),
+            Visitor.intent_score.desc(),
+        )
+        if site and getattr(site, "internal_damping_enabled", False)
+        else (ai_attributable.desc(), Visitor.intent_score.desc())
+    )
 
     result = await db.execute(
         select(Visitor).where(
             Visitor.site_id == site_id,
             Visitor.identity_status == "anonymous",
-            resolution_intent_filter(
+            resolution_candidate_filter(
                 [site.site_id] if site and site_resolves_all_us(site.url) else [],
                 no_floor_site_ids=boost_ids,
             ),
@@ -74,7 +86,9 @@ async def _process_site(db, site_id: str) -> tuple[int, int]:
             # + AutoDrafter on resolved rows, so exclude synthetic agent-derived
             # rows explicitly — incidental intent_score=0 protection is not enough.
             human_only_visitor_filter(),
-        ).order_by(Visitor.intent_score.desc()).limit(50)
+        )
+        .order_by(*order_by)
+        .limit(50)
     )
     visitors = list(result.scalars().all())
 
