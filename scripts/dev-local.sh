@@ -92,7 +92,7 @@ step "Running alembic upgrade head..."
 export PYTHONPATH="$ROOT_DIR"
 python -m alembic -c apps/api/alembic.ini upgrade head
 
-step "Ensuring demo user (demo@getbeam.fyi / password123)..."
+step "Ensuring demo user (demo@getbeam.fyi)..."
 python -m scripts.ensure_demo_user
 
 if [[ "$FULL_SEED" -eq 1 ]]; then
@@ -169,7 +169,11 @@ fi
 step "Local stack ready."
 echo "  API:   http://localhost:8000/health"
 echo "  Login: http://localhost:3000/login"
-echo "  Demo:  demo@getbeam.fyi / password123"
+if grep -qE '^[[:space:]]*BEAM_DEMO_PASSWORD[[:space:]]*=[[:space:]]*[^[:space:]]' .env 2>/dev/null; then
+  echo "  Demo:  demo@getbeam.fyi / (BEAM_DEMO_PASSWORD from .env)"
+else
+  echo "  Demo:  demo@getbeam.fyi / password123"
+fi
 echo "  Logs:  $API_LOG , $WEB_LOG"
 echo ""
 warn "Press Ctrl+C to stop API + Web. Docker: docker compose -f infra/docker-compose.yml stop"

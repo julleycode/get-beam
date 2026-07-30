@@ -9,7 +9,7 @@ Public site: [getbeam.fyi](https://getbeam.fyi)
 **Fastest path:** one-command local stack.
 
 ```powershell
-# Windows — copies .env templates, Docker PG+Redis, migrate, starts API :8000 + Web :3000
+# Windows — also starts a configured named tunnel when API_BASE_URL is public
 .\scripts\dev-local.ps1
 ```
 
@@ -70,7 +70,7 @@ Open `http://localhost:3000`.
 
 ### Demo credentials
 
-- Email: `demo@retargetagent.com`
+- Email: `demo@getbeam.fyi`
 - Password: `password123`
 
 ## Architecture

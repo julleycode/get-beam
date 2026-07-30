@@ -1,6 +1,6 @@
 # Local → UAT → PROD
 
-Last updated: 2026-07-28
+Last updated: 2026-07-29
 
 ## Overview
 
@@ -85,7 +85,7 @@ Today: CI runs on `main`; **no auto UAT deploy or Slack**. See [dev-workflow-sla
 | Repo root `.env` | `.env.example` | FastAPI (`apps/api/config.py`) |
 | `apps/web/.env.local` | `apps/web/.env.example` | Next.js (browser + server) |
 
-**Minimum to boot:** `APP_ENV=development`, localhost `DATABASE_URL` / `REDIS_URL` / `API_BASE_URL` / `FRONTEND_URL`, and web `NEXT_PUBLIC_API_URL=http://localhost:8000`. Clerk keys optional (empty = legacy JWT login). Gemini/SendGrid optional.
+**Minimum to boot:** `APP_ENV=development`, localhost `DATABASE_URL` / `REDIS_URL` / `FRONTEND_URL`, and web `NEXT_PUBLIC_API_URL=http://localhost:8000`. Keep `API_BASE_URL=http://localhost:8000` for local-only work, or use `https://beam-dev.nhantown.com` when an external website must load the local pixel. To reach the dashboard publicly as well, set `FRONTEND_URL=https://beam.nhantown.com` and web `NEXT_PUBLIC_API_URL=https://beam-api.nhantown.com`. Clerk keys optional (empty = legacy JWT login). Gemini/SendGrid optional.
 
 ### One-command scripts
 
@@ -94,6 +94,7 @@ Today: CI runs on `main`; **no auto UAT deploy or Slack**. See [dev-workflow-sla
 .\scripts\dev-local.ps1
 # .\scripts\dev-local.ps1 -SkipInstall
 # .\scripts\dev-local.ps1 -MigrateOnly
+# .\scripts\dev-local.ps1 -NoTunnel
 ```
 
 ```bash
@@ -104,7 +105,7 @@ chmod +x scripts/dev-local.sh
 # ./scripts/dev-local.sh --migrate-only
 ```
 
-Scripts will: copy env templates if missing → docker postgres+redis → venv/npm install → alembic → start API :8000 + Web :3000.
+Scripts will: copy env templates if missing → docker postgres+redis → venv/npm install → alembic → start API :8000 + Web :3000. On Windows, a public `API_BASE_URL` also enables the matching named Cloudflare tunnel when `%USERPROFILE%\.cloudflared\config-beam.yml` exists.
 
 ### 1. Infra (manual alternative)
 
@@ -121,7 +122,11 @@ cp .env.example .env
 cp apps/web/.env.example apps/web/.env.local
 ```
 
-**Safety:** keep local `.env` pointing at localhost, never prod Railway/Supabase URLs (`scripts/e2e-local.sh` and `dev-local.*` guard this).
+**Safety:** keep databases and Redis on localhost; never use prod Railway/Supabase data URLs (`scripts/e2e-local.sh` and `dev-local.*` guard this).
+
+`API_BASE_URL` may use `https://beam-dev.nhantown.com` for public pixel tests. That tunnel host exposes only `/pixel/tracker.js`, `/api/v1/events/ingest`, and `/health/ready` — `dev-local.ps1` audits exactly that host and refuses to start the tunnel otherwise. Keep the real Cloudflare tunnel config and credential JSON outside Git.
+
+**Tunnel-published UAT (2026-07-29).** `beam.nhantown.com` (dashboard, `:3000`) and `beam-api.nhantown.com` (full API, `:8000`) now ride the same named tunnel so sites can be added from any browser. This is a laptop-backed stand-in for UAT, not the Railway/Vercel UAT described below: it dies when the machine sleeps, shares the local Docker Postgres, and runs `APP_ENV=development` — so it does **not** exercise the production-strict secret checks a real UAT must prove. Use it to test flows; do not use it as the promotion gate to PROD. It also puts unrated-limit auth and open signup on the public internet — see the security note in [deployment-guide.md](./deployment-guide.md#public-hostnames-on-the-nhantown-beam-tunnel-updated-2026-07-29).
 
 ### 3. API + Web (manual)
 
@@ -251,7 +256,8 @@ Ordered by value for Local→UAT→PROD:
 ### Local ready
 
 - [ ] `docker compose up -d postgres redis`  
-- [ ] `.env` with `APP_ENV=development` + localhost URLs  
+- [ ] `.env` with `APP_ENV=development` + local data URLs; `API_BASE_URL` local or `https://beam-dev.nhantown.com`
+- [ ] Publishing the dashboard? `FRONTEND_URL=https://beam.nhantown.com`, web `NEXT_PUBLIC_API_URL=https://beam-api.nhantown.com`, and `BEAM_DEMO_PASSWORD` set
 - [ ] `alembic upgrade head` + API `/health`  
 - [ ] Web on :3000 talking to local API  
 - [ ] `./scripts/test.sh unit` green  
