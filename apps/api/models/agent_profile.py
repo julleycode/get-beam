@@ -48,6 +48,15 @@ class AgentProfile(Base):
     # Array of {name, price, currency, billing_period, availability, url}.
     # Shape is validated at the schema layer (schemas/agent_profile.py), not here.
     offers: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # WS3 (agent concierge): customer-authored qualified answers, keyed by
+    # use_case / evaluating_against, served ONLY when a caller supplies the 3
+    # required qualification params. A SEPARATE column from ``offers`` — the
+    # gated content (configured pricing, competitor comparisons, security
+    # answers) never leaks through the ungated read tools. Same "world-readable
+    # once enabled" posture as the rest of this model; no PII, no visitor data.
+    qualified_content: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default="{}"
+    )
     # Subset of request_demo|get_quote|join_waitlist|start_checkout this site
     # exposes. Phase 1+2 only publish these as declarations; the action endpoint
     # that honors them is Phase 3.

@@ -51,6 +51,8 @@ from apps.api.models.site_tombstone import SiteTombstone  # noqa: F401 — regis
 from apps.api.models.engage_outcome import EngageOutcome  # noqa: F401 — register for create_all
 from apps.api.models.job_change_event import JobChangeEvent  # noqa: F401 — register for create_all
 from apps.api.models.paid_request import PaidRequest  # noqa: F401 — register for create_all
+from apps.api.models.agent_lead import AgentLead  # noqa: F401 — register for create_all
+from apps.api.models.agent_tool_call import AgentToolCall  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo, onboarding
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
