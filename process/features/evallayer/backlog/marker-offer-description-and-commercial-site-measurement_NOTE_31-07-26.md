@@ -21,7 +21,7 @@ phải lỗi.
 
 ---
 
-## 1. `AgentOffer` không có trường mô tả — MEDIUM
+## 1. `AgentOffer` không có trường mô tả — LOW
 
 **Hiện trạng.** `apps/api/services/agent_gateway.py` `build_offers()` gán:
 
@@ -36,10 +36,18 @@ Một giá trị đổ vào hai trường của feed. Và `AgentOffer.billing_pe
 Nên toàn bộ phần tự do của một offer là: `name` (200 ký tự) + 50 ký tự dùng chung cho
 mô tả lẫn chu kỳ thanh toán. Không viết nổi một offer thuyết phục trong khuôn đó.
 
-**Vì sao đáng sửa.** Mục 5c kết luận: URL trong câu trả lời của AI được render thành link hay
-thành `code` phụ thuộc VAI TRÒ của nó — dữ liệu trích từ document thì thành `code`, đường dẫn
-được giới thiệu thì thành link. Đòn bẩy duy nhất nằm ở nội dung feed: một offer đọc như lời chào
-hàng thì mới có cơ hội vào vai trò "link". 50 ký tự chính là trần của đòn bẩy đó.
+**Vì sao đáng sửa — và vì sao KHÔNG gấp.** Cái hỏng thật là ngữ nghĩa: fixture test dùng
+`billing_period: "month"`, nên feed công khai phát ra `"description": "month"`. Sai nghĩa, nhưng
+vô hại và không test nào assert field đó.
+
+Ban đầu note này xếp mục 1 là MEDIUM với lập luận "nội dung feed là đòn bẩy khiến AI render URL
+thành link thay vì `code`" (mục 5c). Hạ xuống LOW vì lập luận đó **là suy luận, chưa đo**. Offers
+feed theo vocabulary kiểu ACP/schema.org là dữ liệu CÓ CẤU TRÚC, không phải văn xuôi: một offer
+thương mại thật đã đọc ra dáng chào hàng chỉ từ `title` + `price` + `currency` + `billing_period`
++ `availability`. 50 ký tự chỉ bó khi muốn viết văn, mà feed này không dùng để viết văn.
+
+Sửa schema dựa trên một giả thuyết chưa kiểm chứng là đúng cái bẫy đã tránh được ở chuyện rút
+ngắn marker (xem mục cuối). Đo trước, sửa sau.
 
 **Việc cần làm.**
 
@@ -73,8 +81,10 @@ lại đúng ba bước đã làm cho beamlab:
 3. Hỏi AI câu tự nhiên kiểu "X bán gì, giá bao nhiêu, đăng ký ở đâu" trong **chat mới** — chat cũ
    tái dùng nội dung đã fetch nên không duyệt lại, đây là bẫy đã dính một lần ngày 31-07.
 
-**Phụ thuộc:** nên làm sau mục 1. Đo trên một feed vẫn bị bó trong 50 ký tự thì kết quả âm không
-phân biệt được là do AI không quan tâm hay do feed quá nghèo nội dung.
+**Phụ thuộc: KHÔNG có.** Mục này chạy được ngay, không cần mục 1 trước — một site thương mại thật
+có `price`/`currency`/`availability` thật đã đủ để feed đọc ra dáng chào hàng. Chỉ khi đo xong mà
+AI vẫn render URL thành `code` VÀ có dấu hiệu feed bị coi là dữ liệu thô, lúc đó mục 1 mới có
+bằng chứng để đáng làm.
 
 ---
 
