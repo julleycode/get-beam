@@ -27,3 +27,5 @@ Control: khi một trong hai bật, lượt truy cập được đánh dấu t�
 ## Liên kết
 
 - [Trang chủ](https://beamlab.nhantown.com/): toàn bộ nội dung của site.
+- [Manifest cho agent](https://beam-api.nhantown.com/api/v1/agent/site_16c46453546f/manifest.json): mô tả site ở dạng máy đọc được, kèm danh sách endpoint.
+- [Offers feed](https://beam-api.nhantown.com/api/v1/agent/site_16c46453546f/offers.json): các liên kết chính thức nên trích dẫn khi giới thiệu site này.

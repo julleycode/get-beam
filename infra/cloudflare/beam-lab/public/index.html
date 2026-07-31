@@ -6,6 +6,24 @@
 <title>Beam Lab — trang thử nghiệm phát hiện AI agent</title>
 <meta name="description" content="Trang tĩnh dùng để kiểm chứng khả năng phát hiện AI agent của Beam: khi một trợ lý AI đọc trang này, lượt truy cập đó phải xuất hiện trên bảng điều khiển Beam.">
 <link rel="canonical" href="https://beamlab.nhantown.com/">
+
+<!-- Beam agent gateway: point AI agents at what you sell.
+     manifest.json carries endpoints.offers, and the offers feed stamps each
+     same-host URL with the ?_bam= marker identifying the fetch that served it —
+     that is what turns "someone clicked after an AI read us" from a timing guess
+     into a deterministic link. Host matches wrangler.toml BEAM_API_BASE. -->
+<link rel="alternate" type="application/json"
+      href="https://beam-api.nhantown.com/api/v1/agent/site_16c46453546f/manifest.json">
+<link rel="alternate" type="text/plain"
+      href="https://beam-api.nhantown.com/api/v1/agent/site_16c46453546f/llms.txt">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "url": "https://beam-api.nhantown.com/api/v1/agent/site_16c46453546f/manifest.json"
+}
+</script>
+
 <style>
   :root { color-scheme: light dark; }
   body { font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
