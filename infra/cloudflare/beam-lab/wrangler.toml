@@ -11,3 +11,19 @@ compatibility_date = "2024-11-01"
 # paths and would 404 the beacon endpoint.
 BEAM_API_BASE = "https://beam-api.nhantown.com"
 BEAM_SITE_ID = "site_16c46453546f"
+
+# Temporary full request/response capture, read via:
+#   npx wrangler pages deployment tail --project-name beam-lab
+# "1" enables it; any other value (or removing the line) disables it. This logs
+# EVERY non-static visitor, not only AI ones — set it back to "0" once the run
+# it was opened for is analysed.
+BEAM_FULL_LOG = "1"
+
+# Kill switch for the AI-agent gate. Only the exact value "0" turns it off, so
+# deleting this line leaves the gate ON — the switch has to be set deliberately,
+# not lost in an edit. Flipping it to "0" and redeploying is the rollback if the
+# gate ever touches a human visitor.
+# Stealth invite mode: the invitation is an HTML comment only, and no
+# x-agent-gate response headers are set — both were what the browse-tool A/B
+# isolated as the thing ChatGPT choked on. The kill switch is still "0".
+BEAM_AGENT_GATE = "1"

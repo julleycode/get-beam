@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Danh sách tác nhân AI nhận diện được — Beam Lab</title>
+<meta name="description" content="Danh sách đầy đủ các trình thu thập AI mà Beam nhận diện, phân theo hãng, phân tầng on-demand/index, kèm bốn phương pháp xác minh.">
+<link rel="canonical" href="https://beamlab.nhantown.com/tac-nhan/">
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+         max-width: 46rem; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
+  h1 { font-size: 1.8rem; line-height: 1.22; margin-bottom: .25rem; }
+  .sub { color: #666; margin-top: 0; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; }
+  code { background: rgba(127,127,127,.16); padding: .1em .35em; border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid rgba(127,127,127,.3); vertical-align: top; }
+  footer { margin-top: 3rem; color: #777; font-size: .9rem; }
+</style>
+</head>
+<body>
+
+<h1>Danh sách tác nhân AI nhận diện được</h1>
+<p class="sub">Toàn bộ token User-Agent mà lớp phân loại của Beam nhận ra, kèm tầng và cách xác minh.</p>
+
+<h2>Phân theo hãng</h2>
+<table>
+  <tr><th>Hãng</th><th>Token User-Agent</th><th>Tầng</th></tr>
+  <tr>
+    <td>OpenAI</td>
+    <td><code>chatgpt-user</code>, <code>oai-searchbot</code>, <code>gptbot</code></td>
+    <td><code>chatgpt-user</code>: on-demand<br>còn lại: index</td>
+  </tr>
+  <tr>
+    <td>Anthropic</td>
+    <td><code>claude-user</code>, <code>claude-searchbot</code>, <code>anthropic-ai</code>, <code>claudebot</code></td>
+    <td><code>claude-user</code>: on-demand<br>còn lại: index</td>
+  </tr>
+  <tr>
+    <td>Perplexity</td>
+    <td><code>perplexity-user</code>, <code>perplexitybot</code></td>
+    <td><code>perplexity-user</code>: on-demand<br><code>perplexitybot</code>: index</td>
+  </tr>
+  <tr>
+    <td>ByteDance</td>
+    <td><code>bytespider</code></td>
+    <td>index</td>
+  </tr>
+  <tr>
+    <td>Google</td>
+    <td><code>google-cloudvertexbot</code></td>
+    <td>index</td>
+  </tr>
+</table>
+
+<h2>Vì sao chia hai tầng</h2>
+<p>
+  <strong>On-demand</strong> nghĩa là có một người thật đang chờ ngay lúc đó: họ hỏi trợ lý một
+  câu, trợ lý đi tải trang để trả lời. <strong>Index</strong> là trình thu thập chạy tự động để
+  dựng chỉ mục, không có ai đứng sau ở thời điểm đó.
+</p>
+<p>
+  Chỉ ba token <code>chatgpt-user</code>, <code>claude-user</code>,
+  <code>perplexity-user</code> được xếp on-demand — đó là những lượt tải mà hãng công bố rõ là
+  theo từng câu hỏi. Các token <code>*-searchbot</code> tuy nghe giống nhưng là crawler dựng
+  chỉ mục, nên vẫn thuộc tầng index. Mặc định của một token chưa rõ luôn là index: gán nhầm một
+  crawler thành on-demand sẽ bịa ra một tín hiệu "có người đứng sau" không tồn tại.
+</p>
+
+<h2>Bốn phương pháp xác minh</h2>
+<table>
+  <tr><th>Phương pháp</th><th>Nghĩa</th></tr>
+  <tr><td><code>ua-only</code></td><td>Chỉ dựa trên chuỗi User-Agent tự khai. Mức thấp nhất.</td></tr>
+  <tr><td><code>ip-verified</code></td><td>IP nằm trong dải hãng công bố. Đây là mức tin cậy nhất.</td></tr>
+  <tr><td><code>rdns-verified</code></td><td>Tra ngược tên miền của IP khớp với hãng.</td></tr>
+  <tr><td><code>ip-mismatch</code></td><td>UA tự xưng một hãng có công bố dải IP, nhưng IP không thuộc dải nào. Đây là kết luận giả mạo, không phải mức tin cậy thấp.</td></tr>
+</table>
+<p>
+  Anthropic không công bố dải IP, nên tác nhân của hãng này vĩnh viễn dừng ở
+  <code>ua-only</code> và <strong>không bao giờ</strong> bị kết luận <code>ip-mismatch</code> —
+  không có bằng chứng thì không thể coi là bằng chứng giả mạo.
+</p>
+
+<h2>Hai token cố tình KHÔNG nhận diện</h2>
+<p>
+  <code>google-extended</code> và <code>applebot-extended</code> không nằm trong danh sách. Đó
+  không phải User-Agent của một lượt tải nào cả — chúng là chỉ thị điều khiển AI trong
+  <code>robots.txt</code>. Nhận diện chúng như một tác nhân sẽ tạo ra lượt truy cập ma.
+</p>
+
+<footer>
+  Cập nhật 2026-07-31 · <a href="/">Beam Lab</a>
+</footer>
+
+<!-- Cùng thẻ pixel với trang chủ. Trang sâu là nơi một AI gửi người thật tới, nên
+     đây mới là trang phải chạy pixel: thiếu nó thì cú click mang ?_bfm= chỉ nằm
+     trong log Cloudflare và Beam không ghi nhận gì. -->
+<script src="https://beam-dev.nhantown.com/pixel/tracker.js" data-site="site_16c46453546f" data-api="https://beam-dev.nhantown.com" defer></script>
+</body>
+</html>
