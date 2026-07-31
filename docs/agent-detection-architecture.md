@@ -85,11 +85,9 @@ Hai khái niệm **tách bạch**:
 | Khái niệm | Trạng thái | Cơ chế |
 |---|---|---|
 | **Attribution** (AI nào / công ty nào) | **Hoạt động** khi có click | `ai_source` trên visitor; marker F2 → `agent_handoff_links` method=`marker`, confidence=`high` |
-| **Identity** (tên/email người cụ thể) | **Chưa giải** | `identified_visitors` — marker **không** feed waterfall resolution |
+| **Identity** (tên/email người cụ thể) | **Queue đã ưu tiên; kết quả identify còn OPS** | Marker **không** gọi write path identity (separation cố ý). Visitor có `ai_source`/handoff được qualify + rank trước trong `resolution_runner`. `identified_visitors` vẫn cần provider keys. |
 
-Marker chỉ ghi attribution (`ai_source`, handoff link). `resolution_runner.py` xếp hàng theo
-`intent_score` duy nhất — **không** ưu tiên visitor có `ai_source` hay handoff. Provider keys
-(PDL/Proxycurl/FullContact) trống → resolution không identify được dù có marker.
+Marker chỉ ghi attribution (`ai_source`, handoff link) — không ghi identity. `resolution_eligibility.py` + `resolution_runner.py` ưu tiên visitor AI-attributable (`ai_source` hoặc same-site handoff) trước `intent_score` (shipped `7b1ed33`). Provider keys (PDL/Proxycurl/FullContact) trống → resolution vẫn không identify được dù attribution đúng.
 
 Kỳ vọng đúng: *"ChatGPT đọc pricing cho công ty X"* (cấp công ty), hiếm khi *"John Smith hỏi
 ChatGPT"* trừ khi người đó tự submit email.
@@ -151,14 +149,49 @@ Phiên kiểm chứng trên môi trường lab (`beamlab.nhantown.com`) với Ch
 
 | Gap | Mức | Ghi chú |
 |---|---|---|
-| Marker survival trên AI thật | OPEN | Lab probe chứng minh decode; chưa biết ChatGPT có giữ `?_bam=` khi hiển thị link cho người dùng không |
-| Identity resolution | HIGH | `identified_visitors = 0` sau marker handoff; queue không ưu tiên `ai_source` |
+| Marker survival trên AI thật | **ĐÃ KIỂM CHỨNG (31-07)** | ChatGPT giữ nguyên `?_bam=` trong câu trả lời; chuỗi đóng end-to-end — chi tiết mục 5b |
+| Marker được AI **tự** trích dẫn | OPEN | Lần đo dùng prompt có câu "giữ nguyên URL đầy đủ" — mới chứng minh *có thể giữ*, chưa phải *tự giữ* khi dẫn link tự nhiên |
+| AI **tự tìm ra** offers feed | OPEN | ChatGPT đọc `llms.txt` (có link tuyệt đối tới offers) rồi bỏ qua; chỉ fetch khi được đưa URL thẳng |
+| Link marker không bấm được trong chat | OPEN | ChatGPT render URL ~180 ký tự thành text/code, không linkify — người dùng thật sẽ không copy tay |
+| Identity resolution queue | DONE / OPS | **DONE (`7b1ed33`):** ưu tiên `ai_source`/handoff trước intent. OPEN ops: provider keys → `identified_visitors` |
 | `agent_fetch_events.verification_method` | MEDIUM | Sweep IP chỉ cập nhật `agent_visits`, không `agent_fetch_events` |
 | Beacon không có IP | MEDIUM | Public site không beacon → ChatGPT-User ua-only |
 | Provider keys trống | OPS | PDL/Proxycurl/FullContact chưa cấu hình |
 | F14 Web Bot Auth | — | Chưa implement, không có active plan |
 | `pytest -n` parallel | LOW | Shared DB `drop_all` fixture — không an toàn chạy song song |
 | `ENCRYPTION_KEY` trùng trong `.env` | LOW | Vệ sinh ops |
+
+---
+
+## 5b. Marker end-to-end với ChatGPT thật (2026-07-31)
+
+Lần đầu chuỗi marker chạy thông với một AI thật, không phải probe. Điều kiện: `agent_marker_enabled=True`,
+AgentProfile của `site_16c46453546f` bật với 1 offer trỏ `https://beamlab.nhantown.com/`, và
+`beamlab` được deploy kèm `<link rel="alternate">` → manifest + 2 dòng offers/manifest trong `llms.txt`.
+
+| Giờ (VN) | Sự kiện | Bằng chứng |
+|---|---|---|
+| 12:28:08 | ChatGPT fetch `/agent/offers.json` | `agent_fetch_events` id `53528fb5-…` tier=on-demand |
+| 12:28:xx | ChatGPT in `?_bam=gAAAAABqbDJo…` nguyên vẹn ra câu trả lời | không cắt, không rewrite |
+| 12:30:29 | Người dán URL vào thanh địa chỉ | `events.pageview` mang `_bam=`, **referrer rỗng** |
+| 12:30:31 | Link tất định được ghi | `agent_handoff_links` method=`marker`, confidence=`high`, delta=0 |
+
+Ba điều lần đo này xác lập:
+
+1. **Marker không phụ thuộc referrer.** Lượt click trên có referrer rỗng — đường temporal sẽ không
+   tìm được ứng viên nào (`classify_ai_source(None)` → `None`). Đây đúng là kịch bản đã làm hỏng
+   một lần đo trước đó trong ngày; marker vá đúng chỗ đó.
+2. **Marker ghi đồng bộ tại ingest, không qua sweep.** Click → link cách nhau 2 giây
+   (`routers/events.py` đọc `_bam` ngay trong batch). Mọi tham số của sweep — cửa sổ 30 phút,
+   settle delay, chu kỳ APScheduler — **không áp dụng cho đường marker**.
+3. **`delta_seconds=0` là đúng.** Marker giải mã thẳng ra lượt fetch, không có khoảng thời gian nào
+   để đo; con số đó không so sánh được với 151–157s của các link `temporal-page-match`.
+
+Đối chứng cùng ngày: lúc 12:22 ChatGPT fetch `/` → `/llms.txt` → `/` rồi **dừng**, không mở offers
+feed dù `llms.txt` đã có link tuyệt đối. Nó chỉ fetch khi được đưa URL trực tiếp. Nên câu hỏi
+"AI có tự tìm tới feed không" vẫn mở, và không đo được trên `beamlab` — trang này tự khai
+"Không phải sản phẩm thương mại", mâu thuẫn với chính offers feed của nó, nên không có câu hỏi
+người dùng nào tự nhiên dẫn AI tới đó. Cần một site thương mại thật để đo.
 
 ---
 
@@ -315,5 +348,6 @@ việc này — đây là quy trình vận hành thủ công.
    `data/agent_ip_ranges/runtime/` ngoài git; file ship kèm repo để `ranges: []`.
 4. `routers/visitors.py` (1314 dòng) và 2 trang dashboard mới đọc phần giao với agent, **chưa
    review từng dòng**. Đánh giá trên chưa phủ tab Visitors ở mức chi tiết.
-5. **Identity priority trong resolution queue** — marker/handoff chưa boost `intent_score` hay
-   thứ tự xử lý. Cần quyết định sản phẩm trước khi implement.
+5. ~~**Identity priority trong resolution queue**~~ — **DONE (`7b1ed33`).** AI-attributable
+   (`ai_source` hoặc handoff) qualify + rank trước intent. OPEN còn lại: điền provider keys và
+   đo `identified_visitors` trên traffic thật.
