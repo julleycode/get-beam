@@ -108,6 +108,8 @@ sequenceDiagram
 
 **Scheduler:** `jobs/scheduler.py` → `services/resolution_runner.py`
 
+**Resolution Queue Order (7b1ed33):** Eligible visitors ranked `ai_attributable_human.desc()` (has `ai_source` OR same-site `AgentHandoffLink`) THEN `intent_score.desc()`. AI-attributed visitors resolve first within monthly/daily budget.
+
 ## Request Flow: Campaign Draft → Human Send
 
 ```mermaid

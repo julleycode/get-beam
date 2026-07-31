@@ -69,7 +69,13 @@ get-beam/
 | Ads | `routers/ads.py`, `services/ads/` |
 | Social / EasyEngage | `routers/drafts.py`, `feed.py`, `social_auth.py` |
 
-**EvalLayer notes (Jul 2026):** F2 marker (`agent_marker.py`) mints Fernet `?_bam=` tokens on `offers.json` URLs; click decodes to `agent_handoff_links`. IP sweep (`agent_verification.py`) updates `agent_visits.verification_method` only — `agent_fetch_events.verification_method` stays `ua-only`. All agent flags default OFF. See [agent-detection-architecture.md](./agent-detection-architecture.md).
+**EvalLayer notes (Jul 2026):** F2 marker (`agent_marker.py`) mints Fernet `?_bam=` tokens on `offers.json` URLs; click decodes to `agent_handoff_links`. IP sweep (`agent_verification.py`) updates `agent_visits.verification_method` only — `agent_fetch_events.verification_method` stays `ua-only`. All agent flags default OFF. 
+
+**Shipped (7b1ed33):** `resolution_runner.py` now prioritizes `ai_attributable_human.desc()` (ai_source OR handoff) before intent_score — AI-attributed visitors resolve first.
+
+**Recent fixes:** F10 dedup (`c1e7a94f3d28`): `agent_fetch_events.dedup_key` (sha256) + partial unique index; F12 IP/UA mismatch recorded (not blocking); F13 IP ranges refresh 24h → `runtime/` (outside git).
+
+See [agent-detection-architecture.md](./agent-detection-architecture.md).
 
 ## `apps/web` Map
 

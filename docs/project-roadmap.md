@@ -41,7 +41,7 @@ This roadmap merges **historical MVP phases** (`PRODUCT_ROADMAP.md`) with **curr
 | `ads-audiences` | Phase 1 Foundation | Shipped 25 Jul; flag default OFF |
 | `ads-audiences` | Phase 2 Meta live | EVL-green 26 Jul; env smoke gaps before production enable |
 | `ads-audiences` | Phase 3 Google live | In progress |
-| `agent-gateway` | Agent MCP / gateway + F2 marker | **Shipped** (flags OFF): gateway surfaces, F2 marker handoff, F12/F13 verification. Live probe green; wild marker survival + identity priority + F14 are next |
+| `agent-gateway` | Agent MCP / gateway + F2 marker | **Shipped** (flags OFF): gateway surfaces, F2 marker handoff, F12/F13 verification, AI identity priority queue (7b1ed33). Live probe green; wild marker survival + F14 are next. Ops gate: provider keys (PDL/Proxycurl) for named person resolution |
 | `pixel` | cadence-bot-flag | Active; deferred gates (migration round-trip, live crawler validation) |
 | `campaigns-outreach` | LinkedIn extension onboarding | Feasibility + active plans |
 
@@ -78,7 +78,7 @@ This roadmap merges **historical MVP phases** (`PRODUCT_ROADMAP.md`) with **curr
 ## Near-Term Engineering Themes
 
 1. **Agent marker wild survival test** — confirm real ChatGPT/Claude preserve `?_bam=` when surfacing links to humans (lab probe only so far).
-2. **Identity resolution priority** — marker/handoff attribution does not feed `resolution_runner`; decide product policy before boosting `ai_source` visitors.
+2. **Identity resolution priority** — **SHIPPED (7b1ed33):** `resolution_runner` now prioritizes `ai_attributable_human.desc()` (visitor has `ai_source` OR same-site `AgentHandoffLink`) before `intent_score.desc()`. Ops gate: provider keys (PDL/Proxycurl/FullContact) for named-person resolution.
 3. **Web Bot Auth (F14)** — RFC 9421 for vendors without published IP ranges (Anthropic); no active plan yet.
 4. **Close Docker-gated validation** — migration round-trips, Playwright auth harness, Meta/Google sandbox smokes.
 5. **Ads Phase 3 (Google)** — live OAuth + audience push.

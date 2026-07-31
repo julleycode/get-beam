@@ -1,4 +1,4 @@
-# Giải pháp “người đứng sau AI” — cách cũ vs cách mới
+# Giải pháp "người đứng sau AI" — cách cũ vs cách mới
 
 Cập nhật: 2026-07-30  
 Phạm vi: SA attribution / handoff (không phải outreach, không phải auto-send)  
@@ -13,7 +13,7 @@ Beam đã biết tách hai sự kiện:
 1. **Một AI vừa fetch trang** (ChatGPT-User, ClaudeBot, Perplexity…) — lưu trong `agent_fetch_events` / `agent_visits`.
 2. **Một người vừa vào site** từ referrer AI — lưu trong `visitors` với `ai_source`.
 
-Hai sự kiện đó **không tự nối**. “Người đứng sau AI” trong SA của Beam nghĩa là:
+Hai sự kiện đó **không tự nối**. "Người đứng sau AI" trong SA của Beam nghĩa là:
 
 > Nối đúng **một lượt fetch của AI** với **một visitor người** đã click vào site sau khi AI trả lời — rồi (bước sau) đưa visitor đó vào máy **identity resolution** sẵn có để ra công ty / (hiếm) người.
 
@@ -21,10 +21,10 @@ Kỳ vọng đúng của sản phẩm:
 
 | Kỳ vọng | Thực tế SA hỗ trợ |
 |---|---|
-| “ChatGPT đang đọc pricing cho **công ty X**” | Có hướng tới (attribution + resolution) |
-| “**John Smith** vừa hỏi ChatGPT về pricing” | Chỉ khi người đó để lại email / form — không suy ra từ UA bot |
+| "ChatGPT đang đọc pricing cho **công ty X**" | Có hướng tới (attribution + resolution) |
+| "**John Smith** vừa hỏi ChatGPT về pricing" | Chỉ khi người đó để lại email / form — không suy ra từ UA bot |
 
-Không click → không có “người” để nối. Đọc câu trả lời trong app ChatGPT mà không bấm link = `handoff_links = 0` (đúng thiết kế).
+Không click → không có "người" để nối. Đọc câu trả lời trong app ChatGPT mà không bấm link = `handoff_links = 0` (đúng thiết kế).
 
 ---
 
@@ -47,17 +47,17 @@ Không click → không có “người” để nối. Đọc câu trả lời 
 └────────────────────────────┬────────────────────────────────────┘
                              │
 ┌────────────────────────────▼────────────────────────────────────┐
-│  Tầng C — IDENTIFY (chưa nối từ B)                              │
+│  Tầng C — IDENTIFY (nối từ B: AI-attributed priority)           │
 │  resolution_runner → identity_resolver (PDL / Proxycurl…)       │
 │  Ghi: identified_visitors                                       │
-│  Hiện: xếp hàng theo intent_score, không ưu tiên handoff        │
+│  Nay: ai_attributable_human.desc(), rồi intent_score.desc()     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
 Cách cũ và cách mới **chỉ khác nhau ở tầng B** (cách nối fetch ↔ click).  
-Tầng A và tầng C dùng chung. Marker **không** thay identity resolution — nó chỉ làm attribution chắc hơn trước khi resolution chạy.
+Tầng A dùng chung; Tầng C nay ưu tiên AI-attributed visitors. Marker **không** thay identity resolution — nó chỉ làm attribution chắc hơn; tầng C quyết định ai resolve trước.
 
-Guardrail cố ý (cả hai cách): handoff là metadata attribution trên bảng riêng; **không** biến bản ghi agent thành emailable lead.
+Guardrail cố ý (cả hai cách): handoff là metadata attribution trên bảng riêng; **không** biến bản ghi agent thành emailable lead — marker không gọi write path.
 
 ---
 
@@ -65,19 +65,19 @@ Guardrail cố ý (cả hai cách): handoff là metadata attribution trên bản
 
 ### Ý tưởng
 
-Khi AI (on-demand) fetch trang X lúc T, và sau đó một người click vào cùng site với referrer thuộc “họ” vendor đó trong cửa sổ thời gian → coi như cùng một phiên hỏi đáp.
+Khi AI (on-demand) fetch trang X lúc T, và sau đó một người click vào cùng site với referrer thuộc "họ" vendor đó trong cửa sổ thời gian → coi như cùng một phiên hỏi đáp.
 
 Module: `apps/api/services/agent_handoff_correlation.py`  
 Bảng: `agent_handoff_links` với `method` kiểu temporal / confidence `high` | `medium`.
 
 ### Điều kiện khớp (v1)
 
-1. Fetch **on-demand** (không dùng index-crawler để suy “người đứng sau”).
+1. Fetch **on-demand** (không dùng index-crawler để suy "người đứng sau").
 2. Click cùng `site_id`.
 3. `ai_source` / referrer khớp họ vendor (`openai`↔`chatgpt`, `anthropic`↔`claude`, …).
 4. Click xảy ra **sau** fetch, trong cửa sổ **30 phút** (`_WINDOW_SECONDS = 1800`).
 5. Fetch chỉ được xét sau khi cửa sổ đóng (tránh chốt sớm một click yếu rồi khóa vĩnh viễn).
-6. Lookback quét ~180 phút để một lần sweep miss không làm fetch “chết” im lặng.
+6. Lookback quét ~180 phút để một lần sweep miss không làm fetch "chết" im lặng.
 
 Độ tin cậy:
 
@@ -91,17 +91,17 @@ Bảng: `agent_handoff_links` với `method` kiểu temporal / confidence `high`
 
 - Không cần đổi URL / offers / tracker.
 - Chạy được ngay khi đã có pixel + `ai_source` + fetch events.
-- Phù hợp traffic “người hỏi AI rồi bấm link thường” (không qua offers feed).
+- Phù hợp traffic "người hỏi AI rồi bấm link thường" (không qua offers feed).
 
 ### Điểm yếu (lý do có cách mới)
 
 - **Không tất định.** Hai người hỏi ChatGPT cùng trang trong 30 phút → có thể gán nhầm; hệ thống không biết mình sai.
 - **Phụ thuộc referrer.** Nhiều trình duyệt / in-app browser cắt referrer → mất ứng viên.
 - **Phụ thuộc cửa sổ thời gian.** Click chậm / đọc lâu / mở tab sau → dễ rơi khỏi cửa sổ hoặc chỉ còn medium.
-- **Race với sweep.** Trước khi sửa F5, click sớm yếu có thể “chiếm chỗ” trước click đúng trang.
-- **Không chứng minh được** click xuất phát từ đúng lượt fetch cụ thể — chỉ chứng minh “có vẻ cùng phiên”.
+- **Race với sweep.** Trước khi sửa F5, click sớm yếu có thể "chiếm chỗ" trước click đúng trang.
+- **Không chứng minh được** click xuất phát từ đúng lượt fetch cụ thể — chỉ chứng minh "có vẻ cùng phiên".
 
-Trên prod từng đo: nhiều fetch, gần như **0 link** — thường vì không thỏa cửa sổ / referrer, không phải vì code “hỏng”.
+Trên prod từng đo: nhiều fetch, gần như **0 link** — thường vì không thỏa cửa sổ / referrer, không phải vì code "hỏng".
 
 ---
 
@@ -169,7 +169,7 @@ Pixel pageview URL chứa _bam
 
 | Tiêu chí | Cách cũ (temporal) | Cách mới (marker F2) |
 |---|---|---|
-| Câu hỏi trả lời | “Có vẻ cùng phiên AI không?” | “Click này từ **đúng** lượt fetch nào?” |
+| Câu hỏi trả lời | "Có vẻ cùng phiên AI không?" | "Click này từ **đúng** lượt fetch nào?" |
 | Bằng chứng | Thời gian + referrer + trang | Token mã hoá id fetch trên URL |
 | Độ tin cậy | medium / high (suy đoán) | high (tất định) khi decode + tenancy OK |
 | Phụ thuộc referrer | Có | Không (miễn pixel gửi URL có `_bam`) |
@@ -181,29 +181,37 @@ Pixel pageview URL chứa _bam
 | Sai gán khi 2 người cùng hỏi | Có thể | Cùng marker → click đầu thắng (rõ ràng hơn, vẫn không ra 2 người) |
 | Chống replay chéo tenant | Luật sweep | Decode + query ownership fetch |
 | Trạng thái | Đã ship, luôn chạy nền | Đã ship, **cờ mặc định TẮT** |
-| “Xác định tên người”? | Không | Không — chỉ attribution |
+| "Xác định tên người"? | Không | Không — chỉ attribution |
 
 **Quan hệ giữa hai cách:** không thay thế loại trừ. Temporal vẫn là lưới an toàn cho click không qua offers. Marker là đường ưu tiên khi Beam kiểm soát được URL. Khi cả hai cùng trỏ một fetch, **marker thắng**.
 
 ---
 
-## 6. Phần còn thiếu sau cả hai cách (tầng C)
+## 6. Phần đã sửa trong tầng C (commit 7b1ed33, landed 30-07)
 
-Cả cách cũ lẫn cách mới **dừng ở attribution**:
+**Trước:** `resolution_runner` xếp hàng theo `intent_score` duy nhất, không ưu tiên AI-attributed  
+**Nay:** ưu tiên `ai_attributable_human.desc()` trước `intent_score.desc()`
 
 ```text
 agent_handoff_links  ✓
 Visitor.ai_source    ✓
-identified_visitors  ✗  (probe live = 0)
+identified_visitors  ✓ (AI-attributed queued first)
 ```
 
-Lý do kiến trúc:
+**Resolution eligibility (resolution_eligibility.py §44-65):**
+- Qualify nếu: `ai_source IS NOT NULL` **OR** same-site `AgentHandoffLink` exists
+- Hoặc: intent gate bình thường (intent_score >= RESOLUTION_MIN_INTENT = 20)
+- Hoặc: site ở US + resolve-all-domains
+- Hoặc: first-win boost window
 
-1. Marker / sweep **cố ý không** gọi identity write path (emailability separation).
-2. `resolution_runner` xếp hàng theo `intent_score` — **không** ưu tiên visitor có handoff / `ai_source`.
-3. Provider keys (PDL / Proxycurl / …) trống trên nhiều môi trường → waterfall không có gì để resolve.
+**Ranking (resolution_runner.py:109-119):**
+```python
+order_by = (ai_attributable_human.desc(), Visitor.intent_score.desc())
+```
 
-Vì vậy: “bắt được AI” và “biết click đến từ AI nào” **đã có hướng**; “biết đó là công ty / người nào” là **bước kế tiếp**, không nằm trong diff old vs new của handoff.
+Marker **vẫn không** gọi write path (emailability separation giữ nguyên); chỉ dùng AI attribution làm tín hiệu xếp hàng tiên ưu.
+
+Provider keys (PDL/Proxycurl) trống → resolution trả công ty, không cá nhân. Chỉ sau (ops: fill keys) mới ra "John Smith"; nay là "company X found, queued first".
 
 ---
 
@@ -235,9 +243,9 @@ Không có gì để AI đọc / click thì marker không bao giờ được min
 
 ## 9. Tóm một câu
 
-**Cách cũ** đoán “cùng phiên” bằng đồng hồ và referrer.  
+**Cách cũ** đoán "cùng phiên" bằng đồng hồ và referrer.  
 **Cách mới** đóng mã lượt fetch vào link Beam kiểm soát rồi đọc lại khi người click.  
-Cả hai chỉ trả lời “AI nào dẫn người nào tới site”; bước “người/công ty đó là ai” vẫn là identity resolution tách biệt — và đó là đoạn source đang **chưa ưu tiên nối** sau handoff.
+Cả hai chỉ trả lời "AI nào dẫn người nào tới site"; bước "người/công ty đó là ai" vẫn là identity resolution tách biệt — và đó là đoạn source đang **ưu tiên nối** (AI priority shipped).
 
 ---
 
@@ -251,5 +259,6 @@ Cả hai chỉ trả lời “AI nào dẫn người nào tới site”; bước
 | Pixel decode hook | `apps/api/routers/events.py` (đọc `_bam` trên URL pageview) |
 | AI referrer label | `apps/api/services/ai_referral.py` |
 | Resolution queue | `apps/api/services/resolution_runner.py` |
+| Resolution eligibility | `apps/api/services/resolution_eligibility.py` |
 | Đánh giá kiến trúc | [agent-detection-architecture.md](./agent-detection-architecture.md) |
 | Journal kiểm chứng live | [journals/260730-1126-ai-detection-live-validation.md](./journals/260730-1126-ai-detection-live-validation.md) |

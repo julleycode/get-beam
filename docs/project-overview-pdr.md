@@ -67,7 +67,7 @@ Positioning: simpler and cheaper than enterprise CDPs (Klaviyo, HubSpot) for tea
 - Classify agent bots at ingest; `agent_visits` rollup separate from human visitors
 - Dashboard `/agents` tab; strict guardrail: agent records never emailable
 - Feature flags `agent_detection_enabled`, `agent_gateway_enabled`, `agent_marker_enabled` default **OFF**
-- Marker handoff (F2) provides **attribution** (which AI fetch led to a click), not named person identity — `identified_visitors` is unaffected
+- Marker handoff (F2) provides **attribution** (which AI fetch led to a click); resolution queue now prioritizes `ai_source`/handoff visitors (7b1ed33). Named person identity: ops-gated (needs provider keys PDL/Proxycurl/FullContact)
 
 ### FR-7 Ads audiences (in progress)
 - Meta Custom Audiences live (flag-off default); Google Phase 3 in progress

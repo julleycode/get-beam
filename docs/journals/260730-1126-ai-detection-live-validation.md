@@ -3,12 +3,12 @@ title: AI detection live validation — local probes + real ChatGPT
 date: 2026-07-30 11:26
 severity: high
 component: agent detection, attribution, resolution waterfall
-status: ongoing
+status: ongoing — AI priority shipped 7b1ed33
 ---
 
 ## Context
 
-Phiên validate live: Beam có detect traffic AI và “ai đứng sau AI” không? Stack local + probe thật từ ChatGPT; một session Claude trước bị dừng giữa chừng — entry này gom kết luận đã có.
+Phiên validate live: Beam có detect traffic AI và "ai đứng sau AI" không? Stack local + probe thật từ ChatGPT; một session Claude trước bị dừng giữa chừng — entry này gom kết luận đã có.
 
 Mục tiêu thực tế: không phải named individual mà company-level attribution qua handoff marker và resolution sau đó.
 
@@ -23,9 +23,11 @@ Mục tiêu thực tế: không phải named individual mà company-level attrib
 - `486b47a` — UTF-8 fix cho Windows probe scripts
 - `b5f4311` — IP ranges chuyển sang `runtime/` (không còn path cứng trong harness)
 
+**AI priority shipped (7b1ed33):** `resolution_runner` nay ưu tiên `ai_attributable_human.desc()` (visitor có `ai_source` OR same-site `AgentHandoffLink`) trước `intent_score.desc()`. Ranking: AI-attributed queue first. Không thay đổi emailability separation; marker vẫn không gọi write path.
+
 ## What did NOT work / limits
 
-**`identified_visitors=0` — attribution ≠ identity resolution.** Marker chạy tới handoff rồi dừng. Resolution waterfall không ưu tiên `ai_source`/`handoff`; provider keys trống → không có “named visitor” dù detect AI đúng.
+**Named individual: không.** Marker ships company-level attribution. Resolution queue prioritizes AI-attributed visitors (landed 7b1ed33), but **provider keys trống → resolution trả company, không cá nhân**. Ops: fill PDL/Proxycurl keys để ra "John Smith".
 
 **No click → no handoff.** User đọc answer trong app ChatGPT, không follow link → không có `agent_handoff_links` row.
 
@@ -39,29 +41,32 @@ Mục tiêu thực tế: không phải named individual mà company-level attrib
 
 ## The brutal truth
 
-Detect AI traffic: có, local và một phần real-world. “Who behind the AI” như tên người: không — và đó không phải bug một dòng mà gap thiết kế giữa detection, handoff, và resolution. Session Claude cắt giữa chừng khiến cảm giác “gần xong” nhưng thực tế identity layer chưa có.
+Detect AI traffic: có, local và một phần real-world. "Who behind the AI" như tên người: company-level ✓ (now prioritized), named individual: chỉ khi ops fill provider keys. AI resolution priority: **SHIPPED** (7b1ed33); named-person layer: remains ops gate.
 
-## Decisions / expectations
+## Decisions / expectations (UPDATED 30-07 eve)
 
-“Ai đứng sau AI” trong Beam = **company-level attribution** (handoff marker + resolution sau), không phải cá nhân có tên.
+"Ai đứng sau AI" trong Beam = **company-level attribution + prioritized queue** (handoff marker + resolution prioritizes AI-sourced). Named individual: ops-gated (needs provider keys).
 
-**Priority order:**
-0. Harness fixes — **done** (`53fc573`, `486b47a`, `b5f4311`)
+**Completed:**
+- 0. Harness fixes — **done** (`53fc573`, `486b47a`, `b5f4311`)
+- 1.5 Resolution — **AI priority queuing done** (7b1ed33); ops: fill provider keys
+
+**Remaining:**
 1. Wild marker survival — test `?_bam=` qua ChatGPT link thật ngoài lab
-2. Resolution — ưu tiên visitor có `ai_source`/handoff; fill provider keys
-3. F14 Web Bot Auth — sau khi (1) có kết quả
+2. F14 Web Bot Auth — sau khi (1) có kết quả
+3. Sweep sync: `agent_fetch_events.verification_method`
 
 ## Next steps
 
 **Operators:**
 - Chạy wild test: publish link có `?_bam=` qua ChatGPT answer, verify click log + handoff row trên prod/staging tunnel
 - Probe ChatGPT với page có CTA click rõ — in-app read không tạo handoff
-- Theo dõi `identified_visitors` sau bước resolution, không kỳ vọng >0 trước (2)
+- Populate provider keys (PDL/Proxycurl/FullContact) để ra individual names
+- Monitor `identified_visitors` — expect company-level now, individual only post-ops-keys
 
 **Devs:**
-- Resolution waterfall: priority cho AI-sourced / handoff visitors
-- Populate provider keys từ IP range + UA signals đã có trong `runtime/`
-- Sweep: update `agent_fetch_events.verification_method` đồng bộ với `agent_visits`
 - F14 spec/implement sau wild marker test
+- Sweep: update `agent_fetch_events.verification_method` đồng bộ với `agent_visits`
+- (Optional) Beacon edge IP logging cho ChatGPT-User trên public site
 
-**Status:** Detection validated locally + partial real; identity resolution blocked — không phải harness regression.
+**Status:** Detection validated locally + partial real; AI resolution priority shipped (7b1ed33); named-person gate: ops (provider keys).

@@ -1,6 +1,6 @@
 # Beam Documentation
 
-Last updated: 2026-07-28
+Last updated: 2026-07-30
 
 Human-facing documentation for the Beam monorepo. Agent harness context lives separately in `process/context/` (see [all-context.md](../process/context/all-context.md)).
 
