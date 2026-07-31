@@ -28,6 +28,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.config import settings
 from apps.api.models.agent_fetch_event import AgentFetchEvent
 from apps.api.models.agent_handoff_link import AgentHandoffLink
 from apps.api.models.event import Event
@@ -196,14 +197,32 @@ async def run_handoff_correlation_sweep(
         .where(AgentHandoffLink.agent_fetch_event_id == AgentFetchEvent.id)
         .exists()
     )
-    # Only correlate a fetch once its whole correlation window has elapsed. A
-    # link is written at most once (``~link_exists`` then excludes the fetch
-    # forever), so correlating early would settle on whichever click happened to
-    # exist at that moment: a weak page-mismatch click at T+3min would be written
-    # as ``medium`` and permanently shut out the exact-page click at T+12min that
-    # should have scored ``high``. Waiting for the window to close means every
-    # sweep sees the complete candidate set.
-    window_closed = now - timedelta(seconds=_WINDOW_SECONDS)
+    # Only correlate a fetch once it has settled. A link is written at most once
+    # (``~link_exists`` then excludes the fetch forever), so correlating early
+    # would settle on whichever click happened to exist at that moment: a weak
+    # page-mismatch click at T+3min would be written as ``medium`` and permanently
+    # shut out the exact-page click at T+12min that should have scored ``high``.
+    # Defaulting the settle delay to the full correlation window means every sweep
+    # sees the complete candidate set.
+    #
+    # Configurable so dev/UAT can watch a link appear in ~1 min instead of ~30.
+    # It gates only WHEN a fetch is scored, never WHICH clicks qualify — the
+    # window below is unchanged, so a short settle still accepts a click 15 min
+    # after the fetch. The tradeoff it buys back is exactly the early-settle risk
+    # described above.
+    settle_seconds = settings.handoff_correlation_settle_seconds
+    max_settle = _UNLINKED_LOOKBACK_MINUTES * 60
+    if settle_seconds > max_settle:
+        # Past this a fetch ages out of ``cutoff`` before it is old enough to
+        # sweep, so the query matches nothing and no link is ever written. Clamp
+        # and say so — a silently dead sweep is the hardest failure to notice.
+        logger.warning(
+            "handoff_settle_seconds_clamped",
+            configured=settle_seconds,
+            clamped_to=max_settle,
+        )
+        settle_seconds = max_settle
+    window_closed = now - timedelta(seconds=settle_seconds)
     result = await db.execute(
         select(AgentFetchEvent)
         .where(

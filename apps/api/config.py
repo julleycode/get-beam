@@ -736,6 +736,18 @@ class Settings(BaseSettings):
     agent_verification_sweep_interval_minutes: int = 15  # APScheduler agent IP-verification sweep cadence
     agent_ip_range_refresh_interval_hours: int = 24  # Re-fetch published per-agent IP-range datasets; stale ranges make real agents look like forged ones
     handoff_correlation_sweep_interval_minutes: int = 10  # APScheduler fetch↔click handoff correlation sweep cadence (H2)
+    # How long a fetch event must age before the H2 sweep will correlate it. This
+    # is ONLY the settle delay — it is NOT the correlation window. The window
+    # (agent_handoff_correlation._WINDOW_SECONDS) still decides which clicks count,
+    # so lowering this shortens the wait for a link to appear without narrowing
+    # what qualifies as a match. Lower it in dev/UAT to see a link in ~1 min
+    # instead of ~30; production keeps the default so every fetch is scored
+    # against its complete candidate set (a fetch is linked once, permanently —
+    # settling early can lock in a weak click and shut out a better later one).
+    # Must stay below agent_handoff_correlation._UNLINKED_LOOKBACK_MINUTES or no
+    # fetch is ever both old enough and young enough to be swept; the sweep clamps
+    # and warns rather than silently linking nothing.
+    handoff_correlation_settle_seconds: int = 1800
     intent_signal_sweep_interval_minutes: int = 10  # APScheduler live commercial-page intent-signal + spike sweep cadence (H3)
     aggregation_sweep_interval_minutes: int = 60  # APScheduler full-recompute aggregation repair sweep cadence
     # Data retention (GDPR data minimization / privacy-policy 90-day promise):
