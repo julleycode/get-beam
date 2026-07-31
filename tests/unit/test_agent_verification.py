@@ -24,6 +24,23 @@ def mock_mode(monkeypatch):
     monkeypatch.setattr(settings, "mock_external_apis", True)
 
 
+@pytest.fixture
+def empty_runtime_dir(monkeypatch, tmp_path):
+    """Point the real branch's runtime dataset at an empty directory.
+
+    The refresh job writes real CIDRs into ``_RUNTIME_DIR`` (gitignored), and the
+    real branch reads it before the shipped placeholders. A real-branch test that
+    does not redirect it asserts against whatever that job last wrote, so it
+    passes on a clean checkout and fails on any machine where the job has run.
+    Redirecting to an empty dir makes the shipped placeholder the only input,
+    which is what these tests are actually about.
+    """
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    monkeypatch.setattr(agent_verification, "_RUNTIME_DIR", runtime)
+    return runtime
+
+
 # ─── verify_ip ───────────────────────────────────────────────────────────────
 
 
@@ -83,7 +100,9 @@ def test_load_ip_ranges_is_keyed_per_agent_not_per_vendor(mock_mode):
     assert "claudebot" not in ranges  # Anthropic publishes nothing
 
 
-def test_load_ip_ranges_real_branch_is_empty_until_refreshed(monkeypatch):
+def test_load_ip_ranges_real_branch_is_empty_until_refreshed(
+    monkeypatch, empty_runtime_dir
+):
     """The shipped datasets are placeholders — real ranges arrive from the
     refresh job. Empty must mean "no conclusion", so an unfetched agent is
     dropped from the mapping entirely rather than presenting an empty range list
@@ -95,12 +114,17 @@ def test_load_ip_ranges_real_branch_is_empty_until_refreshed(monkeypatch):
 
 
 def test_load_ip_ranges_fail_open_on_load_error(monkeypatch):
-    # Point the data dir at a nonexistent path → every vendor file missing →
-    # fail-open empty dict, no raise.
+    # Point BOTH dataset dirs at nonexistent paths → every vendor file missing →
+    # fail-open empty dict, no raise. The runtime dir is read first on the real
+    # branch, so leaving it live would test the refresh job's output instead of
+    # the missing-file path.
     from pathlib import Path
 
     monkeypatch.setattr(
         agent_verification, "_DATA_DIR", Path("/nonexistent/agent_ip_ranges")
+    )
+    monkeypatch.setattr(
+        agent_verification, "_RUNTIME_DIR", Path("/nonexistent/agent_ip_ranges/runtime")
     )
     monkeypatch.setattr(settings, "mock_external_apis", False)
     assert agent_verification.load_ip_ranges() == {}
