@@ -152,7 +152,7 @@ Phiên kiểm chứng trên môi trường lab (`beamlab.nhantown.com`) với Ch
 | Marker survival trên AI thật | **ĐÃ KIỂM CHỨNG (31-07)** | ChatGPT giữ nguyên `?_bam=` trong câu trả lời; chuỗi đóng end-to-end — chi tiết mục 5b |
 | Marker được AI **tự** trích dẫn | OPEN | Lần đo dùng prompt có câu "giữ nguyên URL đầy đủ" — mới chứng minh *có thể giữ*, chưa phải *tự giữ* khi dẫn link tự nhiên |
 | AI **tự tìm ra** offers feed | OPEN | ChatGPT đọc `llms.txt` (có link tuyệt đối tới offers) rồi bỏ qua; chỉ fetch khi được đưa URL thẳng |
-| Link marker không bấm được trong chat | OPEN | ChatGPT render URL ~180 ký tự thành text/code, không linkify — người dùng thật sẽ không copy tay |
+| Link marker render thành `code` thay vì link | OPEN (hẹp) | Phụ thuộc VAI TRÒ của URL trong câu trả lời, **không** phụ thuộc độ dài — xem 5c. Xử lý bằng cách làm offers feed đọc như lời chào hàng, không phải bảng dữ liệu trống |
 | Identity resolution queue | DONE / OPS | **DONE (`7b1ed33`):** ưu tiên `ai_source`/handoff trước intent. OPEN ops: provider keys → `identified_visitors` |
 | `agent_fetch_events.verification_method` | MEDIUM | Sweep IP chỉ cập nhật `agent_visits`, không `agent_fetch_events` |
 | Beacon không có IP | MEDIUM | Public site không beacon → ChatGPT-User ua-only |
@@ -192,6 +192,30 @@ feed dù `llms.txt` đã có link tuyệt đối. Nó chỉ fetch khi được �
 "AI có tự tìm tới feed không" vẫn mở, và không đo được trên `beamlab` — trang này tự khai
 "Không phải sản phẩm thương mại", mâu thuẫn với chính offers feed của nó, nên không có câu hỏi
 người dùng nào tự nhiên dẫn AI tới đó. Cần một site thương mại thật để đo.
+
+---
+
+## 5c. Vì sao marker lúc render thành `code`, lúc thành link (31-07)
+
+Cùng một URL marker, hai cách hỏi, hai kết quả:
+
+| Câu hỏi | ChatGPT render |
+|---|---|
+| "Đọc file JSON này và liệt kê các link trong đó" | `code` — không bấm được |
+| "Liệt kê 2 link này cho tôi" | link bấm được |
+
+Đối chứng loại trừ độ dài: hỏi cùng lúc một URL ngắn (`?x=abc`) và URL marker ~180 ký tự —
+**cả hai đều linkify**. Nên giả thuyết "URL quá dài nên không linkify" là SAI, và rút ngắn marker
+không giải quyết được gì. Fernet giữ nguyên.
+
+Yếu tố quyết định là VAI TRÒ của URL trong câu trả lời: trích xuất giá trị từ một document thì
+format như dữ liệu; giới thiệu một đường dẫn thì format như link.
+
+Hệ quả thiết kế: ca dùng thật (AI giới thiệu sản phẩm rồi đưa link đăng ký) rơi vào vai trò
+"link", nên nhiều khả năng linkify. Nhưng link vẫn đến TỪ một feed JSON, nên vẫn có đường rơi lại
+vào vai trò "dữ liệu". Đòn bẩy nằm ở nội dung feed — một offer có tên/giá/mô tả đọc như lời chào
+hàng, còn offer rỗng như của `beamlab` (không giá, mô tả trống, url trỏ về chính trang đang đọc)
+đọc như một bảng dữ liệu. Chỉ đo dứt điểm được trên site thương mại thật.
 
 ---
 
