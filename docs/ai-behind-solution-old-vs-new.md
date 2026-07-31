@@ -1,8 +1,9 @@
 # Giải pháp "người đứng sau AI" — cách cũ vs cách mới
 
-Cập nhật: 2026-07-30  
+Cập nhật: 2026-08-01  
 Phạm vi: SA attribution / handoff (không phải outreach, không phải auto-send)  
-Đọc kèm: [agent-detection-architecture.md](./agent-detection-architecture.md)
+Đọc kèm: [agent-detection-architecture.md](./agent-detection-architecture.md) ·
+[beam-lab-resume.md](./beam-lab-resume.md)
 
 ---
 
@@ -165,6 +166,38 @@ Pixel pageview URL chứa _bam
 
 ---
 
+## 4b. `_bfm` — marker biên riêng cho Beam Lab (không đi qua F2 / `agent_marker_enabled`)
+
+F2 (`_bam`) là đường **sản phẩm đa tenant**: mint tại API, đi qua cờ `agent_marker_enabled`, chỉ
+sống trên `offers.json`. Song song đó, môi trường thử nghiệm **Beam Lab**
+(`beamlab.nhantown.com`, xem [agent-detection-architecture §5d](./agent-detection-architecture.md#5d-soft-serve-gate--marker-biên-_bfm-trên-beam-lab-31-07--01-08))
+dùng một cơ chế nối fetch↔click **thứ ba**, độc lập với cả hai cách ở trên:
+
+| | Temporal (cách cũ) | F2 marker `_bam` (cách mới, sản phẩm) | Edge marker `_bfm` (Beam Lab) |
+|---|---|---|---|
+| Nơi mint | Không mint — suy đoán | `apps/api/services/agent_marker.py`, Fernet | `_middleware.js` trên Cloudflare Pages, hex thường |
+| Đóng vào đâu | — | Mỗi `offer.url` trong `offers.json` | **Mọi** `a[href]` cùng host trên HTML lab, qua `HTMLRewriter` |
+| Cờ điều khiển | Luôn chạy nền | `agent_marker_enabled` (mặc định TẮT) | `BEAM_AGENT_GATE` trên Cloudflare Pages (biến env riêng của lab, không phải cờ trong `config.py`) |
+| Giải mã được không | N/A | Có — ngược ra `agent_fetch_event_id` | Không — chỉ là khoá tra cứu so khớp chuỗi |
+| Cột lưu | `agent_handoff_links` (suy đoán) | `agent_handoff_links.method="marker"` | `agent_fetch_events.link_marker` + `events.link_marker` (migration riêng, **chỉ ở Postgres dev**, chưa apply prod) |
+| Áp dụng cho site nào | Mọi site có pixel | Site khách bật cờ, dùng offers feed | Riêng Beam Lab (thử nghiệm nội bộ) |
+
+Vì sao có `_bfm` mà không tái dùng `_bam`: middleware biên **không có** hàng
+`agent_fetch_events` và **không có** `ENCRYPTION_KEY` của API tại thời điểm nó phải viết lại HTML —
+nên nó không thể mint một token Fernet hợp lệ. Đặt tên khác đi (`_bfm` thay vì `_bam`) là cố ý: nếu
+dùng chung tên, decoder Fernet của API sẽ nhận một chuỗi nó không giải mã được, và kết quả thử
+nghiệm ở lab dễ bị đọc nhầm thành attribution production thật.
+
+`_bfm` **chứng minh được** một năng lực mà cả `_bam` lẫn temporal chưa: nó stamp lên **mọi** link
+cùng host (không chỉ URL trong một feed JSON), và đo trực tiếp trên ChatGPT-User thật (31-07) rằng
+AI giữ nguyên query param, tự follow href trong trang, và tái hiện đúng URL đã đánh dấu trong câu
+trả lời — tức là chuỗi edge → agent → người → click sống được trên một trang HTML bình thường, không
+cần agent chủ động đọc `offers.json`. Cái còn thiếu là chiều ngược lại: **chưa có** người thật bấm
+một link mang `_bfm=` để xác nhận `events.link_marker` join đúng hàng `agent_fetch_events` (khác với
+`_bam`, đã kiểm chứng end-to-end ở [§5b](./agent-detection-architecture.md#5b-marker-end-to-end-với-chatgpt-thật-2026-07-31)).
+
+---
+
 ## 5. So sánh trực diện
 
 | Tiêu chí | Cách cũ (temporal) | Cách mới (marker F2) |
@@ -254,11 +287,13 @@ Cả hai chỉ trả lời "AI nào dẫn người nào tới site"; bước "ng
 | Vai trò | Path |
 |---|---|
 | Temporal sweep | `apps/api/services/agent_handoff_correlation.py` |
-| Marker mint/decode | `apps/api/services/agent_marker.py` |
+| Marker mint/decode (`_bam`, `_bfm`) | `apps/api/services/agent_marker.py` |
+| Edge marker mint + stamp (`_bfm`, Beam Lab) | `infra/cloudflare/beam-lab/functions/_middleware.js` |
 | Gateway / offers | `apps/api/services/agent_gateway.py` |
-| Pixel decode hook | `apps/api/routers/events.py` (đọc `_bam` trên URL pageview) |
+| Pixel decode hook | `apps/api/routers/events.py` (đọc `_bam` **và** `_bfm` trên URL pageview) |
 | AI referrer label | `apps/api/services/ai_referral.py` |
 | Resolution queue | `apps/api/services/resolution_runner.py` |
 | Resolution eligibility | `apps/api/services/resolution_eligibility.py` |
-| Đánh giá kiến trúc | [agent-detection-architecture.md](./agent-detection-architecture.md) |
+| Đánh giá kiến trúc | [agent-detection-architecture.md](./agent-detection-architecture.md) (§5d cho Beam Lab) |
+| Resume / next steps | [beam-lab-resume.md](./beam-lab-resume.md) |
 | Journal kiểm chứng live | [journals/260730-1126-ai-detection-live-validation.md](./journals/260730-1126-ai-detection-live-validation.md) |

@@ -1,6 +1,6 @@
 # System Architecture
 
-Last updated: 2026-07-28
+Last updated: 2026-08-01
 
 ## Overview
 
@@ -227,6 +227,19 @@ Most new capabilities default **OFF** in `config.py`. Examples:
 
 Operators must apply pending Alembic migrations before enabling flags in production.
 
+## Beam Lab (Edge Experiment Surface)
+
+`infra/cloudflare/beam-lab/` is a standalone Cloudflare Pages deployment (`beamlab.nhantown.com`),
+separate from the `client` → `edge` → `api` flow above: it is Beam's own static site, run purely to
+validate the AI-agent detection chain end-to-end, and it writes to a local dev Postgres rather than
+production. Its Pages Functions middleware performs, at the edge, what the API otherwise infers
+from a beacon: it classifies on-demand AI User-Agents, soft-serves them full HTML with an embedded
+identification invitation (replacing an earlier hard-403 gate that real ChatGPT-User simply gave up
+on), and stamps an opaque `?_bfm=` marker onto same-host links — a sibling of the API's own
+Fernet-encrypted `?_bam=` marker (§ EvalLayer above), joined via new `agent_fetch_events.link_marker`
+/ `events.link_marker` columns. See [agent-detection-architecture.md §5d](./agent-detection-architecture.md#5d-soft-serve-gate--marker-biên-_bfm-trên-beam-lab-31-07--01-08)
+and [beam-lab-resume.md](./beam-lab-resume.md) for detail and open items.
+
 ## Drift vs Early Docs
 
 | Early architecture doc | Current |
@@ -240,5 +253,7 @@ Operators must apply pending Alembic migrations before enabling flags in product
 
 - [codebase-summary.md](./codebase-summary.md)
 - [deployment-guide.md](./deployment-guide.md)
+- [agent-detection-architecture.md](./agent-detection-architecture.md) — EvalLayer + Beam Lab detail
+- [beam-lab-resume.md](./beam-lab-resume.md)
 - `apps/api/main.py` — router registry
 - `process/context/all-context.md` — EvalLayer, ingest hardening detail

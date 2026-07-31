@@ -70,6 +70,7 @@ For most substantial tasks:
 | test planning or verification | `all-context.md`, `tests/all-tests.md` | `TESTING.md` (repo root) for docker setup |
 | debugging backend/tests | `all-context.md`, `tests/all-tests.md` | the failing service/router source |
 | AI / agent-layer work | `all-context.md` (AI Layer section below) | `apps/api/services/gemini_client.py`, `apps/api/agents/` |
+| Beam Lab / edge AI detection | `docs/beam-lab-resume.md` | `docs/beam-lab-team-brief.md` (team talk), `docs/agent-detection-architecture.md` §5d, `docs/journals/260801-0051-beam-lab-soft-serve-bfm.md`, `infra/cloudflare/beam-lab/` |
 | visitor identity / enrichment | `all-context.md` | `process/features/visitors-identity/_GUIDE.md` |
 | segments / campaigns / outreach | `all-context.md` | `process/features/campaigns-outreach/_GUIDE.md` |
 | billing / quotas | `all-context.md` | `process/features/billing/_GUIDE.md` |
@@ -100,7 +101,10 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
 - `evallayer` — AI-agent traffic detection (agent_classifier, `/agents` API + dashboard tab, IP/rDNS
   verification, agent→company outreach-safe resolution, GEO/AEO analytics, outreach-exclusion
   guardrail); 8-phase program, code-complete 23-07-26, pending Docker-gate closure — see
-  `process/features/evallayer/active/evallayer_22-07-26/evallayer-umbrella_PLAN_22-07-26.md`
+  `process/features/evallayer/active/evallayer_22-07-26/evallayer-umbrella_PLAN_22-07-26.md`.
+  **Beam Lab (31-07→01-08):** soft-serve gate + edge `_bfm` marker live on `beamlab.nhantown.com`;
+  resume at `docs/beam-lab-resume.md` (plans `agent-gate-soft-serve_31-07-26` /
+  `agent-gate-lab_31-07-26` status may be stale vs lab)
 - `ads-audiences` — OAuth-linked ad channels (Meta Custom Audiences, Google Data Manager API,
   LinkedIn deferred/CSV-only) with direct segment-audience push mirroring the CRM connector
   pattern; 3-phase program. Phase 1 Foundation (models, `services/ads/` registry, router, mock-mode

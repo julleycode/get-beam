@@ -1,6 +1,6 @@
 # Codebase Summary
 
-Last updated: 2026-07-30
+Last updated: 2026-08-01
 
 ## Overview
 
@@ -29,7 +29,10 @@ get-beam/
 │   ├── pixel/        Vanilla JS tracker + CF Worker
 │   └── extension/    Chrome MV3 LinkedIn connect (dumb pipe)
 ├── infra/
-│   └── docker-compose.yml   postgres:16, redis:7, clickhouse:24
+│   ├── docker-compose.yml   postgres:16, redis:7, clickhouse:24
+│   └── cloudflare/beam-lab/ Cloudflare Pages project — AI-agent detection lab
+│                             (static site + Functions middleware, own deploy,
+│                             writes to local dev Postgres, not production)
 ├── tests/            pytest unit + integration
 ├── process/          RIPER-5 harness (context, features, protocols)
 ├── marketing/        brand, launch, content references
@@ -69,7 +72,9 @@ get-beam/
 | Ads | `routers/ads.py`, `services/ads/` |
 | Social / EasyEngage | `routers/drafts.py`, `feed.py`, `social_auth.py` |
 
-**EvalLayer notes (Jul 2026):** F2 marker (`agent_marker.py`) mints Fernet `?_bam=` tokens on `offers.json` URLs; click decodes to `agent_handoff_links`. IP sweep (`agent_verification.py`) updates `agent_visits.verification_method` only — `agent_fetch_events.verification_method` stays `ua-only`. All agent flags default OFF. 
+**EvalLayer notes (Jul 2026):** F2 marker (`agent_marker.py`) mints Fernet `?_bam=` tokens on `offers.json` URLs; click decodes to `agent_handoff_links`. IP sweep (`agent_verification.py`) updates `agent_visits.verification_method` only — `agent_fetch_events.verification_method` stays `ua-only`. All agent flags default OFF.
+
+**Beam Lab notes (31 Jul – 1 Aug 2026):** `infra/cloudflare/beam-lab/` validates the same detection chain live. Its edge middleware mints a *second*, unrelated marker `?_bfm=` (opaque hex, not Fernet — `agent_marker.py::edge_marker_from_url`) stamped onto every same-host link, joined via new `agent_fetch_events.link_marker` / `events.link_marker` columns (migrations `f3c8b2e91d47`, `a7d419e6c052` — **dev Postgres only, not yet applied to production**). The lab's original hard-403 agent gate was replaced by a soft-serve gate (always 200 + real HTML, invitation injected as an HTML comment) after real ChatGPT-User gave up on the 403 and served stale answers. See [agent-detection-architecture.md §5d](./agent-detection-architecture.md#5d-soft-serve-gate--marker-biên-_bfm-trên-beam-lab-31-07--01-08) and [beam-lab-resume.md](./beam-lab-resume.md).
 
 **Shipped (7b1ed33):** `resolution_runner.py` now prioritizes `ai_attributable_human.desc()` (ai_source OR handoff) before intent_score — AI-attributed visitors resolve first.
 
@@ -142,5 +147,7 @@ See [system-architecture.md](./system-architecture.md) for runtime diagram and [
 
 - [code-standards.md](./code-standards.md)
 - [system-architecture.md](./system-architecture.md)
+- [agent-detection-architecture.md](./agent-detection-architecture.md)
+- [beam-lab-resume.md](./beam-lab-resume.md)
 - `process/context/all-context.md`
 - `TESTING.md`

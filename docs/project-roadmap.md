@@ -1,6 +1,6 @@
 # Project Roadmap
 
-Last updated: 2026-07-30
+Last updated: 2026-08-01
 
 ## Overview
 
@@ -29,7 +29,7 @@ This roadmap merges **historical MVP phases** (`PRODUCT_ROADMAP.md`) with **curr
 |---------|-------|-------|
 | `visitors-identity` | Pixel → resolution → enrichment | `first-party-capture`, `owned-data-layer` completed |
 | `pixel` | Ingest abuse hardening | Completed 25–26 Jul; cadence-bot-flag v1 EXECUTE+EVL green |
-| `evallayer` | AI agent traffic detection | Code-complete 23 Jul; **live-validated 29–30 Jul** (17/17 local probes + real ChatGPT-User on lab). Attribution chain works; **person identity gap** documented — see [agent-detection-architecture](./agent-detection-architecture.md) §5 |
+| `evallayer` | AI agent traffic detection | Code-complete 23 Jul; **live-validated 29 Jul – 1 Aug** (17/17 local probes + real ChatGPT-User on lab). Attribution chain works; soft-serve gate + edge `_bfm` marker shipped and live on `beamlab.nhantown.com` (lab only, not prod API); **person identity gap** documented — see [agent-detection-architecture](./agent-detection-architecture.md) §5, §5d |
 | `campaigns-outreach` | Campaigns, LinkedIn extension | Extension + onboarding in active folders |
 | `billing` | Gumroad MoR, quotas | Active folder for ongoing billing work |
 | `marketing-site` | Landing, blog, changelog | Content in `marketing/` |
@@ -42,6 +42,7 @@ This roadmap merges **historical MVP phases** (`PRODUCT_ROADMAP.md`) with **curr
 | `ads-audiences` | Phase 2 Meta live | EVL-green 26 Jul; env smoke gaps before production enable |
 | `ads-audiences` | Phase 3 Google live | In progress |
 | `agent-gateway` | Agent MCP / gateway + F2 marker | **Shipped** (flags OFF): gateway surfaces, F2 marker handoff, F12/F13 verification, AI identity priority queue (7b1ed33). Live probe green; wild marker survival + F14 are next. Ops gate: provider keys (PDL/Proxycurl) for named person resolution |
+| `evallayer` | Beam Lab soft-serve gate + edge `_bfm` marker | **Behaviourally shipped on lab** (`beamlab.nhantown.com`), plan files still `status: awaiting-execute-approval` — reconcile in next UPDATE PROCESS. `link_marker` migrations exist only in dev Postgres, not applied to prod API. See [beam-lab-resume.md](./beam-lab-resume.md) |
 | `pixel` | cadence-bot-flag | Active; deferred gates (migration round-trip, live crawler validation) |
 | `campaigns-outreach` | LinkedIn extension onboarding | Feasibility + active plans |
 
@@ -77,13 +78,21 @@ This roadmap merges **historical MVP phases** (`PRODUCT_ROADMAP.md`) with **curr
 
 ## Near-Term Engineering Themes
 
-1. **Agent marker wild survival test** — confirm real ChatGPT/Claude preserve `?_bam=` when surfacing links to humans (lab probe only so far).
+1. **Agent marker wild survival — CONFIRMED for `_bam` (31 Jul), edge `_bfm` half-confirmed.** Real
+   ChatGPT-User preserves `?_bam=` end-to-end on the offers-feed path (architecture doc §5b). The
+   Beam Lab edge marker `?_bfm=` is verified from edge → agent → answer (AI reproduces the marked
+   URL verbatim), but a real human click-through confirming the `events.link_marker` join has not
+   yet been observed. Next: get that click, and retest the ChatGPT hop-to-link-page behavior with a
+   natural prompt (see [beam-lab-resume.md](./beam-lab-resume.md)).
 2. **Identity resolution priority** — **SHIPPED (7b1ed33):** `resolution_runner` now prioritizes `ai_attributable_human.desc()` (visitor has `ai_source` OR same-site `AgentHandoffLink`) before `intent_score.desc()`. Ops gate: provider keys (PDL/Proxycurl/FullContact) for named-person resolution.
 3. **Web Bot Auth (F14)** — RFC 9421 for vendors without published IP ranges (Anthropic); no active plan yet.
-4. **Close Docker-gated validation** — migration round-trips, Playwright auth harness, Meta/Google sandbox smokes.
-5. **Ads Phase 3 (Google)** — live OAuth + audience push.
-6. **Capacity hardening** — incremental aggregation, pool sizing (see `capacity-hardening` plans in `process/general-plans/`).
-7. **LinkedIn extension onboarding** — reduce install friction (backlog remedy notes exist).
+4. **Beam Lab plan status reconcile** — both `agent-gate-lab_31-07-26` and `agent-gate-soft-serve_31-07-26` plans sit at `status: awaiting-execute-approval` while the soft-serve gate is already live on `beamlab.nhantown.com`; next UPDATE PROCESS pass should reconcile plan status with lab reality and decide whether/when to apply the `link_marker` migrations to the production API.
+5. **ChatGPT browse intermittency** — homepage/canary-only fetches are reliable; hopping to a linked deep page is not (prompt-wording dependent, sometimes skipped even on direct URLs). Treated as an OpenAI browse-tool characteristic, not a Beam detection bug — see [agent-detection-architecture §5d](./agent-detection-architecture.md#5d-soft-serve-gate--marker-biên-_bfm-trên-beam-lab-31-07--01-08).
+6. **Gemini/AWS-fetcher classification gap** — a Gemini-eval-window fetch used UA `got` on AWS ASN 14618, which the classifier does not recognize as an AI token, so no `agent_fetch_events` row is written for it. Optional product decision, not yet scheduled.
+7. **Close Docker-gated validation** — migration round-trips, Playwright auth harness, Meta/Google sandbox smokes.
+8. **Ads Phase 3 (Google)** — live OAuth + audience push.
+9. **Capacity hardening** — incremental aggregation, pool sizing (see `capacity-hardening` plans in `process/general-plans/`).
+10. **LinkedIn extension onboarding** — reduce install friction (backlog remedy notes exist).
 
 ## Out of Scope (explicit)
 
@@ -98,3 +107,5 @@ This roadmap merges **historical MVP phases** (`PRODUCT_ROADMAP.md`) with **curr
 - `process/features/*/_GUIDE.md` — per-feature scope
 - `process/context/all-context.md` — feature list + migration head notes
 - [project-overview-pdr.md](./project-overview-pdr.md)
+- [agent-detection-architecture.md](./agent-detection-architecture.md) — AI-agent detection, §5d for Beam Lab
+- [beam-lab-resume.md](./beam-lab-resume.md) — Beam Lab experiment findings + open items

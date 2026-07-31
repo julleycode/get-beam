@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Last updated: 2026-07-29
+Last updated: 2026-08-01
 
 ## Overview
 
@@ -327,6 +327,42 @@ Build and load unpacked from `apps/extension/` (MV3). Used for LinkedIn outreach
 
 E2E: `apps/extension/e2e/`
 
+## Beam Lab (Cloudflare Pages experiment)
+
+`infra/cloudflare/beam-lab/` is a **separate** deployable surface from the main API/web/pixel
+stack: a static Cloudflare Pages project (`beam-lab`, live at `beamlab.nhantown.com`) plus a Pages
+Functions middleware used to validate the AI-agent detection chain end-to-end. It writes to the
+local Docker Postgres (`retarget_agent`), not production. Full findings and resume notes:
+[beam-lab-resume.md](./beam-lab-resume.md); architecture detail:
+[agent-detection-architecture.md §5d](./agent-detection-architecture.md#5d-soft-serve-gate--marker-biên-_bfm-trên-beam-lab-31-07--01-08).
+
+```bash
+cd infra/cloudflare/beam-lab
+npx wrangler pages deploy public --project-name beam-lab
+```
+
+Tail live production logs (needed to read `beam_gate` / `beam_full_log` JSON lines):
+
+```bash
+npx wrangler pages deployment tail --project-name beam-lab
+```
+
+The latest noted production deployment UUID for that command is
+`9a4d1f20-6bdd-46fc-bfc5-447c83e81cab` (confirm the current one with
+`npx wrangler pages deployment list --project-name beam-lab` — deployments roll forward on each deploy).
+
+| Var | Location | Purpose |
+|-----|----------|---------|
+| `BEAM_API_BASE` | `wrangler.toml [vars]` | Full API host the beacon POSTs to (`beam-api.nhantown.com`) |
+| `BEAM_SITE_ID` | `wrangler.toml [vars]` | `site_16c46453546f` |
+| `BEAM_AGENT_GATE` | `wrangler.toml [vars]` | Kill switch for the soft-serve agent gate. Only the literal `"0"` disables it — deleting the line leaves the gate ON |
+| `BEAM_FULL_LOG` | `wrangler.toml [vars]` | `"1"` logs the complete request/response of every non-static visitor (human included). Deliberately temporary — **turn back off once the current debug window is analysed** |
+| `BEAM_FETCH_BEACON_SECRET` | wrangler secret (`npx wrangler pages secret put BEAM_FETCH_BEACON_SECRET --project-name beam-lab`) | Must equal the API's own `BEAM_FETCH_BEACON_SECRET`, or every beacon 401s with no dashboard signal explaining why |
+
+The gate is **fail-open by design**: any error in the gate/log logic falls back to serving the
+original response untouched, and humans/index crawlers/static assets/`robots.txt`/`sitemap.xml`
+always get byte-identical responses.
+
 ## Production (Railway)
 
 `railway.json` at repo root:
@@ -383,8 +419,11 @@ Integration tests use Redis DB `15` for isolation.
 
 - [local-uat-prod.md](./local-uat-prod.md) — Local → UAT → PROD environments
 - [dev-workflow-slack-issues.md](./dev-workflow-slack-issues.md) — Branch naming, Slack UAT notify (proposed), GitHub Issues
+- [beam-lab-resume.md](./beam-lab-resume.md) — Beam Lab experiment findings + open items
+- [agent-detection-architecture.md](./agent-detection-architecture.md) — AI-agent detection architecture, §5d for Beam Lab
 - [system-architecture.md](./system-architecture.md)
 - [visuals/beam-system-architecture.svg](./visuals/beam-system-architecture.svg)
 - `infra/docker-compose.yml`
+- `infra/cloudflare/beam-lab/` — Cloudflare Pages project + `wrangler.toml`
 - `Dockerfile`, `railway.json`
 - `TESTING.md`, `process/context/tests/all-tests.md`

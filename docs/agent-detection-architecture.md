@@ -1,7 +1,7 @@
 # Lớp phát hiện AI-agent — kiến trúc & đánh giá
 
-Cập nhật: 2026-07-30 · Phạm vi: tab **Agents** + **Visitors**
-Nguồn: đọc trực tiếp source + kiểm chứng live local (17/17 probe) + ChatGPT-User thật trên beamlab.nhantown.com (29–30/07)
+Cập nhật: 2026-08-01 · Phạm vi: tab **Agents** + **Visitors** + Beam Lab (edge)
+Nguồn: đọc trực tiếp source + kiểm chứng live local (17/17 probe) + ChatGPT-User thật trên beamlab.nhantown.com (29-07 → 01-08)
 
 Mục đích: trả lời ba câu hỏi sản phẩm — (1) phân biệt đâu là AI, (2) ai là người đứng sau AI,
 (3) làm sao dẫn người dùng AI click vào site và định danh được họ.
@@ -104,6 +104,8 @@ khách tự soạn, chống dò `site_id` (5 trường hợp lỗi đều trả 
 **Đầu ra — đã sửa 29-07 (F2).** Trước đó link trong offers feed là URL trần, không mang mã nào để
 nhận ra khi có người click. Nay mỗi URL cùng host mang `?_bam=<marker>` mã hoá id của chính lượt
 fetch đã phát nó ra (chi tiết + 4 ràng buộc: mục 7). Cờ `agent_marker_enabled`, mặc định TẮT.
+Riêng môi trường thử nghiệm **Beam Lab** dùng một marker biên khác tên (`?_bfm=`), không mã hoá,
+không đi qua cờ này — xem [§5d](#5d-soft-serve-gate--marker-biên-_bfm-trên-beam-lab-31-07--01-08).
 
 **Đầu vào — đã sửa 29-07 (F11).** Trước đó toàn bộ surface agent-facing không ghi lại một lượt
 truy cập nào. Nay `record_gateway_visit()` trong `services/agent_gateway.py` ghi vào đúng hai bảng
@@ -216,6 +218,152 @@ Hệ quả thiết kế: ca dùng thật (AI giới thiệu sản phẩm rồi �
 vào vai trò "dữ liệu". Đòn bẩy nằm ở nội dung feed — một offer có tên/giá/mô tả đọc như lời chào
 hàng, còn offer rỗng như của `beamlab` (không giá, mô tả trống, url trỏ về chính trang đang đọc)
 đọc như một bảng dữ liệu. Chỉ đo dứt điểm được trên site thương mại thật.
+
+---
+
+## 5d. Soft-serve gate + marker biên `_bfm` trên Beam Lab (31-07 → 01-08)
+
+Môi trường lab riêng biệt với `apps/api` đa tenant: **Beam Lab**
+(`https://beamlab.nhantown.com/`, Cloudflare Pages project `beam-lab`, `site_id
+site_16c46453546f`) là trang tĩnh do chính Beam vận hành để kiểm chứng chuỗi phát hiện agent trên
+một tên miền kiểm soát hoàn toàn. Pixel gửi về `beam-dev.nhantown.com`; beacon fetch gửi về
+`beam-api.nhantown.com`; dữ liệu ghi vào Postgres Docker local (`retarget_agent`), **không phải**
+database production. Canary nội dung `FUCHSIA-0731` trên trang chủ dùng để phân biệt AI đọc bản mới
+hay trả lời từ cache/chỉ mục cũ. Deployment production gần nhất đã ghi nhận:
+`9a4d1f20-6bdd-46fc-bfc5-447c83e81cab` (dùng với `wrangler pages deployment tail`).
+
+### Gate cứng (403) bị thực tế bác bỏ
+
+Kế hoạch đầu tiên (`process/features/evallayer/active/agent-gate-lab_31-07-26/`) chặn 5 UA
+on-demand bằng **403 HTML interstitial** cho tới khi agent tự khai vendor + mục đích (header retry
+hoặc check-in token HMAC). Triển khai xong, ChatGPT-User thật (ASN 8075) đụng 403 **hai lần**,
+không gửi header nào, không gọi check-in, và báo cho người dùng là trang **không đọc được** — model
+quay sang trả lời bằng bản trả lời cũ/cache thay vì đọc trang mới. Gate đo được đúng một điều: agent
+bỏ cuộc.
+
+Vá bằng kế hoạch thứ hai (**thay thế về hành vi, không xoá plan cũ**):
+`process/features/evallayer/active/agent-gate-soft-serve_31-07-26/`. Nguyên tắc đảo ngược: **luôn
+trả 200 + HTML thật** cho agent on-demand; câu hỏi "bạn là ai" được nhét **vào trong** trang (HTML
+comment qua `HTMLRewriter`), không còn đứng chắn trước trang. Không header `x-agent-gate` nào được
+gắn — chính header đó, cùng khối `<section>` hiển thị của bản 403, là thứ khiến công cụ browse của
+ChatGPT từng báo lỗi trên một response 200 đầy đủ nội dung.
+
+Code: `infra/cloudflare/beam-lab/functions/_middleware.js`, `infra/cloudflare/beam-lab/wrangler.toml`.
+
+| Biến env | Vai trò | Trạng thái hiện tại |
+|---|---|---|
+| `BEAM_AGENT_GATE` | Kill switch. Chỉ đúng giá trị `"0"` mới tắt — xoá dòng vẫn để gate BẬT | `"1"` (bật) |
+| `BEAM_FULL_LOG` | Ghi log toàn bộ request/response (kể cả người) để đọc lại từng header | `"1"` — **cố ý tạm thời, cần tắt sau khi hết cửa sổ debug** |
+
+Cả hai đều **fail-open tuyệt đối**: bất kỳ throw nào trong logic gate/log đều rơi về phục vụ trang y
+nguyên. Không áp dụng cho người, index crawler (GPTBot/ClaudeBot/PerplexityBot), static asset,
+`/robots.txt`, `/sitemap.xml` — response byte-identical.
+
+### Marker biên `_bfm` — khác `_bam`, cố ý không trùng tên
+
+Middleware trên Cloudflare Pages **không có** hàng `agent_fetch_events` và **không có** khoá mã hoá
+của API, nên nó không thể mint `_bam` (marker Fernet của F2, mục 7). Nó tự mint marker riêng:
+
+| | `_bam` (API, đã có từ F2) | `_bfm` (edge, mới 31-07) |
+|---|---|---|
+| Nơi mint | `apps/api/services/agent_marker.py` (`mint_marker`) | `_middleware.js` (`mintFetchMarker`) |
+| Định dạng | Token Fernet — mã hoá, tự chứng minh TTL 7 ngày | 12 ký tự hex (`crypto.randomUUID()` cắt ngắn) |
+| Giải mã | Giải mã ngược ra `agent_fetch_events.id` | **Không giải mã được gì** — chỉ là khoá tra cứu, đối chiếu bằng so khớp chuỗi |
+| Đọc lại tại ingest | `agent_marker.py::decode_marker` qua `MARKER_PARAM = "_bam"` | `agent_marker.py::edge_marker_from_url` qua `EDGE_MARKER_PARAM = "_bfm"` |
+| Phạm vi dùng | Offers feed đa tenant (site khách bật `agent_marker_enabled`) | Riêng thử nghiệm Beam Lab (mọi `a[href]` cùng host trên trang tĩnh) |
+
+Cố ý tách tên: nếu edge tái dùng `_bam`, decoder Fernet của API sẽ nhận một giá trị nó **không thể
+giải mã**, và một thử nghiệm lab dễ bị đọc nhầm thành attribution production thật.
+
+Chuỗi ghi nhận, mỗi lượt fetch on-demand:
+
+```text
+Agent on-demand GET / (không mang credential)
+  → middleware mint marker 12-hex (_bfm)
+  → HTMLRewriter stamp _bfm= lên MỌI a[href] cùng host (không đổi header response)
+  → beacon POST /api/v1/agents/fetch-beacon kèm {..., marker: _bfm}
+    → record_fetch_beacon() → persist_agent_fetch_event(..., link_marker=_bfm)
+       ghi agent_fetch_events.link_marker (migration f3c8b2e91d47)
+
+Người click link mang _bfm= trong câu trả lời AI
+  → pixel gửi pageview URL còn nguyên _bfm=
+  → routers/events.py đọc edge_marker_from_url(event.url)
+       ghi events.link_marker (migration a7d419e6c052)
+
+Join: events.link_marker = agent_fetch_events.link_marker  (cả hai cột đều index PARTIAL)
+```
+
+Hai migration này **chỉ áp cho Postgres dev/local** kiểm chứng lab — **chưa apply lên API
+production**. Đây là một trong các việc còn mở (bảng dưới).
+
+`edge_marker_from_url()` có shape-check `[0-9a-f]{1,32}` vì `_bfm` là giá trị **ai cũng append được**
+vào URL (không mã hoá) — khác `_bam`, giải mã sai thì tự loại; `_bfm` phải tự kiểm hình dạng ở phía
+ingest để không nuốt rác vào cột index.
+
+**Lưu ý về trang sâu:** `/tac-nhan/` và `/kiem-chung/{openai,anthropic,perplexity,khac}/` ban đầu
+KHÔNG có snippet pixel — chỉ trang chủ `/` có. Chuỗi handoff cho các trang này im lặng thiếu một nửa
+(edge stamp marker nhưng không trang nào chạy pixel để đọc lại `_bfm` khi người click landing ở đó).
+Đã thêm snippet pixel vào các trang sâu; chưa kiểm chứng lại end-to-end trên các trang này.
+
+### Ba tầng định danh — không đổi kết luận, chỉ thêm bằng chứng
+
+Không có gì trong phiên này thay đổi ba câu hỏi ở mục 4, nhưng làm rõ thêm bằng chứng cho từng tầng:
+
+1. **AI nào** — vẫn có: classifier + beacon + log CF (ASN, tổ chức, UA) đủ để nói "đây là
+   ChatGPT-User thật" hay "đây là AI khác đội lốt".
+2. **Click ↔ fetch** — cơ chế + join DB **có**, khi có người thật bấm link đã đánh dấu (`_bam` hoặc
+   `_bfm` tuỳ đường). Chưa có bằng chứng con người bấm marker `_bfm` trên lab (bảng dưới).
+3. **Người đó là ai** — vẫn **không**. IP nhà/di động dân cư không định danh cá nhân; muốn có tên
+   người vẫn cần identity resolution (provider keys) hoặc chính người đó tự để lại email/form.
+
+**IP không phải khoá phiên.** Quan sát trực tiếp: IP của Azure/OpenAI đổi **giữa** các lượt fetch
+trong cùng MỘT câu trả lời ChatGPT (cùng ASN 8075 Microsoft, IP khác nhau theo từng request) — nên
+không thể dùng IP để nối hai lượt fetch của cùng một phiên hỏi đáp; chỉ marker mới nối được tất định.
+
+### Hành vi browse thật của ChatGPT (kiểm chứng 01-08)
+
+| Quan sát | Chi tiết |
+|---|---|
+| UA + ASN khi browse hoạt động | `ChatGPT-User/1.0`, ASN **8075**, header như `x-envoy-expected-rq-timeout-ms`, `x-request-id` (đổi mỗi request, **không** dùng được làm khoá phiên hội thoại) |
+| Fetch canary-only / trang chủ | Thường thành công; câu trả lời trích đúng `FUCHSIA-0731` — chứng minh đọc bản mới, không phải cache |
+| Prompt "chỉ dựa trên trang đã tải" | **Chặn hẳn** việc model tự hop sang `/tac-nhan/`, dù link nằm ngay trong trang đã tải |
+| Hop tự nhiên (không chặn) | Từng thành công kiểu E2b ở lần đo trước; các lần đo sau: fetch trang chủ xong **không** GET `/tac-nhan/` dù được yêu cầu mở link — model báo "không thấy href" |
+| Fetch thẳng URL sâu `.../tac-nhan/?ref=deep-0801` | Trang public trả 200 bình thường; ChatGPT **đôi lúc không fetch luôn**, bịa lý do, có lần trích dẫn sai domain (`amlab.vn` thay vì `beamlab.nhantown.com`) |
+| Dán thẳng HTML/text của `/tac-nhan/` vào chat | ChatGPT liệt kê đúng cả 13 token UA (11 nhận diện được + 2 cố ý không nhận diện: `google-extended`, `applebot-extended`) — chứng minh model đọc hiểu nội dung tốt, chỉ hành vi **browse chủ động** là không ổn định |
+
+Kết luận thực dụng: đừng coi "AI có tự hop sang link không" là bug của Beam — đó là hành vi
+browse-tool phía OpenAI, ngoài tầm kiểm soát của lớp phát hiện. Câu hỏi mở #1 ở cuối tài liệu này
+(marker có tự được AI giữ khi dẫn link tự nhiên) chưa có thêm bằng chứng quyết định từ phiên này.
+
+### Gemini — vẫn ngoài classifier
+
+Một lượt fetch khớp thời điểm Gemini eval mang UA `got (https://github.com/sindresorhus/got)`, ASN
+**14618 Amazon** (Ashburn) — **không phải** `Googlebot` hay `google-cloudvertexbot`. Classifier
+hiện tại **không** coi `got` là token AI nên **không ghi** `agent_fetch_events` cho lượt này — gap
+sản phẩm nếu cần theo dõi traffic dạng Gemini/AWS-hosted fetcher. Gemini vẫn trích đúng canary từ
+HTML dù đôi khi đọc sai meta/schema.
+
+### Schema.org trên trang chủ lab
+
+`@graph` gồm `Organization`, `WebSite`, `SoftwareApplication`, `WebPage`, `FAQPage`. Đã thử thêm rồi
+bỏ `TechRetail`/`TechArticle` (Rich Results coi là noise, không giúp gì). Cổng agent-facing vẫn giữ
+nguyên ở `<link rel="alternate">` — **không** đặt URL manifest vào `Organization.url` (từng làm tổ
+chức trông như một file JSON).
+
+### Việc còn mở (ưu tiên resume)
+
+| # | Việc | Ghi chú |
+|---|---|---|
+| 1 | Retest hop ChatGPT với prompt tự nhiên (không cấm rời trang) | Hoặc chấp nhận browse không ổn định là kết luận cuối |
+| 2 | Người thật bấm link mang `_bfm=` → xác nhận join `events.link_marker` | Chưa có bằng chứng end-to-end cho đường edge marker (khác với `_bam` đã kiểm chứng ở §5b) |
+| 3 | Phân loại fetcher dạng Gemini/`got`/AWS | Sản phẩm optional |
+| 4 | Áp migration `link_marker` (cả hai) lên API production | Hiện chỉ có ở Postgres dev |
+| 5 | Chính sách TTL cho `_bfm`; test on-demand Perplexity/Claude | `_bfm` chưa có TTL như Fernet 7 ngày của `_bam` |
+| 6 | Tắt `BEAM_FULL_LOG` sau cửa sổ debug | Đang `"1"`, log MỌI khách kể cả người |
+| 7 | F14 Web Bot Auth | Vẫn mở, không đổi so với mục 6 của tài liệu này |
+| 8 | Đối chiếu trạng thái plan | Cả hai plan feature vẫn mang `status: awaiting-execute-approval`, nhưng hành vi soft-serve **đã sống trên lab thật**. Cần UPDATE PROCESS đối chiếu trạng thái |
+
+Tham chiếu vận hành + resume nhanh: [beam-lab-resume.md](./beam-lab-resume.md).
 
 ---
 
