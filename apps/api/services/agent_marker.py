@@ -32,6 +32,7 @@ agent-origin emailability marker. A handoff link is attribution metadata; it
 makes nobody contactable.
 """
 
+import re
 import uuid
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 
@@ -54,6 +55,15 @@ logger = structlog.get_logger()
 # pixel already sends, exactly like the campaign ``_tp`` parameter — no tracker
 # change is involved in capturing it.
 MARKER_PARAM = "_bam"
+# The EDGE-minted sibling. Stamped onto same-host links by the Cloudflare Pages
+# middleware, which has neither an ``agent_fetch_events`` row nor the encryption
+# key at the moment it must rewrite the HTML — so it cannot mint a ``_bam`` and
+# uses its own opaque token instead. Kept as a separate name on purpose: handing
+# the ``_bam`` decoder a value it cannot decrypt would look like tampering.
+EDGE_MARKER_PARAM = "_bfm"
+# What the edge actually mints: lowercase hex, 12 chars today, bounded by the
+# 32-char column. Anchored via fullmatch at the call site.
+_EDGE_MARKER_RE = re.compile(r"[0-9a-f]{1,32}")
 
 # A click this long after the fetch is no longer plausibly "the human acting on
 # that agent answer" — it is a forwarded or bookmarked link. Fernet stamps a mint
@@ -131,15 +141,44 @@ def decode_marker(token: str | None) -> uuid.UUID | None:
     return decode_marker_with_reason(token)[0]
 
 
-def marker_from_url(url: str | None) -> str | None:
-    """Pull the marker out of a landing URL. Mirrors ``events._tp_from_url``."""
-    if not url or MARKER_PARAM + "=" not in url:
+def marker_from_url(url: str | None, param: str = MARKER_PARAM) -> str | None:
+    """Pull a link marker out of a landing URL. Mirrors ``events._tp_from_url``.
+
+    ``param`` defaults to the API-minted ``_bam``; pass ``EDGE_MARKER_PARAM`` for
+    the edge-minted one. The substring pre-check is not just a fast path — it is
+    what keeps the common case (a landing URL with no marker at all) from paying
+    for a full query parse on the ingest hot path.
+    """
+    if not url or param + "=" not in url:
         return None
     try:
-        values = parse_qs(urlsplit(url).query).get(MARKER_PARAM)
+        values = parse_qs(urlsplit(url).query).get(param)
         return values[0] if values else None
     except Exception:
         return None
+
+
+def edge_marker_from_url(url: str | None) -> str | None:
+    """Extract and shape-check the EDGE-minted ``_bfm`` marker from a landing URL.
+
+    Distinct from ``marker_from_url``'s default in both origin and meaning:
+    ``_bam`` is this API's own encrypted ``agent_fetch_events`` id, while
+    ``_bfm`` is an opaque token a Cloudflare Pages middleware minted on its own —
+    it decodes to nothing here and is only ever matched against
+    ``AgentFetchEvent.link_marker``, which the same edge reported via the beacon.
+
+    The shape check exists because this value is attacker-controllable: anyone
+    can append ``?_bfm=<anything>`` to a link. Storing only what the edge could
+    plausibly have minted keeps junk out of the column and keeps the partial
+    index selective. A rejected value degrades to "no deterministic link" — the
+    same outcome as a visitor who simply arrived without one.
+
+    Never raises: this runs on the ingest path.
+    """
+    raw = marker_from_url(url, EDGE_MARKER_PARAM)
+    if raw is None or not _EDGE_MARKER_RE.fullmatch(raw):
+        return None
+    return raw
 
 
 def _bare_host(netloc: str) -> str:

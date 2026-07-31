@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AgentOut(BaseModel):
@@ -68,6 +68,11 @@ class FetchBeaconIn(BaseModel):
     user_agent: str
     path: str
     token: str | None = None
+    # Per-fetch token the edge stamped onto the same-host links in the HTML it
+    # served for this fetch. Optional: every pre-existing edge build omits it,
+    # and a beacon without one is still a valid beacon. Length-capped to the
+    # column so an oversized value is rejected here rather than at the INSERT.
+    marker: str | None = Field(None, max_length=32)
 
 
 class FetchBeaconAck(BaseModel):

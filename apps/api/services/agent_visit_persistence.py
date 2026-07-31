@@ -167,6 +167,7 @@ async def persist_agent_fetch_event(
     page_path: str | None,
     event_time: datetime | None = None,
     dedup_key: str | None = None,
+    link_marker: str | None = None,
 ) -> uuid.UUID | None:
     """Insert one append-only ``agent_fetch_events`` row. Fail-open.
 
@@ -203,6 +204,10 @@ async def persist_agent_fetch_event(
             "ip_address": ip_address or None,
             "verification_method": classification.verification_method,
             "dedup_key": dedup_key,
+            # Edge-minted per-fetch link token, or None for every caller that
+            # does not stamp links. Written unconditionally so a marked fetch is
+            # joinable from a later click; see AgentFetchEvent.link_marker.
+            "link_marker": link_marker,
         }
         if event_time is not None:
             values["created_at"] = event_time

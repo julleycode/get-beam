@@ -13,6 +13,11 @@ from apps.api.models.database import get_db, async_session
 from apps.api.models.event import Event
 from apps.api.schemas.events import EventBatch
 from apps.api.services.agent_classifier import classify_agent, classify_tier
+# Top-level, unlike the flag-gated lazy import of this module further down: the
+# extraction runs on every event row, so paying an import lookup per batch would
+# be the wrong trade. No cycle — agent_marker's heaviest dependency is
+# link_decorator, which this module already imports above.
+from apps.api.services.agent_marker import edge_marker_from_url
 from apps.api.services.agent_visit_persistence import build_dedup_key, persist_agent_visit, persist_agent_fetch_event
 from apps.api.services.bot_filter import is_bot
 from apps.api.services.ip_resolution import resolve_client_ip
@@ -378,6 +383,13 @@ async def ingest_events(
             user_agent=event.user_agent or request_ua[:500],
             page_title=event.page_title or "",
             page_path=event.page_path or "",
+            # Edge-minted AI-fetch marker lifted out of the landing URL. Extracted
+            # here rather than read from ``url`` at query time so the join against
+            # AgentFetchEvent.link_marker is an index lookup instead of a LIKE
+            # scan of this table. Shape-checked inside the helper: the value is
+            # attacker-supplied (anyone can append ``?_bfm=``), and junk that
+            # cannot have been minted is stored as NULL.
+            link_marker=edge_marker_from_url(event.url),
             optout=bool(event.optout),
             # P3 site-ceiling trip OR P4 velocity flag. Written in the SAME INSERT
             # that stores the row, so there is no window where flood traffic is

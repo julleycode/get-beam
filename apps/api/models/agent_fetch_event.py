@@ -51,6 +51,19 @@ class AgentFetchEvent(Base):
             unique=True,
             postgresql_where=text("dedup_key IS NOT NULL"),
         ),
+        # Lookup index for the click-side join: given a ``_bfm`` seen in a landing
+        # URL, find the fetch that minted it. PARTIAL because the overwhelming
+        # majority of rows carry no marker and indexing their NULLs would cost
+        # write throughput on the ingest path for nothing. Deliberately NOT
+        # unique: the edge mints per fetch with no coordination, so uniqueness is
+        # a property to observe, not one to enforce -- a collision should show up
+        # as two candidate rows to disambiguate, never as a rejected insert that
+        # loses an agent visit.
+        Index(
+            "idx_agent_fetch_events_link_marker",
+            "link_marker",
+            postgresql_where=text("link_marker IS NOT NULL"),
+        ),
     )
 
     site_id: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -64,3 +77,20 @@ class AgentFetchEvent(Base):
     # path has none. NULL means "this row makes no dedup claim", never "this row
     # is unique" -- see ``build_dedup_key`` for what goes into the digest.
     dedup_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Opaque per-fetch token the EDGE stamped onto every same-host link in the
+    # HTML it served for this fetch. A human who later clicks one of those links
+    # arrives carrying it in the landing URL, which the pixel already reports --
+    # so joining ``events.url`` back to this row names the exact fetch whose
+    # answer produced the click. That is the deterministic replacement for the
+    # vendor+page+30-minute guess in ``agent_handoff_correlation``.
+    #
+    # NOT the same token as ``agent_marker.py``'s ``_bam``: that one is this
+    # row's id encrypted by the API, minted only for offers.json. This column
+    # stores a marker the edge minted on its own, because a Pages middleware has
+    # neither the row nor the key at the time it must stamp the links.
+    #
+    # Nullable and unconstrained on purpose: every pre-existing row has none,
+    # every non-edge write path still has none, and a forged value can at worst
+    # attach a bogus attribution to an agent-only row -- it reaches no identity
+    # or emailability path.
+    link_marker: Mapped[str | None] = mapped_column(String(32), nullable=True)

@@ -121,6 +121,10 @@ async def record_fetch_beacon(db: AsyncSession, payload: FetchBeaconIn) -> str:
             page_path=payload.path,
             natural_key=payload.token,
         ),
+        # Deliberately NOT folded into the dedup key: the marker is minted fresh
+        # per request, so including it would make every retry look like a new
+        # fetch and defeat the replay guard entirely.
+        link_marker=payload.marker,
     )
     logger.info(
         "fetch_beacon_written",

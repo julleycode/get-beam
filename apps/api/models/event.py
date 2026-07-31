@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text, text
 from sqlalchemy.sql import func
 
 from apps.api.models.database import Base
@@ -48,6 +48,16 @@ class Event(Base):
     is_flagged_abuse: bool = Column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # Edge-minted AI-fetch link marker (``?_bfm=``) extracted from ``url`` at
+    # ingest. Denormalised on purpose: matching it against
+    # AgentFetchEvent.link_marker is how a human click is tied to the exact agent
+    # fetch whose answer produced it, and doing that with LIKE over ``url`` is a
+    # sequential scan of the largest table in the schema. One extracted column
+    # turns that join into two index lookups.
+    #
+    # NULL for the overwhelming majority of events — most visitors arrive with no
+    # marker, and every event before this column existed has none.
+    link_marker: str | None = Column(String(32), nullable=True)
     created_at: datetime = Column(DateTime, default=func.now(), nullable=False)
 
     __table_args__ = (
@@ -57,4 +67,13 @@ class Event(Base):
         Index("ix_events_created", "created_at"),
         # Supports the aggregator's exclusion filter and the P5 health query.
         Index("ix_events_site_flagged", "site_id", "is_flagged_abuse"),
+        # PARTIAL: only marked events are indexed. This table takes every
+        # pageview/scroll/time_on_page on every customer site, so indexing the
+        # NULLs would cost write throughput on the hottest path in the API for
+        # rows that can never satisfy the join.
+        Index(
+            "ix_events_link_marker",
+            "link_marker",
+            postgresql_where=text("link_marker IS NOT NULL"),
+        ),
     )
