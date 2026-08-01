@@ -33,12 +33,17 @@ async def _signup(test_client, email: str) -> str:
 def _visitor(site_id: str, visitor_id: str, **overrides):
     from apps.api.models.visitor import Visitor
 
+    # total_pageviews > 0, or the visitors list drops the row as a "ghost" (zero
+    # pageviews, no identity row, no captured email). The anonymous fixture below
+    # has none of those, so without this it never appears in the response and the
+    # assertions about its null email fail on a missing key instead.
     defaults = dict(
         site_id=site_id,
         visitor_id=visitor_id,
         first_seen=datetime.utcnow(),
         last_seen=datetime.utcnow(),
-        pages_visited=[],
+        pages_visited=["/"],
+        total_pageviews=1,
         ip_address="203.0.113.7",
         intent_score=0.0,
         identity_status="anonymous",

@@ -3,6 +3,9 @@
 .env.local
 .env.*.local
 
+# Graphify knowledge graph (generated)
+**/graphify-out/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -50,5 +53,21 @@ apps/web/public/beam/launch.src.mp4
 .claude/worktrees/
 .env.*
 **/.env
+# Templates must stay trackable (negate after `.env.*` above)
+!.env.example
+!**/.env.example
+!infra/.env.example
 .vibecode-backup*/
 .claude/hooks/.logs/
+
+# Local helper runtime files
+.dev-local.pids
+.dev-local-*.log
+apps/web/.env.local
+
+# Published agent IP ranges refetched at runtime. The shipped *.json files stay
+# tracked and empty; the refresh job writes only here so it never dirties git.
+apps/api/data/agent_ip_ranges/runtime/
+
+# Wrangler local cache (account id, pages metadata) — never commit
+**/.wrangler/

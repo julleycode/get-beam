@@ -19,7 +19,7 @@ MIN_PIXEL_PATH = PIXEL_DIR / "tracker.min.js"
 @pytest.fixture
 def pixel_code() -> str:
     assert PIXEL_PATH.exists(), f"Pixel not found at {PIXEL_PATH}"
-    return PIXEL_PATH.read_text()
+    return PIXEL_PATH.read_text(encoding="utf-8")
 
 
 @pytest.fixture
@@ -27,7 +27,7 @@ def min_pixel_code() -> str:
     assert MIN_PIXEL_PATH.exists(), (
         f"Minified pixel not found at {MIN_PIXEL_PATH} — run `npm run build` in apps/pixel"
     )
-    return MIN_PIXEL_PATH.read_text()
+    return MIN_PIXEL_PATH.read_text(encoding="utf-8")
 
 
 class TestFingerprintV2:

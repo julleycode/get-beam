@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
 
     # PostgreSQL
-    database_url: str = "postgresql+asyncpg://retarget:retarget_dev@localhost:5432/retarget_agent"
+    database_url: str = "postgresql+asyncpg://retarget:retarget_dev@localhost:5433/retarget_agent"
 
     # ─── DB pool + timeout hardening (capacity-hardening plan Phase 4a/4b / W4) ───
     # 4a — SERVER-SIDE statement timeout, applied via asyncpg `server_settings`
@@ -334,6 +334,23 @@ class Settings(BaseSettings):
     # live-applied in prod; flipping it on in a real environment is an explicit
     # operator action, matching agent_detection_enabled / company_graph_enabled.
     agent_gateway_enabled: bool = False
+
+    # ─── Agent link marker (Handoff Detection F2) ───
+    # When true, offers.json stamps each same-host offer URL with an opaque
+    # per-fetch marker, so a human arriving on that link is tied to the exact
+    # agent fetch that surfaced it — replacing the 30-minute temporal guess with
+    # a deterministic match.
+    #
+    # Turning this on CHANGES THE CACHE POSTURE of offers.json: the response goes
+    # private/no-store, because a marker is per-fetch and a shared cache would
+    # hand one agent's marker to every later agent — attributing the human to the
+    # wrong fetch, which is worse than the guess it replaces. manifest.json and
+    # llms.txt are untouched and keep AGENT_CACHE_CONTROL; they carry no marker.
+    #
+    # Defaults OFF, matching agent_detection_enabled / agent_gateway_enabled.
+    # Requires no migration: the marker is self-describing, and the deterministic
+    # link lands in the existing agent_handoff_links table.
+    agent_marker_enabled: bool = False
 
     # ─── Cadence bot flag ───
     # Fifth, ORTHOGONAL bot layer. The four existing ones (tracker.js webdriver
@@ -717,7 +734,20 @@ class Settings(BaseSettings):
     sync_interval_minutes: int = 60
     resolution_sweep_interval_minutes: int = 30  # APScheduler identity-resolution sweep cadence
     agent_verification_sweep_interval_minutes: int = 15  # APScheduler agent IP-verification sweep cadence
+    agent_ip_range_refresh_interval_hours: int = 24  # Re-fetch published per-agent IP-range datasets; stale ranges make real agents look like forged ones
     handoff_correlation_sweep_interval_minutes: int = 10  # APScheduler fetch↔click handoff correlation sweep cadence (H2)
+    # How long a fetch event must age before the H2 sweep will correlate it. This
+    # is ONLY the settle delay — it is NOT the correlation window. The window
+    # (agent_handoff_correlation._WINDOW_SECONDS) still decides which clicks count,
+    # so lowering this shortens the wait for a link to appear without narrowing
+    # what qualifies as a match. Lower it in dev/UAT to see a link in ~1 min
+    # instead of ~30; production keeps the default so every fetch is scored
+    # against its complete candidate set (a fetch is linked once, permanently —
+    # settling early can lock in a weak click and shut out a better later one).
+    # Must stay below agent_handoff_correlation._UNLINKED_LOOKBACK_MINUTES or no
+    # fetch is ever both old enough and young enough to be swept; the sweep clamps
+    # and warns rather than silently linking nothing.
+    handoff_correlation_settle_seconds: int = 1800
     intent_signal_sweep_interval_minutes: int = 10  # APScheduler live commercial-page intent-signal + spike sweep cadence (H3)
     aggregation_sweep_interval_minutes: int = 60  # APScheduler full-recompute aggregation repair sweep cadence
     # Data retention (GDPR data minimization / privacy-policy 90-day promise):

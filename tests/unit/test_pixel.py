@@ -15,7 +15,7 @@ PIXEL_PATH = pathlib.Path(__file__).parent.parent.parent / "apps" / "pixel" / "s
 def pixel_code() -> str:
     """Read the pixel JavaScript source."""
     assert PIXEL_PATH.exists(), f"Pixel file not found at {PIXEL_PATH}"
-    return PIXEL_PATH.read_text()
+    return PIXEL_PATH.read_text(encoding="utf-8")
 
 
 class TestPixelRequiredFeatures:
@@ -146,7 +146,7 @@ class TestBeamConvert:
         # The API serves the MINIFIED file — an unbuilt tracker.js change
         # never reaches customers. This catches a forgotten `npm run build`.
         assert self.MIN_PATH.exists(), "tracker.min.js missing — run npm run build in apps/pixel"
-        assert "beamConvert" in self.MIN_PATH.read_text()
+        assert "beamConvert" in self.MIN_PATH.read_text(encoding="utf-8")
 
     def test_minified_gzip_size_within_budget(self):
         import gzip

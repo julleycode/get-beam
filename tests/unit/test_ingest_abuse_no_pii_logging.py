@@ -84,7 +84,7 @@ _LOG_METHODS = {"debug", "info", "warning", "warn", "error", "exception", "criti
 
 def _logger_calls(path: pathlib.Path):
     """Yield (lineno, kwarg_names) for every logger.<level>(...) call in a file."""
-    tree = ast.parse(path.read_text(), filename=str(path))
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -136,7 +136,7 @@ def test_velocity_counters_key_on_ids_not_pii():
 
 def test_ingest_health_response_exposes_no_pii():
     """AC-9: the operator payload is counts + ids + ratios only."""
-    src = (_REPO_ROOT / "apps/api/routers/ingest_health.py").read_text()
+    src = (_REPO_ROOT / "apps/api/routers/ingest_health.py").read_text(encoding="utf-8")
     for forbidden in ("IdentifiedVisitor", ".email", "full_name"):
         assert forbidden not in src, f"ingest-health surface references {forbidden}"
 
@@ -148,6 +148,6 @@ def test_ac10_no_new_external_service_calls():
         "apps/api/services/ingest_velocity.py",
         "apps/api/routers/ingest_health.py",
     ):
-        src = (_REPO_ROOT / rel_path).read_text()
+        src = (_REPO_ROOT / rel_path).read_text(encoding="utf-8")
         for forbidden in ("httpx", "requests", "aiohttp", "urllib.request"):
             assert forbidden not in src, f"{rel_path} introduces an external call"

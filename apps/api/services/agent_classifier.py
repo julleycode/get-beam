@@ -14,17 +14,27 @@ drop-vs-classify ordering is explicitly Phase 2's filter-ordering requirement
 (SPEC AC4), not this module's job.
 """
 
+import re
 from typing import NamedTuple
 
 # Known AI-agent vendor tokens (all lowercase). The UA is lowercased before
 # comparison, so matching is case-insensitive. Non-OpenAI/Anthropic/Perplexity/
 # ByteSpider vendors (e.g. bedrock-agentcore, agentcore, shap-user) are
 # intentionally drop-only for v1 — v1 backlog per SPEC Resolved Open Question 6.
-_VENDOR_TOKENS: dict[str, frozenset[str]] = {
-    "openai": frozenset({"gptbot", "chatgpt-user", "oai-searchbot"}),
-    "anthropic": frozenset({"claudebot", "anthropic-ai", "claude-user", "claude-searchbot"}),
-    "perplexity": frozenset({"perplexitybot", "perplexity-user"}),
-    "bytespider": frozenset({"bytespider"}),
+#
+# Ordered tuples, NOT sets: a UA can contain more than one token (a spoofed
+# "GPTBot ChatGPT-User" string, say), and set iteration order follows string
+# hashes, which Python randomizes per process. That would make the returned
+# token — and therefore the tier — differ between restarts for the same input,
+# so the same evidence would not classify the same way twice.
+#
+# Within a vendor, longest token first, so the most specific match wins:
+# ``chatgpt-user`` is decided before the shorter ``gptbot`` can claim it.
+_VENDOR_TOKENS: dict[str, tuple[str, ...]] = {
+    "openai": ("oai-searchbot", "chatgpt-user", "gptbot"),
+    "anthropic": ("claude-searchbot", "anthropic-ai", "claude-user", "claudebot"),
+    "perplexity": ("perplexity-user", "perplexitybot"),
+    "bytespider": ("bytespider",),
     # Google/Gemini (Handoff Detection H5, D-A). Added conservatively: the exact
     # live Gemini/Google *on-demand* fetch UA token is UNVERIFIED (KG-3). The
     # only documented Google user/owner-triggered fetcher is
@@ -35,13 +45,23 @@ _VENDOR_TOKENS: dict[str, frozenset[str]] = {
     # directives, not real fetch UAs (see test_agent_classifier AC13 exclusion), and
     # must never classify. Promote to on-demand only after a real fetch UA is
     # confirmed from live logs (KG-3 backlog stub).
-    "google": frozenset({"google-cloudvertexbot"}),
+    "google": ("google-cloudvertexbot",),
 }
 
 # Verification tiers. Phase 1 always returns "ua-only"; Phase 4 adds the other
 # tiers. Forward-declared contract for Phase 4 to import and validate against —
 # not consumed for validation within Phase 1.
-VERIFICATION_METHODS: tuple[str, ...] = ("ua-only", "ip-verified", "rdns-verified")
+# ``ip-mismatch`` is a CONCLUSION, not a lower rank: the UA claims a vendor that
+# publishes IP ranges, and the observed IP is in none of them. It is only ever
+# assignable for a vendor that actually has a published dataset — a vendor with
+# no dataset (Anthropic) can never be judged, because absence of evidence is not
+# evidence of forgery.
+VERIFICATION_METHODS: tuple[str, ...] = (
+    "ua-only",
+    "ip-verified",
+    "rdns-verified",
+    "ip-mismatch",
+)
 
 # On-demand vs index tier split (Handoff Detection H1). "on-demand" tokens are
 # live-fetch-on-user-query bots — a real human is behind the request right now
@@ -51,12 +71,42 @@ VERIFICATION_METHODS: tuple[str, ...] = ("ua-only", "ip-verified", "rdns-verifie
 # Conservative asymmetry: only tokens KNOWN to be user-driven live fetches are
 # on-demand; the default (else-branch) is "index". Mislabeling a crawler as
 # on-demand would fabricate a human-intent signal, so the safe default is index.
-# Notably ``claude-searchbot`` is on-demand (Anthropic's live user-query fetch,
-# analogous to oai-searchbot/perplexity-user) while ``anthropic-ai`` — a distinct
-# token in the same "anthropic" vendor set — is the crawler/index token.
+#
+# The three ``*-user`` tokens are the only per-query fetches their vendors
+# document. The ``*-searchbot`` tokens are NOT: OpenAI describes OAI-SearchBot as
+# "used to surface websites in search results in ChatGPT's search features" — an
+# automatic crawler, not a live fetch — and Anthropic describes Claude-SearchBot
+# as crawling to build an indexed corpus for search. Both are index-tier.
+# ``anthropic-ai`` is the crawler token of the same "anthropic" vendor set.
 _ON_DEMAND_TOKENS: frozenset[str] = frozenset({
-    "chatgpt-user", "oai-searchbot", "claude-user", "claude-searchbot", "perplexity-user",
+    "chatgpt-user", "claude-user", "perplexity-user",
 })
+
+
+# Bot User-Agents conventionally carry a self-describing URL in a comment, e.g.
+# ``Mozilla/5.0 (compatible; GPTBot/1.0; +https://openai.com/gptbot)``. That URL
+# is not a product token, and matching against it means any UA whose comment URL
+# merely mentions a vendor — a scanner advertising ``/gptbot-detector``, say —
+# would be classified as that vendor. Genuine agents still match on the product
+# token itself, which sits outside the URL.
+_URL_RE = re.compile(r"\w+://\S*")
+
+# Token boundary: a vendor token must not be a fragment of a longer run of
+# token characters. Hyphens are part of the tokens themselves (``chatgpt-user``),
+# so the boundary class is letters/digits/hyphen/underscore/dot rather than the
+# regex ``\b`` word boundary, which would treat a hyphen as a separator.
+_TOKEN_CHARS = r"[A-Za-z0-9._-]"
+
+
+def _strip_urls(ua: str) -> str:
+    """Remove self-describing URLs from a UA before token matching."""
+    return _URL_RE.sub(" ", ua)
+
+
+def _contains_token(ua: str, token: str) -> bool:
+    """True iff ``token`` appears in ``ua`` as a whole token, not a fragment."""
+    pattern = rf"(?<!{_TOKEN_CHARS}){re.escape(token)}(?!{_TOKEN_CHARS})"
+    return re.search(pattern, ua) is not None
 
 
 def classify_tier(raw_ua_token: str) -> str:
@@ -84,10 +134,10 @@ def classify_agent(user_agent: str | None) -> AgentClassification | None:
     """
     if not user_agent or not user_agent.strip():
         return None
-    ua = user_agent.lower()
+    ua = _strip_urls(user_agent.lower())
     for vendor, tokens in _VENDOR_TOKENS.items():
         for token in tokens:
-            if token in ua:
+            if _contains_token(ua, token):
                 return AgentClassification(
                     vendor=vendor,
                     product_or_ua_token=token,

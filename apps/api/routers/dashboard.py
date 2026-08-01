@@ -16,12 +16,14 @@ from apps.api.models.database import get_db
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.site import Site
 from apps.api.models.user import User
-from apps.api.models.visitor import IdentifiedVisitor, Visitor, resolution_intent_filter
+from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.dependencies import get_current_user
 from apps.api.schemas.sites import SiteOut
 from apps.api.schemas.visitors import VisitorStatsResponse
+from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 from apps.api.services.resolution_eligibility import (
     first_win_boost_site_ids,
+    resolution_candidate_filter,
     site_resolves_all_us,
 )
 from apps.api.services.usage_limits import _today_start, is_full_byok
@@ -103,12 +105,19 @@ async def get_overview(
                 .filter(
                     and_(
                         Visitor.identity_status == "anonymous",
-                        resolution_intent_filter(all_us_ids, no_floor_site_ids=boost_ids),
+                        resolution_candidate_filter(
+                            all_us_ids,
+                            no_floor_site_ids=boost_ids,
+                        ),
+                        Visitor.do_not_resolve.is_(False),
                     )
                 )
                 .label("eligible_for_resolution"),
             )
-            .where(Visitor.site_id.in_(site_ids))
+            .where(
+                Visitor.site_id.in_(site_ids),
+                human_only_visitor_filter(),
+            )
             .group_by(Visitor.site_id)
         )
     ).all()

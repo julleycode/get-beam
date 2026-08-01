@@ -109,7 +109,7 @@ def test_source_agent_visit_id_absent_from_h2_files(rel_path):
     # Pure text search — the emailability marker must NEVER appear in the H2
     # correlation surface. If a future edit wires it in, this fails loudly instead
     # of silently coupling handoff links to the outreach-exclusion mechanism.
-    text = (_REPO_ROOT / rel_path).read_text()
+    text = (_REPO_ROOT / rel_path).read_text(encoding="utf-8")
     assert "source_agent_visit_id" not in text, (
         f"{rel_path} references 'source_agent_visit_id' — the H2 handoff surface "
         "must stay structurally separate from the AC-H2-3 emailability guardrail."

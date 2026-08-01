@@ -22,6 +22,8 @@ from apps.api.schemas.agents import (
 from apps.api.services.agent_aggregator import (
     aggregate_agent_analytics,
     fetch_agent_visit_rows,
+    fetch_handoff_confidence_split,
+    fetch_handoff_denominator,
     fetch_handoff_links_count,
     fetch_recent_ai_researched_companies,
 )
@@ -172,9 +174,15 @@ async def get_agent_analytics(
 
     rows = await fetch_agent_visit_rows(db, site_id)
     handoff_links_count = await fetch_handoff_links_count(db, site_id)
+    handoff_confidence = await fetch_handoff_confidence_split(db, site_id)
+    on_demand_fetch_count = await fetch_handoff_denominator(db, site_id)
     recent_ai_researched = await fetch_recent_ai_researched_companies(db, site_id)
     result = aggregate_agent_analytics(
-        rows, handoff_links_count, recent_ai_researched
+        rows,
+        handoff_links_count,
+        recent_ai_researched,
+        handoff_confidence=handoff_confidence,
+        on_demand_fetch_count=on_demand_fetch_count,
     )
     return AgentAnalyticsResponse(**result)
 

@@ -1,16 +1,26 @@
-"""Which sites get the loosened all-US resolution eligibility.
+"""Shared identity-resolution candidate eligibility.
 
 Sites whose url hostname matches ``settings.resolve_all_us_domains`` (default
 the owner's own getbeam.fyi) resolve every US visitor regardless of intent
 score. All other sites keep the intent >= RESOLUTION_MIN_INTENT gate so
-customer provider budgets aren't burned on low-intent traffic.
+customer provider budgets aren't burned on low-intent traffic. AI-attributable
+humans also qualify regardless of intent: either ``Visitor.ai_source`` is set
+or a same-site, same-visitor ``AgentHandoffLink`` exists.
 """
 
+from collections.abc import Collection
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from apps.api.config import settings
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.sql.elements import ColumnElement
+
+    from apps.api.models.visitor import Visitor
 
 
 def _hostname(url: str | None) -> str:
@@ -29,6 +39,84 @@ def site_resolves_all_us(site_url: str | None) -> bool:
         if d.strip()
     }
     return bool(domains) and _hostname(site_url) in domains
+
+
+def ai_attributable_visitor_filter(
+    *, handoff_linked: "ColumnElement[bool] | None" = None
+):
+    """SQL predicate for AI referral or same-site handoff attribution.
+
+    Count/filter queries use the default correlated ``EXISTS``. Callers that
+    already joined a deduplicated handoff-id set can inject that joined boolean
+    to reuse it for filtering and ordering.
+    """
+    from apps.api.models.agent_handoff_link import AgentHandoffLink
+    from apps.api.models.visitor import Visitor
+
+    if handoff_linked is None:
+        handoff_linked = (
+            select(AgentHandoffLink.id)
+            .where(
+                AgentHandoffLink.site_id == Visitor.site_id,
+                AgentHandoffLink.visitor_id == Visitor.visitor_id,
+            )
+            .exists()
+        )
+    return or_(Visitor.ai_source.is_not(None), handoff_linked)
+
+
+def resolution_candidate_filter(
+    all_us_site_ids: Collection[str] = (),
+    no_floor_site_ids: Collection[str] = (),
+    *,
+    handoff_linked: "ColumnElement[bool] | None" = None,
+):
+    """SQL predicate for the complete resolution-candidate eligibility rule."""
+    from apps.api.models.visitor import resolution_intent_filter
+
+    return or_(
+        resolution_intent_filter(all_us_site_ids, no_floor_site_ids),
+        ai_attributable_visitor_filter(handoff_linked=handoff_linked),
+    )
+
+
+async def is_resolution_candidate(
+    db: "AsyncSession",
+    visitor: "Visitor",
+    *,
+    site_url: str | None,
+    no_floor_site_ids: Collection[str] | None = None,
+) -> bool:
+    """Evaluate the shared candidate rule for one already-loaded visitor."""
+    from apps.api.models.agent_handoff_link import AgentHandoffLink
+    from apps.api.models.visitor import RESOLUTION_MIN_INTENT
+
+    if (
+        (visitor.intent_score or 0) >= RESOLUTION_MIN_INTENT
+        or visitor.ai_source is not None
+        or (
+            site_resolves_all_us(site_url)
+            and (visitor.country_code or "").upper() == "US"
+        )
+    ):
+        return True
+
+    if no_floor_site_ids is None:
+        no_floor_site_ids = await first_win_boost_site_ids(db, [visitor.site_id])
+    if visitor.site_id in no_floor_site_ids:
+        return True
+
+    handoff_id = (
+        await db.execute(
+            select(AgentHandoffLink.id)
+            .where(
+                AgentHandoffLink.site_id == visitor.site_id,
+                AgentHandoffLink.visitor_id == visitor.visitor_id,
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    return handoff_id is not None
 
 
 async def first_win_boost_site_ids(db, site_ids) -> list[str]:

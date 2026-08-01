@@ -16,15 +16,28 @@ Two hard rules, enforced here rather than at each call site:
    site_ids exist.
 2. The assembly functions only ever read customer-authored fields. No
    ``user_id``, no internal UUIDs, no counts, no operational Site columns.
+
+``record_gateway_visit`` is the one write in this module: it logs a recognized
+agent's call to a gateway surface into the two agent-only tables, so the surface
+built to attract AI agents is visible to Beam's own agent detection.
 """
 
+import uuid
+
 import structlog
+from fastapi import Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.models.agent_profile import AgentProfile
 from apps.api.models.site import Site
+from apps.api.services.agent_classifier import classify_agent, classify_tier
+from apps.api.services.agent_visit_persistence import (
+    persist_agent_fetch_event,
+    persist_agent_visit,
+)
+from apps.api.services.ip_resolution import resolve_client_ip
 from apps.api.schemas.agent_gateway import (
     CAPABILITY_NAMESPACE,
     AgentManifest,
@@ -42,6 +55,77 @@ logger = structlog.get_logger()
 # edit can take up to ~24h to fully propagate. Do not shorten it here in
 # isolation — that would diverge the two surfaces.
 AGENT_CACHE_CONTROL = "public, max-age=0, s-maxage=3600, stale-while-revalidate=86400"
+
+# Cache posture for offers.json while link markers are enabled. A marker is
+# minted per fetch, so a SHARED cache would serve the first agent's marker to
+# every agent behind it and attribute the human to the wrong fetch -- a worse
+# answer than the temporal guess the marker replaces. Only offers.json carries
+# markers, so only offers.json pays this; manifest.json and llms.txt keep
+# AGENT_CACHE_CONTROL above.
+AGENT_OFFERS_MARKED_CACHE_CONTROL = "private, no-store"
+
+# Surface labels stored as the ``page_path`` of a gateway visit. Fixed literals,
+# never the raw request path -- the real path embeds the site_id, which would
+# make every row unique and destroy the rollup. The MCP labels carry the tool
+# name because "an agent asked for pricing" is a materially stronger signal than
+# "an agent called the MCP server".
+SURFACE_MANIFEST = "/agent/manifest.json"
+SURFACE_OFFERS = "/agent/offers.json"
+SURFACE_LLMS_TXT = "/agent/llms.txt"
+SURFACE_MCP_TOOLS_LIST = "/agent/mcp/tools-list"
+
+
+def mcp_tool_surface(tool_name: str) -> str:
+    """Surface label for one MCP tool call, e.g. ``/agent/mcp/get_pricing``.
+
+    Callers pass only names already validated against ``MCP_TOOLS``, so the label
+    is drawn from a fixed set and never carries caller-controlled text.
+    """
+    return f"/agent/mcp/{tool_name}"
+
+
+async def record_gateway_visit(
+    db: AsyncSession, request: Request, site_id: str, surface: str
+) -> uuid.UUID | None:
+    """Record a recognized AI agent's call to a public gateway surface.
+
+    Returns the ``agent_fetch_events`` row id when one was written, else ``None``
+    (unrecognized UA, or a failed best-effort write). The offers route mints its
+    per-fetch link marker from it; every other caller ignores it.
+
+    Without this the gateway is invisible to Beam's own agent detection: an agent
+    could read the manifest, pull the offers feed and query the MCP server, and
+    none of it would appear on the Agents dashboard -- even though an MCP tool
+    call is the most deliberate "an AI is researching this business" signal
+    available, stronger than any User-Agent string.
+
+    Only recognized vendor UAs are recorded, matching the ingest and beacon
+    paths: an unrecognized caller yields no classification, so there is no vendor
+    to attribute the row to and inventing one would corrupt the vendor rollup.
+    An MCP client with a generic UA is therefore still invisible -- a known gap,
+    not an oversight.
+
+    Writes go to the two agent-only tables via the existing fail-open persistence
+    helpers, so this never creates or touches a Visitor or an IdentifiedVisitor.
+    Wrapped end to end because these are public unauthenticated read routes: a
+    bookkeeping failure must never turn an agent's manifest fetch into a 500.
+    """
+    try:
+        classification = classify_agent(request.headers.get("user-agent"))
+        if classification is None:
+            return None
+        tier = classify_tier(classification.product_or_ua_token)
+        ip_address = resolve_client_ip(request)
+        await persist_agent_visit(db, site_id, classification, ip_address, surface)
+        return await persist_agent_fetch_event(
+            db, site_id, classification, tier, ip_address, surface
+        )
+    except Exception:
+        # Keys only -- never the raw UA or the IP (PII/GDPR guard).
+        logger.warning(
+            "agent_gateway_visit_record_failed", site_id=site_id, surface=surface
+        )
+        return None
 
 CAPABILITY_VERSION = "1"
 

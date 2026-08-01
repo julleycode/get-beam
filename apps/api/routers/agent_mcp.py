@@ -36,7 +36,13 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.database import get_db
-from apps.api.services.agent_gateway import MCP_TOOLS, resolve_public_profile
+from apps.api.services.agent_gateway import (
+    MCP_TOOLS,
+    SURFACE_MCP_TOOLS_LIST,
+    mcp_tool_surface,
+    record_gateway_visit,
+    resolve_public_profile,
+)
 from apps.api.services.rate_limiter import limiter
 
 router = APIRouter()
@@ -156,8 +162,11 @@ async def mcp_endpoint(
     if not isinstance(method, str):
         return JSONResponse(_error(request_id, _INVALID_REQUEST, "Invalid Request"))
 
-    # ── Gate 4: strict method allow-list.
+    # ── Gate 4: strict method allow-list. Recording happens only past this gate,
+    # so a malformed or rejected call never lands in the agent tables; the label
+    # is always a fixed literal or a validated MCP_TOOLS key, never raw input.
     if method == "tools/list":
+        await record_gateway_visit(db, request, site_id, SURFACE_MCP_TOOLS_LIST)
         return JSONResponse(_result(request_id, _tools_list()))
 
     if method == "tools/call":
@@ -169,12 +178,14 @@ async def mcp_endpoint(
             return JSONResponse(
                 _error(request_id, _METHOD_NOT_FOUND, "Method not found")
             )
+        await record_gateway_visit(db, request, site_id, mcp_tool_surface(tool_name))
         return JSONResponse(
             _result(request_id, MCP_TOOLS[tool_name](site, profile))
         )
 
     # Direct tool invocation as a bare method, for simple clients.
     if method in MCP_TOOLS:
+        await record_gateway_visit(db, request, site_id, mcp_tool_surface(method))
         return JSONResponse(_result(request_id, MCP_TOOLS[method](site, profile)))
 
     return JSONResponse(_error(request_id, _METHOD_NOT_FOUND, "Method not found"))

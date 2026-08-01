@@ -83,10 +83,15 @@ async def agents_setup(test_client, test_db):
 
     # A human visitor on the SAME site — proves /agents never leaks Visitor rows
     # and /visitors is unaffected by agent data (AC6).
+    # total_pageviews must be > 0: the visitors list filters out "ghost" rows
+    # (zero pageviews AND no identity AND no captured email), so a default-zero
+    # fixture would be excluded for being a ghost rather than for anything to do
+    # with agent data — and this assertion would pass vacuously in reverse.
     test_db.add(Visitor(
         site_id=site_id, visitor_id="human-1",
         first_seen=datetime(2026, 6, 1), last_seen=datetime(2026, 6, 1),
-        pages_visited=[], ip_address="198.51.100.4", intent_score=0.0,
+        pages_visited=["/"], total_pageviews=1,
+        ip_address="198.51.100.4", intent_score=0.0,
         identity_status="anonymous", enrichment_status="pending",
     ))
     await test_db.commit()

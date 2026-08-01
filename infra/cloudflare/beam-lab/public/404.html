@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>404 — Beam Lab</title>
+<style>
+  body { font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+         max-width: 40rem; margin: 0 auto; padding: 4rem 1.25rem; }
+</style>
+</head>
+<body>
+<!--
+  This file exists so Cloudflare Pages stops answering 200 + index.html for every
+  unmatched path. That fallback is fine for a single-page app and wrong for a
+  content site: it made /robots.txt and /sitemap.xml return HTML with a 200, which
+  a crawler cannot parse and will not trust.
+-->
+<h1>404</h1>
+<p>Không tìm thấy trang này. Về <a href="/">trang chủ</a>.</p>
+</body>
+</html>

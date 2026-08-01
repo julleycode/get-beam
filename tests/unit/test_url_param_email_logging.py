@@ -26,7 +26,7 @@ EVENTS_PATH = (
 @pytest.fixture
 def events_src() -> str:
     assert EVENTS_PATH.exists(), f"events.py not found at {EVENTS_PATH}"
-    return EVENTS_PATH.read_text()
+    return EVENTS_PATH.read_text(encoding="utf-8")
 
 
 def _logger_calls(src: str) -> list[str]:

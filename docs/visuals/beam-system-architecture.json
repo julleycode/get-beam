@@ -1,0 +1,56 @@
+{
+  "template_type": "architecture",
+  "style": 1,
+  "width": 1120,
+  "height": 720,
+  "title": "Beam System Architecture",
+  "subtitle": "Shared topology across Local / UAT / PROD",
+  "containers": [
+    { "x": 40, "y": 100, "width": 1040, "height": 100, "label": "Clients", "fill": "#eff6ff", "stroke": "#bfdbfe" },
+    { "x": 40, "y": 230, "width": 1040, "height": 100, "label": "Edge / Hosting", "fill": "#f0fdf4", "stroke": "#bbf7d0" },
+    { "x": 40, "y": 360, "width": 1040, "height": 120, "label": "Application", "fill": "#faf5ff", "stroke": "#e9d5ff" },
+    { "x": 40, "y": 510, "width": 1040, "height": 110, "label": "Data & Providers", "fill": "#fff7ed", "stroke": "#fed7aa" }
+  ],
+  "nodes": [
+    { "id": "web", "kind": "rect", "x": 80, "y": 130, "width": 160, "height": 50, "label": "Dashboard", "sublabel": "Next.js 14", "fill": "#eff6ff", "stroke": "#93c5fd" },
+    { "id": "pixel", "kind": "rect", "x": 300, "y": 130, "width": 160, "height": 50, "label": "Tracking Pixel", "sublabel": "vanilla JS", "fill": "#eff6ff", "stroke": "#93c5fd" },
+    { "id": "ext", "kind": "rect", "x": 520, "y": 130, "width": 160, "height": 50, "label": "LinkedIn Ext", "sublabel": "Chrome MV3", "fill": "#eff6ff", "stroke": "#93c5fd" },
+    { "id": "site", "kind": "rect", "x": 740, "y": 130, "width": 160, "height": 50, "label": "Customer Site", "sublabel": "embeds pixel", "fill": "#eff6ff", "stroke": "#93c5fd" },
+
+    { "id": "vercel", "kind": "rect", "x": 80, "y": 260, "width": 180, "height": 50, "label": "Vercel", "sublabel": "web + marketing", "fill": "#f0fdf4", "stroke": "#86efac" },
+    { "id": "cf", "kind": "rect", "x": 320, "y": 260, "width": 180, "height": 50, "label": "Cloudflare Worker", "sublabel": "pixel.getbeam.fyi", "fill": "#f0fdf4", "stroke": "#86efac" },
+    { "id": "railway", "kind": "rect", "x": 560, "y": 260, "width": 180, "height": 50, "label": "Railway", "sublabel": "API + alembic", "fill": "#f0fdf4", "stroke": "#86efac" },
+
+    { "id": "api", "kind": "double_rect", "x": 200, "y": 390, "width": 220, "height": 60, "label": "FastAPI", "sublabel": "apps/api", "fill": "#faf5ff", "stroke": "#c084fc" },
+    { "id": "sched", "kind": "rect", "x": 480, "y": 395, "width": 160, "height": 50, "label": "APScheduler", "sublabel": "in-process jobs", "fill": "#faf5ff", "stroke": "#c084fc" },
+    { "id": "gemini", "kind": "rect", "x": 700, "y": 395, "width": 160, "height": 50, "label": "Gemini 2.5", "sublabel": "AI drafts only", "fill": "#faf5ff", "stroke": "#c084fc" },
+
+    { "id": "pg", "kind": "cylinder", "x": 80, "y": 530, "width": 140, "height": 70, "label": "PostgreSQL 16", "sublabel": "system of record", "fill": "#fff7ed", "stroke": "#fdba74" },
+    { "id": "redis", "kind": "cylinder", "x": 280, "y": 530, "width": 140, "height": 70, "label": "Redis 7", "sublabel": "cache / limits", "fill": "#fff7ed", "stroke": "#fdba74" },
+    { "id": "idp", "kind": "rect", "x": 480, "y": 545, "width": 180, "height": 50, "label": "Identity APIs", "sublabel": "PDL / ipinfo / …", "fill": "#fff7ed", "stroke": "#fdba74" },
+    { "id": "sg", "kind": "rect", "x": 720, "y": 545, "width": 160, "height": 50, "label": "SendGrid", "sublabel": "email send", "fill": "#fff7ed", "stroke": "#fdba74" }
+  ],
+  "arrows": [
+    { "source": "web", "target": "vercel", "source_port": "bottom", "target_port": "top", "flow": "control", "label": "SSR/SPA" },
+    { "source": "vercel", "target": "api", "source_port": "bottom", "target_port": "top", "flow": "control", "label": "REST /api/v1" },
+    { "source": "site", "target": "pixel", "source_port": "left", "target_port": "right", "flow": "data", "label": "load" },
+    { "source": "pixel", "target": "cf", "source_port": "bottom", "target_port": "top", "flow": "data", "label": "/t.js" },
+    { "source": "cf", "target": "api", "source_port": "bottom", "target_port": "top", "flow": "data", "label": "ingest" },
+    { "source": "ext", "target": "web", "source_port": "left", "target_port": "right", "flow": "async", "label": "nonce", "dashed": true },
+    { "source": "railway", "target": "api", "source_port": "bottom", "target_port": "right", "flow": "control", "label": "hosts" },
+    { "source": "api", "target": "pg", "source_port": "bottom", "target_port": "top", "flow": "data", "label": "ORM" },
+    { "source": "api", "target": "redis", "source_port": "bottom", "target_port": "top", "flow": "async", "label": "cache", "dashed": true },
+    { "source": "api", "target": "gemini", "source_port": "right", "target_port": "left", "flow": "control", "label": "LLM" },
+    { "source": "sched", "target": "api", "source_port": "left", "target_port": "right", "flow": "async", "label": "jobs", "dashed": true },
+    { "source": "api", "target": "idp", "source_port": "bottom", "target_port": "top", "flow": "read", "label": "resolve" },
+    { "source": "api", "target": "sg", "source_port": "bottom", "target_port": "top", "flow": "write", "label": "send" }
+  ],
+  "legend": [
+    { "flow": "control", "label": "Request / AI" },
+    { "flow": "data", "label": "Events / DB" },
+    { "flow": "async", "label": "Background" },
+    { "flow": "write", "label": "Outbound email" }
+  ],
+  "legend_position": "bottom-left",
+  "legend_y": 660
+}

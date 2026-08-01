@@ -23,7 +23,7 @@ SCHEDULER_PATH = (
 
 
 def _add_job_calls() -> list[ast.Call]:
-    tree = ast.parse(SCHEDULER_PATH.read_text())
+    tree = ast.parse(SCHEDULER_PATH.read_text(encoding="utf-8"))
     return [
         node
         for node in ast.walk(tree)
@@ -173,19 +173,21 @@ class TestAC13IntervalJobHardening:
         assert [c for c in cron if "jitter" in _kwargs(c)] == []
 
     def test_the_asserted_set_is_derived_not_hardcoded(self):
-        """E20 arithmetic: 15 total / 13 interval / 2 cron — all AST-derived.
+        """E20 arithmetic: 16 total / 14 interval / 2 cron — all AST-derived.
 
-        Was 14/12/2; +1 interval job for outlier_traffic_damping_sweep
-        (outlier/internal-traffic damping, 27-07-26). Before that 13/12/1 → +1
-        cron job for daily_digest. Before that 12/11/1 → +1 interval job for
-        cadence_bot_flag_sweep. Updated per this gate's own instruction to
-        re-derive the arithmetic when a job is added — never to relax the
-        assertion.
+        Was 15/13/2; +1 interval job for agent_ip_range_refresh (re-fetches the
+        published per-agent IP ranges; stale ranges make real agents read as
+        forged). Before that 14/12/2 → +1 interval job for
+        outlier_traffic_damping_sweep (outlier/internal-traffic damping,
+        27-07-26). Before that 13/12/1 → +1 cron job for daily_digest. Before
+        that 12/11/1 → +1 interval job for cadence_bot_flag_sweep. Updated per
+        this gate's own instruction to re-derive the arithmetic when a job is
+        added — never to relax the assertion.
         """
         calls = _add_job_calls()
         interval = [c for c in calls if _is_interval(c)]
-        assert len(calls) == 15, f"expected 15 add_job calls, found {len(calls)}"
-        assert len(interval) == 13, (
-            f"expected 13 interval calls, found {len(interval)}; if a job was "
+        assert len(calls) == 16, f"expected 16 add_job calls, found {len(calls)}"
+        assert len(interval) == 14, (
+            f"expected 14 interval calls, found {len(interval)}; if a job was "
             "added or removed, update E20's arithmetic — do not relax this gate"
         )

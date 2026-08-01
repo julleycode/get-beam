@@ -267,6 +267,117 @@ async def test_llms_txt_content_and_cache_header(gateway_on):
         _reset()
 
 
+# ── F2 link marker: stamping, cache posture, surface containment ──────
+
+
+@pytest.fixture
+def marker_on(monkeypatch):
+    """Marker enabled, with a known fetch id behind the recorded visit."""
+    from cryptography.fernet import Fernet
+
+    from apps.api.routers import agent_gateway as gateway_router
+    from apps.api.services import link_decorator
+
+    monkeypatch.setattr(settings, "agent_marker_enabled", True)
+    monkeypatch.setattr(
+        link_decorator.settings, "encryption_key", Fernet.generate_key().decode()
+    )
+    fetch_id = uuid.uuid4()
+
+    async def fake_record(*_a, **_kw):
+        return fetch_id
+
+    monkeypatch.setattr(gateway_router, "record_gateway_visit", fake_record)
+    return fetch_id
+
+
+async def test_offers_are_unmarked_and_cacheable_while_the_flag_is_off(
+    gateway_on, monkeypatch
+):
+    """Default posture: byte-identical to pre-F2, including the shared-cache
+    header."""
+    monkeypatch.setattr(settings, "agent_marker_enabled", False)
+    try:
+        async with _client((_site(), _profile())) as client:
+            resp = await client.get("/api/v1/agent/site_abc/offers.json")
+        assert resp.headers["cache-control"] == AGENT_CACHE_CONTROL
+        assert "_bam=" not in resp.text
+    finally:
+        _reset()
+
+
+async def test_marked_offers_are_never_shared_cached(gateway_on, marker_on):
+    """A marker is per-fetch, so a shared cache would hand the first agent's
+    marker to every agent behind it and attribute the human to the wrong fetch."""
+    try:
+        async with _client((_site(), _profile())) as client:
+            resp = await client.get("/api/v1/agent/site_abc/offers.json")
+        assert resp.status_code == 200
+        assert resp.headers["cache-control"] == "private, no-store"
+        assert "s-maxage" not in resp.headers["cache-control"]
+    finally:
+        _reset()
+
+
+async def test_offer_url_carries_a_marker_that_names_this_fetch(
+    gateway_on, marker_on
+):
+    from apps.api.services.agent_marker import decode_marker, marker_from_url
+
+    try:
+        async with _client((_site(), _profile())) as client:
+            resp = await client.get("/api/v1/agent/site_abc/offers.json")
+        url = resp.json()["offers"][0]["url"]
+        assert "_bam=" in url
+        # Round-trips back to the exact fetch that served this feed.
+        assert decode_marker(marker_from_url(url)) == marker_on
+    finally:
+        _reset()
+
+
+async def test_marker_never_leaks_onto_the_cached_surfaces(gateway_on, marker_on):
+    """llms.txt renders the SAME offers via build_offers and is cached for 24h —
+    a marker reaching it would be served to every later agent."""
+    try:
+        async with _client((_site(), _profile())) as client:
+            llms = await client.get("/api/v1/agent/site_abc/llms.txt")
+            manifest = await client.get("/api/v1/agent/site_abc/manifest.json")
+        assert "_bam=" not in llms.text
+        assert llms.headers["cache-control"] == AGENT_CACHE_CONTROL
+        assert "_bam=" not in manifest.text
+        assert manifest.headers["cache-control"] == AGENT_CACHE_CONTROL
+    finally:
+        _reset()
+
+
+async def test_unrecognized_agent_gets_an_unmarked_feed(gateway_on, monkeypatch):
+    """No classification means no fetch row to name. The feed still serves — it
+    just carries no marker, and stays out of shared caches."""
+    from apps.api.routers import agent_gateway as gateway_router
+
+    monkeypatch.setattr(settings, "agent_marker_enabled", True)
+
+    async def no_visit(*_a, **_kw):
+        return None
+
+    monkeypatch.setattr(gateway_router, "record_gateway_visit", no_visit)
+    try:
+        async with _client((_site(), _profile())) as client:
+            resp = await client.get("/api/v1/agent/site_abc/offers.json")
+        assert resp.status_code == 200
+        assert "_bam=" not in resp.text
+        assert resp.headers["cache-control"] == "private, no-store"
+    finally:
+        _reset()
+
+
+async def test_marker_flag_ships_off():
+    """Enabling F2 changes the offers cache posture, so it is an operator action."""
+    from apps.api.config import Settings
+
+    assert Settings.model_fields["agent_marker_enabled"].default is False
+
+
 # ── No internal/PII leakage on the public surface ─────────────────────
 
 

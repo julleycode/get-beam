@@ -423,6 +423,11 @@ export interface AgentAnalytics {
   by_verification: Record<string, number>;
   // Handoff Detection H2: agent fetches correlated to a human AI-referral click.
   handoff_links_count: number;
+  /** Link count broken out by confidence tier ("high" / "medium"). */
+  handoff_confidence: Record<string, number>;
+  /** On-demand agent fetches the links were drawn from — the denominator that
+   *  makes a handoff count of 0 readable. */
+  on_demand_fetch_count: number;
   // Handoff Detection H3: companies that appeared shortly after an AI agent
   // fetched a commercial page. Read-only metadata, never an outreach feed.
   recent_ai_researched_companies: RecentAiResearchEntry[];

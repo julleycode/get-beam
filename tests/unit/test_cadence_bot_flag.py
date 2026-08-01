@@ -203,14 +203,14 @@ async def test_flag_disabled_is_noop(monkeypatch):
 
 def test_thresholds_read_from_settings():
     """The sweep must pass settings values into the decision, never literals."""
-    source = _SWEEP_MODULE.read_text()
+    source = _SWEEP_MODULE.read_text(encoding="utf-8")
     assert "settings.cadence_bot_flag_max_variance_threshold" in source
     assert "settings.cadence_bot_flag_max_engagement_ratio" in source
     assert "settings.cadence_bot_flag_min_visits" in source
     assert "settings.cadence_bot_flag_lookback_days" in source
 
     # The pure module must carry no threshold magic numbers of its own.
-    tree = ast.parse(_PURE_MODULE.read_text())
+    tree = ast.parse(_PURE_MODULE.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == "evaluate_cadence_bot_flag":
             defaults = node.args.defaults + node.args.kw_defaults
@@ -235,7 +235,7 @@ def test_config_defaults_off_and_bounded():
 def test_no_agent_visit_import():
     """Neither module may reference agent_visits or write is_abuse_flagged."""
     for module in (_PURE_MODULE, _SWEEP_MODULE):
-        tree = ast.parse(module.read_text(), filename=str(module))
+        tree = ast.parse(module.read_text(encoding="utf-8"), filename=str(module))
 
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom):
@@ -258,7 +258,7 @@ def test_no_agent_visit_import():
 
 
 def test_pure_module_has_no_db_or_io_imports():
-    tree = ast.parse(_PURE_MODULE.read_text())
+    tree = ast.parse(_PURE_MODULE.read_text(encoding="utf-8"))
     imported: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
@@ -272,7 +272,7 @@ def test_pure_module_has_no_db_or_io_imports():
 
 def test_ingest_router_untouched_by_this_feature():
     """AC-4: nothing in the ingest write path may reference the new modules."""
-    events_router = (_REPO_ROOT / "apps/api/routers/events.py").read_text()
+    events_router = (_REPO_ROOT / "apps/api/routers/events.py").read_text(encoding="utf-8")
     assert "cadence_bot_flag" not in events_router
     assert "is_bot_suspect" not in events_router
 
@@ -283,7 +283,7 @@ def test_emailability_and_aggregator_do_not_read_the_flag():
         "apps/api/services/identity_classification.py",
         "apps/api/services/visitor_aggregator.py",
     ):
-        source = (_REPO_ROOT / rel_path).read_text()
+        source = (_REPO_ROOT / rel_path).read_text(encoding="utf-8")
         assert "is_bot_suspect" not in source, f"{rel_path} must not read the new flag"
 
     import inspect
@@ -329,7 +329,7 @@ _FORBIDDEN_LOG_KEYS = {
 
 
 def _logger_calls(path: pathlib.Path):
-    tree = ast.parse(path.read_text(), filename=str(path))
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue

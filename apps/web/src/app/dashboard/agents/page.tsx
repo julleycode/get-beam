@@ -163,15 +163,38 @@ function AgentAnalyticsCards({ siteId }: { siteId: string }) {
               ))}
             </div>
           )}
-          {/* Handoff Detection H2: agent fetches correlated to a human click. */}
+          {/* Handoff Detection H2: agent fetches correlated to a human click.
+              Always shown with its denominator and confidence split — a bare
+              count of 0 reads as "broken" when it usually means "no AI-referred
+              click landed in the window after a fetch". */}
           <div
             className="mt-3 border-t pt-3 text-xs text-muted-foreground"
-            title="Agent fetches Beam correlated to a human AI-referral click on the same page (probabilistic)."
+            title="Agent fetches Beam correlated to a human AI-referral click on the same page. Correlation is probabilistic — matched on vendor, page and a 30-minute window, not on a unique identifier."
           >
-            Human handoffs detected:{" "}
-            <span className="font-mono tabular-nums text-foreground">
-              {data.handoff_links_count}
-            </span>
+            <div>
+              Human handoffs:{" "}
+              <span className="font-mono tabular-nums text-foreground">
+                {data.handoff_links_count}
+              </span>{" "}
+              of{" "}
+              <span className="font-mono tabular-nums text-foreground">
+                {data.on_demand_fetch_count}
+              </span>{" "}
+              live agent fetches
+            </div>
+            {data.handoff_links_count > 0 ? (
+              <div className="mt-1">
+                {data.handoff_confidence.high ?? 0} strong match
+                {(data.handoff_confidence.high ?? 0) === 1 ? "" : "es"} ·{" "}
+                {data.handoff_confidence.medium ?? 0} likely
+              </div>
+            ) : (
+              <div className="mt-1">
+                {data.on_demand_fetch_count > 0
+                  ? "Agents fetched pages, but no AI-referred visit followed within 30 minutes."
+                  : "No live agent fetches recorded yet — nothing to correlate."}
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>

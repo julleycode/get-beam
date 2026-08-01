@@ -16,9 +16,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 # Force test environment before anything imports settings
 os.environ.setdefault("APP_ENV", "test")
+# Port 5433, matching infra/docker-compose.yml and the config default. Docker
+# Postgres deliberately avoids 5432 because a natively-installed Postgres usually
+# owns it — pointing tests there hits that instance instead and fails on
+# authentication, which reads like a broken test rather than a wrong address.
+# Override by exporting DATABASE_URL to run against a different server.
 os.environ.setdefault(
     "DATABASE_URL",
-    "postgresql+asyncpg://retarget:retarget_dev@localhost:5432/retarget_agent_test",
+    "postgresql+asyncpg://retarget:retarget_dev@localhost:5433/retarget_agent_test",
 )
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/15")  # Use DB 15 for tests
 # Fernet keys for link/token crypto (unsubscribe + _bid links, BYOK vault).
@@ -31,6 +36,20 @@ os.environ.setdefault("TOKEN_ENCRYPTION_KEY", _Fernet.generate_key().decode())
 # agentic /ai/ask path would silently hit the live API before its fallback.
 # Env vars beat dotenv in pydantic-settings, so an empty value forces mocks.
 os.environ.setdefault("GEMINI_API_KEY", "")
+# Same leak, different shape: a developer who turns the agent flags ON in their
+# root .env to exercise the feature locally would flip the DEFAULT every flag
+# test measures against. Two tests assert flag-OFF behaviour explicitly
+# (ingest drops a GPTBot UA; offers.json keeps the shared-cache header), and
+# both go red on that machine while staying green in CI — the worst kind of
+# failure, because it looks like the feature broke rather than the environment.
+# Pinned to the code default here; a test that needs a flag ON sets it itself
+# via monkeypatch, which is unaffected by these values.
+for _flag in (
+    "AGENT_DETECTION_ENABLED",
+    "AGENT_GATEWAY_ENABLED",
+    "AGENT_MARKER_ENABLED",
+):
+    os.environ.setdefault(_flag, "false")
 
 
 def _native_enum_names(metadata) -> list[str]:

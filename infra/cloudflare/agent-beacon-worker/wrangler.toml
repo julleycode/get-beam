@@ -1,0 +1,23 @@
+name = "beam-agent-beacon"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# BEAM_FETCH_BEACON_SECRET is NOT here on purpose — it is a credential.
+#   wrangler secret put BEAM_FETCH_BEACON_SECRET
+# It must equal BEAM_FETCH_BEACON_SECRET in the API's .env, or every beacon
+# gets a 401 that nothing on the dashboard will explain.
+[vars]
+# Must be the FULL API host. beam-dev.nhantown.com exposes only the three pixel
+# paths and would 404 this endpoint.
+BEAM_API_BASE = "https://beam-api.nhantown.com"
+BEAM_SITE_ID = "site_e3a2c56e01ed"
+
+# Route on the site being watched, not on Beam's own hosts.
+[env.splittrip]
+routes = [
+  { pattern = "splittrip.nhantown.com/*", zone_name = "nhantown.com" }
+]
+
+[env.splittrip.vars]
+BEAM_API_BASE = "https://beam-api.nhantown.com"
+BEAM_SITE_ID = "site_e3a2c56e01ed"

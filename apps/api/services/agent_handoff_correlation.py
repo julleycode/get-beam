@@ -28,6 +28,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.config import settings
 from apps.api.models.agent_fetch_event import AgentFetchEvent
 from apps.api.models.agent_handoff_link import AgentHandoffLink
 from apps.api.models.event import Event
@@ -43,6 +44,12 @@ _VENDOR_FAMILY_MAP: dict[str, str] = {
     "openai": "chatgpt",
     "anthropic": "claude",
     "perplexity": "perplexity",
+    # Unreachable today — the google tokens are all index-tier, so they never
+    # reach this sweep. Mapped anyway so that promoting one to on-demand later
+    # cannot silently yield zero links: a missing entry short-circuits to "no
+    # candidate match" without any error, which is the hardest kind of gap to
+    # notice. "gemini" is the matching ai_referral label for gemini.google.com.
+    "google": "gemini",
 }
 
 # Correlation window: a click is only a candidate within this many seconds AFTER
@@ -53,9 +60,20 @@ _WINDOW_SECONDS = 1800
 # High-confidence delta ceiling: exact-page + family within this many seconds.
 _HIGH_DELTA_SECONDS = 300
 
+# Ceiling on referrer-carrying pageviews loaded per fetch event. Ordered oldest
+# first, so the clicks nearest the fetch — the ones that can score ``high`` — are
+# always inside the cap.
+_CANDIDATE_SCAN_LIMIT = 500
+
 # Only fetch events created within this lookback are swept for new links (bounds
 # the unlinked-scan; older events are considered settled). Minutes.
-_UNLINKED_LOOKBACK_MINUTES = 60
+#
+# A fetch only becomes eligible once its 30-minute correlation window has closed,
+# so the usable band is (now - lookback, now - 30min). This is set well above the
+# minimum so a missed sweep — a restart, a failed run — does not age a fetch out
+# before it was ever correlated. The scan stays cheap regardless: it is indexed,
+# excludes already-linked rows, and is capped by ``limit``.
+_UNLINKED_LOOKBACK_MINUTES = 180
 
 
 def _compute_confidence(
@@ -179,17 +197,48 @@ async def run_handoff_correlation_sweep(
         .where(AgentHandoffLink.agent_fetch_event_id == AgentFetchEvent.id)
         .exists()
     )
+    # Only correlate a fetch once it has settled. A link is written at most once
+    # (``~link_exists`` then excludes the fetch forever), so correlating early
+    # would settle on whichever click happened to exist at that moment: a weak
+    # page-mismatch click at T+3min would be written as ``medium`` and permanently
+    # shut out the exact-page click at T+12min that should have scored ``high``.
+    # Defaulting the settle delay to the full correlation window means every sweep
+    # sees the complete candidate set.
+    #
+    # Configurable so dev/UAT can watch a link appear in ~1 min instead of ~30.
+    # It gates only WHEN a fetch is scored, never WHICH clicks qualify — the
+    # window below is unchanged, so a short settle still accepts a click 15 min
+    # after the fetch. The tradeoff it buys back is exactly the early-settle risk
+    # described above.
+    settle_seconds = settings.handoff_correlation_settle_seconds
+    max_settle = _UNLINKED_LOOKBACK_MINUTES * 60
+    if settle_seconds > max_settle:
+        # Past this a fetch ages out of ``cutoff`` before it is old enough to
+        # sweep, so the query matches nothing and no link is ever written. Clamp
+        # and say so — a silently dead sweep is the hardest failure to notice.
+        logger.warning(
+            "handoff_settle_seconds_clamped",
+            configured=settle_seconds,
+            clamped_to=max_settle,
+        )
+        settle_seconds = max_settle
+    window_closed = now - timedelta(seconds=settle_seconds)
     result = await db.execute(
         select(AgentFetchEvent)
         .where(
             AgentFetchEvent.tier == "on-demand",
             AgentFetchEvent.created_at > cutoff,
+            AgentFetchEvent.created_at <= window_closed,
             ~link_exists,
         )
         .limit(limit)
     )
     fetch_events = list(result.scalars().all())
     if not fetch_events:
+        # Still log. An empty sweep and a sweep that never ran are otherwise
+        # indistinguishable in the logs, which makes "zero handoff links"
+        # impossible to diagnose without querying the database by hand.
+        logger.info("agent_handoff_correlation_sweep_done", **counters)
         return counters
 
     for fetch_event in fetch_events:
@@ -206,13 +255,25 @@ async def run_handoff_correlation_sweep(
                 fetch_at = fetch_at.astimezone(timezone.utc).replace(tzinfo=None)
             window_end = fetch_at + timedelta(seconds=_WINDOW_SECONDS)
             # site_id-scoped (AC-H2-5): only this site's pageviews are candidates.
+            # Bounded on purpose. A candidate must carry a referrer to stand any
+            # chance — ``correlate_fetch_to_clicks`` drops everything whose
+            # referrer is not a known AI host — so filtering empty referrers in
+            # SQL removes the bulk of a busy site's pageviews before they are
+            # ever loaded. The cap is the backstop that keeps one fetch on a
+            # high-traffic site from pulling an unbounded result set into memory,
+            # multiplied by up to ``limit`` fetch events per sweep.
             ev_result = await db.execute(
-                select(Event).where(
+                select(Event)
+                .where(
                     Event.site_id == fetch_event.site_id,
                     Event.event_type == "pageview",
                     Event.created_at >= fetch_at,
                     Event.created_at <= window_end,
+                    Event.referrer != "",
+                    Event.referrer.is_not(None),
                 )
+                .order_by(Event.created_at)
+                .limit(_CANDIDATE_SCAN_LIMIT)
             )
             candidate_events = list(ev_result.scalars().all())
 

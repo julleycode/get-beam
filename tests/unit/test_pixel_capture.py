@@ -20,7 +20,7 @@ def _nospace(s: str) -> str:
 @pytest.fixture
 def pixel() -> str:
     assert PIXEL_PATH.exists(), f"Pixel not found at {PIXEL_PATH}"
-    return PIXEL_PATH.read_text()
+    return PIXEL_PATH.read_text(encoding="utf-8")
 
 
 class TestDeterministicCapture:

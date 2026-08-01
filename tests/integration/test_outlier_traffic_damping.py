@@ -259,9 +259,8 @@ async def test_clearing_the_confirmation_restores_the_visitor_to_the_aggregate(
 
 async def _eligibility_order(db, site) -> list[str]:
     """The exact ordering resolution_runner applies, without doing paid work."""
-    from apps.api.models.visitor import Visitor
+    from apps.api.models.visitor import Visitor, resolution_intent_filter
     from apps.api.services.agent_visitor_filters import human_only_visitor_filter
-    from apps.api.services.resolution_eligibility import resolution_intent_filter
 
     order_by = (
         (

@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class AgentOut(BaseModel):
@@ -68,6 +68,11 @@ class FetchBeaconIn(BaseModel):
     user_agent: str
     path: str
     token: str | None = None
+    # Per-fetch token the edge stamped onto the same-host links in the HTML it
+    # served for this fetch. Optional: every pre-existing edge build omits it,
+    # and a beacon without one is still a valid beacon. Length-capped to the
+    # column so an oversized value is rejected here rather than at the INSERT.
+    marker: str | None = Field(None, max_length=32)
 
 
 class FetchBeaconAck(BaseModel):
@@ -89,6 +94,12 @@ class AgentAnalyticsResponse(BaseModel):
     # Handoff Detection H2 (AC-H2-4): count of fetch↔click handoff links for the
     # site — how many agent fetches were correlated to a human AI-referral click.
     handoff_links_count: int
+    # Context that makes a handoff count of 0 readable. The split separates exact
+    # near-instant matches ("high") from looser in-window ones ("medium"); the
+    # denominator is how many on-demand fetches could have produced a link at all,
+    # so "no agent traffic" is distinguishable from "traffic but no human click".
+    handoff_confidence: dict[str, int] = {}
+    on_demand_fetch_count: int = 0
     # Handoff Detection H3 (AC-H3-3): companies that appeared shortly after an AI
     # agent fetched a commercial page. Read-only metadata, never an outreach feed.
     recent_ai_researched_companies: list[RecentAiResearchEntry] = []

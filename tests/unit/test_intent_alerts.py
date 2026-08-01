@@ -219,7 +219,7 @@ def test_correlation_query_is_site_scoped():
     # Structural tripwire: the correlation fetch enforces site scoping on BOTH the
     # agent-fetch side and the company side (AC-H3-4). CompanyGraphNode is
     # cross-tenant, so the Company.site_id filter is what isolates the tenant.
-    src = (_REPO_ROOT / "apps/api/services/agent_aggregator.py").read_text()
+    src = (_REPO_ROOT / "apps/api/services/agent_aggregator.py").read_text(encoding="utf-8")
     assert "AgentFetchEvent.site_id == site_id" in src
     assert "Company.site_id == site_id" in src
 
@@ -239,7 +239,7 @@ def test_company_correlation_is_metadata_only(rel_path):
     # No write path from the H3 intent/correlation surface into any campaign,
     # segment, or outreach table. Pure text tripwire — a future edit that wires a
     # write in fails loudly instead of silently coupling intent signals to sends.
-    text = (_REPO_ROOT / rel_path).read_text()
+    text = (_REPO_ROOT / rel_path).read_text(encoding="utf-8")
     for term in _OUTREACH_WRITE_TERMS:
         assert term not in text, (
             f"{rel_path} constructs '{term}' — the H3 intent-signal surface must "
@@ -262,5 +262,5 @@ def test_correlation_field_absent_from_outreach_agents():
         "apps/api/agents/segmenter.py",
         "apps/api/agents/campaign_planner.py",
     ):
-        text = (_REPO_ROOT / rel_path).read_text()
+        text = (_REPO_ROOT / rel_path).read_text(encoding="utf-8")
         assert "recent_ai_researched" not in text
