@@ -59,13 +59,14 @@ def _capture_persist(monkeypatch) -> dict:
 
     async def fake_event(
         db, site_id, classification, tier, ip_address, page_path,
-        event_time=None, dedup_key=None,
+        event_time=None, dedup_key=None, link_marker=None,
     ):
         calls["event"] = {
             "tier": tier,
             "event_time": event_time,
             "path": page_path,
             "dedup_key": dedup_key,
+            "link_marker": link_marker,
         }
 
     monkeypatch.setattr(afb, "persist_agent_visit", fake_visit)
