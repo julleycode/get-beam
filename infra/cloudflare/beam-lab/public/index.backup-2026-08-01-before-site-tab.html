@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beam Lab — trang thử nghiệm phát hiện AI agent</title>
+<meta name="description" content="Trang tĩnh dùng để kiểm chứng khả năng phát hiện AI agent của Beam: khi một trợ lý AI đọc trang này, lượt truy cập đó phải xuất hiện trên bảng điều khiển Beam.">
+<link rel="canonical" href="https://beamlab.nhantown.com/">
+
+<!-- Beam agent gateway: point AI agents at what you sell.
+     manifest.json carries endpoints.offers, and the offers feed stamps each
+     same-host URL with the ?_bam= marker identifying the fetch that served it —
+     that is what turns "someone clicked after an AI read us" from a timing guess
+     into a deterministic link. Host matches wrangler.toml BEAM_API_BASE. -->
+<link rel="alternate" type="application/json"
+      href="https://beam-api.nhantown.com/api/v1/agent/site_16c46453546f/manifest.json">
+<link rel="alternate" type="text/plain"
+      href="https://beam-api.nhantown.com/api/v1/agent/site_16c46453546f/llms.txt">
+<!-- JSON-LD: entity identity for humans + AI extractors.
+     Agent gateway stays on <link rel="alternate"> above — do NOT put the
+     manifest URL in Organization.url (that made the org look like a JSON file).
+     Schema helps citation/disambiguation; it does NOT by itself cause browse
+     tools to fetch, and OpenAI egress IPs are not company visitor IPs. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://beamlab.nhantown.com/#organization",
+      "name": "Beam",
+      "url": "https://beamlab.nhantown.com/",
+      "description": "Công cụ phân tích website phát hiện trợ lý AI đang đọc trang và hỗ trợ truy vết người đứng sau lượt đọc đó.",
+      "parentOrganization": {
+        "@type": "Organization",
+        "name": "nhantown.com",
+        "url": "https://nhantown.com/"
+      }
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://beamlab.nhantown.com/#website",
+      "name": "Beam Lab",
+      "url": "https://beamlab.nhantown.com/",
+      "description": "Môi trường kiểm chứng đầu-cuối cho lớp phát hiện AI-agent của Beam.",
+      "inLanguage": "vi",
+      "publisher": { "@id": "https://beamlab.nhantown.com/#organization" }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://beamlab.nhantown.com/#software",
+      "name": "Beam",
+      "alternateName": "Beam AI-Agent Analytics",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "description": "Phát hiện và phân loại lượt truy cập của trợ lý AI (on-demand vs index), ghi nhận ở tầng máy chủ, và nối cú click của người thật với lượt đọc AI qua marker trên liên kết.",
+      "url": "https://beamlab.nhantown.com/",
+      "publisher": { "@id": "https://beamlab.nhantown.com/#organization" },
+      "author": { "@id": "https://beamlab.nhantown.com/#organization" },
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD",
+        "availability": "https://schema.org/InStock",
+        "description": "Môi trường kiểm chứng công khai; sản phẩm chưa mở đăng ký."
+      },
+      "featureList": [
+        "Phát hiện AI agent ở tầng middleware (không phụ thuộc JavaScript)",
+        "Phân tầng on-demand vs index theo User-Agent",
+        "Đối chiếu dải IP để phát hiện UA giả mạo",
+        "Đóng dấu liên kết same-host để nối fetch AI với cú click của người",
+        "Pixel JavaScript cho khách truy cập trình duyệt"
+      ]
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://beamlab.nhantown.com/#webpage",
+      "url": "https://beamlab.nhantown.com/",
+      "name": "Beam Lab — trang thử nghiệm phát hiện AI agent",
+      "isPartOf": { "@id": "https://beamlab.nhantown.com/#website" },
+      "about": [
+        { "@id": "https://beamlab.nhantown.com/#software" },
+        { "@id": "https://beamlab.nhantown.com/#organization" }
+      ],
+      "dateModified": "2026-08-01",
+      "inLanguage": "vi",
+      "significantLink": [
+        "https://beamlab.nhantown.com/tac-nhan/",
+        "https://beamlab.nhantown.com/kiem-chung/openai/",
+        "https://beamlab.nhantown.com/llms.txt",
+        "https://beam-api.nhantown.com/api/v1/agent/site_16c46453546f/manifest.json",
+        "https://beam-api.nhantown.com/api/v1/agent/site_16c46453546f/llms.txt"
+      ],
+      "mainEntity": { "@id": "https://beamlab.nhantown.com/#faq" }
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://beamlab.nhantown.com/#faq",
+      "url": "https://beamlab.nhantown.com/",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Trang Beam Lab để làm gì?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Beam Lab là trang tĩnh dùng để kiểm chứng đầu-cuối chuỗi phát hiện AI-agent của Beam: khi một trợ lý AI đọc trang, lượt truy cập phải xuất hiện trên bảng điều khiển Beam. Beam trả lời câu hỏi analytics thông thường bỏ trống — có trợ lý AI nào đang đọc trang của bạn không, và ai là người đứng sau nó."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Vì sao Beam cần một trang kiểm chứng riêng?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Pixel của Beam là JavaScript. Các trình thu thập như ChatGPT-User, Claude-User hay Perplexity-User tải HTML rồi rời đi mà không chạy script, nên pixel không thấy chúng. Muốn ghi nhận được phải chặn ở tầng máy chủ — trang này chạy trên Cloudflare Pages với middleware đọc User-Agent và báo về Beam trước khi trả nội dung."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Beam Lab đang kiểm chứng những lớp phát hiện nào?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Ba lớp: (1) Pixel JavaScript cho người thật dùng trình duyệt; (2) Middleware phía máy chủ cho trợ lý AI tải trang theo yêu cầu của một người; (3) Đối chiếu dải IP để phát hiện User-Agent giả mạo tự xưng là AI của hãng lớn."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Beam Lab xử lý quyền riêng tư thế nào?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Trang không đặt cookie quảng cáo, không bán dữ liệu, và tôn trọng Do Not Track cùng Global Privacy Control: khi một trong hai bật, lượt truy cập bị đánh dấu từ chối định danh và Beam sẽ không cố tìm danh tính người đó."
+          }
+        }
+      ]
+    }
+  ]
+}
+</script>
+
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif;
+         max-width: 46rem; margin: 0 auto; padding: 2.5rem 1.25rem 5rem; }
+  h1 { font-size: 1.9rem; line-height: 1.2; margin-bottom: .25rem; }
+  .sub { color: #666; margin-top: 0; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; }
+  code { background: rgba(127,127,127,.16); padding: .1em .35em; border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid rgba(127,127,127,.3); }
+  footer { margin-top: 3rem; color: #777; font-size: .9rem; }
+</style>
+</head>
+<body>
+
+<h1>Beam Lab</h1>
+<p class="sub">Trang thử nghiệm cho lớp phát hiện AI-agent của Beam.</p>
+<p><strong>Mã kiểm chứng nội dung (canary): FUCHSIA-0731.</strong> Chuỗi duy nhất này được thêm ngày 31-07-2026 để kiểm tra xem một trợ lý AI có thực sự đọc bản mới nhất của trang hay đang trả về bản đã lưu trong bộ nhớ/chỉ mục cũ.</p>
+
+<h2>Mã phiên bản theo nguồn</h2>
+<p>
+  Ngoài mã kiểm chứng nội dung ở trên, mỗi nguồn truy cập còn nhận một
+  <strong>mã phiên bản riêng</strong>, không hiển thị ở trang này. Mã phiên bản cho biết
+  bản nội dung nào đã tới tay nguồn nào — mở trang tương ứng với hệ thống đang truy cập:
+</p>
+<ul>
+  <li><a href="/kiem-chung/openai/?src=oai-7c41">OpenAI</a></li>
+  <li><a href="/kiem-chung/anthropic/?src=ant-7c41">Anthropic</a></li>
+  <li><a href="/kiem-chung/perplexity/?src=pplx-7c41">Perplexity</a></li>
+  <li><a href="/kiem-chung/khac/?src=oth-7c41">Nguồn khác</a></li>
+</ul>
+
+<h2>Trang này để làm gì</h2>
+<p>
+  Beam là công cụ phân tích website trả lời một câu hỏi mà công cụ analytics thông thường
+  không trả lời được: <strong>có trợ lý AI nào đang đọc trang của bạn không, và ai là người
+  đứng sau nó</strong>. Trang tĩnh này tồn tại để kiểm chứng chuỗi đó đầu-cuối trên một tên
+  miền được kiểm soát hoàn toàn.
+</p>
+
+<h2>Vì sao cần một trang riêng</h2>
+<p>
+  Pixel của Beam là JavaScript. Các trình thu thập như <code>ChatGPT-User</code>,
+  <code>Claude-User</code> hay <code>Perplexity-User</code> tải HTML rồi rời đi mà không
+  chạy một dòng script nào — nên pixel vĩnh viễn không thấy chúng. Muốn ghi nhận được,
+  phải chặn ở tầng máy chủ. Trang này chạy trên Cloudflare Pages, nơi một hàm middleware
+  đọc User-Agent của mọi yêu cầu và báo về Beam trước khi trả nội dung.
+</p>
+
+<h2>Ba lớp đang được kiểm chứng</h2>
+<table>
+  <tr><th>Lớp</th><th>Bắt được gì</th></tr>
+  <tr><td>Pixel JavaScript</td><td>Người thật dùng trình duyệt</td></tr>
+  <tr><td>Middleware phía máy chủ</td><td>Trợ lý AI tải trang theo yêu cầu của một người</td></tr>
+  <tr><td>Đối chiếu dải IP</td><td>User-Agent giả mạo tự xưng là AI của hãng lớn</td></tr>
+</table>
+<p>
+  Danh sách đầy đủ các tác nhân nhận diện được, cách phân tầng và bốn phương pháp xác minh:
+  <a href="/tac-nhan/">Danh sách tác nhân AI nhận diện được</a>.
+</p>
+
+<h2>Nguyên tắc về quyền riêng tư</h2>
+<p>
+  Trang không đặt cookie quảng cáo, không bán dữ liệu, và tôn trọng tín hiệu
+  <code>Do Not Track</code> cùng <code>Global Privacy Control</code> của trình duyệt: khi
+  một trong hai bật, lượt truy cập bị đánh dấu từ chối định danh và Beam sẽ không cố tìm
+  danh tính người đó.
+</p>
+
+<h2>Beam là gì</h2>
+<p>
+  Beam là công cụ phân tích website đang trong quá trình phát triển, trả lời câu hỏi mà
+  analytics thông thường bỏ trống: có trợ lý AI nào đang đọc trang của bạn không, và ai là
+  người đứng sau nó. Trang này là môi trường kiểm chứng của Beam, do nhantown.com vận hành —
+  không phải trang bán hàng, và hiện chưa mở đăng ký công khai.
+</p>
+
+<footer>
+  Cập nhật 2026-07-31 · <a href="/llms.txt">llms.txt</a>
+</footer>
+
+<script src="https://beam-dev.nhantown.com/pixel/tracker.js" data-site="site_16c46453546f" data-api="https://beam-dev.nhantown.com" defer></script>
+</body>
+</html>
