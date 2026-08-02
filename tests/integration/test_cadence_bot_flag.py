@@ -168,7 +168,7 @@ async def test_is_emailable_identity_unaffected(test_db, test_site_id):
         site_id=test_site_id,
         visitor_id="cadence_emailable_probe",
         email="probe@example.com",
-        resolution_provider="rb2b",
+        resolution_provider="form_capture",
         is_bot_suspect=True,
     )
     test_db.add(identity)

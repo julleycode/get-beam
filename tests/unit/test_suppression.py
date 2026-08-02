@@ -166,7 +166,7 @@ class TestCsvExportSuppression:
             city=None,
             region=None,
             country=None,
-            resolution_provider="leadpipe",  # person-level → exportable
+            resolution_provider="form_capture",  # first-party → exportable
         )
         db = _make_db([
             _scalars_all_result([member]),

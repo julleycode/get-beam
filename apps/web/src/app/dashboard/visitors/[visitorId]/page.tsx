@@ -387,7 +387,10 @@ export default function VisitorDetailPage() {
 
   const completeness = visitor.enrichment_completeness ?? 0;
   const hasDeepResearch = !!visitor.social_context?.deep_research;
-  const identified = visitor.identity_status !== "anonymous";
+  const identified =
+    visitor.identity_status !== "anonymous" &&
+    visitor.identity_status !== "unresolvable" &&
+    visitor.identity_status !== "vpn_filtered";
   const isCompanyLevel = visitor.identity_level === "company";
 
   const canOsint = identified;
@@ -408,7 +411,11 @@ export default function VisitorDetailPage() {
   // Header line: "Job Title at Company" / "Company" / anonymous fallback.
   const roleLine =
     [visitor.job_title, visitor.company_name].filter(Boolean).join(" at ") ||
-    (visitor.identity_status === "identified" ? "Identified visitor" : "Anonymous visitor");
+    (visitor.identity_status === "verified" || visitor.identity_status === "identified"
+      ? "Verified visitor"
+      : visitor.identity_status === "provider_candidate"
+        ? "Candidate visitor"
+        : "Anonymous visitor");
   const locationLine = [visitor.city, visitor.region, visitor.country || visitor.country_code]
     .filter(Boolean)
     .join(", ");

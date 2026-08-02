@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.draft import Draft, DraftStatus
 from apps.api.models.visitor import Visitor
+from apps.api.services.identity_classification import VERIFIED_STATUSES
 
 logger = structlog.get_logger()
 
@@ -52,20 +53,21 @@ async def compute_kpis(db: AsyncSession, site_id: str, days: int = 30) -> dict:
         return (await db.execute(stmt)).scalar() or 0
 
     visitors = await count(base)
-    identified = await count(base.where(Visitor.identity_status == "identified"))
+    # Trusted / first-party style only — provider_candidate (RB2B etc.) excluded.
+    identified = await count(base.where(Visitor.identity_status.in_(VERIFIED_STATUSES)))
     enriched = await count(base.where(Visitor.enrichment_status == "enriched"))
     high_intent = await count(
         base.where(
-            Visitor.identity_status == "identified",
+            Visitor.identity_status.in_(VERIFIED_STATUSES),
             Visitor.intent_score >= HIGH_INTENT,
         )
     )
 
     # Acted = distinct site visitors we've drafted outreach for. `acted_high` is
-    # the same but restricted to the qualified (identified + high-intent) leads.
+    # the same but restricted to the qualified (verified + high-intent) leads.
     hi_vids = select(Visitor.visitor_id).where(
         Visitor.site_id == site_id,
-        Visitor.identity_status == "identified",
+        Visitor.identity_status.in_(VERIFIED_STATUSES),
         Visitor.intent_score >= HIGH_INTENT,
     )
     site_vids = select(Visitor.visitor_id).where(Visitor.site_id == site_id)

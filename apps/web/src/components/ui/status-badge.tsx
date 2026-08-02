@@ -31,8 +31,12 @@ const STATUS_TONE: Record<string, Tone> = {
   canceled: "neutral",
   // visitors / enrichment / keys
   identified: "info",
+  verified: "success",
+  provider_candidate: "warning",
   enriched: "success",
   unresolvable: "neutral",
+  vpn_filtered: "neutral",
+  merged: "info",
   valid: "success",
   invalid: "destructive",
   // agents / agent-visit verification method

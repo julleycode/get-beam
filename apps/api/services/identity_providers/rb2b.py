@@ -153,7 +153,12 @@ def _merge_rb2b_identity(base: dict | None, extra: dict | None) -> dict | None:
 class RB2BMixin:
     @_http_retry
     async def _call_rb2b_api(self, visitor: Visitor) -> dict | None:
-        """Call RB2B: IP → HEM → profile, then Full Business Enrichment for email.
+        """Call RB2B Identification API branch (rb2b_api), not Beam cookie/FP.
+
+        Beam only forwards ip_address (+ optional user_agent). RB2B may use its
+        own network graph server-side; this is NOT "identified by IP alone" and
+        Beam cookie/fp2_* are never sent. Results are person-level *candidates*
+        and are not emailable without a first-party signal.
 
         Chain (api.rb2b.com/api/v1/):
         1. ip_to_hem

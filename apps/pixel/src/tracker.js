@@ -232,6 +232,10 @@
     xhrInFlight = true;
     var xhr = new XMLHttpRequest();
     xhr.open("POST", ENDPOINT, true);
+    // Cross-origin Set-Cookie (_rta_svid HttpOnly) is ignored unless the XHR
+    // opts into credentials AND the API echoes Origin + Allow-Credentials.
+    // sendBeacon still used on unload; once the cookie is set, beacons include it.
+    xhr.withCredentials = true;
     // text/plain is CORS-safelisted → no preflight (matches the beacon); the
     // server parses text/plain the same as JSON.
     xhr.setRequestHeader("Content-Type", "text/plain");

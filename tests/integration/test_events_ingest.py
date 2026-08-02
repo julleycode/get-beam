@@ -431,3 +431,214 @@ class TestAgentDetection:
             )
         ).scalars().all()
         assert rows == []
+
+
+class TestCookieFpPhase2:
+    """First-party cookie + fingerprint hardening (cook Phase 2)."""
+
+    @pytest.mark.asyncio
+    async def test_ingest_cors_echoes_origin_with_credentials(self, test_client, test_site_id):
+        """Credentialed cross-origin ingest must not use ACAO=*."""
+        origin = "https://lab.example.com"
+        payload = {
+            "site_id": test_site_id,
+            "visitor_id": "cors-cred-visitor",
+            "events": [{
+                "type": "pageview",
+                "url": "https://lab.example.com/",
+                "page_path": "/",
+                "ts": "2026-05-27T00:00:00",
+            }],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={
+                "Content-Type": "text/plain",
+                "User-Agent": _BROWSER_UA,
+                "Origin": origin,
+            },
+        )
+        assert resp.status_code == 204, resp.text
+        assert resp.headers.get("access-control-allow-origin") == origin
+        assert resp.headers.get("access-control-allow-credentials") == "true"
+
+    @pytest.mark.asyncio
+    async def test_ingest_options_preflight_credentialed(self, test_client, test_site_id):
+        origin = "https://lab.example.com"
+        resp = await test_client.options(
+            "/api/v1/events/ingest",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.headers.get("access-control-allow-origin") == origin
+        assert resp.headers.get("access-control-allow-credentials") == "true"
+
+    @pytest.mark.asyncio
+    async def test_fingerprint_persists_before_aggregation(
+        self, test_client, test_site_id, test_db
+    ):
+        """_fp on first batch must stick even though aggregator runs later."""
+        from apps.api.models.visitor import Visitor
+
+        vid = "fp-oneshot-visitor"
+        fp = "fp2_oneshotphase2testabc"
+        payload = {
+            "site_id": test_site_id,
+            "visitor_id": vid,
+            "events": [{
+                "type": "pageview",
+                "url": "https://test-ingest.example.com/",
+                "page_path": "/",
+                "ts": "2026-05-27T00:00:00",
+                "_fp": fp,
+            }],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={"Content-Type": "text/plain", "User-Agent": _BROWSER_UA},
+        )
+        assert resp.status_code == 204, resp.text
+
+        row = (
+            await test_db.execute(
+                select(Visitor).where(
+                    Visitor.site_id == test_site_id,
+                    Visitor.visitor_id == vid,
+                )
+            )
+        ).scalar_one_or_none()
+        assert row is not None, "visitor stub must exist immediately after ingest"
+        assert row.fingerprint == fp
+
+    @pytest.mark.asyncio
+    async def test_svid_cookie_stamps_server_visitor_id(
+        self, test_client, test_site_id, test_db
+    ):
+        """Returning wiped client id + _rta_svid cookie → server_visitor_id."""
+        from apps.api.models.visitor import Visitor
+
+        site_id = test_site_id
+        cookie_name = "_rta_svid_" + "".join(c for c in site_id if c.isalnum() or c == "_")
+        original = "orig-visitor-root-001"
+        wiped = "wiped-client-visitor-002"
+        payload = {
+            "site_id": site_id,
+            "visitor_id": wiped,
+            "events": [{
+                "type": "pageview",
+                "url": "https://test-ingest.example.com/",
+                "page_path": "/",
+                "ts": "2026-05-27T00:00:00",
+                "_fp": "fp2_wipedreturnabc123",
+            }],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={
+                "Content-Type": "text/plain",
+                "User-Agent": _BROWSER_UA,
+                "Cookie": f"{cookie_name}={original}",
+            },
+        )
+        assert resp.status_code == 204, resp.text
+
+        row = (
+            await test_db.execute(
+                select(Visitor).where(
+                    Visitor.site_id == site_id,
+                    Visitor.visitor_id == wiped,
+                )
+            )
+        ).scalar_one_or_none()
+        assert row is not None
+        assert row.server_visitor_id == original
+
+    @pytest.mark.asyncio
+    async def test_deleted_site_403_cors_allows_credentialed_cookie_clear(
+        self, test_client
+    ):
+        """Cross-origin 403 must echo Origin+credentials so pixel can apply
+        Set-Cookie expiry for HttpOnly _rta_svid (selfDestruct path)."""
+        origin = "https://lab.example.com"
+        site_id = "nonexistent_site_cors_403"
+        payload = {
+            "site_id": site_id,
+            "visitor_id": "test-visitor",
+            "events": [{
+                "type": "pageview",
+                "url": "https://lab.example.com/",
+                "ts": "2026-05-27T00:00:00",
+            }],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={
+                "Content-Type": "text/plain",
+                "User-Agent": _BROWSER_UA,
+                "Origin": origin,
+            },
+        )
+        assert resp.status_code == 403
+        assert resp.headers.get("access-control-allow-origin") == origin
+        assert resp.headers.get("access-control-allow-credentials") == "true"
+        set_cookies = resp.headers.get_list("set-cookie")
+        assert any("_rta_svid_nonexistent_site_cors_403" in c for c in set_cookies)
+
+    @pytest.mark.asyncio
+    async def test_fingerprint_survives_aggregation_totals(
+        self, test_client, test_site_id, test_db
+    ):
+        """AC#5: after aggregate, pageviews filled and FP/svid untouched."""
+        from apps.api.models.visitor import Visitor
+        from apps.api.services.visitor_aggregator import aggregate_visitors_for_site
+
+        vid = "fp-agg-survive-visitor"
+        fp = "fp2_aggsurvivephase2xyz"
+        cookie_name = "_rta_svid_" + "".join(
+            c for c in test_site_id if c.isalnum() or c == "_"
+        )
+        original = "root-before-wipe-agg"
+        payload = {
+            "site_id": test_site_id,
+            "visitor_id": vid,
+            "events": [{
+                "type": "pageview",
+                "url": "https://test-ingest.example.com/pricing",
+                "page_path": "/pricing",
+                "ts": "2026-05-27T00:00:00",
+                "_fp": fp,
+            }],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={
+                "Content-Type": "text/plain",
+                "User-Agent": _BROWSER_UA,
+                "Cookie": f"{cookie_name}={original}",
+            },
+        )
+        assert resp.status_code == 204, resp.text
+
+        await aggregate_visitors_for_site(test_db, test_site_id, since=None)
+        await test_db.commit()
+
+        row = (
+            await test_db.execute(
+                select(Visitor).where(
+                    Visitor.site_id == test_site_id,
+                    Visitor.visitor_id == vid,
+                )
+            )
+        ).scalar_one_or_none()
+        assert row is not None
+        assert row.fingerprint == fp
+        assert row.server_visitor_id == original
+        assert row.total_pageviews >= 1

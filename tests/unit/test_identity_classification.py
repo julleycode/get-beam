@@ -44,15 +44,16 @@ def test_is_emailable_identity_abuse_flag_overrides_provider(provider):
     assert is_emailable_identity(provider, None, True) is False
 
 
-def test_abuse_flag_default_false_preserves_existing_behavior():
-    """Regression: the new third parameter must not change any existing call."""
-    assert is_emailable_identity("rb2b") is True
+def test_abuse_flag_default_false_preserves_owned_emailable():
+    """Owned/first-party stays emailable; paid graphs are candidates only."""
+    assert is_emailable_identity("form_capture") is True
+    assert is_emailable_identity("rb2b") is False
     assert is_emailable_identity("hunter") is False
-    assert is_emailable_identity("rb2b", "agent-visit-uuid") is False
+    assert is_emailable_identity("form_capture", "agent-visit-uuid") is False
 
 
 def test_agent_marker_and_abuse_flag_are_independent_guards():
-    """Either marker alone is sufficient to refuse outreach."""
-    assert is_emailable_identity("rb2b", "agent-visit-uuid", False) is False
-    assert is_emailable_identity("rb2b", None, True) is False
-    assert is_emailable_identity("rb2b", None, False) is True
+    """Either marker alone is sufficient to refuse outreach on owned providers."""
+    assert is_emailable_identity("form_capture", "agent-visit-uuid", False) is False
+    assert is_emailable_identity("form_capture", None, True) is False
+    assert is_emailable_identity("form_capture", None, False) is True

@@ -43,6 +43,7 @@ from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 from apps.api.services.billing import check_usage_allowed, increment_usage
 from apps.api.services.conviction import build_conviction
 from apps.api.services.enricher import Enricher
+from apps.api.services.identity_classification import STATUS_VERIFIED
 from apps.api.services.identity_classification import identity_level
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.known_hash import email_hash
@@ -904,7 +905,10 @@ async def resolve_one_visitor(
     messages = {
         "unresolvable": _coverage_note(visitor)
         or "Couldn't identify this visitor from available providers.",
-        "vpn_filtered": "Skipped — visitor is behind a VPN/proxy.",
+        "vpn_filtered": (
+            "Skipped — visitor is behind a VPN, proxy, or privacy relay "
+            "(e.g. iCloud Private Relay)."
+        ),
     }
     return {"status": status, "message": messages.get(status, "Not resolved.")}
 
@@ -1016,7 +1020,7 @@ async def manual_identify_visitor(
         )
         db.add(identified)
 
-    visitor.identity_status = "identified"
+    visitor.identity_status = STATUS_VERIFIED
     await db.commit()
 
     # Also create/update enrichment profile if company info provided

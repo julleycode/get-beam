@@ -525,7 +525,7 @@ async def _process_signal_events(
     Upserts into visitor_emails so the identity resolver can use them in the
     pre-waterfall check instead of burning IP-resolution credits.
     """
-    from sqlalchemy import select, update
+    from sqlalchemy import select, text as sa_text, update
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from apps.api.models.visitor import Visitor
     from apps.api.models.visitor_email import VisitorEmail
@@ -549,40 +549,64 @@ async def _process_signal_events(
 
     needs_commit = False
 
-    if fp_value:
+    # Aggregation creates visitor rows asynchronously AFTER this function runs.
+    # A bare UPDATE then matches 0 rows and one-shot visitors never get FP/svid.
+    # Upsert a minimal stub with write-once FP/svid in ONE statement so a stub
+    # failure cannot leave the stamps silently dropped; aggregator later fills
+    # pageview/session totals on the same PK without touching those columns.
+    if fp_value or svid:
         try:
-            # Only update visitors that don't yet have a fingerprint to avoid
-            # overwriting a previously stored value with a potentially different one.
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            seen_times: list[datetime] = []
+            for event in batch.events:
+                ts = getattr(event, "ts", None)
+                if isinstance(ts, datetime):
+                    seen_times.append(ts.replace(tzinfo=None) if ts.tzinfo else ts)
+            first_seen = min(seen_times) if seen_times else now
+            last_seen = max(seen_times) if seen_times else now
             await db.execute(
-                update(Visitor)
-                .where(
-                    Visitor.site_id == batch.site_id,
-                    Visitor.visitor_id == batch.visitor_id,
-                    Visitor.fingerprint.is_(None),
+                pg_insert(Visitor)
+                .values(
+                    site_id=batch.site_id,
+                    visitor_id=batch.visitor_id,
+                    first_seen=first_seen,
+                    last_seen=last_seen,
+                    total_pageviews=0,
+                    total_sessions=0,
+                    avg_time_on_page=0.0,
+                    max_scroll_depth=0,
+                    pages_visited=[],
+                    intent_score=0.0,
+                    identity_status="anonymous",
+                    enrichment_status="pending",
+                    segmented=False,
+                    fingerprint=fp_value,
+                    server_visitor_id=svid,
                 )
-                .values(fingerprint=fp_value)
+                .on_conflict_do_update(
+                    index_elements=["site_id", "visitor_id"],
+                    set_={
+                        # Write-once: keep existing stamp; fill only when NULL.
+                        "fingerprint": sa_text(
+                            "COALESCE(visitors.fingerprint, EXCLUDED.fingerprint)"
+                        ),
+                        "server_visitor_id": sa_text(
+                            "COALESCE(visitors.server_visitor_id, EXCLUDED.server_visitor_id)"
+                        ),
+                        # Prefer earliest first_seen if stub raced ahead of events.
+                        "first_seen": sa_text(
+                            "LEAST(visitors.first_seen, EXCLUDED.first_seen)"
+                        ),
+                    },
+                )
             )
             needs_commit = True
         except Exception as exc:
-            logger.warning("fingerprint_store_failed", error=str(exc), visitor_id=batch.visitor_id[:8])
-
-    # Durable server-cookie reconciliation: stamp the original visitor_id (from
-    # _rta_svid) onto this returning-but-wiped visitor, write-once like the
-    # fingerprint. The resolver follows it to a prior identification for free.
-    if svid:
-        try:
-            await db.execute(
-                update(Visitor)
-                .where(
-                    Visitor.site_id == batch.site_id,
-                    Visitor.visitor_id == batch.visitor_id,
-                    Visitor.server_visitor_id.is_(None),
-                )
-                .values(server_visitor_id=svid)
+            logger.warning(
+                "visitor_stub_ensure_failed",
+                error=str(exc),
+                visitor_id=batch.visitor_id[:8],
             )
-            needs_commit = True
-        except Exception as exc:
-            logger.warning("svid_store_failed", error=str(exc), visitor_id=batch.visitor_id[:8])
 
     emails_to_upsert: list[dict] = []
 

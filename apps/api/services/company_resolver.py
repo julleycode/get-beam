@@ -225,6 +225,26 @@ def is_ip_suspicious(privacy: dict | None) -> bool:
     return any(privacy.get(k, False) for k in ("vpn", "proxy", "tor", "relay", "hosting"))
 
 
+# iCloud Private Relay egress via Cloudflare. Client IPs in this prefix are shared
+# relays — useless (and dangerous) for person-level IP→identity. Checked locally so
+# resolution still refuses them when IPinfo is unavailable (fail-closed for this
+# known range). Ingest MUST keep these events (real humans); only paid person-ID
+# resolution is blocked.
+_ICLOUD_PRIVATE_RELAY_V6_PREFIXES = ("2a09:bac3:",)
+
+
+def is_privacy_relay_ip(ip: str | None) -> bool:
+    """True for known privacy-relay *client* IPs (local, no network call).
+
+    Does not drop ingest traffic — only signals that person-level resolution from
+    IP must not run.
+    """
+    if not ip:
+        return False
+    low = ip.strip().lower()
+    return any(low.startswith(prefix) for prefix in _ICLOUD_PRIVATE_RELAY_V6_PREFIXES)
+
+
 # Ingest DROP signal: proxy / VPN / Tor / hosting — but NOT `relay`. Apple Private
 # Relay and Cloudflare WARP set relay=True yet front REAL humans, so relay alone
 # must never drop an event (mirrors the CDN/relay carve-out in classify_org_kind).

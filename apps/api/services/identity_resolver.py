@@ -30,6 +30,16 @@ from apps.api.config import settings
 from apps.api.models.beam_identity import BeamIdentityNode
 from apps.api.models.site import Site
 from apps.api.models.visitor import IdentifiedVisitor, ResolutionLog, Visitor
+from apps.api.services.company_resolver import (
+    check_ip_privacy,
+    is_ip_suspicious,
+    is_privacy_relay_ip,
+)
+from apps.api.services.identity_classification import (
+    PAID_PERSON_GRAPH_PROVIDERS,
+    identity_status_for_provider,
+    name_email_consistent,
+)
 from apps.api.services.usage_logger import log_api_call
 
 # Re-exported for backward compatibility: callers and tests import these names
@@ -472,10 +482,20 @@ class IdentityResolver(
             await self.db.commit()
             return None
 
-        # ── VPN/Proxy/Tor detection — skip expensive lookups for masked IPs ──
+        # ── Privacy-relay / VPN / proxy — skip paid person-ID for masked IPs ──
+        # Local prefix check first (fail-closed for known iCloud Private Relay
+        # egress) so missing IPinfo token cannot let 2a09:bac3::/32 through.
+        if is_privacy_relay_ip(visitor.ip_address):
+            logger.info(
+                "resolution_skipped_privacy_relay",
+                visitor_id=visitor.visitor_id[:8],
+                ip_prefix=str(visitor.ip_address)[:12],
+            )
+            visitor.identity_status = "vpn_filtered"
+            await self.db.commit()
+            return None
         if settings.ipinfo_token:
             try:
-                from apps.api.services.company_resolver import check_ip_privacy, is_ip_suspicious
                 privacy = await check_ip_privacy(visitor.ip_address)
                 if is_ip_suspicious(privacy):
                     logger.info(
@@ -614,6 +634,8 @@ class IdentityResolver(
 
         best_name: str | None = None
         best_data: dict | None = None
+        best_idx: int | None = None
+        best_elapsed = 0
 
         for i, r in enumerate(results):
             if isinstance(r, BaseException):
@@ -626,15 +648,20 @@ class IdentityResolver(
             name, data, elapsed, attempted = r
             if not attempted:
                 continue
+            # Defer ledger write for the first successful payload until after
+            # _save_identified — name/email reject must not leave success=True.
+            if data and best_data is None:
+                best_name = name
+                best_data = data
+                best_idx = i
+                best_elapsed = elapsed
+                continue
             success_cost = providers[i][3] if data else 0.0
             await self._log_resolution(
                 visitor, name, data is not None, success_cost, elapsed
             )
-            if data and best_data is None:
-                best_name = name
-                best_data = data
 
-        if best_data and best_name:
+        if best_data and best_name is not None and best_idx is not None:
             logger.info(
                 "identity_graph_identified",
                 provider=best_name,
@@ -642,7 +669,12 @@ class IdentityResolver(
                 email=(best_data.get("email", "")[:5] + "***"
                        if best_data.get("email") else None),
             )
-            return await self._save_identified(visitor, best_data, best_name)
+            row = await self._save_identified(visitor, best_data, best_name)
+            cost = providers[best_idx][3] if row is not None else 0.0
+            await self._log_resolution(
+                visitor, best_name, row is not None, cost, best_elapsed
+            )
+            return row
 
         return None
 
@@ -768,6 +800,22 @@ class IdentityResolver(
                 )
                 data.pop("email", None)
 
+        # Paid person-graphs: reject obvious name↔email corruption before save
+        # (e.g. Janet Valla + danica_naluz@…). Owned/form paths are exempt —
+        # the visitor typed the email themselves.
+        if (
+            provider in PAID_PERSON_GRAPH_PROVIDERS
+            and data.get("email")
+            and data.get("full_name")
+            and not name_email_consistent(data.get("full_name"), data.get("email"))
+        ):
+            logger.info(
+                "identity_rejected_name_email_mismatch",
+                visitor_id=visitor.visitor_id[:8],
+                provider=provider,
+            )
+            return None
+
         # Email dedup: if same (site_id, email) already identified under
         # a different visitor_id, link via canonical_visitor_id instead
         # of creating a duplicate IdentifiedVisitor row.
@@ -819,7 +867,7 @@ class IdentityResolver(
             is_abuse_flagged=bool(getattr(visitor, "is_abuse_flagged", False)),
         )
         self.db.add(identified)
-        visitor.identity_status = "identified"
+        visitor.identity_status = identity_status_for_provider(provider)
         await self._log_owned_resolution(visitor, provider)
         try:
             await self.db.commit()

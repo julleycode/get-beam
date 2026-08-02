@@ -86,6 +86,10 @@ class TestFingerprintV2:
     def test_hash_produces_base36(self, pixel_code: str):
         assert "toString(36)" in pixel_code
 
+    def test_xhr_sends_credentials_for_svid_cookie(self, pixel_code: str):
+        """Cross-origin _rta_svid Set-Cookie requires credentialed XHR."""
+        assert "xhr.withCredentials = true" in pixel_code
+
 
 class TestIdentityGraphStacking:
     """Identity-vendor stacking is STRICTLY OPT-IN (default OFF).

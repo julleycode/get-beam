@@ -275,7 +275,7 @@ class TestAiReferralAggregation:
             visitor_id="v_emailable",
             email="human@example.com",
             full_name="Real Human",
-            resolution_provider="rb2b",  # person-level
+            resolution_provider="form_capture",  # first-party → emailable
             source_agent_visit_id=None,  # NEVER set for AI-referred humans
         ))
         await test_db.commit()
@@ -289,4 +289,4 @@ class TestAiReferralAggregation:
         assert idrow.source_agent_visit_id is None
         assert is_emailable_identity(
             idrow.resolution_provider, idrow.source_agent_visit_id
-        ) is True, "AI-referred human with person provider must be emailable"
+        ) is True, "AI-referred human with first-party provider must be emailable"

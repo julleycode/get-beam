@@ -217,6 +217,9 @@ async def _upsert_visitor(
     ).on_conflict_do_update(
         index_elements=["site_id", "visitor_id"],
         set_={
+            # Ingest may have inserted a FP/svid stub with first_seen≈now; prefer
+            # the true earliest event timestamp from this full recompute.
+            "first_seen": text("LEAST(visitors.first_seen, EXCLUDED.first_seen)"),
             "last_seen": last_seen,
             # Full recompute each run → SET totals (not increment) to avoid double-counting.
             "total_pageviews": total_pageviews,

@@ -37,6 +37,7 @@ import apps.api.main  # noqa: F401 — registers ALL ORM models so a REAL
 from apps.api.models.visitor import IdentifiedVisitor
 from apps.api.services.identity_classification import (
     COMPANY_LEVEL_PROVIDERS,
+    EMAILABLE_PROVIDERS,
     PERSON_LEVEL_PROVIDERS,
     is_emailable_identity,
 )
@@ -50,22 +51,31 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("provider", sorted(PERSON_LEVEL_PROVIDERS))
-def test_agent_origin_overrides_person_level(provider):
-    # Baseline: a person-level provider with no agent marker stays emailable.
+@pytest.mark.parametrize("provider", sorted(EMAILABLE_PROVIDERS))
+def test_agent_origin_overrides_emailable_providers(provider):
+    # Baseline: an emailable provider with no agent marker stays emailable.
     assert is_emailable_identity(provider) is True
-    # AC10 override: the SAME person-level provider becomes non-emailable the
-    # instant an agent-origin marker is present. The override fires first and
-    # unconditionally, for EVERY person-level provider.
+    # AC10 override: the SAME provider becomes non-emailable the instant an
+    # agent-origin marker is present.
+    assert is_emailable_identity(provider, source_agent_visit_id="fake-uuid") is False
+
+
+@pytest.mark.parametrize("provider", sorted(PERSON_LEVEL_PROVIDERS - EMAILABLE_PROVIDERS))
+def test_agent_origin_still_blocks_paid_graph_candidates(provider):
+    # Paid graphs are already non-emailable; agent marker must not reopen them.
+    assert is_emailable_identity(provider) is False
     assert is_emailable_identity(provider, source_agent_visit_id="fake-uuid") is False
 
 
 def test_non_agent_identity_unaffected():
-    # rb2b is a real person-level provider → emailable when no marker is passed.
-    assert is_emailable_identity("rb2b", None) is True
+    # form_capture is first-party → emailable when no marker is passed.
+    assert is_emailable_identity("form_capture", None) is True
+    # rb2b is person-level but probabilistic → not emailable (P0 quality gates).
+    assert is_emailable_identity("rb2b", None) is False
     # hunter is a real company-level provider → never emailable (unchanged).
     assert is_emailable_identity("hunter", None) is False
-    # Sanity: the two providers used above are the real classifications.
+    # Sanity: the providers used above are the real classifications.
+    assert "form_capture" in EMAILABLE_PROVIDERS
     assert "rb2b" in PERSON_LEVEL_PROVIDERS
     assert "hunter" in COMPANY_LEVEL_PROVIDERS
 
@@ -75,12 +85,13 @@ def test_non_agent_identity_unaffected():
 # ---------------------------------------------------------------------------
 
 
-def _agent_origin_iv(provider="rb2b"):
+def _agent_origin_iv(provider="form_capture"):
     """A minimal IdentifiedVisitor-shaped mock that is agent-origin.
 
-    provider defaults to a PERSON_LEVEL provider on purpose: absent the AC10
+    provider defaults to an EMAILABLE provider on purpose: absent the AC10
     override this record WOULD be emailable, so exclusion proves the guard —
-    not merely the pre-existing company-level filter — is doing the work.
+    not merely the pre-existing company-level / paid-graph filter — is doing
+    the work.
     """
     iv = MagicMock()
     iv.resolution_provider = provider
@@ -192,9 +203,9 @@ async def test_ac10_real_sweep_created_row_is_non_emailable():
     visitor = SimpleNamespace(
         visitor_id="agent:real-agent-visit-id", site_id="site-1", fingerprint=None
     )
-    # rb2b is PERSON_LEVEL — absent the marker this WOULD be emailable, so the
-    # exclusion proves the AC10 marker override, not the company-level filter.
-    row = await resolver._save_identified(visitor, {"full_name": "Jane"}, "rb2b")
+    # form_capture is EMAILABLE — absent the marker this WOULD be emailable, so
+    # the exclusion proves the AC10 marker override, not the paid-graph filter.
+    row = await resolver._save_identified(visitor, {"full_name": "Jane"}, "form_capture")
 
     assert isinstance(row, IdentifiedVisitor)
     assert row is added[0]

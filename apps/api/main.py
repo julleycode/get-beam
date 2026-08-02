@@ -155,39 +155,91 @@ app.mount(
 # This must be added AFTER CORSMiddleware so it intercepts /ingest requests
 # before CORSMiddleware can reject them.
 class PixelCORSMiddleware:
-    """Allow cross-origin requests to /api/v1/events/ingest from any origin.
+    """Allow cross-origin pixel traffic from any customer origin.
+
+    Ingest is credentialed: browsers only store/send the HttpOnly ``_rta_svid``
+    cookie when ``Access-Control-Allow-Origin`` mirrors the request Origin
+    (not ``*``) and ``Access-Control-Allow-Credentials: true``. Tracker script
+    loads stay wildcard — ``<script src>`` does not need credentials.
 
     Pure ASGI middleware (not BaseHTTPMiddleware) to avoid event-loop conflicts
     with asyncpg when running under pytest / ASGITransport.
     """
 
-    _PIXEL_PATHS = {"/api/v1/events/ingest", "/pixel/tracker.js"}
+    _INGEST_PATH = "/api/v1/events/ingest"
+    _PIXEL_PATHS = {_INGEST_PATH, "/pixel/tracker.js"}
 
     def __init__(self, app):
         self.app = app
+
+    @staticmethod
+    def _origin(scope) -> bytes | None:
+        for key, value in scope.get("headers", []):
+            if key == b"origin":
+                return value
+        return None
+
+    @classmethod
+    def _ingest_cors_headers(cls, scope) -> list[tuple[bytes, bytes]]:
+        origin = cls._origin(scope)
+        if origin:
+            return [
+                (b"access-control-allow-origin", origin),
+                (b"access-control-allow-credentials", b"true"),
+                (b"vary", b"Origin"),
+            ]
+        # Non-browser clients (no Origin) — wildcard is fine; no cookie jar.
+        return [(b"access-control-allow-origin", b"*")]
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope.get("path", "") not in self._PIXEL_PATHS:
             await self.app(scope, receive, send)
             return
 
+        path = scope.get("path", "")
+        credentialed = path == self._INGEST_PATH
+
         if scope.get("method") == "OPTIONS":
-            response = Response(
-                status_code=200,
-                headers={
-                    "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Methods": "POST, OPTIONS",
-                    "Access-Control-Allow-Headers": "Content-Type",
-                    "Access-Control-Max-Age": "86400",
-                },
-            )
+            headers = {
+                "Access-Control-Allow-Methods": "POST, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Max-Age": "86400",
+            }
+            if credentialed:
+                origin = self._origin(scope)
+                if origin:
+                    headers["Access-Control-Allow-Origin"] = origin.decode("latin-1")
+                    headers["Access-Control-Allow-Credentials"] = "true"
+                    headers["Vary"] = "Origin"
+                else:
+                    headers["Access-Control-Allow-Origin"] = "*"
+            else:
+                headers["Access-Control-Allow-Origin"] = "*"
+            response = Response(status_code=200, headers=headers)
             await response(scope, receive, send)
             return
 
+        cors_extra = (
+            self._ingest_cors_headers(scope)
+            if credentialed
+            else [(b"access-control-allow-origin", b"*")]
+        )
+
+        _REPLACE = {
+            b"access-control-allow-origin",
+            b"access-control-allow-credentials",
+        }
+
         async def send_with_cors(message):
             if message["type"] == "http.response.start":
-                headers = list(message.get("headers", []))
-                headers.append((b"access-control-allow-origin", b"*"))
+                # Inner CORSMiddleware may have already set ACAO/ACAC; replace
+                # so credentialed ingest never ends up with duplicate/conflicting values.
+                headers = [
+                    (k, v)
+                    for k, v in message.get("headers", [])
+                    if k not in _REPLACE
+                ]
+                headers.extend(cors_extra)
                 message = {**message, "headers": headers}
             await send(message)
 

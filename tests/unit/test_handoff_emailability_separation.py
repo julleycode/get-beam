@@ -31,7 +31,7 @@ import apps.api.main  # noqa: F401 — registers ALL ORM models so REAL rows can
 from apps.api.models.agent_handoff_link import AgentHandoffLink
 from apps.api.models.visitor import IdentifiedVisitor
 from apps.api.services.identity_classification import (
-    PERSON_LEVEL_PROVIDERS,
+    EMAILABLE_PROVIDERS,
     is_emailable_identity,
 )
 
@@ -57,9 +57,9 @@ def _real_handoff_link(visitor_id="vid-1", site_id="site-1"):
 
 
 def test_linked_human_emailability_unchanged_both_ways():
-    provider = sorted(PERSON_LEVEL_PROVIDERS)[0]
+    provider = sorted(EMAILABLE_PROVIDERS)[0]
 
-    # A REAL person-level identity with NO agent-origin marker → emailable.
+    # A REAL emailable identity with NO agent-origin marker → emailable.
     iv = IdentifiedVisitor(
         site_id="site-1",
         visitor_id="vid-1",

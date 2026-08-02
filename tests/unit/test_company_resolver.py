@@ -7,6 +7,7 @@ from apps.api.services import company_resolver
 from apps.api.services.company_resolver import (
     _extract_domain,
     is_datacenter_ip,
+    is_privacy_relay_ip,
     is_proxy_or_vpn,
     resolve_company_from_ip,
 )
@@ -236,6 +237,16 @@ class TestIsProxyOrVpn:
     def test_missing_privacy_not_dropped(self, privacy):
         # check_ip_privacy returns None when disabled/failed → fail-open (keep event).
         assert is_proxy_or_vpn(privacy) is False
+
+
+class TestIsPrivacyRelayIp:
+    """Local fail-closed gate for known iCloud Private Relay client prefixes."""
+
+    def test_known_prefix(self):
+        assert is_privacy_relay_ip("2a09:bac3:627a:3050::4d0:11") is True
+
+    def test_unrelated_ip(self):
+        assert is_privacy_relay_ip("8.8.8.8") is False
 
 
 class TestIpinfoFabricationGuard:

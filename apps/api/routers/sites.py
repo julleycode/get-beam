@@ -1,4 +1,3 @@
-import json
 import re
 import uuid
 
@@ -277,30 +276,41 @@ async def get_pixel_snippet(
 ) -> SitePixelSnippet:
     site = await verify_site_access(db, site_id, user)
 
-    # Build identity providers list for multi-provider pixel stacking
-    providers: list[dict[str, str]] = []
+    # Identity-vendor stacking attrs for tracker.js (data-stack + data-stack-<vendor>).
+    # Tracker intentionally does NOT parse legacy data-identity-providers JSON.
+    # Attr key must match vendorUrls keys in apps/pixel/src/tracker.js.
+    stack_vendors: list[tuple[str, str]] = []
 
     # Leadpipe: prefer per-site pixel ID, fall back to global default
     leadpipe_pixel_id = (
         getattr(site, "leadpipe_pixel_id", None)
-        or (settings.leadpipe_default_pixel_id if settings.leadpipe_api_key or settings.leadpipe_default_pixel_id else None)
+        or (
+            settings.leadpipe_default_pixel_id
+            if settings.leadpipe_default_pixel_id
+            else None
+        )
     )
     if leadpipe_pixel_id:
-        providers.append({"type": "leadpipe", "id": leadpipe_pixel_id})
+        stack_vendors.append(("leadpipe", leadpipe_pixel_id))
 
     if settings.capturify_pixel_id:
-        providers.append({"type": "capturify", "id": settings.capturify_pixel_id})
+        stack_vendors.append(("capturify", settings.capturify_pixel_id))
 
     if settings.fullcontact_pixel_id:
-        providers.append({"type": "fullcontact", "id": settings.fullcontact_pixel_id})
+        stack_vendors.append(("fullcontact", settings.fullcontact_pixel_id))
 
     if settings.customers_ai_pixel_id:
-        providers.append({"type": "customers_ai", "id": settings.customers_ai_pixel_id})
+        # tracker.js vendor key uses a hyphen
+        stack_vendors.append(("customers-ai", settings.customers_ai_pixel_id))
 
-    providers_attr = ""
-    if providers:
-        providers_json = json.dumps(providers, separators=(",", ":"))
-        providers_attr = f" data-identity-providers='{providers_json}'"
+    stack_attr = ""
+    if stack_vendors:
+        parts = ['data-stack="1"']
+        for vendor_key, vendor_id in stack_vendors:
+            # Escape quotes in ids; pixel ids are UUIDs / opaque tokens
+            safe_id = str(vendor_id).replace('"', "")
+            parts.append(f'data-stack-{vendor_key}="{safe_id}"')
+        stack_attr = " " + " ".join(parts)
 
     # Only emit data-consent when consent gating is enabled, so "off" sites keep
     # the exact snippet they had before this feature (zero churn for existing users).
@@ -312,7 +322,7 @@ async def get_pixel_snippet(
     snippet = (
         f'<script src="{settings.api_base_url}/pixel/tracker.js" '
         f'data-site="{site.site_id}" data-api="{settings.api_base_url}"'
-        f'{providers_attr}{consent_attr} defer></script>'
+        f'{stack_attr}{consent_attr} defer></script>'
     )
     return SitePixelSnippet(site_id=site.site_id, snippet=snippet)
 

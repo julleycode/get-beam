@@ -23,6 +23,7 @@ from apps.api.models.visitor import (
 )
 from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 from apps.api.services.billing import check_usage_allowed
+from apps.api.services.identity_classification import VERIFIED_STATUSES
 from apps.api.services.known_hash import email_hash
 from apps.api.services.osint_scanner import run_osint_scan
 from apps.api.services.resolution_eligibility import (
@@ -107,7 +108,10 @@ async def _build_visitor_filters(
     # endpoint and the country-facet endpoint inherit it (they both call this
     # helper), covering plan sites D1 and D6.
     filters: list = [human_only_visitor_filter()]
-    if identity_status:
+    if identity_status == "identified":
+        # UI "Identified" = trusted/first-party (verified + legacy identified).
+        filters.append(Visitor.identity_status.in_(VERIFIED_STATUSES))
+    elif identity_status:
         filters.append(Visitor.identity_status == identity_status)
     if enrichment_status:
         filters.append(Visitor.enrichment_status == enrichment_status)
@@ -172,7 +176,7 @@ async def _compute_visitor_stat_counts(db: AsyncSession, site_id: str) -> dict[s
             select(
                 func.count().label("total"),
                 func.count()
-                .filter(Visitor.identity_status == "identified")
+                .filter(Visitor.identity_status.in_(VERIFIED_STATUSES))
                 .label("identified"),
                 func.count()
                 .filter(Visitor.enrichment_status == "enriched")

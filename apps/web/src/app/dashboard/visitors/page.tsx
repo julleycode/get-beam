@@ -359,17 +359,20 @@ export default function VisitorsPage() {
 
   function renderIdentity(v: (typeof visitors)[number]) {
     const s = v.identity_status;
-    if (s === "identified") {
-      return <StatusBadge status="identified" label="Identified" />;
+    if (s === "verified" || s === "identified") {
+      return <StatusBadge status="verified" label="Verified" />;
+    }
+    if (s === "provider_candidate") {
+      return <StatusBadge status="provider_candidate" label="Candidate" />;
     }
     if (s === "merged") {
       // Deduped duplicate of another visitor — same person. The identity lives
       // on the canonical profile; the API surfaces its email here too.
-      return <StatusBadge status="identified" label="Merged" className="opacity-80" />;
+      return <StatusBadge status="merged" label="Merged" className="opacity-80" />;
     }
     if (s === "vpn_filtered") {
       return (
-        <StatusBadge status={s} label={s.replace("_", " ")} className="opacity-60" />
+        <StatusBadge status={s} label="Privacy relay / VPN" className="opacity-60" />
       );
     }
     if (s === "unresolvable") {
@@ -403,7 +406,11 @@ export default function VisitorsPage() {
   }
 
   function renderEnrichment(v: (typeof visitors)[number]) {
-    const idOk = v.identity_status === "identified" || v.identity_status === "merged";
+    const idOk =
+      v.identity_status === "verified" ||
+      v.identity_status === "identified" ||
+      v.identity_status === "provider_candidate" ||
+      v.identity_status === "merged";
     // Can't enrich an anonymous / unresolvable visitor — dim + disabled.
     if (!idOk) {
       return <span className="text-xs text-muted-foreground opacity-50">—</span>;
@@ -466,7 +473,8 @@ export default function VisitorsPage() {
               <SelectContent>
                 <SelectItem value="all">All status</SelectItem>
                 <SelectItem value="anonymous">Anonymous</SelectItem>
-                <SelectItem value="identified">Identified</SelectItem>
+                <SelectItem value="identified">Verified</SelectItem>
+                <SelectItem value="provider_candidate">Candidate</SelectItem>
                 <SelectItem value="enriched">Enriched</SelectItem>
               </SelectContent>
             </Select>

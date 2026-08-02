@@ -61,7 +61,7 @@ async def seeded_campaign(test_db):
             visitor_id=vid,
             email=f"lead-{suffix}@example.com",
             full_name="Lead Person",
-            resolution_provider="rb2b",  # person-level → emailable
+            resolution_provider="form_capture",  # first-party → emailable
         )
     )
     segment = Segment(site_id=site_id, name="Seg", visitor_count=1)

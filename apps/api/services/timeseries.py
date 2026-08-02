@@ -12,6 +12,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.visitor import Visitor
+from apps.api.services.identity_classification import VERIFIED_STATUSES
 from apps.api.services.kpi import HIGH_INTENT
 
 logger = structlog.get_logger()
@@ -46,10 +47,11 @@ async def compute_timeseries(db: AsyncSession, site_id: str, days: int = 30) -> 
     since = datetime.utcnow() - timedelta(days=days)
     day = func.date(Visitor.last_seen)
     # case()-sum instead of count().filter() for SQLite (tests) portability.
-    identified_case = case((Visitor.identity_status == "identified", 1), else_=0)
+    # Trusted statuses only (verified + legacy identified) — not provider_candidate.
+    identified_case = case((Visitor.identity_status.in_(VERIFIED_STATUSES), 1), else_=0)
     high_intent_case = case(
         (
-            (Visitor.identity_status == "identified")
+            Visitor.identity_status.in_(VERIFIED_STATUSES)
             & (Visitor.intent_score >= HIGH_INTENT),
             1,
         ),
