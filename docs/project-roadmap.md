@@ -1,6 +1,6 @@
 # Project Roadmap
 
-Last updated: 2026-08-01
+Last updated: 2026-08-02
 
 ## Overview
 
@@ -38,6 +38,7 @@ This roadmap merges **historical MVP phases** (`PRODUCT_ROADMAP.md`) with **curr
 
 | Feature | Phase | Status |
 |---------|-------|--------|
+| `visitors-identity` | Current US handoff | **Active / blocked**: see [identity-us-current-handoff.md](./identity-us-current-handoff.md) for the current plan selection conflict, Leadpipe health failure, and exact next TODOs |
 | `ads-audiences` | Phase 1 Foundation | Shipped 25 Jul; flag default OFF |
 | `ads-audiences` | Phase 2 Meta live | EVL-green 26 Jul; env smoke gaps before production enable |
 | `ads-audiences` | Phase 3 Google live | In progress |

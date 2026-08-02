@@ -1,6 +1,6 @@
 # Beam Documentation
 
-Last updated: 2026-08-01
+Last updated: 2026-08-02
 
 Human-facing documentation for the Beam monorepo. Agent harness context lives separately in `process/context/` (see [all-context.md](../process/context/all-context.md)).
 
@@ -8,6 +8,7 @@ Human-facing documentation for the Beam monorepo. Agent harness context lives se
 
 | Doc | Description |
 |-----|-------------|
+| [identity-us-current-handoff.md](./identity-us-current-handoff.md) | Current visitor-identity handoff; read first for live status |
 | [project-overview-pdr.md](./project-overview-pdr.md) | Product overview, users, constraints, PDR |
 | [codebase-summary.md](./codebase-summary.md) | Repository map, LOC orientation, drift notes |
 | [code-standards.md](./code-standards.md) | Structure, naming, patterns observed in code |
@@ -27,11 +28,12 @@ Human-facing documentation for the Beam monorepo. Agent harness context lives se
 
 1. Windows: `.\scripts\dev-local.ps1` — macOS: `./scripts/dev-local.sh` (Windows: use Postgres port **5433**, not 5432 — see [deployment-guide.md](./deployment-guide.md#windows-local-verified))
 2. Read [local-uat-prod.md](./local-uat-prod.md) for Local → UAT → PROD.
-3. Read [dev-workflow-slack-issues.md](./dev-workflow-slack-issues.md) for branch naming, Issues, and Slack UAT design.
-4. Read [deployment-guide.md](./deployment-guide.md) for manual commands.
-5. Read [system-architecture.md](./system-architecture.md) for how apps connect.
-6. For tests: [TESTING.md](../TESTING.md) and `process/context/tests/all-tests.md`.
-7. Knowledge graph: open `apps/graphify-out/graph.html` (regenerate: `graphify update apps`).
+3. For current visitor-identity status and next steps, read [identity-us-current-handoff.md](./identity-us-current-handoff.md) first.
+4. Read [dev-workflow-slack-issues.md](./dev-workflow-slack-issues.md) for branch naming, Issues, and Slack UAT design.
+5. Read [deployment-guide.md](./deployment-guide.md) for manual commands.
+6. Read [system-architecture.md](./system-architecture.md) for how apps connect.
+7. For tests: [TESTING.md](../TESTING.md) and `process/context/tests/all-tests.md`.
+8. Knowledge graph: open `apps/graphify-out/graph.html` (regenerate: `graphify update apps`).
 
 ## References
 
