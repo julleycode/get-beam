@@ -231,7 +231,7 @@ export default function CampaignDetailPage() {
     <div className="max-w-3xl space-y-6">
       <div>
         <h2 className="text-2xl font-serif font-semibold tracking-tight">{campaign.name}</h2>
-        <Badge className="mt-1">{campaign.status}</Badge>
+        <StatusBadge status={campaign.status} className="mt-1" />
       </div>
 
       <div className="grid gap-4 md:grid-cols-3 text-sm">
