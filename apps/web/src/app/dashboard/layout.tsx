@@ -21,6 +21,7 @@ import {
   HelpCircle,
   Gift,
   Bot,
+  Target,
 } from "lucide-react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { api } from "@/lib/api";
@@ -54,6 +55,7 @@ const EASYTRACK_ITEMS: NavItem[] = [
   { href: "/dashboard/agents", label: "Agents", icon: Bot, tour: "agents" },
   { href: "/dashboard/segments", label: "Segments", icon: Layers, tour: "segments" },
   { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone, tour: "campaigns" },
+  { href: "/dashboard/outcomes", label: "Outcomes", icon: Target },
   { href: "/dashboard/connectors", label: "Connectors", icon: Plug, tour: "connectors" },
 ];
 
@@ -99,6 +101,8 @@ function NavLink({
   pathname,
   onNavigate,
   tour,
+  dimmed,
+  dimReason,
 }: {
   href: string;
   label: string;
@@ -106,20 +110,27 @@ function NavLink({
   pathname: string;
   onNavigate?: () => void;
   tour?: string;
+  dimmed?: boolean;
+  dimReason?: string;
 }) {
   const isActive =
     pathname === href ||
     (href !== "/dashboard" && pathname.startsWith(href));
+  // Tabs whose prerequisite data doesn't exist yet stay clickable — dimming
+  // only hints at the order to work in; disabling them would hide the product.
+  const isDimmed = !!dimmed && !isActive;
   return (
     <Link
       href={href}
       onClick={onNavigate}
       data-tour={tour}
+      title={isDimmed ? dimReason : undefined}
       className={cn(
         "flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors",
         isActive
           ? "bg-primary font-medium text-primary-foreground shadow-sm"
-          : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+          : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+        isDimmed && "opacity-45"
       )}
     >
       <Icon className="h-4 w-4 shrink-0" />
@@ -345,12 +356,15 @@ function SidebarBody({
   pathname,
   onNavigate,
   onReplayTour,
+  dimMap,
 }: {
   userEmail: string;
   isAdmin: boolean;
   pathname: string;
   onNavigate?: () => void;
   onReplayTour?: () => void;
+  /** href → why this tab isn't useful yet. Absent href = not dimmed. */
+  dimMap?: Record<string, string>;
 }) {
   return (
     <>
@@ -363,7 +377,7 @@ function SidebarBody({
       </div>
       <nav className="flex flex-1 flex-col gap-1">
         <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          EasyTrack
+          Track
         </p>
         {EASYTRACK_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => (
           <NavLink
@@ -374,13 +388,15 @@ function SidebarBody({
             pathname={pathname}
             onNavigate={onNavigate}
             tour={item.tour}
+            dimmed={!!dimMap?.[item.href]}
+            dimReason={dimMap?.[item.href]}
           />
         ))}
 
         <Separator className="my-2" />
 
         <p className="px-3 py-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          EasyEngage
+          Engage
         </p>
         {EASYENGAGE_ITEMS.map((item) => (
           <NavLink
@@ -391,6 +407,8 @@ function SidebarBody({
             pathname={pathname}
             onNavigate={onNavigate}
             tour={item.tour}
+            dimmed={!!dimMap?.[item.href]}
+            dimReason={dimMap?.[item.href]}
           />
         ))}
 
@@ -405,6 +423,8 @@ function SidebarBody({
             pathname={pathname}
             onNavigate={onNavigate}
             tour={item.tour}
+            dimmed={!!dimMap?.[item.href]}
+            dimReason={dimMap?.[item.href]}
           />
         ))}
 
@@ -460,6 +480,47 @@ export default function DashboardLayout({
   });
   const userEmail = me?.email ?? "";
   const isAdmin = me?.is_admin === true;
+
+  // Progressive nav gating: tabs are only useful once their prerequisite data
+  // exists. Gated on `me` so they don't fire before the auth token is synced.
+  const { data: overview } = useQuery({
+    queryKey: ["dashboard-overview"],
+    queryFn: () => api.getDashboardOverview(),
+    enabled: !!me,
+    staleTime: 60_000,
+  });
+  const { data: social } = useQuery({
+    queryKey: ["social-accounts"],
+    queryFn: () => api.getSocialAccounts(),
+    enabled: !!me,
+    staleTime: 60_000,
+  });
+
+  const stats = Object.values(overview?.stats ?? {});
+  const hasVisitors = stats.some((s) => s.total_visitors > 0);
+  const hasEnriched = stats.some((s) => s.enriched > 0);
+  const hasSocial = (social?.length ?? 0) > 0;
+
+  // While the queries are still loading we dim nothing — dimming on undefined
+  // data would flash every tab grey on each cold load.
+  const dimMap: Record<string, string> = {};
+  if (overview) {
+    if (!hasVisitors) {
+      const reason = "Install the pixel and get your first visitor to use this";
+      dimMap["/dashboard/visitors"] = reason;
+      dimMap["/dashboard/agents"] = reason;
+      dimMap["/dashboard/outcomes"] = reason;
+    }
+    if (!hasEnriched) {
+      dimMap["/dashboard/segments"] = "Needs identified visitors first";
+      dimMap["/dashboard/campaigns"] =
+        "Campaigns are generated from segments — identify visitors first";
+    }
+  }
+  if (social && !hasSocial) {
+    dimMap["/dashboard/feed"] = "Connect a social account first";
+    dimMap["/dashboard/drafts"] = "Connect a social account first";
+  }
 
   useEffect(() => {
     // Legacy auth (no Clerk): a missing token or a failed /me means re-login.
@@ -537,6 +598,7 @@ export default function DashboardLayout({
           isAdmin={isAdmin}
           pathname={pathname}
           onReplayTour={() => setTourOpen(true)}
+          dimMap={dimMap}
         />
       </aside>
 
@@ -553,6 +615,7 @@ export default function DashboardLayout({
               pathname={pathname}
               onNavigate={() => setMobileNavOpen(false)}
               onReplayTour={() => setTourOpen(true)}
+              dimMap={dimMap}
             />
           </DialogPrimitive.Content>
         </DialogPrimitive.Portal>
