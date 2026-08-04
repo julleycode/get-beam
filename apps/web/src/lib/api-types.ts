@@ -244,6 +244,10 @@ export interface Visitor {
   // 'person' = the real visitor; 'company' = an arbitrary employee guessed
   // from the visitor's IP→company domain (Hunter/Apollo), NOT the real person.
   identity_level?: "person" | "company" | null;
+  // 0-1 confidence of the identity match. Shown alongside the "Candidate" badge
+  // when identity_status === "candidate" — an unconfirmed graph guess. Never
+  // auto-promotes: only a human confirm (or a first-party capture) does that.
+  confidence_score?: number | null;
   is_known?: boolean;
   known_source?: string | null;
   conviction?: string | null;
@@ -401,6 +405,7 @@ export interface AgentStatsResponse {
   total_visits: number;
   distinct_vendors: number;
   by_vendor: Record<string, number>;
+  detection_enabled?: boolean;
 }
 
 // Read-only GEO/AEO analytics snapshot — matches AgentAnalyticsResponse /
