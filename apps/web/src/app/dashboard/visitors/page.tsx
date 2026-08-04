@@ -155,9 +155,9 @@ export default function VisitorsPage() {
   const dateWarning =
     (firstFrom && firstTo && firstFrom > firstTo) ||
     (lastFrom && lastTo && lastFrom > lastTo)
-      ? "Ngày bắt đầu đang sau ngày kết thúc. Không có khách nào khớp."
+      ? "Start date is after end date. No visitors match."
       : firstFrom && lastTo && lastTo < firstFrom
-        ? "“Last seen đến” đang trước “First seen từ”: bất khả thi (lần cuối luôn sau lần đầu)."
+        ? "“Last seen to” is before “First seen from” — impossible (last seen is always after first seen)."
         : null;
 
   const { data, isLoading, isError, error, refetch } = useQuery({
@@ -362,6 +362,24 @@ export default function VisitorsPage() {
     if (s === "identified") {
       return <StatusBadge status="identified" label="Identified" />;
     }
+    if (s === "candidate") {
+      // Identity-honesty Phase 1: an UNCONFIRMED identity-graph match. Placed
+      // here (the status column) rather than as an extra pill in the name
+      // cluster because "candidate" IS a status value, not an orthogonal
+      // attribute like Known / Company-level. The confidence lives in the
+      // tooltip so the row stays scannable.
+      return (
+        <span
+          title={`Unconfirmed match${
+            typeof v.confidence_score === "number"
+              ? ` — ${Math.round(v.confidence_score * 100)}% confidence`
+              : ""
+          }. Not personalized in outreach until confirmed.`}
+        >
+          <StatusBadge status="candidate" label="Candidate" />
+        </span>
+      );
+    }
     if (s === "merged") {
       // Deduped duplicate of another visitor — same person. The identity lives
       // on the canonical profile; the API surfaces its email here too.
@@ -447,7 +465,7 @@ export default function VisitorsPage() {
                 on={!!site.auto_identify_enabled}
                 pending={autoMut.isPending}
                 onToggle={() => autoMut.mutate(!site.auto_identify_enabled)}
-                title="On = tự động nhận diện khách intent cao. Off = bấm Identify từng người."
+                title="On = auto-identify high-intent visitors. Off = click Identify per visitor."
               />
             )}
             {siteId && site && (
@@ -456,7 +474,7 @@ export default function VisitorsPage() {
                 on={!!site.hot_alert_enabled}
                 pending={hotMut.isPending}
                 onToggle={() => hotMut.mutate(!site.hot_alert_enabled)}
-                title="On = email báo ngay khi có khách US intent cao được nhận diện."
+                title="On = email alert when a high-intent US visitor is identified."
               />
             )}
             <Select value={filter} onValueChange={(v) => { setFilter(v); setPage(1); }}>
@@ -666,16 +684,16 @@ export default function VisitorsPage() {
           {visitors.length === 0 ? (
             <EmptyState
               icon={SearchX}
-              title={hasFilters ? "Không có khách nào khớp bộ lọc" : "Chưa có khách nào"}
+              title={hasFilters ? "No visitors match your filters" : "No visitors yet"}
               description={
                 hasFilters
-                  ? "Thử nới rộng khoảng ngày hoặc bỏ bớt điều kiện lọc."
-                  : "Khi pixel ghi nhận lượt truy cập, khách sẽ hiện ở đây."
+                  ? "Try widening the date range or removing some filters."
+                  : "Once the pixel records a visit, visitors will show up here."
               }
               action={
                 hasFilters ? (
                   <Button variant="outline" size="sm" onClick={clearFilters}>
-                    Xoá bộ lọc
+                    Clear filters
                   </Button>
                 ) : undefined
               }
