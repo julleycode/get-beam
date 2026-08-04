@@ -9,7 +9,8 @@ feature: evallayer
 
 **Date**: 04-08-26
 **Complexity**: Simple
-**Status**: ⏳ PLANNED
+**Status**: ✅ VERIFIED (PVL PASS + EVL green, 3 gates + 32 regression tests; archived 04-08-26 —
+known-gaps pre-accepted: no integration-tier Postgres coverage, no browser render assertion)
 
 ## Phase Completion Rules
 

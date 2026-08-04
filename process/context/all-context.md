@@ -1,6 +1,6 @@
 # Beam - All Context
 
-Last updated: 2026-07-26
+Last updated: 2026-08-04
 
 This file is the root context entrypoint for the repo.
 
@@ -102,6 +102,10 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   verification, agent→company outreach-safe resolution, GEO/AEO analytics, outreach-exclusion
   guardrail); 8-phase program, code-complete 23-07-26, pending Docker-gate closure — see
   `process/features/evallayer/active/evallayer_22-07-26/evallayer-umbrella_PLAN_22-07-26.md`.
+  `GET /agents/{site_id}/stats` now returns additive `detection_enabled: bool`
+  (`settings.agent_detection_enabled`), and the `/dashboard/agents` empty state branches on it
+  (flag-off vs no-visits-yet copy) — shipped 04-08-26, PVL/EVL green, archived to
+  `process/features/evallayer/completed/agents-flag-empty-state_04-08-26/`.
   **Beam Lab (31-07→01-08):** soft-serve gate + edge `_bfm` marker live on `beamlab.nhantown.com`;
   resume at `docs/beam-lab-resume.md` (plans `agent-gate-soft-serve_31-07-26` /
   `agent-gate-lab_31-07-26` status may be stale vs lab)
