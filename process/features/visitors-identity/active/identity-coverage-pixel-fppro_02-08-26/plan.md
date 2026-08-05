@@ -13,7 +13,7 @@ tags:
   - coverage
   - pixel
   - fingerprint-pro
-blockedBy: []
+blockedBy: ['project:260805-1543-identity-coverage-recovery']
 blocks: []
 created: '2026-08-02T11:35:10.284Z'
 createdBy: 'ck:plan'
@@ -43,6 +43,18 @@ source: skill
 3. **Out of scope:** Treating Fingerprint Pro as person-ID; auto-Verified from vendor; full Luật 91 rewrite; OpenSend/Retention unless Phase 1 chooses them later.
 4. **Constraints:** Pixel opt-in (existing `data-stack` model); no secrets in tracker; US-only expectation for person graphs.
 5. **Touchpoints:** `apps/pixel/src/tracker.js`, `apps/api/routers/sites.py`, `config.py`, identity resolver/webhooks, new Fingerprint client module.
+
+## Blocker cập nhật 05-08-26
+
+Phase 1 báo DONE dựa trên structural/unit test, nhưng kiểm tra live cho thấy **FAILED**:
+Leadpipe account expired, `pixels_active=0`, `/v1/data` trả 403, URL pixel dựng từ UUID trả 404.
+Chi tiết: [identity-us-current-handoff.md](../../../../../docs/identity-us-current-handoff.md).
+
+Phase 2 của program này (`wire candidate ingest`) bị chặn cho tới khi
+`plans/260805-1543-identity-coverage-recovery/` gỡ xong blocker hạ tầng và chốt quyết định
+giữ/bỏ vendor. Plan đó kế thừa Phase 2 và đổi vendor chính sang Leadpipe (có webhook push;
+Customers.ai chưa có pixel-id). Phase 3 (Fingerprint Pro) và Phase 4 (US benchmark) của program
+này **không đổi**.
 
 ## Scout finding (critical)
 

@@ -14,7 +14,6 @@ async def test_pixel_snippet_emits_leadpipe_stack_attrs():
 
     site = SimpleNamespace(
         site_id="site_test123",
-        leadpipe_pixel_id=None,
         consent_mode="off",
     )
     user = SimpleNamespace(id="u1")
@@ -44,7 +43,6 @@ async def test_pixel_snippet_no_stack_when_no_vendor_ids():
 
     site = SimpleNamespace(
         site_id="site_empty",
-        leadpipe_pixel_id=None,
         consent_mode="off",
     )
     user = SimpleNamespace(id="u1")

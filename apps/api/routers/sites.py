@@ -281,17 +281,12 @@ async def get_pixel_snippet(
     # Attr key must match vendorUrls keys in apps/pixel/src/tracker.js.
     stack_vendors: list[tuple[str, str]] = []
 
-    # Leadpipe: prefer per-site pixel ID, fall back to global default
-    leadpipe_pixel_id = (
-        getattr(site, "leadpipe_pixel_id", None)
-        or (
-            settings.leadpipe_default_pixel_id
-            if settings.leadpipe_default_pixel_id
-            else None
-        )
-    )
-    if leadpipe_pixel_id:
-        stack_vendors.append(("leadpipe", leadpipe_pixel_id))
+    # Leadpipe: global pixel id only. `Site` has no leadpipe_pixel_id column, so
+    # every site shares one pixel id and Leadpipe separates them by the `domain`
+    # filter on /v1/data. A per-site override needs that column added first — the
+    # getattr that used to read as a per-site fallback here could only return None.
+    if settings.leadpipe_default_pixel_id:
+        stack_vendors.append(("leadpipe", settings.leadpipe_default_pixel_id))
 
     if settings.capturify_pixel_id:
         stack_vendors.append(("capturify", settings.capturify_pixel_id))
