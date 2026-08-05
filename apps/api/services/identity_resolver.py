@@ -21,6 +21,7 @@ import asyncio
 import time
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import structlog
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
@@ -48,11 +49,17 @@ from apps.api.services.usage_logger import log_api_call
 from apps.api.services.identity_providers.base import (  # noqa: F401
     REDIS_RESOLUTION_PREFIX,
     RESOLUTION_CACHE_TTL,
+    RESOLUTION_OUTCOME_MATCH,
+    RESOLUTION_OUTCOME_NO_MATCH,
+    RESOLUTION_OUTCOME_PROVIDER_UNAVAILABLE,
+    RESOLUTION_OUTCOMES,
     _TRANSIENT_HTTP_STATUSES,
     HttpRetryMixin,
+    ProviderUnavailableError,
     _http_retry,
     _is_transient_http_error,
     _url_to_host,
+    safe_failure_detail,
 )
 from apps.api.services.identity_providers.apollo import ApolloMixin
 from apps.api.services.identity_providers.capturify import CapturifyMixin
@@ -577,7 +584,20 @@ class IdentityResolver(
             if result:
                 return result
 
-        # No match from any provider
+        # No match from any provider.
+        #
+        # KNOWN GAP: this also fires when every provider was DOWN, which writes the
+        # visitor off permanently — the sweep (services/resolution_runner.py)
+        # selects only `anonymous` rows, so `unresolvable` removes them from every
+        # future run. Fixing it safely needs a persisted deferral watermark (a new
+        # `visitors` column) so the sweep can skip deferred rows instead of
+        # re-selecting them every 30 minutes; without that bound, a long outage
+        # would let deferred visitors occupy all 20 per-site slots and starve new
+        # ones. That needs a migration, so it is scoped as its own phase — see
+        # plans/260805-1543-identity-coverage-recovery/ §Phase 5.
+        # Until then the escape hatches are the manual per-visitor Retry
+        # (routers/visitors.py, uses force_retry) and `revive_returning_unresolvable`
+        # on an IP change.
         visitor.identity_status = "unresolvable"
         await self.db.commit()
         return None
@@ -601,10 +621,17 @@ class IdentityResolver(
 
         async def _fetch(
             name: str, api_key: str | None, call_fn
-        ) -> tuple[str, dict | None, int, bool]:
+        ) -> tuple[str, dict | None, int, bool, str | None]:
+            """Return the provider's payload plus *why* it produced no payload.
+
+            The failure reason has to survive back to the caller: `data is None`
+            alone cannot distinguish "answered, nobody matched" from "never
+            answered", and only the latter must skip the ledger.
+            """
             if not api_key:
-                return (name, None, 0, False)
+                return (name, None, 0, False, None)
             start = time.monotonic()
+            unavailable_detail: str | None = None
             try:
                 data = await asyncio.wait_for(
                     call_fn(visitor), timeout=self._GRAPH_TIMEOUT
@@ -616,7 +643,19 @@ class IdentityResolver(
                     visitor_id=visitor.visitor_id[:8],
                 )
                 data = None
-            except Exception as exc:
+                unavailable_detail = "timeout"
+            except ProviderUnavailableError as exc:
+                logger.warning(
+                    "identity_graph_unavailable",
+                    provider=name,
+                    error=str(exc),
+                    visitor_id=visitor.visitor_id[:8],
+                )
+                data = None
+                unavailable_detail = exc.detail or "provider unavailable"
+            except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+                # Transport/status failures survived tenacity — the provider
+                # never delivered a verdict.
                 logger.warning(
                     "identity_graph_error",
                     provider=name,
@@ -624,8 +663,22 @@ class IdentityResolver(
                     visitor_id=visitor.visitor_id[:8],
                 )
                 data = None
+                unavailable_detail = safe_failure_detail(exc)
+            except Exception as exc:
+                # An unclassified crash is a bug in OUR parsing, not a provider
+                # outage. Treat it as no_match so the 30-day lock still applies:
+                # the plan's own risk table says lean toward locking when unsure,
+                # because "never lock" turns a parse bug into a retry storm that
+                # re-hits the provider on every sweep.
+                logger.warning(
+                    "identity_graph_unexpected_error",
+                    provider=name,
+                    error=str(exc),
+                    visitor_id=visitor.visitor_id[:8],
+                )
+                data = None
             elapsed = int((time.monotonic() - start) * 1000)
-            return (name, data, elapsed, True)
+            return (name, data, elapsed, True, unavailable_detail)
 
         results = await asyncio.gather(
             *[_fetch(n, k, c) for n, k, c, _ in providers],
@@ -645,7 +698,7 @@ class IdentityResolver(
                     error=str(r),
                 )
                 continue
-            name, data, elapsed, attempted = r
+            name, data, elapsed, attempted, unavailable_detail = r
             if not attempted:
                 continue
             # Defer ledger write for the first successful payload until after
@@ -658,7 +711,17 @@ class IdentityResolver(
                 continue
             success_cost = providers[i][3] if data else 0.0
             await self._log_resolution(
-                visitor, name, data is not None, success_cost, elapsed
+                visitor,
+                name,
+                data is not None,
+                success_cost,
+                elapsed,
+                outcome=(
+                    RESOLUTION_OUTCOME_PROVIDER_UNAVAILABLE
+                    if unavailable_detail
+                    else None
+                ),
+                detail=unavailable_detail,
             )
 
         if best_data and best_name is not None and best_idx is not None:
@@ -681,56 +744,88 @@ class IdentityResolver(
     async def _resolve_ip_company_parallel(self, visitor: Visitor) -> str | None:
         """Run PDL IP Enrich + IPinfo in parallel. Return first domain."""
 
-        async def _fetch_pdl() -> tuple[str | None, int]:
-            if not settings.pdl_ip_enabled:
-                return (None, 0)
+        async def _fetch_domain(
+            label: str, call_fn
+        ) -> tuple[str | None, int, str | None]:
+            """Resolve a company domain, keeping the reason for an empty result."""
             start = time.monotonic()
+            unavailable_detail: str | None = None
             try:
                 domain = await asyncio.wait_for(
-                    self._call_pdl_ip_enrich(visitor),
-                    timeout=self._GRAPH_TIMEOUT,
+                    call_fn(visitor), timeout=self._GRAPH_TIMEOUT
                 )
             except asyncio.TimeoutError:
-                logger.warning("pdl_ip_timeout", visitor_id=visitor.visitor_id[:8])
+                logger.warning("ip_company_timeout", provider=label, visitor_id=visitor.visitor_id[:8])
                 domain = None
+                unavailable_detail = "timeout"
+            except ProviderUnavailableError as exc:
+                logger.warning("ip_company_unavailable", provider=label, error=str(exc))
+                domain = None
+                unavailable_detail = exc.detail or "provider unavailable"
+            except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+                logger.warning("ip_company_error", provider=label, error=str(exc))
+                domain = None
+                unavailable_detail = safe_failure_detail(exc)
             except Exception as exc:
-                logger.warning("pdl_ip_error", error=str(exc))
-                domain = None
-            elapsed = int((time.monotonic() - start) * 1000)
-            return (domain, elapsed)
-
-        async def _fetch_ipinfo() -> tuple[str | None, int]:
-            if not settings.ipinfo_enabled:
-                return (None, 0)
-            start = time.monotonic()
-            try:
-                domain = await asyncio.wait_for(
-                    self._call_ipinfo_api(visitor),
-                    timeout=self._GRAPH_TIMEOUT,
+                # Our bug, not theirs — keep the lock (see _fetch above).
+                logger.warning(
+                    "ip_company_unexpected_error", provider=label, error=str(exc)
                 )
-            except asyncio.TimeoutError:
-                logger.warning("ipinfo_timeout", visitor_id=visitor.visitor_id[:8])
-                domain = None
-            except Exception as exc:
-                logger.warning("ipinfo_error", error=str(exc))
                 domain = None
             elapsed = int((time.monotonic() - start) * 1000)
-            return (domain, elapsed)
+            return (domain, elapsed, unavailable_detail)
 
-        (pdl_domain, pdl_ms), (ipi_domain, ipi_ms) = await asyncio.gather(
-            _fetch_pdl(), _fetch_ipinfo()
+        # "Attempted" means enabled AND holding a key. Both mixins return None
+        # immediately when their key is empty, so gating the ledger on the enable
+        # flag alone records a failed attempt for a provider that was never
+        # called — which arms the 30-day retry lock and consumes a daily budget
+        # slot over a config gap. `_resolve_identity_graphs_parallel` already
+        # gates on key presence; this mirrors it.
+        pdl_attempted = bool(
+            settings.pdl_ip_enabled and settings.people_data_labs_api_key
+        )
+        ipinfo_attempted = bool(settings.ipinfo_enabled and settings.ipinfo_token)
+
+        async def _fetch_pdl() -> tuple[str | None, int, str | None]:
+            if not pdl_attempted:
+                return (None, 0, None)
+            return await _fetch_domain("pdl_ip", self._call_pdl_ip_enrich)
+
+        async def _fetch_ipinfo() -> tuple[str | None, int, str | None]:
+            if not ipinfo_attempted:
+                return (None, 0, None)
+            return await _fetch_domain("ipinfo", self._call_ipinfo_api)
+
+        (pdl_domain, pdl_ms, pdl_detail), (ipi_domain, ipi_ms, ipi_detail) = (
+            await asyncio.gather(_fetch_pdl(), _fetch_ipinfo())
         )
 
-        # Only log providers we actually ran — a disabled provider was never
-        # attempted, so it must not leave a "failed" row in the cost ledger.
-        if settings.pdl_ip_enabled:
+        # Only log providers we actually ran — a disabled or keyless provider was
+        # never attempted, so it must not leave a "failed" row in the cost ledger.
+        if pdl_attempted:
             pdl_cost = 0.01 if pdl_domain else 0.0
             await self._log_resolution(
-                visitor, "pdl_ip_enrich", pdl_domain is not None, pdl_cost, pdl_ms
+                visitor,
+                "pdl_ip_enrich",
+                pdl_domain is not None,
+                pdl_cost,
+                pdl_ms,
+                outcome=(
+                    RESOLUTION_OUTCOME_PROVIDER_UNAVAILABLE if pdl_detail else None
+                ),
+                detail=pdl_detail,
             )
-        if settings.ipinfo_enabled:
+        if ipinfo_attempted:
             await self._log_resolution(
-                visitor, "ipinfo", ipi_domain is not None, 0.0, ipi_ms
+                visitor,
+                "ipinfo",
+                ipi_domain is not None,
+                0.0,
+                ipi_ms,
+                outcome=(
+                    RESOLUTION_OUTCOME_PROVIDER_UNAVAILABLE if ipi_detail else None
+                ),
+                detail=ipi_detail,
             )
 
         domain = pdl_domain or ipi_domain
@@ -1059,20 +1154,70 @@ class IdentityResolver(
             logger.debug("owned_resolution_log_failed", error=str(exc))
 
     async def _log_resolution(
-        self, visitor: Visitor, provider: str, success: bool, cost: float, ms: int
+        self,
+        visitor: Visitor,
+        provider: str,
+        success: bool,
+        cost: float,
+        ms: int,
+        *,
+        outcome: str | None = None,
+        detail: str | None = None,
     ) -> None:
-        log = ResolutionLog(
-            site_id=visitor.site_id,
-            visitor_id=visitor.visitor_id,
-            provider=provider,
-            success=success,
-            cost_usd=cost,
-            response_time_ms=ms,
-        )
-        self.db.add(log)
+        """Record one resolution attempt across both ledgers.
+
+        `outcome` is the contract that separates "the provider answered, nobody
+        matched" from "the provider never answered" — see RESOLUTION_OUTCOMES:
+
+        - `match`                 — usable payload came back
+        - `no_match`              — provider answered: 200-empty, 404, or 400
+                                    (unresolvable IP). A real, informative answer.
+        - `provider_unavailable`  — provider never answered: 401, 403, 429 after
+                                    retries, 5xx, timeout, DNS or connect error.
+
+        Only the first two write `ResolutionLog`. An outage is not an attempt, so
+        counting it as one would arm the 30-day retry lock and burn the daily
+        budget over a failure the visitor had nothing to do with. Every outcome
+        still writes `api_usage_logs`, so outages stay observable rather than
+        silently dropped; `price_for()` returns 0.0 when `success=False`, so those
+        rows cannot distort the cost ledger.
+
+        Keyword-only with a derived default so existing call sites keep their exact
+        behavior — only callers that can actually tell an outage apart pass it.
+        """
+        if outcome is None:
+            outcome = RESOLUTION_OUTCOME_MATCH if success else RESOLUTION_OUTCOME_NO_MATCH
+        elif outcome not in RESOLUTION_OUTCOMES:
+            # A typo must not silently become "not provider_unavailable" and
+            # quietly re-arm the retry lock this whole change exists to remove.
+            raise ValueError(
+                f"unknown resolution outcome {outcome!r}; expected one of {sorted(RESOLUTION_OUTCOMES)}"
+            )
+
+        if outcome != RESOLUTION_OUTCOME_PROVIDER_UNAVAILABLE:
+            log = ResolutionLog(
+                site_id=visitor.site_id,
+                visitor_id=visitor.visitor_id,
+                provider=provider,
+                success=success,
+                cost_usd=cost,
+                response_time_ms=ms,
+            )
+            self.db.add(log)
+        else:
+            logger.warning(
+                "identity_provider_unavailable",
+                provider=provider,
+                visitor_id=visitor.visitor_id[:8],
+                detail=(detail or "")[:200],
+            )
+
         # Mirror into the unified cost ledger (api_usage_logs) so the costs
         # dashboard reads one source. resolution_logs stays the budget meter.
         # Best-effort — never breaks resolve; commits with the row below.
+        meta = {"outcome": outcome}
+        if detail:
+            meta["detail"] = detail[:200]
         await log_api_call(
             db=self.db,
             site_id=visitor.site_id,
@@ -1082,5 +1227,6 @@ class IdentityResolver(
             success=success,
             cost_usd=cost,
             response_time_ms=ms,
+            meta=meta,
         )
         await self.db.commit()

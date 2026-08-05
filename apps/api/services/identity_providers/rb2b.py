@@ -7,7 +7,10 @@ import structlog
 
 from apps.api.config import settings
 from apps.api.models.visitor import Visitor
-from apps.api.services.identity_providers.base import _http_retry
+from apps.api.services.identity_providers.base import (
+    ProviderUnavailableError,
+    _http_retry,
+)
 
 logger = structlog.get_logger()
 
@@ -185,13 +188,23 @@ class RB2BMixin:
             if resp.status_code == 404:
                 logger.debug("rb2b_no_match", ip=visitor.ip_address[:8])
                 return None
-            if resp.status_code == 403:
+            if resp.status_code in (401, 403):
+                # Account/permission failure, not a verdict about this visitor.
+                # Returning None here would arm the 30-day retry lock over an
+                # outage the visitor had nothing to do with.
                 logger.warning("rb2b_service_unavailable", detail=resp.text[:200])
-                return None
+                raise ProviderUnavailableError(
+                    "rb2b", f"HTTP {resp.status_code}"
+                )
             if resp.status_code != 200:
                 logger.warning("rb2b_ip_error", status=resp.status_code,
                                detail=resp.text[:200])
                 self._raise_if_transient(resp)
+                # 400 = unusable IP: a real answer, so it stays a no-match.
+                if resp.status_code != 400:
+                    raise ProviderUnavailableError(
+                        "rb2b", f"HTTP {resp.status_code}"
+                    )
                 return None
 
             hem_data = resp.json()

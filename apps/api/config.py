@@ -529,7 +529,13 @@ class Settings(BaseSettings):
     # RB2B_ENABLED=false to stop it. The resolver checks the flag alongside the key.
     rb2b_enabled: bool = True
     leadpipe_enabled: bool = True
-    capturify_enabled: bool = True
+    # Defaults OFF, unlike its siblings: the configured host `api.capturify.io` has
+    # no DNS record (NXDOMAIN, checked 05-08-26), so every call fails to connect and
+    # the provider has never produced a single `resolution_logs` row. The parsing
+    # code is kept because `app.capturify.io` (the pixel host in tracker.js) does
+    # resolve — the product exists, only this base URL is unverified. Turn back on
+    # once an official doc confirms the real API base URL.
+    capturify_enabled: bool = False
     pdl_ip_enabled: bool = True
     ipinfo_enabled: bool = True
     hunter_enabled: bool = True

@@ -6,6 +6,7 @@ from sqlalchemy import select, func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
+from apps.api.models.api_usage import ApiUsageLog
 from apps.api.models.database import get_db
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.user import User
@@ -636,7 +637,27 @@ async def get_visitor_detail(
     if logs:
         data["last_resolution_attempt"] = logs[0].created_at
         data["resolution_providers_tried"] = list(dict.fromkeys(l.provider for l in logs))
+
+    # Provider outages live only in api_usage_logs — by design, since treating an
+    # outage as an attempt is the bug this separation fixes. Read them separately
+    # so the UI can still show "tried, vendor was down".
+    outage_result = await db.execute(
+        select(ApiUsageLog).where(
+            ApiUsageLog.site_id == site_id,
+            ApiUsageLog.visitor_id == visitor_id,
+            ApiUsageLog.category == "identity",
+            ApiUsageLog.success.is_(False),
+            ApiUsageLog.meta["outcome"].astext == "provider_unavailable",
+        ).order_by(ApiUsageLog.created_at.desc()).limit(10)
+    )
+    outages = list(outage_result.scalars().all())
+    if outages:
+        data["last_outage_at"] = outages[0].created_at
+        data["outage_providers"] = list(dict.fromkeys(o.provider for o in outages))
+
     if visitor.identity_status == "anonymous":
+        # Deliberately ResolutionLog-only: the cooldown must NOT count outages,
+        # otherwise the 30-day lock returns through the back door.
         data["resolution_skip_reason"] = await _resolution_skip_reason(
             db, site, visitor, logs[0].created_at if logs else None
         )

@@ -8,7 +8,10 @@ import structlog
 
 from apps.api.config import settings
 from apps.api.models.visitor import Visitor
-from apps.api.services.identity_providers.base import _http_retry
+from apps.api.services.identity_providers.base import (
+    ProviderUnavailableError,
+    _http_retry,
+)
 
 logger = structlog.get_logger()
 
@@ -180,4 +183,10 @@ class IPinfoMixin:
             else:
                 logger.warning("ipinfo_api_error", status=resp.status_code)
                 self._raise_if_transient(resp)
+                # 404 = IP genuinely unknown; anything else here (401 bad token,
+                # 429 after retries) means the provider never gave a verdict.
+                if resp.status_code != 404:
+                    raise ProviderUnavailableError(
+                        "ipinfo", f"HTTP {resp.status_code}"
+                    )
         return None

@@ -5,7 +5,16 @@ import structlog
 
 from apps.api.config import settings
 from apps.api.models.visitor import Visitor
-from apps.api.services.identity_providers.base import _http_retry
+from apps.api.services.identity_providers.base import (
+    ProviderUnavailableError,
+    _http_retry,
+)
+from apps.api.services.identity_providers.matching import (
+    REJECTION_IP_MISMATCH,
+    REJECTION_NO_EMAIL,
+    log_rejection_tally,
+    new_rejection_tally,
+)
 
 logger = structlog.get_logger()
 
@@ -46,6 +55,13 @@ class LeadpipeMixin:
                 logger.warning("leadpipe_api_error", status=resp.status_code,
                                detail=resp.text[:200])
                 self._raise_if_transient(resp)
+                # 400 = unusable request params: a real answer, so no-match.
+                # Everything else (401/403 "Organization is expired" above all)
+                # is the account failing, not a verdict about this visitor.
+                if resp.status_code != 400:
+                    raise ProviderUnavailableError(
+                        "leadpipe", f"HTTP {resp.status_code}"
+                    )
                 return None
 
             body = resp.json()
@@ -60,19 +76,26 @@ class LeadpipeMixin:
             # a record only attaches to THIS visitor on IP equality AND recency
             # (_record_matches_visitor). The old "page URL contains site domain"
             # fallback attached arbitrary humans and is intentionally gone.
+            # Counts why records were dropped, so "the feed had rows but none
+            # attached" is a number instead of guesswork. The IP filter lives
+            # here rather than in matching.py, so it is tallied here too.
+            tally = new_rejection_tally()
+
             for lp_visitor in visitors_data:
                 lp_email = lp_visitor.get("email")
                 if not lp_email and isinstance(lp_visitor.get("emails"), list) and lp_visitor.get("emails"):
                     lp_email = lp_visitor["emails"][0]
                 if not lp_email:
+                    tally[REJECTION_NO_EMAIL] += 1
                     continue
 
                 lp_ip = lp_visitor.get("ip") or lp_visitor.get("ipAddress")
                 if not lp_ip or lp_ip != visitor.ip_address:
+                    tally[REJECTION_IP_MISMATCH] += 1
                     continue
 
                 matched, weak = self._record_matches_visitor(
-                    lp_visitor, visitor, "leadpipe"
+                    lp_visitor, visitor, "leadpipe", tally=tally
                 )
                 if not matched:
                     continue
@@ -84,7 +107,9 @@ class LeadpipeMixin:
                     )
                 return person
 
-            logger.debug("leadpipe_no_ip_match", ip=visitor.ip_address[:8])
+            log_rejection_tally(
+                "leadpipe", visitor.visitor_id, tally, len(visitors_data)
+            )
             return None
 
     @staticmethod

@@ -89,6 +89,14 @@ class VisitorDetailOut(VisitorOut):
     resolution_providers_tried: list[str] | None = None
     resolution_skip_reason: str | None = None  # below_intent_threshold | no_ip_address | recently_attempted | daily_budget_exhausted | monthly_plan_limit_reached | privacy_opt_out | awaiting_next_run
     coverage_note: str | None = None  # set for 'unresolvable' visitors the US-only provider stack structurally can't match (e.g. non-US residential)
+    # Provider outages (401/403/5xx/timeout/DNS) deliberately do NOT write
+    # resolution_logs — counting them as attempts is what armed the 30-day retry
+    # lock over vendor downtime. They are still recorded in api_usage_logs, and
+    # surfaced here so "we tried, the vendor was down" stays visible in the UI
+    # instead of looking like the visitor was never processed. Display only:
+    # these never feed the cooldown calculation.
+    outage_providers: list[str] | None = None
+    last_outage_at: datetime | None = None
     # Handoff Detection H2 (SPEC AC-H2-1/4): the latest fetch↔click handoff link
     # for this visitor, if any. PROBABILISTIC attribution only — an AI agent
     # fetched this page shortly before the visit. Never a certainty assertion, and

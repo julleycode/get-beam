@@ -274,6 +274,18 @@ export interface VisitorDetail extends Visitor {
   region?: string | null;
   country?: string | null;
   coverage_note?: string | null;
+  // Resolution observability — why is this visitor still unidentified?
+  // `resolution_providers_tried` / `last_resolution_attempt` come from
+  // resolution_logs (real attempts). `outage_providers` / `last_outage_at` come
+  // from api_usage_logs and mean the opposite: the provider never answered, so
+  // it was deliberately NOT recorded as an attempt and never armed the 30-day
+  // retry lock. Keep the two lists visually distinct — conflating them is the
+  // exact confusion this data exists to prevent.
+  last_resolution_attempt?: string | null;
+  resolution_providers_tried?: string[] | null;
+  resolution_skip_reason?: string | null;
+  outage_providers?: string[] | null;
+  last_outage_at?: string | null;
   job_title?: string | null;
   company_name?: string | null;
   industry?: string | null;

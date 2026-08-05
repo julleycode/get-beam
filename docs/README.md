@@ -1,6 +1,6 @@
 # Beam Documentation
 
-Last updated: 2026-08-02
+Last updated: 2026-08-05
 
 Human-facing documentation for the Beam monorepo. Agent harness context lives separately in `process/context/` (see [all-context.md](../process/context/all-context.md)).
 
@@ -9,6 +9,7 @@ Human-facing documentation for the Beam monorepo. Agent harness context lives se
 | Doc | Description |
 |-----|-------------|
 | [identity-us-current-handoff.md](./identity-us-current-handoff.md) | Current visitor-identity handoff; read first for live status |
+| [visitor-identity-flow-architecture.md](./visitor-identity-flow-architecture.md) | Luồng định danh visitor: input fields gửi cho từng provider, waterfall pre/paid, match logic Leadpipe/Capturify, so sánh `main-backup1_8`, đề xuất tối ưu input |
 | [project-overview-pdr.md](./project-overview-pdr.md) | Product overview, users, constraints, PDR |
 | [codebase-summary.md](./codebase-summary.md) | Repository map, LOC orientation, drift notes |
 | [code-standards.md](./code-standards.md) | Structure, naming, patterns observed in code |

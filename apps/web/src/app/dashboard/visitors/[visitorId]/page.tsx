@@ -48,8 +48,19 @@ function shortenPath(raw: string, max = 26): string {
   return p.slice(0, max - 1) + "…";
 }
 
+/** Parse an API timestamp as UTC.
+ *
+ * DB columns are naive `DateTime` and serialize without a `Z`, and JS parses an
+ * offset-less datetime as LOCAL time — so a UTC+7 viewer would read a 5-minute-old
+ * event as "7h ago". Append the marker when the string carries no zone of its own.
+ */
+function parseApiDate(iso: string): Date {
+  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(iso);
+  return new Date(hasZone || !iso.includes("T") ? iso : `${iso}Z`);
+}
+
 function timeAgo(iso: string): string {
-  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  const s = Math.floor((Date.now() - parseApiDate(iso).getTime()) / 1000);
   if (s < 60) return "just now";
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ago`;
@@ -57,7 +68,7 @@ function timeAgo(iso: string): string {
   if (h < 24) return `${h}h ago`;
   const d = Math.floor(h / 24);
   if (d < 30) return `${d}d ago`;
-  return new Date(iso).toLocaleDateString();
+  return parseApiDate(iso).toLocaleDateString();
 }
 
 function IntentRing({ score }: { score: number }) {
@@ -173,6 +184,50 @@ function InfoRow({ label, children }: { label: string; children: ReactNode }) {
     <div className="flex items-start justify-between gap-4 py-2 text-sm">
       <span className="shrink-0 text-muted-foreground">{label}</span>
       <span className="max-w-[62%] text-right font-medium">{children}</span>
+    </div>
+  );
+}
+
+function providerCount(count: number): string {
+  return `${count} data provider${count === 1 ? "" : "s"}`;
+}
+
+/** Why this visitor is still unidentified: real attempts vs provider outages.
+ *
+ * These are two different things and the whole point is to keep them apart. An
+ * *attempt* means a provider answered and nobody matched — that is information
+ * about the visitor, and it arms the 30-day retry lock. An *outage* means the
+ * provider never answered — that says nothing about the visitor, so it is
+ * deliberately not recorded as an attempt and the visitor stays retryable.
+ * Showing only "tried: leadpipe" for a vendor that was down reads as "we looked
+ * and found nothing", which is exactly the wrong conclusion.
+ */
+function ResolutionAttempts({ visitor }: { visitor: VisitorDetail }) {
+  const tried = visitor.resolution_providers_tried ?? [];
+  const outages = visitor.outage_providers ?? [];
+  if (tried.length === 0 && outages.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5 rounded-xl border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
+      {tried.length > 0 && (
+        <p>
+          <span className="font-medium text-foreground">
+            Checked {providerCount(tried.length)}
+          </span>
+          {visitor.last_resolution_attempt && (
+            <> · last attempt {timeAgo(visitor.last_resolution_attempt)}</>
+          )}
+        </p>
+      )}
+      {outages.length > 0 && (
+        <p>
+          <span className="font-medium text-amber-600 dark:text-amber-500">
+            {providerCount(outages.length)} unavailable
+          </span>
+          {visitor.last_outage_at && <> ({timeAgo(visitor.last_outage_at)})</>}. This
+          isn&apos;t a &quot;no match&quot; — the visitor stays eligible for a retry.
+        </p>
+      )}
     </div>
   );
 }
@@ -629,6 +684,7 @@ export default function VisitorDetailPage() {
           {visitor.coverage_note}
         </div>
       )}
+      <ResolutionAttempts visitor={visitor} />
 
       {/* ---- Body: main + sidebar ---- */}
       <div className="grid gap-6 lg:grid-cols-3">

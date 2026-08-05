@@ -6,6 +6,37 @@ Kết luận ngắn: các thay đổi hiện tại làm an toàn hơn và đo đ
 
 Viết tắt: RB2B = vendor person-graph/pixel; `Candidate` = `provider_candidate`; `Verified` = `verified`; US = visitor ở Mỹ; P1/P2 = hai phase đang bàn.
 
+## ⚠️ Đính chính 05-08-26 — phần Leadpipe bên dưới đã lỗi thời
+
+Kiểm tra lại live ngày 05-08-26 bác bỏ ba khẳng định trong file này:
+
+| Khẳng định (02-08) | Thực tế (05-08) |
+|---|---|
+| `leadpipe.aws53.cloud/p/<uuid>.js` = **404** | **HTTP 200**, 1154 bytes, pixel thật của `beamlab.nhantown.com` |
+| `pixels_total=0, pixels_active=0` | có ít nhất 1 pixel đăng ký cho domain lab; SDK chain cũng 200 |
+| "Cách dựng URL từ UUID chưa được chứng minh đúng" | **Đã chứng minh đúng** — không cần sửa `tracker.js` |
+
+**Nhưng phần account thì ĐÚNG** — test lại 05-08-26 09:30 UTC với API key thật:
+`GET /v1/data` và `POST /v1/data/pixels` đều trả **403 `"Organization is expired"`**.
+
+Tách bạch hai mặt: **pixel JS phục vụ được** (200, CDN không kiểm tra trạng thái org), nhưng
+**API đọc dữ liệu và tạo pixel đều bị chặn**. Nên pixel vẫn nạp trên site mà Beam không lấy được
+gì về. Leadpipe hiện **không dùng được**, và đây là việc tài khoản phía vendor — **không có gì
+trong code Beam cần sửa** để khôi phục.
+
+Hai điểm mới phát hiện: pixel trên site lab được **dán tay vào HTML**, không đi qua `data-stack`
+của Beam; và pixel là **per-domain**, nên một pixel-id toàn cục không dùng chung cho nhiều site
+khách được.
+
+Ngoài ra: **không có "xung đột 2 plan Phase 2"**. Plan cookie/fingerprint đã hoàn thành đủ 5/5
+acceptance (chính là commit `0ff8c9a` trên `dev_nhantc2`) — nó chỉ trùng nhãn "Phase 2" với
+coverage Phase 2, hai phạm vi khác nhau (first-party cookie/FP vs vendor webhook ingest). Đã
+archive sang `plans/completed/260802-1854-cookie-fp-phase2/` (05-08-26), nên không còn gì để
+"reconcile".
+
+Kế hoạch gỡ đầy đủ: `plans/260805-1543-identity-coverage-recovery/`.
+Kiến trúc luồng: `docs/visitor-identity-flow-architecture.md`.
+
 ## Trạng thái nhanh
 
 | Phần việc | Trạng thái thật | Ý nghĩa |
@@ -13,7 +44,7 @@ Viết tắt: RB2B = vendor person-graph/pixel; `Candidate` = `provider_candidat
 | P0 quality gates | Committed tại `f11004e`: RB2B parser chặn hashed email-like values, enrich/normalize profile + tests | Mốc an toàn đã có trong Git |
 | P1/P2 status + observability | Code/tests có trong dirty worktree; completion report có nhưng folder vẫn nằm ở `active/` | Chưa coi là bàn giao bền vững trước khi review, commit và dọn trạng thái plan |
 | Coverage Phase 1 Leadpipe | Structural/unit test xong, nhưng live **FAILED / BLOCKED** | Account expired, 0 active pixel, API 403 và tracker URL 404 |
-| Coverage Phase 2-4 | Pending; đang có hai plan Phase 2 cạnh tranh | Phải chọn/reconcile một plan duy nhất rồi VALIDATE trước khi EXECUTE |
+| Coverage Phase 2-4 | Pending | Xung đột "hai plan Phase 2" là giả — plan cookie/FP đã xong và archive 05-08-26. Đường đi hiện tại: `plans/260805-1543-identity-coverage-recovery/` |
 
 ## Flow cũ vs mới
 
@@ -45,6 +76,15 @@ Candidate bị tách khỏi emailable và verified KPI
 - Row identified duy nhất có mismatch tên/email rõ ràng, nên baseline đúng thực tế hiện tại là gần như `0/8`.
 - `6/7` US-unresolvable có resolution log gần đây và đang nằm trong retry lock 30 ngày.
 - Leadpipe logs = `0`.
+- **Bổ sung 05-08-26 (audit chạy thật, `scripts/identity_locked_visitors_audit.sql`):** provider
+  ghi các dòng khoá là `ipinfo` (**9 lần / 0 thành công**) và `pdl_ip_enrich` (**9 lần / 0 thành
+  công**) — **không phải Leadpipe**, vốn có 0 dòng như trên. Một phần nguyên nhân đã sửa
+  (`_resolve_ip_company_parallel` trước đây ghi "đã thử, thất bại" cho cả provider **thiếu key nên
+  chưa từng được gọi**). Đừng quy kết khoá oan cho Leadpipe khi chưa đo lại.
+- **Lưu ý trạng thái:** visitor bị khoá mang `identity_status='unresolvable'`, **không phải
+  `anonymous`**. Truy vấn lọc `anonymous` sẽ trả 0 dòng. Quan trọng hơn: sweep
+  (`apps/api/tasks/resolution_tasks.py`) chỉ chọn `anonymous`, nên **gỡ khoá 30 ngày một mình
+  không đưa visitor nào quay lại hàng đợi** — đây là khoá ràng buộc thật, vẫn đang mở.
 - US RB2B logs = `13` attempts, `8` success logs, nhưng toàn bộ success dồn vào đúng 1 visitor false-positive.
 - Fresh test: `50 passed + 52 passed = 102 passed`; `git diff --check` passed. Đây là bằng chứng code-path, không phải bằng chứng live uplift.
 - Live Leadpipe read-only checks: key shape `sk_` dài 67, pixel UUID dài 36; account endpoint 200 nhưng `healthy=false`, `org_status=expired`, `credits_remaining=500`, `pixels_total=0`, `pixels_active=0`.
@@ -54,7 +94,7 @@ Candidate bị tách khỏi emailable và verified KPI
 
 ## Việc cần làm tiếp theo
 
-1. Chọn/reconcile một plan authoritative duy nhất cho Phase 2: [coverage Phase 2](../process/features/visitors-identity/active/identity-coverage-pixel-fppro_02-08-26/phase-02-wire-candidate-ingest-from-vendor-callbacks.md) hay [plan cookie/fingerprint mới](../plans/260802-1854-cookie-fp-phase2/plan.md).
+1. ~~Chọn/reconcile một plan authoritative duy nhất cho Phase 2~~ — **XONG 05-08-26:** không có xung đột. Plan cookie/FP đã archive; [coverage Phase 2](../process/features/visitors-identity/active/identity-coverage-pixel-fppro_02-08-26/phase-02-wire-candidate-ingest-from-vendor-callbacks.md) được [Phase 4 của plan recovery](../plans/260805-1543-identity-coverage-recovery/phase-04-webhook-ingest-and-measurable-coverage.md) kế thừa.
 2. Chốt quyết định business: re-activate Leadpipe hay replace/drop nó.
 3. Sửa plan rồi VALIDATE lại: dùng exact provider install code/URL, thêm provider-health preflight, coi 403/5xx là provider failure thay vì khóa 30 ngày no-match, và giữ KPI `Candidate` tách khỏi `Verified`.
 4. Chỉ EXECUTE sau khi VALIDATE xong và plan đã rõ.
@@ -77,7 +117,7 @@ Candidate bị tách khỏi emailable và verified KPI
 - [Identity coverage program](../process/features/visitors-identity/active/identity-coverage-pixel-fppro_02-08-26/plan.md)
 - [Phase 1 report Leadpipe pixel PoC wiring](../process/features/visitors-identity/active/identity-coverage-pixel-fppro_02-08-26/phase-01_REPORT_02-08-26.md) — structural/unit evidence; live status trong report đã bị evidence mới ở file này thay thế.
 - [Coverage Phase 2](../process/features/visitors-identity/active/identity-coverage-pixel-fppro_02-08-26/phase-02-wire-candidate-ingest-from-vendor-callbacks.md)
-- [Plan cookie/fingerprint Phase 2 mới](../plans/260802-1854-cookie-fp-phase2/plan.md) — phải reconcile với coverage Phase 2 trước khi chạy.
+- [Plan cookie/fingerprint Phase 2](../plans/completed/260802-1854-cookie-fp-phase2/plan.md) — **đã hoàn thành + archive 05-08-26** (commit `0ff8c9a`). Không cần reconcile.
 - [Phase 3 Fingerprint Pro device continuity](../process/features/visitors-identity/active/identity-coverage-pixel-fppro_02-08-26/phase-03-fingerprint-pro-device-continuity.md)
 - [Phase 4 US ground-truth benchmark pack](../process/features/visitors-identity/active/identity-coverage-pixel-fppro_02-08-26/phase-04-us-ground-truth-benchmark-pack.md)
 
@@ -89,5 +129,5 @@ Candidate bị tách khỏi emailable và verified KPI
 ## Unresolved questions
 
 - Leadpipe nên bật lại, thay bằng provider khác, hay bỏ khỏi đường coverage?
-- Coverage Phase 2 hay plan cookie/fingerprint mới sẽ là authoritative?
+- ~~Coverage Phase 2 hay plan cookie/fingerprint mới sẽ là authoritative?~~ — **ĐÃ TRẢ LỜI 05-08-26:** câu hỏi dựa trên xung đột không có thật; plan cookie/FP đã xong và archive.
 - Candidate KPI nên hiển thị riêng ở đâu để người xem không nhầm với Verified?

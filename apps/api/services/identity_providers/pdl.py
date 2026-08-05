@@ -7,7 +7,10 @@ import structlog
 
 from apps.api.config import settings
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
-from apps.api.services.identity_providers.base import _http_retry
+from apps.api.services.identity_providers.base import (
+    ProviderUnavailableError,
+    _http_retry,
+)
 
 logger = structlog.get_logger()
 
@@ -105,4 +108,9 @@ class PDLMixin:
             else:
                 logger.warning("pdl_ip_error", status=resp.status_code, ip=visitor.ip_address[:8])
                 self._raise_if_transient(resp)
+                # 200/400/404 already handled above as real answers; anything
+                # left here (401 bad key, 402 quota) is the account failing.
+                raise ProviderUnavailableError(
+                    "pdl_ip_enrich", f"HTTP {resp.status_code}"
+                )
         return None
