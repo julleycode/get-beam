@@ -154,6 +154,7 @@ async def get_agent_stats(
         total_visits=int(total_visits),
         distinct_vendors=len(by_vendor),
         by_vendor=by_vendor,
+        detection_enabled=settings.agent_detection_enabled,
     )
 
 

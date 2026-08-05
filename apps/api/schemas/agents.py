@@ -38,6 +38,7 @@ class AgentStatsResponse(BaseModel):
     total_visits: int
     distinct_vendors: int
     by_vendor: dict[str, int]
+    detection_enabled: bool
 
 
 class TopPageEntry(BaseModel):

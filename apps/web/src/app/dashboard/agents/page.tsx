@@ -267,6 +267,9 @@ export default function AgentsPage() {
         actions={
           <div className="flex flex-wrap items-center gap-3">
             <SiteSelector value={siteId} onChange={handleSiteChange} />
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/dashboard/agent-gateway">Gateway settings</Link>
+            </Button>
           </div>
         }
       />
@@ -312,7 +315,11 @@ export default function AgentsPage() {
             <EmptyState
               icon={Bot}
               title="No agent visits yet"
-              description="When AI agents (crawlers, assistants) hit your site, they show up here, kept separate from your human visitors."
+              description={
+                stats?.detection_enabled === false
+                  ? "Agent detection must be enabled on the backend (AGENT_DETECTION_ENABLED) before visits from GPTBot, ClaudeBot, PerplexityBot and others appear here."
+                  : "No agent visits yet — once AI agents like GPTBot or ClaudeBot fetch your pages they'll appear here."
+              }
             />
           ) : (
             <Table>

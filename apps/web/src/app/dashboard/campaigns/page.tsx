@@ -4,9 +4,10 @@ import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, ArchiveRestore, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Megaphone, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { TableSkeleton } from "@/components/skeletons";
+import { EmptyState } from "@/components/empty-state";
 import { SiteSelector } from "@/components/site-selector";
 import { PageHeader } from "@/components/page-header";
 import { CampaignsHelp } from "@/components/page-help";
@@ -204,9 +205,16 @@ export default function CampaignsPage() {
       ) : isLoading ? (
         <TableSkeleton cols={4} rows={6} />
       ) : campaigns.length === 0 ? (
-        <p className="text-muted-foreground">
-          No campaigns yet. Campaigns are auto-generated when segments are created.
-        </p>
+        <EmptyState
+          icon={Megaphone}
+          title="No campaigns yet"
+          description="Campaigns are auto-generated when segments are created. Create a segment first and drafts will show up here."
+          action={
+            <Button asChild size="sm">
+              <Link href="/dashboard/segments">Go to segments</Link>
+            </Button>
+          }
+        />
       ) : (
         <Table>
           <TableHeader>
