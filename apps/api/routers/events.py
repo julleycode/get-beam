@@ -548,15 +548,30 @@ async def _process_signal_events(
     # builds emitted "fp_<hash>" — accept both. Cap at the visitors.fingerprint
     # column length (64) so a malformed value can't fail the UPDATE.
     fp_value: str | None = None
+    fp3_value: str | None = None
     for event in batch.events:
         raw_fp = event.fp
         if (
-            raw_fp
+            fp_value is None
+            and raw_fp
             and isinstance(raw_fp, str)
             and raw_fp.startswith(("fp_", "fp2_"))
             and len(raw_fp) <= 64
         ):
             fp_value = raw_fp
+        # fp3 resolves asynchronously on the client, so it can appear on a LATER
+        # event than fp2 (or on a later batch entirely) — keep scanning for it
+        # instead of breaking on the first fp2 hit.
+        raw_fp3 = event.fp3
+        if (
+            fp3_value is None
+            and raw_fp3
+            and isinstance(raw_fp3, str)
+            and raw_fp3.startswith("fp3_")
+            and len(raw_fp3) <= 64
+        ):
+            fp3_value = raw_fp3
+        if fp_value and fp3_value:
             break
 
     needs_commit = False
@@ -566,7 +581,14 @@ async def _process_signal_events(
     # Upsert a minimal stub with write-once FP/svid in ONE statement so a stub
     # failure cannot leave the stamps silently dropped; aggregator later fills
     # pageview/session totals on the same PK without touching those columns.
-    if fp_value or svid:
+    #
+    # Gate note (reconciliation E-8): the condition is `fp_value or fp3_value or
+    # svid`. All three are independent client-side signals — dropping `or svid`
+    # would silently reintroduce the exact race this upsert-stub exists to fix
+    # for a batch that carries only the durable _rta_svid server cookie and no
+    # fingerprint at all; dropping `or fp3_value` would lose an fp3 that resolved
+    # on a later batch than fp2.
+    if fp_value or fp3_value or svid:
         try:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             seen_times: list[datetime] = []
@@ -593,6 +615,7 @@ async def _process_signal_events(
                     enrichment_status="pending",
                     segmented=False,
                     fingerprint=fp_value,
+                    fingerprint_v3=fp3_value,
                     server_visitor_id=svid,
                 )
                 .on_conflict_do_update(
@@ -601,6 +624,12 @@ async def _process_signal_events(
                         # Write-once: keep existing stamp; fill only when NULL.
                         "fingerprint": sa_text(
                             "COALESCE(visitors.fingerprint, EXCLUDED.fingerprint)"
+                        ),
+                        # Same write-once semantics as fingerprint: fp3 resolves
+                        # asynchronously on the client and may land on a later
+                        # batch, so never blank a stored value with a NULL.
+                        "fingerprint_v3": sa_text(
+                            "COALESCE(visitors.fingerprint_v3, EXCLUDED.fingerprint_v3)"
                         ),
                         "server_visitor_id": sa_text(
                             "COALESCE(visitors.server_visitor_id, EXCLUDED.server_visitor_id)"

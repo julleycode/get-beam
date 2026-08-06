@@ -448,6 +448,50 @@ block) — all default OFF/permissive, same operator-gated posture as `agent_det
   `process/features/pixel/backlog/ingest-abuse-hardening-deferred-gates_NOTE_25-07-26.md` (open:
   migration live round-trip; AC-4a mutation-kill re-verification).
 
+## Browser Fingerprint v3 (fp3 — fonts + audio, shipped 07-08-26)
+
+Adds the two signals the v2 hash was missing, without disturbing v2:
+
+- **Installed-font probe** (`fontFp` in `apps/pixel/src/tracker.js`) — renders a fixed string at
+  72px per candidate font against the `monospace`/`sans-serif`/`serif` fallbacks; a metrics
+  difference means the font resolved. 25 candidates → hit bitmask in base36. Needs
+  `document.body`, so it runs behind the new `whenBody()` helper — a head-placed and a
+  body-placed snippet must produce the same value.
+- **Audio-stack probe** (`audioFp`) — fixed triangle oscillator through a `DynamicsCompressor`
+  rendered in an `OfflineAudioContext`, summing the tail. `sampleRate` is pinned to 44100 so the
+  value does not move with the machine's audio config. Async (hence a callback), 1s timeout, and
+  every failure path yields `""` — unsupported/blocked is itself a stable per-browser constant.
+- **`fp2_` is unchanged and still emitted on every event.** `fp3_` = `hash128(fp2 base | fonts |
+  audio)` and rides along as a second field (`_fp3`). This is the whole point of the design:
+  overwriting `fingerprint` with a new hash would make every already-known visitor look new,
+  missing `fingerprint_match` AND the cross-tenant `beam_identity_graph`, and re-paying providers
+  to re-identify people Beam already owns.
+- **Storage is additive** — new nullable `visitors.fingerprint_v3` and
+  `beam_identity_graph.fingerprint_v3` columns (+ indexes), migration `f1a7c3e05b92`. The graph's
+  unique key stays `(fingerprint, email)`; fp3 is only an extra lookup path on the same row, and
+  the upsert `coalesce`s so a NULL fp3 never blanks a stored one. Both visitor columns are
+  write-once: fp3 resolves asynchronously on the client, so it routinely arrives on a LATER batch
+  than fp2 (`_process_signal_events` scans for both independently).
+- **Resolver prefers v3, falls back to v2** — `identity_resolver.py` Check 2 and
+  `_check_beam_identity_network` both try the v3 column first (confidence 0.80, above v2's 0.75,
+  still below the 0.90 deterministic svid path), then the v2 column for rows written before fp3
+  existed and for older pixel builds. The P4 ingest-velocity diversity check deliberately still
+  keys on fp2 — that signal is present on 100% of events, so abuse detection is unchanged.
+- **Pixel size budget raised 5KB → 6KB gzipped** (`tracker.min.js` 4843B → 5692B). Enforced in
+  `tests/unit/test_pixel_fingerprint.py` (`< 6000`) and `tests/unit/test_pixel.py` (`< 6144`).
+- Browser-only behavior is covered by `apps/pixel/e2e/fingerprint-v3.spec.ts` (fp2-always,
+  fp3-eventually, fp3 stable across reloads, no stray probe span) — green on chromium/webkit/firefox.
+- **Still missing from Layer 2**: extension enumeration, and CPU clock skew (not reachable from
+  JS at all — it needs TCP-stack timing at the edge, not the pixel).
+
+**Alembic head note:** the migration chain listed in the EvalLayer section below is STALE — it
+ends at `e6b2d4a1c837`, but the chain has since advanced through `c2f8a5d31e97` →
+`e9d2a4c71f68` (add_site_tombstones) → `f1a7c3e05b92` (add_fingerprint_v3, **current head**,
+confirmed live via `alembic -c apps/api/alembic.ini heads` on 07-08-26 — single head, no
+branching). Always re-run `alembic heads` before chaining or applying; concurrent programs move
+it repeatedly. `f1a7c3e05b92` is offline `--sql`-validated only — live round-trip NOT run
+(Docker daemon down in the implementing environment).
+
 ## Key Patterns and Conventions
 
 **Python:** type hints on all functions; async for all I/O; `structlog` only (never `print()`); `httpx` async for external calls (never `requests`); every external call has timeout + retry/backoff + error handling; never swallow exceptions; Pydantic models for every API schema; config via `pydantic-settings` env only — no hardcoded secrets.

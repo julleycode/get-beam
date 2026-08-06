@@ -44,6 +44,12 @@ class Visitor(Base):
     ip_address: Mapped[str | None] = mapped_column(String(45))
     company_domain: Mapped[str | None] = mapped_column(String(253))
     fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # fp3 — base signals + installed-font probe + offline audio render. Stored in
+    # its own column rather than replacing `fingerprint`, so every fingerprint
+    # already on disk keeps matching. Write-once like `fingerprint`; stays NULL
+    # for older pixel builds and for the first events of a session (fp3 resolves
+    # asynchronously on the client).
+    fingerprint_v3: Mapped[str | None] = mapped_column(String(64), nullable=True)
     canonical_visitor_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # Durable server-set identity (_rta_svid HttpOnly cookie). When a returning
     # visitor's CLIENT id is wiped (Safari ITP caps client cookies/localStorage at

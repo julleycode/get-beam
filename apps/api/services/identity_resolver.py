@@ -419,14 +419,22 @@ class IdentityResolver(
             logger.warning("prior_signal_email_check_failed", error=str(exc))
 
         # ── Check 2: Fingerprint match against already-identified visitors ──
-        if getattr(visitor, "fingerprint", None):
+        # Prefer the fp3 hash (base signals + installed fonts + audio render): it
+        # carries more entropy than fp2, so a v3 hit is a stronger claim and gets
+        # the higher confidence. Falls back to the fp2 column for visitors stored
+        # before fp3 existed, older pixel builds, and the async window before fp3
+        # resolves on the client.
+        fp_v3 = getattr(visitor, "fingerprint_v3", None)
+        fp_col = Visitor.fingerprint_v3 if fp_v3 else Visitor.fingerprint
+        fp_val = fp_v3 or getattr(visitor, "fingerprint", None)
+        if fp_val:
             try:
                 fp_result = await self.db.execute(
                     select(IdentifiedVisitor)
                     .join(Visitor, IdentifiedVisitor.visitor_id == Visitor.visitor_id)
                     .where(
                         Visitor.site_id == visitor.site_id,
-                        Visitor.fingerprint == visitor.fingerprint,
+                        fp_col == fp_val,
                         Visitor.visitor_id != visitor.visitor_id,
                         # Identity-honesty Phase 1 (A1c): only inherit from a
                         # CONFIRMED origin. A fingerprint match against a
@@ -454,6 +462,7 @@ class IdentityResolver(
                         "prior_signal_fingerprint_match",
                         visitor_id=visitor.visitor_id[:8],
                         matched_visitor=matched.visitor_id[:8],
+                        fp_version=3 if fp_v3 else 2,
                     )
                     # Copy identity to this visitor
                     return await self._save_identified(
@@ -464,7 +473,10 @@ class IdentityResolver(
                             "city": matched.city,
                             "region": matched.region,
                             "country": matched.country,
-                            "confidence_score": 0.75,  # slightly lower — fingerprint match
+                            # fingerprint match — below the 0.90 deterministic
+                            # svid path either way; fp3 carries more entropy than
+                            # fp2, so a v3 hit is a slightly stronger claim.
+                            "confidence_score": 0.80 if fp_v3 else 0.75,
                         },
                         "fingerprint_match",
                     )
@@ -1266,6 +1278,7 @@ class IdentityResolver(
 
             stmt = pg_insert(BeamIdentityNode).values(
                 fingerprint=fp,
+                fingerprint_v3=getattr(visitor, "fingerprint_v3", None),
                 email=email,
                 full_name=data.get("full_name"),
                 email_ciphertext=encrypt_pii(email),
@@ -1278,6 +1291,12 @@ class IdentityResolver(
             stmt = stmt.on_conflict_do_update(
                 index_elements=["fingerprint", "email"],
                 set_={
+                    # Backfill fp3 onto a row first written before fp3 existed,
+                    # but never blank an existing value with a NULL from a visitor
+                    # whose fp3 has not resolved yet.
+                    "fingerprint_v3": func.coalesce(
+                        stmt.excluded.fingerprint_v3, BeamIdentityNode.fingerprint_v3
+                    ),
                     "full_name": stmt.excluded.full_name,
                     "full_name_ciphertext": stmt.excluded.full_name_ciphertext,
                     "confidence_score": stmt.excluded.confidence_score,
@@ -1335,20 +1354,30 @@ class IdentityResolver(
         that identity (discounted confidence: 0.85).
         """
         fp = getattr(visitor, "fingerprint", None)
-        if not fp:
+        fp_v3 = getattr(visitor, "fingerprint_v3", None)
+        if not fp and not fp_v3:
             return None
         try:
-            result = await self.db.execute(
-                select(BeamIdentityNode)
-                .where(
-                    BeamIdentityNode.fingerprint == fp,
-                    BeamIdentityNode.email.isnot(None),
-                    BeamIdentityNode.confidence_score >= 0.5,
+            # Same v3-first, v2-fallback order as the per-site fingerprint match:
+            # graph rows written before fp3 existed only carry the fp2 column.
+            node = None
+            for col, val in ((BeamIdentityNode.fingerprint_v3, fp_v3),
+                             (BeamIdentityNode.fingerprint, fp)):
+                if not val:
+                    continue
+                result = await self.db.execute(
+                    select(BeamIdentityNode)
+                    .where(
+                        col == val,
+                        BeamIdentityNode.email.isnot(None),
+                        BeamIdentityNode.confidence_score >= 0.5,
+                    )
+                    .order_by(BeamIdentityNode.confidence_score.desc())
+                    .limit(1)
                 )
-                .order_by(BeamIdentityNode.confidence_score.desc())
-                .limit(1)
-            )
-            node = result.scalar_one_or_none()
+                node = result.scalar_one_or_none()
+                if node:
+                    break
             if node:
                 logger.info(
                     "beam_identity_network_match",

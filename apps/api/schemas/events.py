@@ -51,6 +51,10 @@ class Event(BaseModel):
     value: float | None = None
     # Browser fingerprint (sent on every event by the pixel as _fp field)
     fp: str | None = Field(None, alias="_fp")
+    # fp3: the same base signals plus the installed-font probe and the offline
+    # audio render. Async on the client, so early events in a session may carry
+    # _fp without _fp3. Older pixel builds never send it.
+    fp3: str | None = Field(None, alias="_fp3")
     # Privacy opt-out: pixel sets true when navigator.globalPrivacyControl (GPC)
     # or doNotTrack (DNT) is on. Defaults False for older pixel builds.
     optout: bool = False

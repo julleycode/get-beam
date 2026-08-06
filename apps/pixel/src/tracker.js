@@ -124,7 +124,84 @@
     } catch(e) { return ""; }
   }
 
-  function getFingerprint() {
+  // Installed-font probe. Renders a fixed string at 72px in each candidate font
+  // with a base fallback appended; if the metrics differ from the bare fallback,
+  // the candidate resolved => it is installed. Returns the hit bitmask in base36.
+  // Needs document.body, so callers must wait for DOM ready (see whenBody).
+  function fontFp() {
+    try {
+      if (!document.body) return "";
+      var base = ["monospace", "sans-serif", "serif"];
+      var list = ("Arial Black,Arial Narrow,Bookman Old Style,Calibri,Cambria,Candara," +
+        "Century Gothic,Consolas,Courier New,Franklin Gothic Medium,Garamond,Georgia," +
+        "Helvetica Neue,Impact,Lucida Console,Lucida Grande,MS Gothic,Menlo,Monaco," +
+        "Optima,Palatino,Segoe UI,Tahoma,Trebuchet MS,Verdana").split(",");
+      var s = document.createElement("span");
+      s.style.cssText = "position:absolute;left:-9999px;top:-9999px;font-size:72px;" +
+        "line-height:normal;white-space:nowrap;visibility:hidden";
+      s.textContent = "mmmmmmmmmmlli";
+      document.body.appendChild(s);
+      var dflt = [];
+      for (var i = 0; i < 3; i++) {
+        s.style.fontFamily = base[i];
+        dflt.push([s.offsetWidth, s.offsetHeight]);
+      }
+      var bits = "";
+      for (var j = 0; j < list.length; j++) {
+        var hit = "0";
+        for (var k = 0; k < 3; k++) {
+          s.style.fontFamily = '"' + list[j] + '",' + base[k];
+          if (s.offsetWidth !== dflt[k][0] || s.offsetHeight !== dflt[k][1]) { hit = "1"; break; }
+        }
+        bits += hit;
+      }
+      document.body.removeChild(s);
+      return parseInt(bits, 2).toString(36);
+    } catch(e) { return ""; }
+  }
+
+  // Audio-stack probe: render a fixed oscillator through a compressor offline and
+  // sum the tail. Differences in the DSP implementation produce a stable per-
+  // device value. Async — hence the callback. sampleRate is pinned so the value
+  // does not move with the machine's audio config. Any failure yields "" (a
+  // stable value: unsupported/blocked is itself a per-browser constant).
+  function audioFp(cb) {
+    try {
+      var C = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      if (!C) return cb("");
+      var ctx = new C(1, 5000, 44100);
+      var osc = ctx.createOscillator();
+      osc.type = "triangle";
+      osc.frequency.value = 10000;
+      var cmp = ctx.createDynamicsCompressor();
+      cmp.threshold.value = -50;
+      cmp.knee.value = 40;
+      cmp.ratio.value = 12;
+      cmp.attack.value = 0;
+      cmp.release.value = 0.25;
+      osc.connect(cmp);
+      cmp.connect(ctx.destination);
+      osc.start(0);
+      var done = false;
+      function finish(v) { if (!done) { done = true; cb(v); } }
+      ctx.oncomplete = function(e) {
+        try {
+          var d = e.renderedBuffer.getChannelData(0), sum = 0;
+          for (var i = 4500; i < 5000; i++) sum += Math.abs(d[i]);
+          finish(sum.toString());
+        } catch(err) { finish(""); }
+      };
+      ctx.startRendering();
+      setTimeout(function() { finish(""); }, 1000);
+    } catch(e) { cb(""); }
+  }
+
+  function whenBody(fn) {
+    if (document.body) return fn();
+    document.addEventListener("DOMContentLoaded", fn, { once: true });
+  }
+
+  function fpParts() {
     var c = [];
     c.push(screen.width + "x" + screen.height);
     c.push(screen.availWidth + "x" + screen.availHeight);
@@ -143,7 +220,15 @@
     c.push(canvasFp());
     c.push(webglFp());
     c.push(Math.tan(-1e300));
-    return "fp2_" + hash128(c.join("|"));
+    return c.join("|");
+  }
+
+  // fp2 stays byte-identical to the pre-font/audio build so every already-stored
+  // fingerprint keeps matching. fp3 = the same base plus the two new signals.
+  var fpBase = fpParts();
+
+  function getFingerprint() {
+    return "fp2_" + hash128(fpBase);
   }
 
   var visitorId = getVisitorId();
@@ -157,6 +242,16 @@
   try { inSubframe = window.self !== window.top; } catch (e) { inSubframe = true; }
   if (inSubframe && !getCookie(COOKIE_NAME) && !lsGet(COOKIE_NAME)) return;
   var fingerprint = getFingerprint();
+  // fp3 resolves asynchronously (audio render + DOM-ready font probe). Events
+  // emitted before it lands carry fp2 only; the server stores fp3 write-once
+  // from whichever later batch first supplies it.
+  var fingerprint3 = null;
+  whenBody(function() {
+    var f = fontFp();
+    audioFp(function(a) {
+      fingerprint3 = "fp3_" + hash128(fpBase + "|" + f + "|" + a);
+    });
+  });
   var QUEUE_KEY = "_rta_q";
   var queue = [];
 
@@ -171,6 +266,7 @@
   function pushEvent(evt) {
     if (DEAD) return; // site deleted — stop collecting
     evt._fp = fingerprint;
+    if (fingerprint3) evt._fp3 = fingerprint3;
     evt.optout = OPTOUT;
     // Idempotency key — server drops duplicate event_ids (retry/replay safe).
     evt.event_id = uuid();

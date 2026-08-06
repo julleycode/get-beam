@@ -123,7 +123,7 @@ class TestPixelSize:
         # field matching, mailto/URL-param, shadow-DOM/iframe). This is only a
         # sanity guard against someone dumping something huge into the source.
         # The binding budget applies to the SERVED (minified) tracker.min.js at
-        # <5KB gzipped — see test_pixel_fingerprint.py.
+        # <6KB gzipped — see test_pixel_fingerprint.py.
         assert len(pixel_code.encode()) < 32000, f"Pixel source is {len(pixel_code.encode())} bytes, should be under 32KB"
 
     def test_is_iife(self, pixel_code: str):
@@ -152,4 +152,4 @@ class TestBeamConvert:
         import gzip
 
         size = len(gzip.compress(self.MIN_PATH.read_bytes()))
-        assert size < 5120, f"pixel gzipped {size}B — over the 5KB budget"
+        assert size < 6144, f"pixel gzipped {size}B — over the 6KB budget"

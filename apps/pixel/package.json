@@ -2,7 +2,7 @@
   "name": "beam-pixel",
   "version": "1.0.0",
   "private": true,
-  "description": "Beam tracking pixel — vanilla JS, zero deps. Source is src/tracker.js; the API serves the minified src/tracker.min.js (must stay <5KB gzipped).",
+  "description": "Beam tracking pixel — vanilla JS, zero deps. Source is src/tracker.js; the API serves the minified src/tracker.min.js (must stay <6KB gzipped).",
   "scripts": {
     "build": "npx --yes esbuild@0.24.0 src/tracker.js --minify --target=es2017 --outfile=src/tracker.min.js",
     "size": "gzip -c src/tracker.min.js | wc -c",
