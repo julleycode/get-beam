@@ -1,6 +1,6 @@
 # Beam - All Context
 
-Last updated: 2026-08-04
+Last updated: 2026-08-07
 
 This file is the root context entrypoint for the repo.
 
