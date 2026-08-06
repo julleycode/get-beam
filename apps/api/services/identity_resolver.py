@@ -1094,6 +1094,13 @@ class IdentityResolver(
         self.db.add(identified)
         visitor.identity_status = identity_status_for_provider(provider)
         await self._log_owned_resolution(visitor, provider)
+        # Read the ids off the instance BEFORE the commit attempt. rollback()
+        # expires every instance in the session regardless of expire_on_commit,
+        # so touching visitor.* inside the except branch would trigger a
+        # synchronous lazy refresh and raise MissingGreenlet — losing the real
+        # conflict behind an unrelated error.
+        conflict_visitor_id = visitor.visitor_id
+        conflict_site_id = visitor.site_id
         try:
             await self.db.commit()
         except IntegrityError:
@@ -1102,13 +1109,13 @@ class IdentityResolver(
             await self.db.rollback()
             logger.info(
                 "save_identified_conflict_fetch_existing",
-                visitor_id=visitor.visitor_id[:8],
+                visitor_id=conflict_visitor_id[:8],
                 provider=provider,
             )
             existing = await self.db.execute(
                 select(IdentifiedVisitor).where(
-                    IdentifiedVisitor.visitor_id == visitor.visitor_id,
-                    IdentifiedVisitor.site_id == visitor.site_id,
+                    IdentifiedVisitor.visitor_id == conflict_visitor_id,
+                    IdentifiedVisitor.site_id == conflict_site_id,
                 )
             )
             row = existing.scalar_one_or_none()
