@@ -8,8 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.segment import SegmentMember
-from apps.api.models.visitor import IdentifiedVisitor
-from apps.api.services.identity_classification import is_emailable_identity
+from apps.api.models.visitor import IdentifiedVisitor, Visitor
+from apps.api.config import settings
+from apps.api.services.identity_classification import (
+    is_emailable_identity,
+    is_graph_candidate_provider,
+    is_verified_identity,
+)
 from apps.api.services.suppression import is_email_suppressed
 
 logger = structlog.get_logger()
@@ -76,11 +81,29 @@ async def _get_segment_visitors(
         # Never export a company-level guess (hunter/apollo) — it's a random
         # employee at the visitor's company, not the visitor; pushing it to ad
         # audiences / CRM spams someone who never visited.
-        if not is_emailable_identity(
+        exportable = is_emailable_identity(
             identified.resolution_provider,
             getattr(identified, "source_agent_visit_id", None),
             getattr(identified, "is_abuse_flagged", False),
+        )
+        # D5/D10 confirm-gate (see config.candidate_outreach_enabled). Only
+        # queried for graph-candidate providers, so the common path costs nothing.
+        # Additive-restrictive: can narrow the export, never widen it.
+        if (
+            exportable
+            and is_graph_candidate_provider(identified.resolution_provider)
+            and not settings.candidate_outreach_enabled
         ):
+            identity_status = (
+                await db.execute(
+                    select(Visitor.identity_status).where(
+                        Visitor.site_id == member.site_id,
+                        Visitor.visitor_id == member.visitor_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            exportable = is_verified_identity(identity_status)
+        if not exportable:
             continue
 
         # Compliance: never export contacts on the privacy suppression list

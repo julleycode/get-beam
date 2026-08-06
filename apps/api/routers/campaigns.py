@@ -13,6 +13,7 @@ from apps.api.models.segment import Segment, SegmentMember
 from apps.api.models.social_account import Platform, SocialAccount
 from apps.api.models.user import User
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
+from apps.api.config import settings
 from apps.api.dependencies import get_current_user, verify_site_access
 from apps.api.schemas.campaigns import (
     MAX_LINKEDIN_OUTREACH_LIMIT,
@@ -38,7 +39,11 @@ from apps.api.services.campaign_sender import (
 )
 from apps.api.services.email_rate_limiter import check_and_reserve_email
 from apps.api.services.email_sender import EmailSender
-from apps.api.services.identity_classification import is_emailable_identity
+from apps.api.services.identity_classification import (
+    is_emailable_identity,
+    is_graph_candidate_provider,
+    is_verified_identity,
+)
 from apps.api.services.phantommm_client import (
     PhantommmClient,
     PhantommmError,
@@ -722,11 +727,29 @@ async def _resolve_linkedin_targets(
             if iv.do_not_email:
                 skipped_no_linkedin += 1
                 continue
-            if not is_emailable_identity(
+            contactable = is_emailable_identity(
                 iv.resolution_provider,
                 getattr(iv, "source_agent_visit_id", None),
                 getattr(iv, "is_abuse_flagged", False),
+            )
+            # D5/D10 confirm-gate (see config.candidate_outreach_enabled). Only
+            # queried for graph-candidate providers, so the common path is
+            # unchanged. Additive-restrictive: can narrow, never widen.
+            if (
+                contactable
+                and is_graph_candidate_provider(iv.resolution_provider)
+                and not settings.candidate_outreach_enabled
             ):
+                identity_status = (
+                    await db.execute(
+                        select(Visitor.identity_status).where(
+                            Visitor.site_id == site_id,
+                            Visitor.visitor_id == vid,
+                        )
+                    )
+                ).scalar_one_or_none()
+                contactable = is_verified_identity(identity_status)
+            if not contactable:
                 skipped_no_linkedin += 1
                 continue
             if iv.email and await is_email_suppressed(db, iv.email, "do_not_email"):

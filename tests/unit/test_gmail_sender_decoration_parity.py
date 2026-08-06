@@ -97,9 +97,15 @@ async def _run_send(monkeypatch, *, gmail_connected: bool) -> str:
             member_result,
             site_result,
             iv_result,
+            # identity_status is read here (right after the IdentifiedVisitor
+            # row) because the D5/D10 candidate_outreach_enabled confirm-gate
+            # needs it BEFORE the emailability decision for a graph-candidate
+            # provider like the "rb2b" this fixture uses. The value is cached for
+            # the rest of the iteration, so the personalization gate further down
+            # reuses it — still exactly one identity_status query per recipient.
+            status_result,
             existing_result,
             company_result,
-            status_result,
         ]
     )
     db.flush = AsyncMock()

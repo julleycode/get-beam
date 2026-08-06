@@ -328,6 +328,27 @@ class Settings(BaseSettings):
     # pre-EvalLayer (recognized agent UAs fall through to the is_bot() drop).
     agent_detection_enabled: bool = False
 
+    # ─── Candidate outreach (identity-vocab-reconcile D5/D10) ───
+    # Gates the D2 WIDENING only: whether a graph-candidate identity
+    # (rb2b/leadpipe/capturify/beam_identity_network) that is still
+    # identity_status == "candidate" — an UNCONFIRMED graph guess — may be an
+    # outreach target.
+    #
+    # OFF (default): unconfirmed candidates are held back at the 3 outreach call
+    # sites (campaign send, CSV export, LinkedIn target resolution). A candidate a
+    # human has explicitly CONFIRMED (identity_status == "identified", via the
+    # confirm-candidate endpoint) is emailable regardless of this flag — that is
+    # the entire point of the confirm workflow, not a bypass.
+    # ON: the full D2 rule — any person-level identity is emailable, restrained
+    # only by the personalization gate (generic copy for unconfirmed candidates).
+    #
+    # is_emailable_identity() is NOT parameterized by this flag; the check is a
+    # wrapper at the call sites (hot_alert.py and outcome_digest.py are
+    # deliberately excluded — they gate what the SITE OWNER sees, not outreach to
+    # the candidate). Turning this on is a separate deliberate operator action,
+    # same posture as agent_detection_enabled / company_graph_enabled.
+    candidate_outreach_enabled: bool = False
+
     # ─── Agent gateway (agent-gateway Phase 1+2) ───
     # When true, the public per-site agent-facing read surface is served:
     # GET /api/v1/agent/{site_id}/manifest.json | /offers.json | /llms.txt and

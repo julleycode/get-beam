@@ -46,14 +46,23 @@ def _make_resolver():
 
 
 def _mock_rb2b(client_cls: MagicMock, hem_results: list, profile: dict) -> MagicMock:
-    """Wire the two-step RB2B chain onto a mocked httpx.AsyncClient class."""
+    """Wire the RB2B chain onto a mocked httpx.AsyncClient class.
+
+    Three steps, not two: main's RB2B rework added a Step 3 "full business
+    enrichment" POST (/identity/business) that fires whenever Step 2 produced no
+    plaintext email. Step 3 is mocked as a 404 (the "no further data" outcome) so
+    these score-parsing tests still observe exactly Step 2's parsed result, while
+    the extra call no longer exhausts the side_effect list.
+    """
     hem_resp = MagicMock(status_code=200)
     hem_resp.json.return_value = {"results": hem_results}
     profile_resp = MagicMock(status_code=200)
     profile_resp.json.return_value = profile
+    enrich_resp = MagicMock(status_code=404)
+    enrich_resp.json.return_value = {}
 
     client = AsyncMock()
-    client.post = AsyncMock(side_effect=[hem_resp, profile_resp])
+    client.post = AsyncMock(side_effect=[hem_resp, profile_resp, enrich_resp])
     client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
     client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
     return client

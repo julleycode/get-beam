@@ -37,6 +37,7 @@ from apps.api.services.email_rate_limiter import (
 from apps.api.services.email_sender import EmailSender
 from apps.api.services.identity_classification import (
     is_emailable_identity,
+    is_graph_candidate_provider,
     is_verified_identity,
 )
 from apps.api.services.link_decorator import generate_unsubscribe_token
@@ -278,13 +279,54 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
         if iv.do_not_email:
             summary["skipped_suppressed"] += 1
             continue
+        # identity_status lives on Visitor (not IdentifiedVisitor), joined on
+        # (site_id, visitor_id) — the same predicate used in identity_resolver /
+        # routers.visitors / daily_digest. Read FRESH per recipient inside the
+        # send loop: that is what makes a mid-campaign candidate confirmation take
+        # effect on the very next send without re-planning the campaign. A missing
+        # Visitor row yields None, which is not verified → generic copy (fails
+        # safe, never drops the recipient).
+        #
+        # Fetched LAZILY, at most once per recipient, by the closure below. The
+        # confirm-gate (a few lines down) needs it BEFORE the skip-gates, but the
+        # personalization gate needs it AFTER them — reading it eagerly at the top
+        # would add a query for every recipient that gets skipped. This keeps the
+        # query count byte-identical to before the confirm-gate was introduced.
+        _identity_status_cache: list = []
+
+        async def _identity_status() -> str | None:
+            if not _identity_status_cache:
+                _identity_status_cache.append(
+                    (
+                        await db.execute(
+                            select(Visitor.identity_status).where(
+                                Visitor.site_id == campaign.site_id,
+                                Visitor.visitor_id == vid,
+                            )
+                        )
+                    ).scalar_one_or_none()
+                )
+            return _identity_status_cache[0]
+
         # Never email a company-level guess (hunter/apollo map IP -> company and
         # return a RANDOM employee, not the visitor) or an unclassified provider.
-        if not is_emailable_identity(
+        emailable = is_emailable_identity(
             iv.resolution_provider,
             getattr(iv, "source_agent_visit_id", None),
             getattr(iv, "is_abuse_flagged", False),
+        )
+        # D5/D10 confirm-gate. Additive-RESTRICTIVE only: it can narrow the
+        # audience, never widen it beyond what is_emailable_identity() already
+        # allowed. With candidate_outreach_enabled OFF (default), an UNCONFIRMED
+        # graph-candidate is held back; a human-CONFIRMED one still sends, by
+        # design. is_emailable_identity() itself is deliberately not parameterized.
+        if (
+            emailable
+            and is_graph_candidate_provider(iv.resolution_provider)
+            and not settings.candidate_outreach_enabled
         ):
+            emailable = is_verified_identity(await _identity_status())
+        if not emailable:
             summary["skipped_company_level"] += 1
             continue
         # Suppression list catches addresses opted out AFTER identification (the
@@ -326,21 +368,9 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
             )
         ).scalar_one_or_none()
 
-        # identity_status lives on Visitor (not IdentifiedVisitor), joined on
-        # (site_id, visitor_id) — the same predicate used in identity_resolver /
-        # routers.visitors / daily_digest. Read FRESH here, per recipient, inside
-        # the send loop: that is what makes a mid-campaign candidate confirmation
-        # take effect on the very next send without re-planning the campaign. A
-        # missing Visitor row yields None, which is not verified → generic copy
-        # (fails safe, never drops the recipient).
-        identity_status = (
-            await db.execute(
-                select(Visitor.identity_status).where(
-                    Visitor.site_id == campaign.site_id,
-                    Visitor.visitor_id == vid,
-                )
-            )
-        ).scalar_one_or_none()
+        # Resolves the lazy read above (or reuses the value the confirm-gate
+        # already fetched) — exactly one query per recipient that gets this far.
+        identity_status = await _identity_status()
 
         # Identity-honesty gate: only a CONFIRMED ("identified") recipient is
         # addressed by name/company. Candidate-tier graph guesses get generic copy.
