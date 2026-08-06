@@ -8,7 +8,6 @@ recent social content from:
 Results are stored as `social_context` JSON on the EnrichmentProfile.
 """
 
-from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -96,9 +95,19 @@ class SocialIntelligence:
         enrichment_profile: EnrichmentProfile,
         context: dict,
     ) -> None:
-        """Persist social context onto the enrichment profile."""
-        enrichment_profile.social_context = context
-        enrichment_profile.social_context_updated_at = datetime.now(timezone.utc)
+        """Persist social context onto the enrichment profile.
+
+        Read-modify-writes EnrichmentProfile.social_context: sibling top-level keys
+        written by enrich_tier1 and the other merge writers are PRESERVED, and a NEW
+        dict is reassigned (never mutated in place) so SQLAlchemy detects the JSONB
+        change. Keys present in the incoming `context` win over same-named existing
+        keys. Deliberately does NOT touch social_context_updated_at — that column
+        drives the deep-research daily meter in usage_limits.get_enrich_usage(), and
+        a social-intelligence write must not count against it.
+        """
+        merged = dict(enrichment_profile.social_context or {})
+        merged.update(context)
+        enrichment_profile.social_context = merged
         await self.db.commit()
 
     # ── Private helpers ────────────────────────────────────────────────
