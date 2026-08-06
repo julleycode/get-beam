@@ -473,6 +473,10 @@ class TestRejectionCounters:
             async def _site_domain(self, site_id):
                 return "example.com"
 
+            async def _leadpipe_active_domains(self):
+                # This site HAS a registered pixel, so the scan below is reached.
+                return {"example.com"}
+
         visitor = _make_visitor(ip_address="203.0.113.42")
         feed = {
             "data": [
@@ -520,6 +524,10 @@ class TestRejectionCounters:
             async def _site_domain(self, site_id):
                 return "example.com"
 
+            async def _leadpipe_active_domains(self):
+                # This site HAS a registered pixel, so the scan below is reached.
+                return {"example.com"}
+
         feed = {"data": [{"ip": "203.0.113.42"}, {"emails": []}]}  # no usable email
         resp = httpx.Response(
             200, json=feed, request=httpx.Request("GET", "https://x.test")
@@ -565,3 +573,116 @@ class TestRejectionCounters:
             log.debug.assert_not_called()
             assert log.info.call_args.kwargs[REJECTION_IP_MISMATCH] == 3
             assert log.info.call_args.kwargs["scanned"] == 50
+
+
+class TestPixelRegistryGate:
+    """A domain with no Leadpipe pixel is not a no-match — it is not an attempt.
+
+    `/v1/data` answers identically for "no pixel registered" and "pixel
+    registered, nobody visited": `200 {"data": [], "meta": {"total": 0}}`
+    (verified against a live org 06-08-26). Only `/v1/data/pixels` separates the
+    two, so the gate has to run before the data call — otherwise the first case
+    writes a `resolution_logs` row and arms the 30-day lock over a question
+    Leadpipe was never in a position to answer for that site.
+    """
+
+    @staticmethod
+    def _client_returning(resp):
+        client = AsyncMock()
+        client.get = AsyncMock(return_value=resp)
+        cm = MagicMock()
+        cm.__aenter__ = AsyncMock(return_value=client)
+        cm.__aexit__ = AsyncMock(return_value=False)
+        return cm, client
+
+    @classmethod
+    def _pixel_list(cls, rows):
+        return cls._client_returning(
+            httpx.Response(
+                200, json={"data": rows}, request=httpx.Request("GET", "https://x.test")
+            )
+        )
+
+    @staticmethod
+    def _leadpipe_for(domain):
+        # HttpRetryMixin supplies `_raise_if_transient`, exactly as it does on
+        # the real IdentityResolver — a stub without it would pass on the 200
+        # paths and only break on the error path this class is here to cover.
+        from apps.api.services.identity_providers.base import HttpRetryMixin
+        from apps.api.services.identity_providers.leadpipe import LeadpipeMixin
+
+        class _L(LeadpipeMixin, HttpRetryMixin):
+            async def _site_domain(self, site_id):
+                return domain
+
+        return _L
+
+    @pytest.mark.asyncio
+    async def test_domain_without_pixel_raises_not_configured(self):
+        from apps.api.services.identity_providers.base import ProviderNotConfiguredError
+
+        _L = self._leadpipe_for("unregistered.com")
+        cm, client = self._pixel_list([{"domain": "someone-else.com", "status": "active"}])
+
+        with patch("apps.api.services.identity_providers.leadpipe.settings") as s, \
+             patch("httpx.AsyncClient", return_value=cm):
+            s.leadpipe_api_key = "k"
+            with pytest.raises(ProviderNotConfiguredError):
+                await _L()._call_leadpipe_api.__wrapped__(_L(), _make_visitor())
+
+        # The registry call happened; the /v1/data call never did.
+        assert client.get.await_count == 1
+        assert client.get.await_args.args[0].endswith("/v1/data/pixels")
+
+    @pytest.mark.asyncio
+    async def test_paused_pixel_counts_as_no_pixel(self):
+        """A paused pixel serves no data, so gating on existence alone would
+        reproduce the exact silent-empty symptom this gate exists to remove."""
+        from apps.api.services.identity_providers.base import ProviderNotConfiguredError
+
+        _L = self._leadpipe_for("example.com")
+        cm, _ = self._pixel_list(
+            [{"domain": "example.com", "status": "paused", "pausedReason": "manual"}]
+        )
+
+        with patch("apps.api.services.identity_providers.leadpipe.settings") as s, \
+             patch("httpx.AsyncClient", return_value=cm):
+            s.leadpipe_api_key = "k"
+            with pytest.raises(ProviderNotConfiguredError):
+                await _L()._call_leadpipe_api.__wrapped__(_L(), _make_visitor())
+
+    @pytest.mark.asyncio
+    async def test_site_without_domain_never_queries_the_whole_account(self):
+        """Dropping the `domain` filter reads one tenant feed while resolving a
+        different tenant visitor. Refuse rather than widen the query."""
+        from apps.api.services.identity_providers.base import ProviderNotConfiguredError
+
+        _L = self._leadpipe_for(None)
+        cm, client = self._pixel_list([])
+
+        with patch("apps.api.services.identity_providers.leadpipe.settings") as s, \
+             patch("httpx.AsyncClient", return_value=cm):
+            s.leadpipe_api_key = "k"
+            with pytest.raises(ProviderNotConfiguredError):
+                await _L()._call_leadpipe_api.__wrapped__(_L(), _make_visitor())
+
+        client.get.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_unreadable_registry_is_an_outage_not_a_missing_pixel(self):
+        """403 on the pixel list says nothing about any visitor. Reading it as
+        "no pixel" would silently disable Leadpipe org-wide and hide the outage."""
+        _L = self._leadpipe_for("example.com")
+        cm, _ = self._client_returning(
+            httpx.Response(
+                403,
+                json={"error": {"message": "Organization is expired"}},
+                request=httpx.Request("GET", "https://x.test"),
+            )
+        )
+
+        with patch("apps.api.services.identity_providers.leadpipe.settings") as s, \
+             patch("httpx.AsyncClient", return_value=cm):
+            s.leadpipe_api_key = "k"
+            with pytest.raises(ProviderUnavailableError):
+                await _L()._call_leadpipe_api.__wrapped__(_L(), _make_visitor())

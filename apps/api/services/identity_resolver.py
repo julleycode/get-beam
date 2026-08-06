@@ -55,6 +55,7 @@ from apps.api.services.identity_providers.base import (  # noqa: F401
     RESOLUTION_OUTCOMES,
     _TRANSIENT_HTTP_STATUSES,
     HttpRetryMixin,
+    ProviderNotConfiguredError,
     ProviderUnavailableError,
     _http_retry,
     _is_transient_http_error,
@@ -636,6 +637,19 @@ class IdentityResolver(
                 data = await asyncio.wait_for(
                     call_fn(visitor), timeout=self._GRAPH_TIMEOUT
                 )
+            except ProviderNotConfiguredError as exc:
+                # Never wired up for this site — not an attempt at all. Returning
+                # attempted=False takes the same path as a missing API key: no
+                # ledger row, no 30-day lock, no budget spend. A no-match here
+                # would record "we looked and found nobody" about a provider that
+                # was structurally unable to look.
+                logger.debug(
+                    "identity_graph_not_configured",
+                    provider=name,
+                    reason=exc.detail,
+                    visitor_id=visitor.visitor_id[:8],
+                )
+                return (name, None, 0, False, None)
             except asyncio.TimeoutError:
                 logger.warning(
                     "identity_graph_timeout",

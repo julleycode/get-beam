@@ -51,6 +51,32 @@ class ProviderUnavailableError(Exception):
         super().__init__(f"{provider} unavailable: {detail}" if detail else f"{provider} unavailable")
 
 
+class ProviderNotConfiguredError(Exception):
+    """The provider could never have answered for this site — not an attempt.
+
+    Distinct from ``ProviderUnavailableError``: that one means a configured
+    provider failed right now (retry later); this one means the provider was
+    never wired up for this site at all, so calling it would be meaningless.
+
+    It matters because ``GET /v1/data`` cannot tell the two apart on its own.
+    A Leadpipe query for a domain with NO registered pixel returns exactly what
+    a domain WITH a pixel and no visitors returns — ``200 {"data": [], "meta":
+    {"total": 0}}`` (verified against a live org 06-08-26). Treating the first
+    case as a no-match writes a ResolutionLog row and arms the 30-day retry lock
+    over a question the provider was never in a position to answer.
+
+    Raised BEFORE any HTTP call, so it costs nothing. Callers must map it to
+    "not attempted" — no ledger row, no lock, no budget spend.
+    """
+
+    def __init__(self, provider: str, detail: str = "") -> None:
+        self.provider = provider
+        self.detail = detail
+        super().__init__(
+            f"{provider} not configured: {detail}" if detail else f"{provider} not configured"
+        )
+
+
 def safe_failure_detail(exc: BaseException) -> str:
     """A failure description safe to persist: exception type plus HTTP status.
 
