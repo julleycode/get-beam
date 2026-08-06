@@ -250,6 +250,23 @@ test.describe("Onboarding — Platform Detection", () => {
     await expect(page.locator(".animate-spin")).toBeHidden({ timeout: 30_000 });
   });
 
+  test("AC-9: cross-tenant disclosure is visible on the pixel-install step", async ({
+    page,
+  }) => {
+    test.slow();
+
+    await fillCreateForm(page, "Test Disclosure", "https://example.com");
+    // Present from the moment the install step renders — deliberately outside
+    // the detection branch, so it shows before AND during pixel install.
+    await expect(page.locator("text=Install tracking pixel")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const disclosure = page.locator('[data-testid="cross-tenant-disclosure"]');
+    await expect(disclosure).toBeVisible({ timeout: 15_000 });
+    await expect(disclosure).toContainText("cross-tenant identity");
+  });
+
   test("Snippet contains site ID and tracker.js URL", async ({ page }) => {
     test.slow();
 

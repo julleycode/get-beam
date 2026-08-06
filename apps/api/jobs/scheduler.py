@@ -307,6 +307,23 @@ async def _promotion_sweep_job() -> None:
         logger.exception("promotion_sweep_crashed")
 
 
+async def _graph_erasure_sweep_job() -> None:
+    """Periodic job: drain the cross-tenant identity-graph erasure queue.
+
+    run_graph_erasure_sweep opens its own session, holds a Postgres advisory
+    lock (single-flight across replicas), re-checks the feature flag, and
+    isolates per-row failures; this wrapper only swallows a top-level crash.
+    Never runs inside a request — all graph work is deliberately out of band so
+    the deletion endpoint cannot become an existence oracle.
+    """
+    try:
+        from apps.api.services.graph_erasure import run_graph_erasure_sweep
+
+        await run_graph_erasure_sweep()
+    except Exception:
+        logger.exception("graph_erasure_sweep_crashed")
+
+
 async def _sweep_one_site(
     site_id: str,
     allow_defer: bool,
@@ -612,6 +629,19 @@ def start_scheduler() -> None:
             # so promotion stays on time, but non-zero so replicas spread out.
             jitter=15,
             misfire_grace_time=60,
+        )
+    if settings.graph_erasure_sweep_enabled:
+        scheduler.add_job(
+            _graph_erasure_sweep_job,
+            "interval",
+            minutes=settings.graph_erasure_sweep_interval_minutes,
+            id="graph_erasure_sweep",
+            replace_existing=True,
+            # Phase 4c convention: explicit jitter + misfire_grace_time. Small
+            # jitter (5-minute interval), and a grace window wide enough that a
+            # deploy restart never silently skips a pass on a legal clock.
+            jitter=30,
+            misfire_grace_time=300,
         )
     if settings.changelog_sync_enabled:
         scheduler.add_job(

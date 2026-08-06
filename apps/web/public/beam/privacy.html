@@ -125,7 +125,23 @@
     <li>send you transactional emails (new visitor alerts, billing receipts)</li>
     <li>improve the product based on usage patterns</li>
   </ul>
-  <p>we do not sell your data. we do not share visitor data with third parties except the enrichment providers we use to identify visitors on your behalf (people data labs, proxycurl). those providers have their own privacy policies.</p>
+  <!-- REQUIREMENT (graph-erasure-compliance C-22/C-25, AC-7). The previous
+       unqualified sentence here ("we do not share visitor data with third
+       parties") contradicted the shared cross-tenant identity graph and has
+       been qualified below. This copy is a REQUIREMENTS PLACEHOLDER: it states
+       the four things that must be disclosed (reuse across customers, which
+       fields are pooled, how to request erasure, and where the subprocessor
+       list lives) and carries the literal marker string "cross-tenant identity"
+       so its presence is mechanically checkable. IT IS NOT COUNSEL-APPROVED
+       WORDING and must be reviewed by qualified privacy counsel before it is
+       treated as final. -->
+  <p>we do not sell your data. we do not share visitor data with third parties except the enrichment providers we use to identify visitors on your behalf (people data labs, proxycurl) and the shared identification network described below. those providers have their own privacy policies.</p>
+
+  <h2>cross-tenant identity network</h2>
+  <p>beam operates a shared cross-tenant identity network. when a visitor is identified on one beam customer's site, that identification may be reused to identify the same person on other beam customers' sites. this is what makes identification fast and cheap, and it means an identification is not confined to the site where it was first made.</p>
+  <p>the fields pooled in this shared network are: email address, name, city / region / country, and the browser fingerprint used to match a returning person. no page-level browsing history, no event data, and no site-specific analytics are pooled.</p>
+  <p>to request erasure from the shared network, email <a href="mailto:hello@getbeam.fyi">hello@getbeam.fyi</a>. an erasure request removes the person's records from the shared network across all beam customers and records a permanent block so they are not added back on a future visit to any site. note that it does not reach copies another beam customer already exported or stored outside beam.</p>
+  <p>a list of the subprocessors and enrichment providers involved is available on request at <a href="mailto:hello@getbeam.fyi">hello@getbeam.fyi</a>.</p>
 
   <h2>visitor data and your visitors</h2>
   <p>beam's person-level visitor identification only resolves visitors with US-based IP addresses. we use IP geofencing to restrict person-level identification to US traffic only. beam does not intentionally or deliberately provide person-level identification for european, UK, or other non-US markets.</p>

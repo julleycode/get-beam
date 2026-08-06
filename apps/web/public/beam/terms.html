@@ -128,7 +128,14 @@
   <p>paid plans are billed monthly or annually in advance. you can cancel at any time from your dashboard. cancellation takes effect at the end of the current billing period — no refunds for partial periods, but we're human and will work with you if something goes sideways.</p>
 
   <h2>data ownership</h2>
-  <p>you own the data you bring to beam. visitor event data collected through your pixel belongs to your account. we don't claim ownership of your data and won't sell it. see our <a href="/beam/privacy.html">privacy policy</a> for full details.</p>
+  <!-- REQUIREMENT (graph-erasure-compliance C-23/C-25, AC-8). "you own the data
+       you bring to beam" was unqualified and contradicted the shared identity
+       graph. Qualified below, carrying the literal marker string
+       "cross-tenant identity" for the mechanical presence check. REQUIREMENTS
+       PLACEHOLDER, NOT COUNSEL-APPROVED WORDING — privacy counsel must review
+       before this is treated as final. -->
+  <p>you own the data you bring to beam. visitor event data collected through your pixel belongs to your account. we don't claim ownership of your data and won't sell it.</p>
+  <p>one qualification: identifications are not exclusive to your account. beam operates a shared cross-tenant identity network, so a person identified on your site may also be identified on other beam customers' sites, and people identified on their sites may be identified on yours. the pooled fields and the erasure process are described in our <a href="/beam/privacy.html">privacy policy</a>, which governs in full.</p>
 
   <h2>uptime and support</h2>
   <p>we aim for 99.5% uptime but don't offer a formal sla on free or starter plans. if something breaks, we'll fix it fast — this is our product too. support is via email at <a href="mailto:hello@getbeam.fyi">hello@getbeam.fyi</a>.</p>

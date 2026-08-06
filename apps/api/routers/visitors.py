@@ -418,6 +418,32 @@ async def delete_visitor_data(
 
     await _verify_site_access(db, site_id, user)
 
+    # ORDERING-CRITICAL: enqueue the cross-tenant graph erasure BEFORE any
+    # delete statement runs. The visitor/identity rows below are the only source
+    # of the match keys (fingerprints + email blind indexes), so enqueuing after
+    # the loop would always produce an empty-keyed, useless request.
+    #
+    # Best-effort by design, matching this endpoint's existing per-table posture:
+    # a missing table or transient failure must never break the tenant-facing
+    # deletion. Note this performs NO graph read — the response must stay
+    # byte-shape-identical whether or not a shared-graph row exists, or this
+    # endpoint becomes a probe for the shared graph's contents.
+    erasure_request_id: str | None = None
+    try:
+        from apps.api.services.graph_erasure import enqueue_erasure
+
+        req = await enqueue_erasure(db, site_id=site_id, visitor_id=visitor_id)
+        erasure_request_id = str(req.id) if req is not None else None
+    except Exception as e:  # noqa: BLE001
+        # sanitize_error, not str(e): key collection reads plaintext emails, so a
+        # driver error here can echo an address straight into the log.
+        from apps.api.services.graph_erasure import sanitize_error
+
+        logger.warning(
+            "erasure_enqueue_failed", site_id=site_id, error=sanitize_error(e)
+        )
+        await db.rollback()
+
     deleted: dict[str, int] = {}
     for table in (
         "resolution_logs",
@@ -425,6 +451,11 @@ async def delete_visitor_data(
         "enrichment_profiles",
         "events",
         "segment_members",
+        # job_change_events carries no FK onto visitors (string-pair convention),
+        # so its rows would survive an otherwise-complete erasure unless listed
+        # here explicitly. Table names in this tuple are hardcoded literals, not
+        # user input — no injection surface.
+        "job_change_events",
         "visitors",
     ):
         try:
@@ -438,7 +469,15 @@ async def delete_visitor_data(
     await db.commit()
 
     logger.info("visitor_data_deleted", site_id=site_id, visitor_id=visitor_id[:8], deleted=deleted)
-    return {"status": "deleted", "visitor_id": visitor_id, "deleted": deleted}
+    # Uniform response shape, always. No match count, no "found" boolean, no
+    # differing status or HTTP code — the caller must not be able to infer
+    # whether a shared-graph row existed.
+    return {
+        "status": "deleted",
+        "visitor_id": visitor_id,
+        "deleted": deleted,
+        "erasure_request": {"id": erasure_request_id, "status": "queued"},
+    }
 
 
 @router.get("/{site_id}/{visitor_id}/data/export")

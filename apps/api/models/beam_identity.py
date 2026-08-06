@@ -47,7 +47,11 @@ class BeamIdentityNode(Base):
     city: Mapped[str | None] = mapped_column(String(100), nullable=True)
     region: Mapped[str | None] = mapped_column(String(100), nullable=True)
     country: Mapped[str | None] = mapped_column(String(5), nullable=True)
-    # Phase 05 (encrypt PII at rest) — added nullable, not yet read/written.
+    # Phase 05 (encrypt PII at rest). LIVE: both columns are written on every
+    # upsert by identity_resolver._upsert_beam_identity, and email_bidx is read
+    # by _graph_node_by_email (ix_beam_identity_graph_email_bidx) and matched by
+    # the erasure sweep. Same HMAC/key as suppression_list.email_hash, so the
+    # two columns are directly comparable. Do NOT add another dual-write.
     email_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     email_bidx: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     full_name_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)

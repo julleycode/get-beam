@@ -1269,6 +1269,20 @@ class IdentityResolver(
         email = data.get("email")
         if not fp or not email:
             return
+        # Write-boundary erasure guard. Enforced HERE, not only upstream: this
+        # is the sole write path into the cross-tenant graph, so a person who
+        # asked to be forgotten can never be silently re-added on a later visit
+        # to any site. A no-op for everyone who has not opted out.
+        from apps.api.services.graph_erasure import GRAPH_WRITE_BLOCKING_SCOPES
+        from apps.api.services.suppression import is_email_suppressed_any
+
+        if getattr(visitor, "do_not_resolve", False) or await is_email_suppressed_any(
+            self.db, email, GRAPH_WRITE_BLOCKING_SCOPES
+        ):
+            logger.info(
+                "graph_write_blocked", visitor_id=visitor.visitor_id[:8]
+            )
+            return
         try:
             from sqlalchemy.dialects.postgresql import insert as pg_insert
 

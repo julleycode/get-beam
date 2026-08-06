@@ -20,6 +20,12 @@ class SuppressionEntry(Base):
     - "do_not_process" — GDPR: do not resolve/enrich
     - "do_not_sell"    — CCPA: do not export to ad audiences
     - "do_not_email"   — do not send marketing email
+    - "erased"         — graph erasure tombstone; blocks any future cross-tenant
+                         graph write. Written by the erasure sweep
+                         (services/graph_erasure.py) using the stored blind
+                         index directly as email_hash, so no plaintext is ever
+                         needed. Durable audit marker: it records that a
+                         person's shared-graph rows were hard-deleted.
     """
 
     __tablename__ = "suppression_list"

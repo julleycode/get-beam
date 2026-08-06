@@ -22,22 +22,39 @@ from apps.api.services.pii_crypto import email_hash, normalize_email
 
 logger = structlog.get_logger()
 
-VALID_SCOPES = {"all", "do_not_sell", "do_not_process", "do_not_email"}
+VALID_SCOPES = {"all", "do_not_sell", "do_not_process", "do_not_email", "erased"}
 
 
-async def is_email_suppressed(db: AsyncSession, email: str, scope: str) -> bool:
-    """True if this email is suppressed for the given scope (or "all")."""
+async def is_email_suppressed_any(
+    db: AsyncSession, email: str, scopes: tuple[str, ...]
+) -> bool:
+    """True if this email is suppressed for ANY of the given scopes (or "all").
+
+    The multi-scope generalisation of :func:`is_email_suppressed`. The graph
+    write boundary needs it because the erasure tombstone is written under
+    ``scope="erased"`` while the pre-existing upstream opt-out check asks only
+    for ``"do_not_process"`` — one lookup must see both.
+    """
     if not email:
         return False
     result = await db.execute(
         select(SuppressionEntry.id)
         .where(
             SuppressionEntry.email_hash == email_hash(email),
-            SuppressionEntry.scope.in_([scope, "all"]),
+            SuppressionEntry.scope.in_([*scopes, "all"]),
         )
         .limit(1)
     )
     return result.scalar_one_or_none() is not None
+
+
+async def is_email_suppressed(db: AsyncSession, email: str, scope: str) -> bool:
+    """True if this email is suppressed for the given scope (or "all").
+
+    Signature and behaviour are unchanged — a thin delegate to
+    :func:`is_email_suppressed_any` so there stays exactly one query.
+    """
+    return await is_email_suppressed_any(db, email, (scope,))
 
 
 async def _cascade_suppress(db: AsyncSession, email: str, scope: str) -> dict:

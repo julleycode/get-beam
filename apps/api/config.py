@@ -531,6 +531,52 @@ class Settings(BaseSettings):
     # the affected visitor is then only promoted if they click again.
     promotion_sweep_window_floor_minutes: int = 15
 
+    # ─── Cross-tenant identity-graph erasure (graph-erasure-compliance) ───
+    # DELIBERATE DEVIATION FROM PRECEDENT: this sweep ships default ON, unlike
+    # agent_detection_enabled / site_ingest_limit_enabled / cadence_bot_flag_
+    # enabled / promotion_sweep_enabled, which all default OFF. Those flags gate
+    # NEW risky behaviour. This one gates the REMOVAL of data Beam has promised
+    # to delete: defaulting it OFF would ship a compliance fix that does nothing
+    # and would silently retain data after an erasure was accepted and reported
+    # complete. The flag exists as an OPERATOR KILL-SWITCH, not a rollout gate —
+    # flip it to false to stop the only destructive actor in this feature, which
+    # has no restart-unsafe state.
+    #
+    # The producer (enqueue) and the write-boundary guard carry no flag at all:
+    # the enqueue is try/except-wrapped so a missing table cannot break the
+    # tenant-facing delete, and the guard is a refusal to write, which fails
+    # closed and cannot break a non-suppressed visitor.
+    graph_erasure_sweep_enabled: bool = True
+    graph_erasure_sweep_interval_minutes: int = 5
+    # Attempts before a request is parked at status='failed'. A failed row is
+    # NOT a backlog item: the data subject's request is unfulfilled, so
+    # failed_count > 0 raises the queue-health log to warning.
+    graph_erasure_max_attempts: int = 5
+    # How long a row may sit at status='processing' before the sweep reclaims it
+    # as pending (crash recovery). Only meaningful because the claim commits in
+    # its own transaction, separate from the destructive work.
+    graph_erasure_stale_processing_minutes: int = 30
+    # Age at which erasure_queue_health logs at warning. 7 days, deliberately
+    # well inside GDPR's ~1-month response window so a stuck queue surfaces with
+    # weeks of slack.
+    graph_erasure_stale_alert_hours: int = 168
+    # NOT A CAP, DESPITE THE NAME. This is the threshold for a FORENSIC VOLUME
+    # MARKER, not an enforced limit. Exceeding it sets throttle_flagged=True on
+    # the enqueued row for after-the-fact human review and changes NO execution
+    # path: the request is never rejected (never a 429), the tenant's own local
+    # deletion always runs, and the flagged row is claimed and processed by the
+    # sweep identically to an unflagged one. The 61st request in a minute does
+    # NOT fail. It records volumetric abuse; it prevents none. This deliberately
+    # differs from the is_flagged_abuse precedent, which DOES exclude downstream
+    # — excluding here would wedge a real erasure behind a manual release on a
+    # legal clock while still failing to stop the actual named attack (a single
+    # precision request). There is consequently no erasure abuse control of any
+    # kind today; see the cumulative-cap backlog note.
+    graph_erasure_max_per_minute: int = 60
+    # The operator lookup IS an existence oracle by design, so precedent applies
+    # in full here: default OFF, and admin-gated on top.
+    graph_identity_lookup_enabled: bool = False
+
     # ─── Server-side AI-fetch capture beacon (Handoff Detection H5) ───
     # When true, POST /api/v1/agents/fetch-beacon accepts an authenticated
     # server-side beacon (from the getbeam.fyi edge middleware) that classifies

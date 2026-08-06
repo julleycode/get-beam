@@ -275,6 +275,38 @@ function OnboardingFlow() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {/*
+              REQUIREMENT (graph-erasure-compliance C-24/C-25, AC-9): the
+              cross-tenant disclosure must be visible BEFORE or DURING the
+              pixel-install step, so it is rendered outside the `detecting`
+              branch and shows in both states. Carries the literal marker string
+              "cross-tenant identity" for the mechanical presence check.
+              REQUIREMENTS PLACEHOLDER, NOT COUNSEL-APPROVED WORDING.
+            */}
+            <div
+              data-testid="cross-tenant-disclosure"
+              className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-200"
+            >
+              <p className="font-medium">
+                Heads up: identifications are shared across Beam customers
+              </p>
+              <p className="mt-1">
+                Beam runs a shared cross-tenant identity network. A visitor
+                identified on your site may also be identified on other Beam
+                customers&apos; sites, and vice versa. The pooled fields are
+                email, name, city/region/country, and the browser fingerprint —
+                never your page-level event data. See the{" "}
+                <a
+                  href="/beam/privacy.html"
+                  className="underline underline-offset-2"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  privacy policy
+                </a>{" "}
+                for what is pooled and how a person requests erasure.
+              </p>
+            </div>
             {detecting ? (
               <div className="flex flex-col items-center justify-center py-12 gap-3">
                 <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
