@@ -154,6 +154,69 @@ class TestFingerprintV3:
         )
 
 
+class TestFingerprintV3:
+    """fp3 = the v2 base signals plus installed fonts and an audio render.
+
+    fp2 must survive untouched: it is the key every already-stored fingerprint
+    was written under, so replacing it would orphan the whole identity graph.
+    """
+
+    def test_has_fp3_prefix(self, pixel_code: str):
+        assert '"fp3_"' in pixel_code, "Strong fingerprint should use fp3_ prefix"
+
+    def test_fp2_still_emitted(self, pixel_code: str):
+        assert '"fp2_"' in pixel_code, (
+            "fp2 must keep being emitted — it is the match key for every "
+            "fingerprint already stored"
+        )
+
+    def test_has_font_probe(self, pixel_code: str):
+        assert "fontFp" in pixel_code
+        assert "offsetWidth" in pixel_code, "Font probe compares rendered metrics"
+
+    def test_font_probe_uses_fallback_bases(self, pixel_code: str):
+        for base in ("monospace", "sans-serif", "serif"):
+            assert base in pixel_code, f"Font probe needs the {base} fallback base"
+
+    def test_has_audio_probe(self, pixel_code: str):
+        assert "audioFp" in pixel_code
+        assert "OfflineAudioContext" in pixel_code
+        assert "createOscillator" in pixel_code
+        assert "createDynamicsCompressor" in pixel_code
+
+    def test_audio_sample_rate_pinned(self, pixel_code: str):
+        assert "44100" in pixel_code, (
+            "sampleRate must be pinned or the hash moves with the machine's "
+            "audio config"
+        )
+
+    def test_audio_probe_has_timeout(self, pixel_code: str):
+        assert "setTimeout" in pixel_code, (
+            "audio render must not hang the fp3 callback forever"
+        )
+
+    def test_font_probe_waits_for_body(self, pixel_code: str):
+        assert "whenBody" in pixel_code, (
+            "font probe needs document.body — a head-loaded pixel must wait, "
+            "or fp3 differs between head and body placement"
+        )
+
+    def test_fp3_sent_on_events(self, pixel_code: str):
+        assert "_fp3" in pixel_code, "fp3 must reach the server as _fp3"
+
+    def test_fp3_omitted_until_resolved(self, pixel_code: str):
+        assert "if (fingerprint3) evt._fp3" in pixel_code, (
+            "fp3 is async — events before it resolves must carry fp2 only, "
+            "never a null fp3"
+        )
+
+    def test_fp3_present_in_minified(self, min_pixel_code: str):
+        assert "fp3_" in min_pixel_code, (
+            "fp3 is in tracker.js but missing from tracker.min.js "
+            "— re-run `npm run build` in apps/pixel"
+        )
+
+
 class TestIdentityGraphStacking:
     """Identity-vendor stacking is STRICTLY OPT-IN (default OFF).
 
