@@ -264,5 +264,71 @@ SELECT
   MAX(created_at)::date                           AS newest
 FROM beam_identity_graph;
 
+-- ---------------------------------------------------------------------------
+-- Q10. Cost per identity, with the DISPROVEN ones taken out of the denominator.
+--
+--      Q3's cost_per_success divides spend by rows saved, which silently counts
+--      a wrong identity as a win — the exact trap the RB2B baseline fell into
+--      (8 successes → 1 identity → and that identity was wrong).
+--
+--      True precision needs ground truth (N>=30 human-verified identities) and
+--      is deliberately deferred. What IS knowable today is the opposite:
+--
+--        do_not_email = true  →  the address hard-bounced or was suppressed.
+--                                That identity is PROVABLY unusable.
+--        opened / clicked     →  a human acted on mail sent to that address.
+--                                Corroboration, not proof (a shared inbox or a
+--                                security scanner also opens mail).
+--
+--      So read these as a RANGE, never as a precision number:
+--        cost_per_saved       = the optimistic bound (Q3's number, restated)
+--        cost_per_not_disproven = spend divided by identities not yet refuted
+--        cost_per_corroborated  = the pessimistic bound; the closest honest
+--                                 stand-in for cost per CORRECT identity
+--
+--      Only paid person-graph providers appear: owned resolutions cost $0, so a
+--      per-identity cost for them is meaningless.
+-- ---------------------------------------------------------------------------
+\echo ''
+\echo '=== Q10. Cost per identity: saved vs not-disproven vs corroborated ==='
+WITH spend AS (
+  SELECT provider, SUM(cost_usd) AS total_cost_usd
+  FROM resolution_logs
+  WHERE created_at >= now() - interval '90 days'
+  GROUP BY provider
+),
+engaged AS (
+  -- One row per visitor that ever opened or clicked any campaign mail.
+  SELECT DISTINCT visitor_id
+  FROM campaign_touchpoints
+  WHERE opened_at IS NOT NULL OR clicked_at IS NOT NULL
+),
+ident AS (
+  SELECT
+    iv.resolution_provider                      AS provider,
+    COUNT(*)                                    AS saved,
+    COUNT(*) FILTER (WHERE NOT iv.do_not_email) AS not_disproven,
+    COUNT(*) FILTER (
+      WHERE NOT iv.do_not_email AND e.visitor_id IS NOT NULL
+    )                                           AS corroborated
+  FROM identified_visitors iv
+  LEFT JOIN engaged e ON e.visitor_id = iv.visitor_id
+  WHERE iv.created_at >= now() - interval '90 days'
+    AND iv.resolution_provider IN ('rb2b', 'leadpipe', 'capturify')
+  GROUP BY iv.resolution_provider
+)
+SELECT
+  i.provider,
+  i.saved,
+  i.not_disproven,
+  i.corroborated,
+  ROUND(s.total_cost_usd::numeric, 4)                                        AS total_cost_usd,
+  ROUND((s.total_cost_usd / NULLIF(i.saved, 0))::numeric, 4)                 AS cost_per_saved,
+  ROUND((s.total_cost_usd / NULLIF(i.not_disproven, 0))::numeric, 4)         AS cost_per_not_disproven,
+  ROUND((s.total_cost_usd / NULLIF(i.corroborated, 0))::numeric, 4)          AS cost_per_corroborated
+FROM ident i
+LEFT JOIN spend s ON s.provider = i.provider
+ORDER BY i.saved DESC;
+
 \echo ''
 \echo '=== done ==='
