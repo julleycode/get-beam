@@ -75,7 +75,7 @@ Bài học giữ lại: pixel nạp HTTP 200 **không** chứng minh gì về or
 | 1 | [Ground clearing and truth reconciliation](./phase-01-ground-clearing-and-truth-reconciliation.md) | **Complete** (05-08-26) |
 | 2 | [Provider failure vs no-match separation](./phase-02-provider-failure-vs-no-match-separation.md) | **Complete** (05-08-26) — 1 known-gap |
 | 3 | [Vendor decision and Leadpipe restoration](./phase-03-vendor-decision-and-leadpipe-restoration.md) | **Code xong 06-08-26** — còn 3 thao tác vận hành (apply migration → đổi API key → bật cờ) |
-| 4 | [Webhook ingest and measurable coverage](./phase-04-webhook-ingest-and-measurable-coverage.md) | Pending — **KHÔNG còn bị chặn** (điều kiện tiên quyết cũ sai, đã sửa 06-08-26) |
+| 4 | [Webhook ingest and measurable coverage](./phase-04-webhook-ingest-and-measurable-coverage.md) | **Bước 3–6 code xong 06-08-26** — unit 1654 pass, integration 122+5 pass; sửa kèm 1 bug có sẵn ở `_save_identified`; 1 known-gap (`tracker.min.js` chưa build lại). Còn bước 1/2 (tay) + bước 7 (smoke) |
 | 5 | [Outage deferral watermark](./phase-05-outage-deferral-watermark.md) | **Complete** (06-08-26) — migration `c2f7a9d31b64` round-trip sạch; unit 1622 pass, integration deferral 3/3; **bẫy #7 mới** (Redis thật rò rỉ giữa test) + 3 known-gap ghi trong phase file |
 
 Phase 1–2 **không phụ thuộc vendor** — đã xong.
@@ -108,41 +108,116 @@ Phase 1 ──► Phase 2 ──┬─► Phase 3 (code xong) ──► Phase 4 
 
 ### A. Thao tác vận hành — người làm, KHÔNG code được
 
-Không có API cho mấy việc này; đều làm trên dashboard Leadpipe hoặc trên server.
+Không có API cho mấy việc này; đều làm trên dashboard Leadpipe hoặc trên server. **Thứ tự A1→A3
+là bắt buộc** (lý do ở A3). A4 chạy lúc nào cũng được. A5 phải sau khi B đã deploy (lý do ở A5).
 
-| # | Việc | Thuộc | Kiểm bằng gì |
+| # | Việc | Thuộc | Cách kiểm chứng |
 |---|---|---|---|
-| A1 | Apply chuỗi migration lên môi trường thật | Phase 3 | `alembic heads` → phải ra `c2f7a9d31b64` |
-| A2 | Đổi `LEADPIPE_API_KEY` sang key của org `To's workspace` | Phase 3 | `GET /v1/data/account` trả 200 và **không** `expired` |
-| A3 | Bật `LEADPIPE_PIXEL_AUTOPROVISION_ENABLED` | Phase 3 | site mới lấy snippet → có `Site.leadpipe_pixel_id` |
-| A4 | Gắn marker vào `globalParams` trên site lab, tạo 1 lượt truy cập, đọc `/v1/data` xem marker có echo lại không | Phase 4 bước 1 | quyết định tầng ghép người tốt nhất — xem A4 ở dưới |
-| A5 | Đăng ký webhook trên dashboard Leadpipe, chế độ **First Match** | Phase 4 bước 2 | webhook bắn tới endpoint của Beam |
+| A1 | Apply chuỗi migration lên môi trường thật | Phase 3 | `alembic -c apps/api/alembic.ini current` == `heads` == `c2f7a9d31b64`, một head |
+| A2 | Đổi `LEADPIPE_API_KEY` sang key org `To's workspace` | Phase 3 | `GET /v1/data/account` trả 200 **và** không `expired` |
+| A3 | Bật `LEADPIPE_PIXEL_AUTOPROVISION_ENABLED=true` | Phase 3 | site mới gọi `GET /api/v1/sites/{id}/pixel` → `Site.leadpipe_pixel_id` khác NULL |
+| A4 | Probe marker echo trên site lab | Phase 4 bước 1 | marker có/không xuất hiện trong `/v1/data` |
+| A5 | Đăng ký webhook dashboard, chế độ **First Match** | Phase 4 bước 2 | endpoint Beam nhận được POST thật |
 
-**A4 không chặn việc code** (xem B). Nó chỉ quyết định tầng 1 của waterfall ghép người có dùng
-được hay không. Đã biết chắc: **phía client CÓ** gửi được key tuỳ ý (SDK spread-merge, không
-whitelist — xem phase-04 §Bài toán khó nhất). Chưa biết: **phía server có echo lại trong webhook**
-hay không.
+**A1 — apply migration.** Chuỗi hiện 22 revision, không phải 12 (con số cũ trong
+`process/context/all-context.md` đã sai) — **đừng trích số, lấy từ `alembic history` lúc apply**.
+Forward-apply cả chuỗi từ DB rỗng đã chạy sạch trên Postgres dùng-một-lần 06-08-26; đây vẫn
+**không** phải production live-apply.
 
-### B. Việc code — session sau cook được ngay
+```bash
+alembic -c apps/api/alembic.ini heads     # kỳ vọng: c2f7a9d31b64 (single head)
+alembic -c apps/api/alembic.ini current   # sau khi apply: khớp dòng trên
+```
 
-**Phase 4 bước 3–7.** KHÔNG chờ A4: kiến trúc đã chốt waterfall 3 tầng
-(custom param → email đã capture → IP+cửa sổ thời gian). Code cả 3 tầng; nếu payload không có
-marker thì tầng 1 tự rỗng và rơi xuống tầng 2 — đúng hành vi mong muốn, không phải hack.
+**A2 — đổi API key.** Kiểm bằng endpoint account, **KHÔNG kiểm bằng URL pixel** — đây là đúng bài
+học 06-08: pixel nạp HTTP 200 trong khi org đã hết hạn, vì CDN không kiểm tra org còn gate nằm ở
+tầng tài khoản. `GET /v1/data/account` sống cả khi expired nên đọc được `status` thật.
+
+```bash
+curl -s -H "X-API-Key: $LEADPIPE_API_KEY" https://api.aws53.cloud/v1/data/account
+# đạt: HTTP 200, org = To's workspace, status != expired, healthy: true
+# hỏng: 403 "Organization is expired"  → key vẫn đang trỏ org `Beam ai`
+curl -s -H "X-API-Key: $LEADPIPE_API_KEY" https://api.aws53.cloud/v1/data/pixels
+# kỳ vọng: pixel 3ead3e50-… của beamlab.nhantown.com, status: active
+```
+
+**A3 — bật autoprovision, chỉ sau A1+A2.** Đây là đường code **duy nhất GHI** state ở phía vendor
+(`POST /v1/data/pixels`). Pixel ăn quota của org và **không chuyển được giữa các org** — bật khi key
+còn trỏ org sai thì pixel đẻ nhầm chỗ và mất luôn, không undo được. Kiểm: tạo/lấy snippet cho một
+site → response có `data-stack-leadpipe`, và trong DB `SELECT leadpipe_pixel_id FROM sites WHERE
+id='…'` khác NULL. Cấp phát là lazy tại `sites.py:274 get_pixel_snippet`, idempotent (409 của API
+tự chặn trùng), và vendor chết thì snippet vẫn trả về — chỉ thiếu thẻ vendor.
+
+**A4 — probe marker echo.** Gắn một key nhận dạng được (vd `beam_visitor_id`) vào `globalParams`
+trong thẻ `<script type="application/json" id="pixelsdk-config-…">` trên site lab → tạo 1 lượt truy
+cập → đọc `GET /v1/data?domain=beamlab.nhantown.com` xem marker có xuất hiện không.
+
+- **Có echo** → tầng 1 waterfall dùng được, bài toán ghép người biến mất.
+- **Không echo** → tầng 1 chết, rơi xuống tầng 2 (email đã capture) rồi tầng 3 (IP+thời gian), và
+  phải ghi rõ là probabilistic — không được nâng trần confidence để bù.
+
+Đã biết chắc **phía client CÓ** gửi được key tuỳ ý (SDK spread-merge, không whitelist — phase-04
+§Bài toán khó nhất). Chỉ còn ẩn số phía server. **A4 không chặn B** (xem B).
+
+**A5 — đăng ký webhook, làm SAU khi B đã deploy.** Dashboard Leadpipe **auto-disable webhook sau
+một chuỗi lỗi liên tiếp** (`guides/set-up-webhooks`). Đăng ký lúc endpoint chưa live = webhook bị
+tắt sẵn, rồi session sau ngồi debug một handler đúng mà không bao giờ được gọi. Trình tự đúng:
+B bước 3 lên môi trường có URL public → mới đăng ký → kiểm bằng một POST thật đến từ Leadpipe
+(log server hoặc `request_logs`), không kiểm bằng trạng thái hiển thị trên dashboard.
+
+### B. Việc code — bước 3–6 ĐÃ XONG 06-08-26
+
+<!-- Updated 06-08-26 sau khi cook bước 3–6. -->
+
+| Bước | Việc | Trạng thái |
+|---|---|---|
+| 3 | Handler `POST /webhooks/identity/leadpipe`: xác thực token → sanitize → gắn visitor theo waterfall 3 tầng → quality gate → lưu candidate | **Xong** |
+| 4 | Idempotency — hoá ra không cần khoá riêng: unique index `(site_id, visitor_id)` đã tự lo | **Xong** |
+| 5 | Thêm cờ `leadpipe_pull_enabled` (default True); pull và webhook chạy song song không đẻ trùng | **Xong** |
+| 6 | Q10 trong `scripts/identity_resolution_audit.sql` | **Xong** |
+| 7 | Smoke 5 session US — **ngưỡng đóng phase** | Chờ A5 + traffic thật |
+
+Chi tiết, kết quả test, và 1 known-gap (`tracker.min.js` chưa build lại nên tầng 1 tạm rỗng):
+§Execution trong phase-04.
+
+**Vì sao không chờ A4:** kiến trúc đã chốt waterfall 3 tầng (custom param → email đã capture →
+IP+cửa sổ thời gian). Code cả 3 tầng ngay; payload không có marker thì tầng 1 tự rỗng và rơi xuống
+tầng 2 — đó là hành vi degrade đã thiết kế, không phải hack chữa cháy. A4 chỉ quyết định tầng 1 có
+dữ liệu hay không, không quyết định code trông thế nào.
 
 Chốt chặn phải giữ nguyên khi cook: identity từ webhook là `provider_candidate`, **không** thêm
-leadpipe vào `EMAILABLE_PROVIDERS`, payload vendor là dữ liệu không tin cậy.
+leadpipe vào `EMAILABLE_PROVIDERS`, payload vendor là dữ liệu không tin cậy (sanitize như mọi input
+ngoài, không đưa thẳng vào prompt AI).
 
 ### C. Môi trường test — bẫy mất thời gian nếu không biết trước
 
-- Integration test cần Postgres **cổng 5433** + Redis 6379 (`infra/docker-compose.yml`), và
-  database **`retarget_agent_test`**. Session 06-08-26 phải tạo tay:
-  `docker exec infra-postgres-1 psql -U retarget -d postgres -c "CREATE DATABASE retarget_agent_test;"`
-  Không có DB này thì mọi integration test chết bằng `InvalidCatalogNameError`, đọc như lỗi code.
-- `tests/integration/test_ai_ask.py::TestAiAsk::test_gemini_failure_returns_503` **fail sẵn**, không
-  liên quan identity (đã xác minh bằng cách stash sạch thay đổi rồi chạy lại). Đừng đi sửa nó khi
-  đang cook identity.
-- Đừng bao giờ tạo `IdentityResolver(db, redis_client=None)` trong test: nó dựng Redis **thật** và
-  các test dùng chung IP mẫu sẽ rò cache cho nhau. Xem phase-05 §bẫy #7.
+Bốn cái này đều đã tốn thời gian thật trong session 06-08-26.
+
+1. **Phải tạo tay database `retarget_agent_test`.** Integration test cần Postgres **cổng 5433** +
+   Redis 6379 (`infra/docker-compose.yml`); `docker compose up` **không** tạo DB test.
+
+   ```bash
+   docker exec infra-postgres-1 psql -U retarget -d postgres -c "CREATE DATABASE retarget_agent_test;"
+   ```
+
+   Không có DB này thì **mọi** integration test chết bằng `InvalidCatalogNameError` — đọc y hệt lỗi
+   code, dễ đi sửa nhầm vào chỗ vừa viết.
+
+2. **`tests/integration/test_ai_ask.py::TestAiAsk::test_gemini_failure_returns_503` fail sẵn.**
+   Không liên quan identity — đã xác minh bằng cách stash sạch thay đổi rồi chạy lại vẫn fail.
+   Thấy nó đỏ thì bỏ qua, đừng đi sửa khi đang cook identity.
+
+3. **`tests/unit/test_provider_dns_permanent_error.py::...::test_real_nxdomain_chain_from_httpx_is_detected`
+   phụ thuộc mạng.** Nó mở kết nối thật; mạng chậm/chặn thì fail bằng `httpx.ConnectTimeout` —
+   đọc như lỗi code. Cùng họ với `test_ai_ask` ở trên. Xác minh 06-08-26 bằng cách stash sạch thay
+   đổi rồi chạy lại: **vẫn fail**. Trong cùng session nó khi pass khi fail, nên đừng dùng nó làm
+   mốc regression.
+
+4. **Không bao giờ `IdentityResolver(db, redis_client=None)` trong test.** Truyền `None` **không**
+   chạy không-Redis: nó tự dựng client **thật** (`identity_resolver.py:126-132`). Cache key là
+   `prefix + visitor.ip_address` nên các test dùng chung IP mẫu rò cache cho nhau, bỏ qua hẳn tầng
+   IP, và fail sai lý do (`assert 'unresolvable' == 'anonymous'` trỏ vào logic chứ không trỏ vào
+   cache). Dùng fake Redis **riêng cho từng test** — xem `_fake_redis()` trong phase-05 §Bẫy #7.
 
 ## Câu hỏi quyết định trung tâm
 

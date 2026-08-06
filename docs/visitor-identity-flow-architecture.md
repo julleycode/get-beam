@@ -27,7 +27,7 @@ Xem thêm: `docs/agent-detection-architecture.md` (AI-agent traffic, tách biệ
 | 6 | Hunter/Apollo trả **nhân viên bất kỳ** của công ty, không phải người truy cập → gắn nhãn `company-level`, không emailable. | ℹ️ Theo thiết kế |
 
 | 7 | **Leadpipe/Capturify chỉ hoạt động khi pixel CỦA HỌ được cài lên site khách.** Beam có sẵn cơ chế (`data-stack`) nhưng snippet cũ không tự cập nhật, và pixel-id theo site là code chết. Chi tiết §6 | 🔴 Cao — gốc rễ |
-| 8 | **Leadpipe có webhook push, Beam đang polling.** Webhook xoá bỏ cùng lúc vấn đề #1, #2, #4. Đã nằm trong Phase 2 của plan active | 🔴 Cao — hướng đi |
+| 8 | ~~**Leadpipe có webhook push, Beam đang polling.**~~ — **ĐÃ DỰNG 06-08-26.** `POST /webhooks/identity/leadpipe` ([leadpipe_webhook.py](apps/api/services/leadpipe_webhook.py)) nhận push và gắn visitor theo 3 tầng: marker Beam tự cấp → email đã capture → IP+30 phút. Xoá vấn đề #2 và #4 cho **đường webhook**; đường pull vẫn giữ nguyên hai vấn đề đó và vẫn chạy song song (cờ `LEADPIPE_PULL_ENABLED`, mặc định ON). Chi tiết §6.2b | 🟡 Còn lại: đăng ký webhook trên dashboard (thao tác tay) |
 
 **Kết luận cho mục tiêu "chỉnh input lúc đầu"**: đòn bẩy lớn nhất KHÔNG nằm ở việc
 thêm trường vào payload provider (RB2B chỉ nhận IP+UA; Leadpipe/Capturify không nhận
@@ -97,6 +97,7 @@ flowchart TB
 | Provider | Kiểu gọi | **Input Beam thực sự gửi** | Match logic | Cost | Confidence |
 |---|---|---|---|---|---|
 | **Leadpipe** | `GET /v1/data` (pull feed) | `domain` = hostname của site **(chỉ vậy)** | Local: `record.ip == visitor.ip` **AND** `|Δt| ≤ 30min` | $0 | 0.95 |
+| **Leadpipe** (webhook, 06-08-26) | vendor POST vào Beam | — Beam không gửi gì; nhận `pixel_id` + record | marker → email đã capture → IP+30min | $0 | 0.95, riêng tầng IP cap 0.6 |
 | **Capturify** | `GET /v1/visitors` (pull feed) | `limit=10`, `sort=desc` — **KHÔNG có site scope** | Local: giống trên | $0 | 0.90 |
 | **RB2B** | `POST` chain 3 bước | `ip_address`, `user_agent`, `include_sha256` | Server-side (RB2B graph) | $0.09 | score từ RB2B (0-0.99) |
 | **PDL IP** | `GET /v5/ip/enrich` | `ip` | Server-side | $0.01 | — (trả domain) |
@@ -334,6 +335,41 @@ flowchart LR
     style SETUP fill:#fff4e6
     style E3 fill:#ffe0e0
 ```
+
+### 6.2b Đường thứ hai: webhook push (dựng 06-08-26)
+
+Sơ đồ trên là đường **pull**. Từ 06-08-26 có thêm đường **push**, chạy song song:
+
+```
+Leadpipe nhận diện khách
+   → POST /webhooks/identity/leadpipe?token=<LEADPIPE_WEBHOOK_SECRET>
+   → tra site: Site.leadpipe_pixel_id (chính xác) → fallback so hostname; không ra ⇒ BỎ, không đoán
+   → gắn visitor, tin cậy giảm dần:
+        ① marker beam_visitor_id vendor echo lại   (deterministic)
+        ② email trùng visitor_emails của site này  (deterministic)
+        ③ IP trùng + last_seen lệch ≤ 30 phút      (probabilistic → cap confidence 0.6)
+   → _save_identified(provider="leadpipe")  ← ĐÚNG hàm mà đường pull dùng
+   → identity_status = provider_candidate; KHÔNG vào EMAILABLE_PROVIDERS
+```
+
+Khác biệt so với pull, và giới hạn còn lại:
+
+| | Pull `GET /v1/data` | Webhook push |
+|---|---|---|
+| Ghép người ↔ visitor | luôn phải đoán IP+thời gian | tầng ① hoặc ② khi có; tầng ③ chỉ là đường cuối |
+| Độ trễ | tới 1 giờ | tức thì |
+| Phân trang 50 record | có — site ít traffic bị chìm | không |
+| Chống trùng | — | unique `(site_id, visitor_id)`; giao lại không đẻ dòng thứ 2 |
+
+Hai đường cùng ghi dưới **một** tên provider và cùng đi qua một hàm lưu, nên chạy song song không
+tạo identity trùng — chỉ tốn một lượt gọi API thừa. Tắt pull bằng `LEADPIPE_PULL_ENABLED=false`
+(đổi env, không cần deploy). Giữ ON tới khi webhook chứng minh được, vì Leadpipe tự tắt webhook
+khi nó gọi lỗi liên tiếp.
+
+**Tầng ① hiện chưa có dữ liệu:** `tracker.js` đã gắn `beam_visitor_id` vào `globalParams` của SDK
+Leadpipe, nhưng bản nén `tracker.min.js` (file API thực sự phục vụ) chưa build lại, và cũng chưa
+xác minh phía Leadpipe có echo tham số đó trong payload webhook hay không. Waterfall tự rơi xuống
+tầng ② — đúng thiết kế.
 
 ### 6.3 Ba lỗ hổng trong bước ①
 
