@@ -65,4 +65,14 @@ celery_app.conf.beat_schedule = {
         "task": "apps.api.tasks.segmentation_tasks.check_segmentation_triggers",
         "schedule": crontab(minute="30"),
     },
+    # Job-change detection Trigger B (staleness sweep). Daily and off-peak,
+    # DELIBERATELY not on the :15 hourly cadence of process-pending-visitors:
+    # both touch EnrichmentProfile, and re-checking a profile the resolution
+    # pass is concurrently writing would race for no benefit. Doubly inert
+    # today — the whole beat schedule is dormant (see the banner above) and
+    # job_change_detection_enabled defaults False.
+    "sweep-job-change-stale-profiles": {
+        "task": "apps.api.tasks.job_change_tasks.sweep_stale_profiles",
+        "schedule": crontab(hour=3, minute=0),
+    },
 }

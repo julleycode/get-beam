@@ -328,6 +328,41 @@ class Settings(BaseSettings):
     # pre-EvalLayer (recognized agent UAs fall through to the is_bot() drop).
     agent_detection_enabled: bool = False
 
+    # ─── Job-change detection (v1, same-tenant) ───
+    # Detects that an ALREADY-IDENTIFIED visitor's company changed, by re-checking
+    # them against this site's OWN stored EnrichmentProfile baseline. Gates the
+    # whole pipeline: the event-driven Trigger A dispatch, the scheduled Trigger B
+    # sweep, and job_change_detector.run_recheck itself (the service re-checks the
+    # flag independently of its callers, same belt-and-suspenders posture as
+    # agent_detection_enabled).
+    #
+    # Defaults OFF. Flipping this in a real environment is an explicit operator
+    # action AFTER the job_change_events migration (a4f2b8c15d70) is confirmed
+    # live-applied — with the flag off, zero rechecks fire, zero provider credits
+    # are spent, and zero rows are written.
+    job_change_detection_enabled: bool = False
+
+    # Daily per-site ceiling on re-checks (Redis counter, NOT the DB-row-count
+    # Site.daily_resolution_budget — the two are deliberately different stores so
+    # neither can influence the other). PLACEHOLDER value: tune from observed
+    # per-site resolution-budget sizing before enabling live, same posture as
+    # site_ingest_limit_per_minute. Every re-check costs a paid provider call, so
+    # this is a real spend cap, not just a throttle.
+    job_change_recheck_daily_cap: int = 200
+
+    # How stale an EnrichmentProfile must be before the Trigger B sweep will
+    # re-check it. Deliberately the same number as company_graph_staleness_days,
+    # not independently re-derived: both answer "how stale is too stale to trust a
+    # cached professional-data snapshot".
+    job_change_staleness_days: int = 75
+
+    # Corroboration gate threshold. A detected company difference is only recorded
+    # when confidence >= this AND at least one independent corroborating signal is
+    # present (work-email domain or company_graph IP attribution). The confidence
+    # constants themselves live in services/job_change_detector.py and are an
+    # UNCALIBRATED heuristic — see the plan's Known-Gap #2.
+    job_change_min_confidence: float = 0.5
+
     # ─── Candidate outreach (identity-vocab-reconcile D5/D10) ───
     # Gates the D2 WIDENING only: whether a graph-candidate identity
     # (rb2b/leadpipe/capturify/beam_identity_network) that is still

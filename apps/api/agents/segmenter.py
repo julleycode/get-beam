@@ -59,7 +59,7 @@ Analyze these visitors and group them into 2 to 5 actionable segments. Each segm
 async def build_visitor_profiles(
     db: AsyncSession, site_id: str, visitors: list[Visitor]
 ) -> list[dict]:
-    from sqlalchemy import select
+    from sqlalchemy import func, select
 
     visitor_ids = [v.visitor_id for v in visitors]
 
@@ -80,6 +80,24 @@ async def build_visitor_profiles(
         )
     )
     enrich_map = {ep.visitor_id: ep for ep in enrich_result.scalars().all()}
+
+    # Batch-fetch the most recent confirmed job change per visitor (one query,
+    # same N+1-avoiding shape as the two fetches above). Empty for every site
+    # until job-change detection is enabled.
+    from apps.api.models.job_change_event import JobChangeEvent
+
+    job_change_result = await db.execute(
+        select(
+            JobChangeEvent.visitor_id,
+            func.max(JobChangeEvent.detected_at),
+        )
+        .where(
+            JobChangeEvent.site_id == site_id,
+            JobChangeEvent.visitor_id.in_(visitor_ids),
+        )
+        .group_by(JobChangeEvent.visitor_id)
+    )
+    job_change_map = {vid: detected_at for vid, detected_at in job_change_result.all()}
 
     profiles = []
     for v in visitors:
@@ -103,6 +121,17 @@ async def build_visitor_profiles(
             # a UX default only; the real enforcement is the send-time gate in
             # campaign_sender._compose_for_recipient.
             "identity_status": v.identity_status,
+            # Job-change signal: when this person's employer changed since we
+            # last enriched them, so Gemini can carve a "recently changed jobs"
+            # segment. Signal, NOT a bypass — exactly the ai_source posture
+            # above: no intent-score boost, segmentation still only runs on
+            # already-enriched visitors, and this never affects emailability.
+            # None for the overwhelming majority of visitors.
+            "job_changed_at": (
+                job_change_map[v.visitor_id].isoformat()
+                if v.visitor_id in job_change_map
+                else None
+            ),
         }
         identified = id_map.get(v.visitor_id)
         if identified:

@@ -25,6 +25,8 @@ from apps.api.models.user import User
 from apps.api.services.hot_contacts import (
     DEFAULT_ACTIVITY_WINDOW_DAYS,
     MAX_HOT_CONTACTS_RETURNED,
+    MAX_JOB_CHANGES_RETURNED,
+    get_job_change_events,
     hot_contacts_summary,
 )
 
@@ -79,5 +81,63 @@ async def get_hot_imported_contacts(
                 ),
             )
             for c in summary["contacts"]
+        ],
+    )
+
+
+class JobChangeEventOut(BaseModel):
+    """One confirmed employer change. Carries NO email/name (SPEC AC-14) —
+    the person is referenced by visitor_id, which the Visitors surface resolves."""
+
+    visitor_id: str
+    prior_company: str | None
+    new_company: str | None
+    prior_job_title: str | None
+    new_job_title: str | None
+    confidence: float
+    corroboration_signal: str | None
+    detected_at: str | None
+
+
+class JobChangeFeed(BaseModel):
+    events: list[JobChangeEventOut]
+    count: int
+
+
+# ROUTE-ORDER SAFE (checked against this module's own docstring warning):
+# "/{site_id}/job-changes" has a LITERAL second segment. The only parametric
+# second-segment route registered at the /api/v1/sites prefix is sites.py's
+# "/{site_id}", which is one segment shorter and cannot match; contacts.py's
+# catch-all is "/{site_id}/contacts/{visitor_id}", three segments deep. So
+# nothing swallows this route and this route swallows nothing.
+@router.get("/{site_id}/job-changes", response_model=JobChangeFeed)
+async def get_job_changes(
+    site_id: str,
+    limit: int = Query(MAX_JOB_CHANGES_RETURNED, ge=1, le=MAX_JOB_CHANGES_RETURNED),
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> JobChangeFeed:
+    """Recently detected job changes for a site (newest first).
+
+    Read-only. Site ownership goes through the same shared ``verify_site_access``
+    dependency as every sibling site-scoped route (404, never 403 — never leak
+    which site_ids exist). Empty while job-change detection is disabled.
+    """
+    await verify_site_access(db, site_id, user)
+    events = await get_job_change_events(db, site_id, limit=limit)
+    return JobChangeFeed(
+        count=len(events),
+        events=[
+            JobChangeEventOut(
+                visitor_id=e.visitor_id,
+                prior_company=e.prior_company,
+                new_company=e.new_company,
+                prior_job_title=e.prior_job_title,
+                new_job_title=e.new_job_title,
+                confidence=e.confidence,
+                corroboration_signal=e.corroboration_signal,
+                detected_at=e.detected_at.isoformat() if e.detected_at else None,
+            )
+            for e in events
         ],
     )

@@ -93,8 +93,14 @@ class TestSegmenterWiring:
         enrich_result = MagicMock()
         enrich_result.scalars.return_value.all.return_value = [enriched]
 
+        # Third query: the additive job-change signal batch fetch. Returns no
+        # rows here — this suite is about recent_content, and job_changed_at is
+        # None for a visitor with no confirmed job change.
+        job_change_result = MagicMock()
+        job_change_result.all.return_value = []
+
         db = AsyncMock()
-        db.execute = AsyncMock(side_effect=[id_result, enrich_result])
+        db.execute = AsyncMock(side_effect=[id_result, enrich_result, job_change_result])
 
         profiles = await segmenter.build_visitor_profiles(db, "site1", [visitor])
         assert profiles[0]["recent_content"]
@@ -129,8 +135,14 @@ class TestSegmenterWiring:
         enrich_result = MagicMock()
         enrich_result.scalars.return_value.all.return_value = [enriched]
 
+        # Third query: the additive job-change signal batch fetch. Returns no
+        # rows here — this suite is about recent_content, and job_changed_at is
+        # None for a visitor with no confirmed job change.
+        job_change_result = MagicMock()
+        job_change_result.all.return_value = []
+
         db = AsyncMock()
-        db.execute = AsyncMock(side_effect=[id_result, enrich_result])
+        db.execute = AsyncMock(side_effect=[id_result, enrich_result, job_change_result])
 
         profiles = await segmenter.build_visitor_profiles(db, "site1", [visitor])
         assert "recent_content" not in profiles[0]

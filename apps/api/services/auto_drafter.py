@@ -55,6 +55,7 @@ class AutoDrafter:
         enrichment_data: dict,
         social_context: dict,
         user: User,
+        trigger_reason: Optional[str] = None,
     ) -> Optional[Draft]:
         """Auto-generate an engagement draft for a high-intent identified visitor.
 
@@ -63,17 +64,36 @@ class AutoDrafter:
             enrichment_data: Dict with 'full_name', 'job_title', etc.
             social_context: Dict with 'recent_posts' and 'topics'.
             user: The site owner who will review/send the draft.
+            trigger_reason: Optional non-social reason to draft (e.g.
+                ``"job_change:Acme->Globex"``). ADDITIVE and OPTIONAL: when
+                omitted, behavior is byte-identical to before — a recent social
+                post is still required. When supplied, the event ITSELF is the
+                thing worth reaching out about, so the recent-post precondition
+                is satisfied by a synthesized context line instead. Either way
+                the result is still a ``pending`` draft for human review; this
+                parameter does not create a send path.
 
         Returns:
             A saved Draft instance, or None if generation is not possible.
         """
         recent_posts = social_context.get("recent_posts", [])
         if len(recent_posts) < _MIN_POSTS_FOR_DRAFT:
-            logger.debug(
-                "auto_draft_skipped_no_posts",
-                visitor_id=visitor.visitor_id,
-            )
-            return None
+            if not trigger_reason:
+                logger.debug(
+                    "auto_draft_skipped_no_posts",
+                    visitor_id=visitor.visitor_id,
+                )
+                return None
+            # Non-social trigger: the event is the context. Shaped like a post
+            # dict so every downstream step (platform pick, char limits, prompt
+            # construction) stays on the one existing code path.
+            recent_posts = [
+                {
+                    "content": trigger_reason,
+                    "platform": "linkedin",
+                    "author": enrichment_data.get("full_name") or "them",
+                }
+            ]
 
         # Pick the best (most recent) post
         best_post = recent_posts[0]

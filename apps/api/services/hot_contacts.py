@@ -161,3 +161,42 @@ async def hot_contacts_summary(
             for visitor_id, email, full_name, last_activity in rows
         ],
     }
+
+
+# ─────────────────── Job-change events (job-change-detection v1) ──────────────
+#
+# DELIBERATELY NOT built on the phantom-pointer query family above. That
+# machinery (correlated MAX(child.last_seen) through canonical_visitor_id)
+# exists to solve one specific problem: a phantom imported-contact row accrues
+# no traffic on its own columns, so "active" has to be read off a merged CHILD.
+# A JobChangeEvent row has no such indirection — it is written directly against
+# a real (site_id, visitor_id) pair at detection time, so a plain site-scoped
+# ORDER BY is both correct and counting-safe.
+#
+# Stated explicitly so a future reader does not "unify" the two query families
+# and reintroduce pointer semantics where none are needed.
+
+# Cap on the returned job-change feed, mirroring MAX_HOT_CONTACTS_RETURNED's
+# intent: the dashboard shows a recent-activity list, not an unbounded history.
+MAX_JOB_CHANGES_RETURNED = 50
+
+
+async def get_job_change_events(db, site_id: str, limit: int = MAX_JOB_CHANGES_RETURNED):
+    """Most recent confirmed job changes for one site, newest first.
+
+    Read-only. Site-scoped, so a wrong or foreign ``site_id`` yields an empty
+    list rather than another tenant's data (the caller still owns the
+    ``verify_site_access`` check). Returns [] for every site while job-change
+    detection is disabled.
+    """
+    from apps.api.models.job_change_event import JobChangeEvent
+
+    rows = (
+        await db.execute(
+            select(JobChangeEvent)
+            .where(JobChangeEvent.site_id == site_id)
+            .order_by(desc(JobChangeEvent.detected_at))
+            .limit(limit)
+        )
+    ).scalars().all()
+    return list(rows)
