@@ -247,6 +247,11 @@ function SiteCard({
               and all of its data: every visitor, identity, segment, campaign, and event.
               This can&apos;t be undone.
             </DialogDescription>
+            <p className="text-sm text-destructive">
+              Your installed pixel will also stop working — the tracking snippet on
+              your website will start being rejected until you re-add this site or
+              install a new snippet.
+            </p>
           </DialogHeader>
           {deleteError && (
             <p className="text-sm text-destructive">{deleteError}</p>

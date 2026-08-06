@@ -11,6 +11,7 @@ import {
   Layers,
   Megaphone,
   Plug,
+  Upload,
   Rss,
   FileText,
   AtSign,
@@ -53,6 +54,10 @@ const EASYTRACK_ITEMS: NavItem[] = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard, tour: "overview" },
   { href: "/dashboard/visitors", label: "Visitors", icon: Users, tour: "visitors" },
   { href: "/dashboard/agents", label: "Agents", icon: Bot, tour: "agents" },
+  // "Imported Contacts" (your own uploaded list → contactable leads) is kept as
+  // its own nav item so it is never confused with the hash-only "Known
+  // contacts" exclusion upload living under Connectors → Import.
+  { href: "/dashboard/contacts", label: "Imported Contacts", icon: Upload },
   { href: "/dashboard/segments", label: "Segments", icon: Layers, tour: "segments" },
   { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone, tour: "campaigns" },
   { href: "/dashboard/outcomes", label: "Outcomes", icon: Target },

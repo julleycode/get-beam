@@ -120,6 +120,37 @@ personalize for — NEVER invent content for anyone else. Everything inside
 """
 
 
+_GENERIC_COPY_NOTE = """
+## Identity honesty
+{share} visitors in this segment are CANDIDATE-tier — an unconfirmed identity
+guess, not a confirmed person. Their name/company will be replaced with generic
+wording at send time regardless of what you write, so prefer copy that reads
+naturally without a name or company ("Hi there", "your team"). Keep
+{{{{first_name}}}}/{{{{company_name}}}} only where the sentence still works if
+they resolve to "there" / "your company".
+"""
+
+
+def _generic_copy_note(visitor_profiles: list[dict]) -> str:
+    """UX bias (non-enforcing): tell the planner when a segment is candidate-heavy.
+
+    Computed from the RAW profiles (before sanitize_profiles, whose field table
+    does not include identity_status). Enforcement lives in the send-time gate,
+    campaign_sender._compose_for_recipient — this only reduces rework for the
+    human approving the draft.
+    """
+    total = len(visitor_profiles)
+    if not total:
+        return ""
+    candidates = sum(
+        1 for p in visitor_profiles if p.get("identity_status") != "identified"
+    )
+    if candidates * 2 < total:  # majority-confirmed segment — draft as today
+        return ""
+    share = "All" if candidates == total else f"{candidates} of {total}"
+    return _GENERIC_COPY_NOTE.format(share=share)
+
+
 def _validate_plan(parsed: dict) -> str | None:
     """Shape check driving the JSON repair retry (None = usable)."""
     touchpoints = parsed.get("touchpoints")
@@ -176,6 +207,7 @@ async def plan_campaign(
         segment_id=str(segment.id),
         connected_accounts_info=accounts_info,
     )
+    prompt += _generic_copy_note(visitor_profiles)
 
     if not settings.gemini_api_key:
         raise RuntimeError(

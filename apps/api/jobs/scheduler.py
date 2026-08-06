@@ -291,6 +291,22 @@ async def _outlier_traffic_damping_sweep_job() -> None:
         logger.exception("outlier_traffic_damping_sweep_crashed")
 
 
+async def _promotion_sweep_job() -> None:
+    """Periodic job: promote fresh tokenized-link clicks to a verified identity.
+
+    run_promotion_sweep opens its own session, holds a Postgres advisory lock
+    (single-flight across replicas), re-checks the feature flag, and isolates
+    per-visitor failures; this wrapper only swallows a top-level crash. Never
+    touches the ingest hot path — promotion is batch-only by design (SPEC AC11).
+    """
+    try:
+        from apps.api.services.promotion_sweep_runner import run_promotion_sweep
+
+        await run_promotion_sweep()
+    except Exception:
+        logger.exception("promotion_sweep_crashed")
+
+
 async def _sweep_one_site(
     site_id: str,
     allow_defer: bool,
@@ -585,6 +601,18 @@ def start_scheduler() -> None:
         jitter=300,
         misfire_grace_time=600,
     )
+    if settings.promotion_sweep_enabled:
+        scheduler.add_job(
+            _promotion_sweep_job,
+            "interval",
+            minutes=settings.promotion_sweep_interval_minutes,
+            id="promotion_sweep",
+            replace_existing=True,
+            # Short interval (1-2 min) inside a 5-minute SLA: jitter stays small
+            # so promotion stays on time, but non-zero so replicas spread out.
+            jitter=15,
+            misfire_grace_time=60,
+        )
     if settings.changelog_sync_enabled:
         scheduler.add_job(
             _changelog_sync_job,

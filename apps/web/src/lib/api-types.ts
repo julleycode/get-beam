@@ -13,6 +13,53 @@ export interface KnownUploadResult {
   truncated: boolean;
 }
 
+// ── Imported contacts (Phase 4) ─────────────────────────
+// Distinct from KnownUploadResult above: known contacts are a hash-only
+// exclusion list; imported contacts are real contactable leads.
+export interface ImportContactsRejectedRow {
+  line: number | null;
+  reason: string;
+}
+
+export interface ImportContactsResult {
+  imported: number;
+  rejected: number;
+  rejected_rows: ImportContactsRejectedRow[];
+  total: number;
+  limit: number;
+}
+
+export interface ImportedContact {
+  visitor_id: string;
+  email: string | null;
+  full_name: string | null;
+  identity_status: string;
+  has_link: boolean;
+}
+
+export interface ImportedContactList {
+  contacts: ImportedContact[];
+  total: number;
+  limit: number;
+}
+
+// Phase 6 — "N of your M imported contacts active this week". Activity is
+// resolved through the merged-child pointer server-side; the phantom's own
+// last_seen is meaningless here.
+export interface HotImportedContact {
+  visitor_id: string;
+  email: string | null;
+  full_name: string | null;
+  last_activity_at: string | null;
+}
+
+export interface HotImportedContactsSummary {
+  active_count: number;
+  total_count: number;
+  window_days: number;
+  contacts: HotImportedContact[];
+}
+
 // ── Blog CMS types ──────────────────────────────────────
 export interface BlogPost {
   id: string;

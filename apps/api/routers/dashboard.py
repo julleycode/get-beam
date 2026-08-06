@@ -90,6 +90,13 @@ async def get_overview(
                 func.count()
                 .filter(Visitor.identity_status == "identified")
                 .label("identified"),
+                # Identity-honesty Phase 1 (B4) — explicit decision for this
+                # site: candidates are a SEPARATE per-site count. `identified`
+                # keeps meaning CONFIRMED only; candidates are surfaced, not
+                # folded in and not dropped.
+                func.count()
+                .filter(Visitor.identity_status == "candidate")
+                .label("candidates"),
                 func.count()
                 .filter(Visitor.enrichment_status == "enriched")
                 .label("enriched"),
@@ -195,6 +202,7 @@ async def get_overview(
         stats[site.site_id] = VisitorStatsResponse(
             total_visitors=counts.total if counts else 0,
             identified=counts.identified if counts else 0,
+            candidates=counts.candidates if counts else 0,
             enriched=counts.enriched if counts else 0,
             could_enrich_more=enrich_map.get(site.site_id, 0),
             enriched_unsegmented=counts.enriched_unsegmented if counts else 0,

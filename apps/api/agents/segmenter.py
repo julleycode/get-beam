@@ -97,6 +97,12 @@ async def build_visitor_profiles(
             # required) and there is NO intent-score boost in v1. ai_source never
             # affects emailability — these stay ordinary emailable humans.
             "ai_source": v.ai_source,
+            # Identity-honesty tier ("identified" = human-confirmed, "candidate"
+            # = unconfirmed graph guess). Used by the campaign planner to bias
+            # draft copy toward generic wording for candidate-heavy segments —
+            # a UX default only; the real enforcement is the send-time gate in
+            # campaign_sender._compose_for_recipient.
+            "identity_status": v.identity_status,
         }
         identified = id_map.get(v.visitor_id)
         if identified:

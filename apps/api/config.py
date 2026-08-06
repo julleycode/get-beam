@@ -483,6 +483,33 @@ class Settings(BaseSettings):
     # cadence/bot layer instead). Operator-tunable; tune before enabling.
     outlier_traffic_damping_min_engagement_ratio: float = 0.1
 
+    # ─── Click→verified promotion sweep (identity-honesty Phase 5) ───
+    # When an imported contact clicks their tokenized link, the pixel writes a
+    # `visitor_emails` row with source="utm". This batch sweep promotes that
+    # visitor to a verified identity within <=5 minutes by re-running the
+    # resolver's existing deterministic email path — AFTER the /ingest request
+    # completes, never synchronously inside it (locked SPEC constraint).
+    #
+    # DEFAULT OFF, matching every other recent identity/traffic sweep in this
+    # file (cadence_bot_flag_enabled, agent_detection_enabled,
+    # identity_signals_enabled, site_ingest_limit_enabled): identity-status
+    # mutation is a high-risk class, so enabling it is an explicit operator act.
+    promotion_sweep_enabled: bool = False
+
+    # Sweep cadence. 1-2 minutes keeps click→verified comfortably inside the
+    # 5-minute SLA. The sweep is cheap: it only touches visitors that just had a
+    # `visitor_emails` row written, and the resolver short-circuits on the free
+    # prior-signal path before any paid provider is reached.
+    promotion_sweep_interval_minutes: int = 2
+
+    # ABSOLUTE lookback floor in minutes, independent of cadence. The window is
+    # max(2 * cadence, this) — a bare "2x cadence" would be only 2-4 minutes and
+    # would NOT survive a routine deploy restart, silently aging rows out of
+    # scope. Residual (documented, not eliminated): the query is time-bound, not
+    # state-bound, so a sustained outage LONGER than the window still drops rows;
+    # the affected visitor is then only promoted if they click again.
+    promotion_sweep_window_floor_minutes: int = 15
+
     # ─── Server-side AI-fetch capture beacon (Handoff Detection H5) ───
     # When true, POST /api/v1/agents/fetch-beacon accepts an authenticated
     # server-side beacon (from the getbeam.fyi edge middleware) that classifies
@@ -509,6 +536,16 @@ class Settings(BaseSettings):
     # Configurable window (days) before a company_graph row triggers lazy
     # re-validation at read time (no cron; read-time only).
     company_graph_staleness_days: int = 75
+
+    # How long after a site is deleted its site_id stays eligible for reuse when
+    # the SAME owner re-creates a site for the SAME normalized url. This bounds
+    # REUSE ELIGIBILITY only — site_tombstones rows are never deleted (they are
+    # a cheap audit trail of what id a domain used to have), and the window is
+    # enforced at READ time in the create_site lookup, with no cron/TTL job
+    # (mirrors company_graph_staleness_days above). Past this window a
+    # re-created site gets a fresh random id, so a years-old tombstone can never
+    # silently resurrect an id whose pixel is long gone.
+    site_id_reclaim_window_days: int = 90
 
     # When true, SendGrid open/click engagement events are captured to the
     # identity_signals corroborating table (all 4 write gates enforced), and

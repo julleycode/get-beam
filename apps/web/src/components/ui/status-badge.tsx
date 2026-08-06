@@ -31,8 +31,10 @@ const STATUS_TONE: Record<string, Tone> = {
   canceled: "neutral",
   // visitors / enrichment / keys
   identified: "info",
-  verified: "success",
-  provider_candidate: "warning",
+  // Identity-honesty Phase 1: an UNCONFIRMED identity-graph match. Warning tone
+  // deliberately mirrors the company-level caution pill — the owner must read it
+  // as "don't trust this yet", not as a weaker shade of "identified".
+  candidate: "warning",
   enriched: "success",
   unresolvable: "neutral",
   vpn_filtered: "neutral",

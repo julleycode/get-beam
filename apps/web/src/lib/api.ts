@@ -1,5 +1,8 @@
 import type {
   KnownUploadResult,
+  ImportContactsResult,
+  ImportedContactList,
+  HotImportedContactsSummary,
   RequestLogEntry,
   RequestLogListResponse,
   RequestLogStats,
@@ -389,6 +392,30 @@ class ApiClient {
     }>(`/api/v1/visitors/${siteId}/${visitorId}/internal-override`, {
       method: "POST",
       body: JSON.stringify({ override }),
+    });
+  }
+
+  // Identity-honesty Phase 1: the human's verdict on an unconfirmed
+  // identity-graph match. Confirm promotes candidate → identified (and stamps
+  // confirmed_at); reject returns them to anonymous and marks the stale
+  // identity row do-not-email. No confidence score ever promotes on its own.
+  async confirmCandidate(siteId: string, visitorId: string) {
+    return this.request<{
+      status: string;
+      visitor_id: string;
+      confirmed_at: string;
+    }>(`/api/v1/visitors/${siteId}/${visitorId}/confirm-candidate`, {
+      method: "POST",
+    });
+  }
+
+  async rejectCandidate(siteId: string, visitorId: string) {
+    return this.request<{
+      status: string;
+      visitor_id: string;
+      rejected: boolean;
+    }>(`/api/v1/visitors/${siteId}/${visitorId}/reject-candidate`, {
+      method: "POST",
     });
   }
 
@@ -818,6 +845,9 @@ class ApiClient {
       status: string;
       verified: boolean;
       message: string;
+      // Only set when status === "wrong_site": the foreign Beam site id found
+      // installed on the page.
+      found_site_id?: string | null;
     }>(`/api/v1/sites/${siteId}/verify-pixel`, {
       method: "POST",
     });
@@ -1621,6 +1651,60 @@ class ApiClient {
     );
   }
 
+  // ── Imported contacts (Phase 4) ────────────────────────────────────────
+  // NOT the same as known contacts above. Known contacts are a hash-only
+  // EXCLUSION list (no visitor created, no plaintext email kept). These are
+  // real, contactable leads created from the customer's own list.
+  async importContacts(siteId: string, file: File): Promise<ImportContactsResult> {
+    // Multipart — bypass the JSON request helper (browser sets the boundary).
+    const form = new FormData();
+    form.append("file", file);
+
+    const send = (token: string | null) =>
+      fetch(`${API_BASE}/api/v1/sites/${siteId}/contacts/import`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      });
+
+    let res = await send(this.getToken());
+    if (res.status === 401 && this.clerkTokenGetter) {
+      try {
+        const fresh = await this.clerkTokenGetter();
+        if (fresh) {
+          this.setClerkToken(fresh);
+          res = await send(fresh);
+        }
+      } catch {
+        // fall through to the error handling below
+      }
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Import failed: ${res.status}`);
+    }
+    return res.json() as Promise<ImportContactsResult>;
+  }
+
+  async listImportedContacts(siteId: string, limit = 100, offset = 0) {
+    return this.request<ImportedContactList>(
+      `/api/v1/sites/${siteId}/contacts?limit=${limit}&offset=${offset}`
+    );
+  }
+
+  async getImportedContactsCount(siteId: string) {
+    return this.request<{ count: number; limit: number }>(
+      `/api/v1/sites/${siteId}/contacts-count`
+    );
+  }
+
+  // Phase 6 — imported contacts with real activity in the last `days` days.
+  async getHotImportedContacts(siteId: string, days = 7) {
+    return this.request<HotImportedContactsSummary>(
+      `/api/v1/sites/${siteId}/contacts/hot?days=${days}`
+    );
+  }
+
   // ── AI assistant (Overview "ask Beam anything" box) ────
   async askAI(question: string, siteId?: string) {
     return this.request<{ answer: string }>("/api/v1/ai/ask", {
@@ -1667,6 +1751,12 @@ export const api = new ApiClient();
 
 export type {
   KnownUploadResult,
+  ImportContactsResult,
+  ImportContactsRejectedRow,
+  ImportedContact,
+  ImportedContactList,
+  HotImportedContact,
+  HotImportedContactsSummary,
   RequestLogEntry,
   RequestLogListResponse,
   RequestLogStats,

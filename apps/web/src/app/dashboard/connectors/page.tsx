@@ -217,6 +217,13 @@ export default function ConnectorsPage() {
                 leads, or a CRM export. Beam flags matching visitors as “Known” so
                 you can filter them out of net-new targeting. Emails are stored
                 hashed; we never keep your plaintext list.
+                <br />
+                <span className="text-muted-foreground">
+                  This does <strong>not</strong> create contacts or send anything.
+                  To turn your own list into contactable leads with tracking
+                  links, use <strong>Imported Contacts</strong> in the sidebar
+                  instead.
+                </span>
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">

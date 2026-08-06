@@ -22,6 +22,7 @@ from apps.api.services.agent_visit_persistence import build_dedup_key, persist_a
 from apps.api.services.bot_filter import is_bot
 from apps.api.services.ip_resolution import resolve_client_ip
 from apps.api.services.link_decorator import decode_bid
+from apps.api.services.orphan_ingest_metrics import record_orphan_ingest
 from apps.api.services.rate_limiter import limiter, site_ceiling_tripped
 
 router = APIRouter()
@@ -188,6 +189,17 @@ async def ingest_events(
             httponly=True,
             samesite="none",
         )
+        # Observability ONLY, added strictly AFTER the response is fully built
+        # and strictly BEFORE the return: the status code, body, and every
+        # cookie attribute above must stay byte-identical, because already
+        # deployed trackers depend on this exact response and cannot be updated.
+        # record_orphan_ingest is fail-open and can never raise.
+        logger.warning(
+            "ingest_unknown_site",
+            site_id=batch.site_id,
+            rejected_as="unknown_site",
+        )
+        await record_orphan_ingest(batch.site_id)
         return gone
     if tracking_enabled is False:
         # Tracking paused for this site — silently drop the events (same pattern

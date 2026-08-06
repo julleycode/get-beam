@@ -42,12 +42,15 @@ from apps.api.models.identity_signal import IdentitySignal  # noqa: F401 — reg
 from apps.api.models.ad_connection import AdConnection  # noqa: F401 — register for create_all
 from apps.api.models.ad_audience_link import AdAudienceLink  # noqa: F401 — register for create_all
 from apps.api.models.agent_profile import AgentProfile  # noqa: F401 — register for create_all
+from apps.api.models.site_tombstone import SiteTombstone  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
 from apps.api.routers import known_contacts, costs, ai, dashboard, crm, changelog, click, open_pixel
 from apps.api.routers import email_sender_oauth, outcomes, referrals, agents, ads
 from apps.api.routers import ingest_health
+from apps.api.routers import contacts
+from apps.api.routers import hot_contacts
 from apps.api.routers import request_logs
 from apps.api.routers import agent_profile, agent_gateway, agent_mcp
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
@@ -492,6 +495,17 @@ app.include_router(events.router, prefix="/api/v1/events", tags=["events"])
 app.include_router(sites.router, prefix="/api/v1/sites", tags=["sites"])
 app.include_router(known_contacts.router, prefix="/api/v1/sites", tags=["known-contacts"])
 app.include_router(ingest_health.router, prefix="/api/v1/sites", tags=["ingest-health"])
+# Imported contacts (Phase 4) — distinct surface from known-contacts above:
+# creates contactable identities, not a hash-only exclusion list.
+#
+# ORDER IS LOAD-BEARING: hot_contacts registers the literal
+# /{site_id}/contacts/hot, contacts.router registers the parametric
+# /{site_id}/contacts/{visitor_id}. FastAPI matches in registration order, so
+# the literal route MUST come first — reversed, every /contacts/hot request is
+# swallowed as visitor_id="hot" and silently 404s. Covered by
+# tests/unit/test_hot_contacts_query.py::test_hot_route_is_not_shadowed_by_visitor_id_route.
+app.include_router(hot_contacts.router, prefix="/api/v1/sites", tags=["imported-contacts"])
+app.include_router(contacts.router, prefix="/api/v1/sites", tags=["imported-contacts"])
 app.include_router(
     request_logs.router, prefix="/api/v1/admin/request-logs", tags=["admin-request-logs"]
 )

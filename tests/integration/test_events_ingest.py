@@ -642,3 +642,93 @@ class TestCookieFpPhase2:
         assert row.fingerprint == fp
         assert row.server_visitor_id == original
         assert row.total_pageviews >= 1
+
+
+class TestUnknownSiteObservability:
+    """AC2 — the unknown-site 403 emits a structured, aggregatable log event.
+
+    AC9 (byte-identical response) is covered by the untouched
+    test_invalid_site_returns_403 / test_deleted_site_403_expires_svid_cookie
+    cases above; this class only adds observability cover.
+    """
+
+    @pytest.mark.asyncio
+    async def test_unknown_site_logs_structured_event(
+        self, test_client, test_site_id, monkeypatch
+    ):
+        from apps.api.routers import events as events_router
+
+        captured: list[tuple[str, dict]] = []
+        real_warning = events_router.logger.warning
+
+        def _capture(event: str, **kw):
+            captured.append((event, kw))
+            return real_warning(event, **kw)
+
+        monkeypatch.setattr(events_router.logger, "warning", _capture)
+
+        orphan_id = "orphaned_site_ac2_test"
+        payload = {
+            "site_id": orphan_id,
+            "visitor_id": "test-visitor",
+            "events": [
+                {
+                    "type": "pageview",
+                    "url": "https://example.com/",
+                    "ts": "2026-05-27T00:00:00",
+                }
+            ],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA},
+        )
+
+        # Response contract unchanged (AC9).
+        assert resp.status_code == 403
+        assert resp.content == b""
+
+        matching = [kw for name, kw in captured if name == "ingest_unknown_site"]
+        assert matching, f"no ingest_unknown_site event captured: {captured}"
+        assert matching[0]["site_id"] == orphan_id
+        assert matching[0]["rejected_as"] == "unknown_site"
+
+    @pytest.mark.asyncio
+    async def test_counter_failure_does_not_break_the_403(
+        self, test_client, test_site_id, monkeypatch
+    ):
+        """Fail-open: a raising counter must not turn the 403 into a 500."""
+        from apps.api.routers import events as events_router
+        from apps.api.services import orphan_ingest_metrics as oim
+
+        class _BoomRedis:
+            async def incr(self, key):
+                raise RuntimeError("redis down")
+
+            async def expire(self, key, seconds):
+                raise RuntimeError("redis down")
+
+        # Patch the redis accessor (not the helper) so the helper's own
+        # fail-open try/except is what is actually exercised here.
+        monkeypatch.setattr(oim, "get_redis", lambda: _BoomRedis())
+        assert events_router.record_orphan_ingest is oim.record_orphan_ingest
+
+        payload = {
+            "site_id": "orphaned_site_failopen",
+            "visitor_id": "test-visitor",
+            "events": [
+                {
+                    "type": "pageview",
+                    "url": "https://example.com/",
+                    "ts": "2026-05-27T00:00:00",
+                }
+            ],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA},
+        )
+        assert resp.status_code == 403
+        assert resp.content == b""
