@@ -259,6 +259,27 @@ structurally separate from human Visitor/Event data, never as a targetable outre
   against alembic's offline `MockConnection`) — offline validation of the tail of the chain must use
   an explicit `<from>:<to>` range (e.g. `upgrade d5b1f7c3a908:head --sql`), confirmed at
   cadence-bot-flag EXECUTE 26-07-26; see `process/context/tests/all-tests.md` for the gotcha.
+- **CORRECTION 06-08-26 (identity-coverage-recovery Phase 5) — the block above is stale on two
+  counts. Read this before trusting any number in it.**
+  - **TRUE current head: `c2f7a9d31b64`** (`add_resolution_deferral_watermark`), re-confirmed LIVE
+    via `alembic -c apps/api/alembic.ini heads` — single head, no branching. `e6b2d4a1c837` is
+    **9 revisions behind**. The chain continues: `e6b2d4a1c837` → `a4f7c2e9d31b` (agent_profiles)
+    → `b1e7f3c9d425` (sites.last_daily_digest_sent_at) → `f3a7c9e21b48` (outlier/internal damping)
+    → `a2f8d61c9e37` (request_logs) → `c1e7a94f3d28` (agent_fetch_events.dedup_key) →
+    `f3c8b2e91d47` (agent_fetch_events.link_marker) → `a7d419e6c052` (events.link_marker) →
+    `b4c9a71e35d8` (sites.leadpipe_pixel_id) → `c2f7a9d31b64` (**current head**).
+  - The counts "12 migrations" / "apply all twelve" are wrong twice over: the list above already
+    enumerates **13**, and the real pending chain is now **22**. Do not quote either number —
+    derive the list from `alembic history` at apply time.
+  - **Live-apply status improved.** The whole chain from an EMPTY database through
+    `c2f7a9d31b64` was applied live on a disposable `postgres:16-alpine` on 06-08-26 and
+    succeeded, so "offline `--sql`-validated only" no longer holds for the tail. Precisely what
+    is proven: **forward** apply of every migration on a real Postgres; **down→up round-trip**
+    only for `c2f7a9d31b64` itself. Earlier revisions still have no downgrade evidence. Note this
+    also means the `sa.inspect(bind)` gotcha is offline-only — a real connection handles it fine.
+  - Unchanged: **none of this is a production live-apply**, which remains a separate explicit
+    operator action, and `c2f7a9d31b64` needs no feature flag (the deferral column is always-on
+    and inert until a provider tier actually goes down).
 - Docker/live-integration known-gaps consolidated in
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`
 
@@ -464,10 +485,12 @@ block) — all default OFF/permissive, same operator-gated posture as `agent_det
   OFF; 12 migrations pending PRODUCTION live-apply (`d11b39a6c843` → `a1c7e4f92b83` →
   `b3f9a1d2c7e5` → `c4e8f1a9d2b7` → `f8a2c1d9b3e7` → `a3e9f1c7d2b5` → `e2a4c7f81b93` →
   `a9f2c1e7b4d6` → `c7d3b8e1f624` → `b7d3e9f1a4c2` → `c8e4f2a6b1d9` → `d5b1f7c3a908` →
-  `e6b2d4a1c837` — **current head, single head, confirmed LIVE via `alembic heads` on 26-07-26 (at
-  cadence-bot-flag EXECUTE)**; round-trip verified clean on a disposable dev Postgres only up
-  to `a9f2c1e7b4d6` (24-07-26) — the 5 migrations after that point are offline `--sql`-validated
-  only, NOT yet live-round-tripped, and NONE of the 12 are applied to any real environment) — see
+  `e6b2d4a1c837` — <!-- Updated 06-08-26: NO LONGER the head. True head is `c2f7a9d31b64`, 9
+  revisions later, and the pending chain is 22 not 12; the whole chain now applies live (forward)
+  on a disposable Postgres. Full correction + revision list in the AI-Agent-Traffic Layer section
+  above — read it instead of this line. --> head as of 26-07-26 only; round-trip verified clean on
+  a disposable dev Postgres up to `a9f2c1e7b4d6` (24-07-26), and forward-apply of the FULL chain
+  verified live 06-08-26; NONE are applied to any real environment) — see
   AI-Agent-Traffic Layer + Owned Identity Data Layer + First-Party Email Capture Expansion + Ingest
   Abuse Hardening sections above,
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`,

@@ -76,7 +76,7 @@ Bài học giữ lại: pixel nạp HTTP 200 **không** chứng minh gì về or
 | 2 | [Provider failure vs no-match separation](./phase-02-provider-failure-vs-no-match-separation.md) | **Complete** (05-08-26) — 1 known-gap |
 | 3 | [Vendor decision and Leadpipe restoration](./phase-03-vendor-decision-and-leadpipe-restoration.md) | **Code xong 06-08-26** — còn 3 thao tác vận hành (apply migration → đổi API key → bật cờ) |
 | 4 | [Webhook ingest and measurable coverage](./phase-04-webhook-ingest-and-measurable-coverage.md) | Pending — **KHÔNG còn bị chặn** (điều kiện tiên quyết cũ sai, đã sửa 06-08-26) |
-| 5 | [Outage deferral watermark](./phase-05-outage-deferral-watermark.md) | Pending — **sẵn sàng cook**; cần migration; đã thử session 3 và REVERT (5 bẫy ghi trong phase file) |
+| 5 | [Outage deferral watermark](./phase-05-outage-deferral-watermark.md) | **Complete** (06-08-26) — migration `c2f7a9d31b64` round-trip sạch; unit 1622 pass, integration deferral 3/3; **bẫy #7 mới** (Redis thật rò rỉ giữa test) + 3 known-gap ghi trong phase file |
 
 Phase 1–2 **không phụ thuộc vendor** — đã xong.
 Phase 5 phụ thuộc **chỉ Phase 2** → chạy song song được với 3/4.
@@ -97,8 +97,52 @@ Phase 1 ──► Phase 2 ──┬─► Phase 3 (code xong) ──► Phase 4 
 - Phase 4 **không còn bị chặn**: điều kiện tiên quyết cũ ("`/v1/data` phải trả dữ liệu thật") là
   lập luận vòng tròn — số bản ghi trong feed chính là chỉ số coverage mà Phase 4 sinh ra để đo.
   Điều kiện thật (org còn hiệu lực + pixel active) đã đạt.
-- Phase 5 **sẵn sàng cook**: trần backoff chốt **4 lần** (15p→1h→6h→24h), và phase file đã ghi
-  bẫy thứ 5 do thay đổi 06-08-26 tạo ra (`attempted=False` là trạng thái thứ ba).
+- Phase 5 **đã cook xong** (06-08-26): trần backoff **4 lần** (15p→1h→6h→24h), cả 2 sweep đều vá,
+  migration `c2f7a9d31b64` (round-trip sạch trên Postgres dùng-một-lần, một head). Bẫy #6 được
+  chốt lại bằng **test tự dò sweep** thay cho tiêu chí `grep` thủ công. Chi tiết + 3 known-gap
+  mới: §Execution trong phase file.
+
+## Bước kế tiếp — đọc mục này trước khi cook
+
+<!-- Updated 06-08-26 sau khi cook xong Phase 5. -->
+
+### A. Thao tác vận hành — người làm, KHÔNG code được
+
+Không có API cho mấy việc này; đều làm trên dashboard Leadpipe hoặc trên server.
+
+| # | Việc | Thuộc | Kiểm bằng gì |
+|---|---|---|---|
+| A1 | Apply chuỗi migration lên môi trường thật | Phase 3 | `alembic heads` → phải ra `c2f7a9d31b64` |
+| A2 | Đổi `LEADPIPE_API_KEY` sang key của org `To's workspace` | Phase 3 | `GET /v1/data/account` trả 200 và **không** `expired` |
+| A3 | Bật `LEADPIPE_PIXEL_AUTOPROVISION_ENABLED` | Phase 3 | site mới lấy snippet → có `Site.leadpipe_pixel_id` |
+| A4 | Gắn marker vào `globalParams` trên site lab, tạo 1 lượt truy cập, đọc `/v1/data` xem marker có echo lại không | Phase 4 bước 1 | quyết định tầng ghép người tốt nhất — xem A4 ở dưới |
+| A5 | Đăng ký webhook trên dashboard Leadpipe, chế độ **First Match** | Phase 4 bước 2 | webhook bắn tới endpoint của Beam |
+
+**A4 không chặn việc code** (xem B). Nó chỉ quyết định tầng 1 của waterfall ghép người có dùng
+được hay không. Đã biết chắc: **phía client CÓ** gửi được key tuỳ ý (SDK spread-merge, không
+whitelist — xem phase-04 §Bài toán khó nhất). Chưa biết: **phía server có echo lại trong webhook**
+hay không.
+
+### B. Việc code — session sau cook được ngay
+
+**Phase 4 bước 3–7.** KHÔNG chờ A4: kiến trúc đã chốt waterfall 3 tầng
+(custom param → email đã capture → IP+cửa sổ thời gian). Code cả 3 tầng; nếu payload không có
+marker thì tầng 1 tự rỗng và rơi xuống tầng 2 — đúng hành vi mong muốn, không phải hack.
+
+Chốt chặn phải giữ nguyên khi cook: identity từ webhook là `provider_candidate`, **không** thêm
+leadpipe vào `EMAILABLE_PROVIDERS`, payload vendor là dữ liệu không tin cậy.
+
+### C. Môi trường test — bẫy mất thời gian nếu không biết trước
+
+- Integration test cần Postgres **cổng 5433** + Redis 6379 (`infra/docker-compose.yml`), và
+  database **`retarget_agent_test`**. Session 06-08-26 phải tạo tay:
+  `docker exec infra-postgres-1 psql -U retarget -d postgres -c "CREATE DATABASE retarget_agent_test;"`
+  Không có DB này thì mọi integration test chết bằng `InvalidCatalogNameError`, đọc như lỗi code.
+- `tests/integration/test_ai_ask.py::TestAiAsk::test_gemini_failure_returns_503` **fail sẵn**, không
+  liên quan identity (đã xác minh bằng cách stash sạch thay đổi rồi chạy lại). Đừng đi sửa nó khi
+  đang cook identity.
+- Đừng bao giờ tạo `IdentityResolver(db, redis_client=None)` trong test: nó dựng Redis **thật** và
+  các test dùng chung IP mẫu sẽ rò cache cho nhau. Xem phase-05 §bẫy #7.
 
 ## Câu hỏi quyết định trung tâm
 
@@ -266,7 +310,122 @@ phase file") là đúng nhưng chưa đủ: đọc lại rồi vẫn có thể b
 không soát Success Criteria / Risk Assessment / Related Code Files — ba mục hay ôm giả định cũ nhất
 vì chúng nằm cuối file.
 
+### Session 3 — 06-08-26 — validate Phase 5
+
+**Trigger:** `/ck:plan validate phase-05-outage-deferral-watermark.md` trước khi cook lại phase đã
+revert một lần.
+
+#### Verification Results
+
+- **Tier:** Full (5 phase → cả 4 role), tập trung claim của Phase 5
+- **Claims checked:** 22
+- **Verified:** 19 | **Failed:** 3 | **Unverified:** 1
+
+##### Failures
+
+1. **[Fact Checker + Contract Verifier] Sweep nằm ở HAI file, phase file chỉ ghi một.**
+   [resolution_tasks.py:79](apps/api/tasks/resolution_tasks.py#L79) là task Celery beat
+   `process_all_pending_visitors` (đăng ký ở [celery_app.py:61](apps/api/services/celery_app.py#L61)),
+   **đang chạy thật**, cùng bộ lọc `identity_status == "anonymous"`, **`LIMIT 50`** (không phải 20),
+   gọi `resolve()` ở [:123](apps/api/tasks/resolution_tasks.py#L123). Phase file bản cũ chỉ ghi
+   `resolution_runner.py:130` ở Related Code Files, bước 6, và bảng Architecture ("LIMIT 20/site").
+   Vá một chỗ ⇒ đường Celery vẫn SELECT visitor đang hoãn ⇒ mốc hoãn vô tác dụng, bẫy #3 sống lại,
+   `resolution_defer_count` tăng oan. **Đây là bẫy #1 lặp lại ở tầng khác.**
+   Ghi chú: `plan.md` §Execution Log (dòng ~329) gọi `resolution_tasks.py` là sweep, phase file gọi
+   `resolution_runner.py` — hai artifact mâu thuẫn nhau, cả hai đúng một nửa. Đó là cách lỗi này
+   lọt qua hai vòng review trước.
+2. **[Contract Verifier] `_resolve_ip_company_parallel` đổi kiểu trả đụng 7 call site, plan ghi 0.**
+   1 production ([identity_resolver.py:552](apps/api/services/identity_resolver.py#L552)) + 6 test.
+   3 test assert trực tiếp giá trị trả và sẽ vỡ: `test_identity_resolver_parallel.py:263`
+   (`assert result == "pdl-company.com"`), `:286` (`== "fallback.com"`),
+   `test_resolution_outcome_taxonomy.py:267` (`assert domain is None`). Related Code Files bản cũ
+   chỉ ghi "Tests: `tests/unit/`". **Cùng loại lỗi với failure #1 của session 1 và session 2.**
+3. **[Flow Tracer] Bước 7 (bỏ qua `check_ip_privacy`) không chạy tới.** Bước 6 loại visitor hoãn
+   khỏi câu SELECT ⇒ `resolve()` không được gọi ⇒ `check_ip_privacy` không chạy. Đường duy nhất còn
+   chạm tới là Retry tay ([visitors.py:879](apps/api/routers/visitors.py#L879), `force_retry=True`)
+   — ở đó bỏ qua kiểm VPN là sai vì đó là bộ lọc an toàn đặt `vpn_filtered`, không phải tối ưu chi phí.
+
+##### Unverified
+
+- Claim của bẫy #1 ("4 test cũ đều gán tay bộ đếm") — code đã revert sạch nên không kiểm lại được.
+  Không chặn: claim này là bài học lịch sử, không phải tiền đề thiết kế.
+
+##### Đã verify đúng (không phải lỗi)
+
+Revert sạch (0 hit `_providers_answered` / `_providers_unavailable` / `_finalize_unmatched`, không
+còn circuit breaker); [identity_resolver.py:602](apps/api/services/identity_resolver.py#L602) gán
+`unresolvable` vô điều kiện + comment KNOWN GAP trỏ đúng phase này; alembic head `b4c9a71e35d8` có
+thật và là head **duy nhất** (các "head" khác chỉ là phần tử trong tuple của migration merge);
+budget = đếm visitor riêng biệt có `ResolutionLog` hôm nay
+([usage_limits.py:69-83](apps/api/services/usage_limits.py#L69-L83)); **outage KHÔNG ghi
+`ResolutionLog`** ([identity_resolver.py:1210](apps/api/services/identity_resolver.py#L1210)) nên
+visitor hoãn không tốn budget — claim §Trạng thái nền đúng; bẫy #3 ([:504-518](apps/api/services/identity_resolver.py#L504-L518)),
+bẫy #4 ([:560](apps/api/services/identity_resolver.py#L560) `setex(..., 86400, "__none__")` vô điều
+kiện), bẫy #5 ([:640-652](apps/api/services/identity_resolver.py#L640-L652) `ProviderNotConfiguredError`
+→ `attempted=False`) đều còn sống trong code đúng như mô tả; `_fetch` trả 5-tuple, unpack ở
+[:715](apps/api/services/identity_resolver.py#L715); skip reason `recently_attempted` ở
+[visitors_helpers.py:261,279](apps/api/routers/visitors_helpers.py#L261).
+
+#### Quyết định
+
+| # | Câu hỏi | Quyết định | Ảnh hưởng |
+|---|---|---|---|
+| 1 | Bộ lọc mốc hoãn đặt ở đâu | **Vá cả 2 file** (`resolution_runner.py:130` + `resolution_tasks.py:79`) | Phase 5 bước 6 tách thành 2 gạch đầu dòng; bảng Architecture ghi cả LIMIT 20 và 50; thêm Success Criteria cho đường Celery + 1 tiêu chí `grep` cơ học |
+| 2 | Đổi kiểu trả `_resolve_ip_company_parallel` | **Giữ tuple, liệt kê đủ 7 call site** | Related Code Files thêm bảng 7 dòng, gọi tên 3 test sẽ vỡ; bước 1 nhắc lại |
+| 3 | Bước 7 (`check_ip_privacy`) | **Bỏ hẳn** | Bước 7 cũ xoá, bước 8 lên thành 7; tiêu chí "check_ip_privacy không bị gọi lại" xoá; bẫy #3 đổi nhãn thành "đã được bước 6 phủ" + giữ nợ kỹ thuật `except Exception` không cache âm |
+| 4 | Đường gọi `resolve()` ngoài sweep | **Retry tay bỏ qua mốc hoãn; đường agent để ngoài** | Thêm mục §Đường gọi `resolve()` ngoài sweep (3 dòng, kèm hệ quả Retry tay đẩy backoff); Risk Assessment thêm known-gap `agent_company_resolution.py:130` |
+
+#### Whole-Plan Consistency Sweep
+
+- **Files reread:** `plan.md`, `phase-01-…`, `phase-02-…`, `phase-03-…`, `phase-04-…`, `phase-05-…`
+- **Decision deltas checked:** 4 (sweep 2 chỗ; 7 call site; bỏ bước 7; đường ngoài sweep)
+- **Reconciled stale references:** 9
+  - `phase-05` — (a) bảng §Trạng thái nền dòng "Sweep query" ghi 1 file → ghi 2, kèm LIMIT 50;
+    (b) khối code §Overview; (c) bảng §Architecture "LIMIT 20/site"; (d) bẫy #3 đổi nhãn
+    ⚠️CÒN SỐNG → ✅ĐÃ ĐƯỢC BƯỚC 6 PHỦ; (e) Related Code Files (bỏ `check_ip_privacy`, thêm
+    `resolution_tasks.py`, thêm bảng 7 call site, thêm mục KHÔNG-sửa tường minh); (f) bước 6 + xoá
+    bước 7; (g) Success Criteria (xoá 1, thêm 4); (h) Risk Assessment thêm 4 dòng;
+    (i) Requirements thêm 1 dòng
+  - `plan.md` — bảng Phases dòng 5 + mục "Trạng thái sau session 06-08-26" cập nhật (5 bẫy → 6);
+    §Execution Log known-gap thêm đính chính "có HAI sweep"
+  - `phase-02` — §Known-gap "khoá thật vẫn chưa gỡ" chỉ ghi `resolution_tasks.py` là sweep → thêm
+    đính chính cùng nội dung (đây chính là nguồn gốc của mâu thuẫn ở failure #1)
+- **Unresolved contradictions:** 0
+
+Mâu thuẫn `plan.md` ↔ `phase-05` về file sweep (failure #1) đã hoà giải: **cả hai đều là sweep**,
+phase file giờ ghi đủ cả hai và nêu rõ vì sao hai artifact từng nói khác nhau. Bài học nối tiếp
+session 1 + 2: sweep chỉ hợp lệ khi đối chiếu claim của phase file **với claim của plan.md**, không
+chỉ đọc lại từng file riêng lẻ — hai file cùng "nhất quán nội bộ" vẫn có thể mâu thuẫn nhau.
+
 ## Execution Log
+
+### Session 4 — 06-08-26 — EXECUTE Phase 5
+
+Cook Phase 5 sau khi validate session 3 gỡ xong 6 bẫy. Đầy đủ ở
+[phase-05 §Execution](./phase-05-outage-deferral-watermark.md).
+
+**Kết quả:** unit `1622 passed, 2 skipped, 0 failed`; integration deferral `3/3`; migration
+`c2f7a9d31b64` round-trip sạch, `alembic heads` một head.
+
+**Bài học nối tiếp session 1–3 — cùng một cái bẫy, lần thứ tư.** Session 1, 2, 3 đều thất bại
+đúng kiểu "plan gọi tên 1 file, thay đổi thật trải trên N file", và session 3 đã liệt kê **đủ 7
+call site** của `_resolve_ip_company_parallel` để chặn nó. Nhưng hàm **kia** ở cùng bước —
+`_resolve_identity_graphs_parallel` — thì plan không kiểm call site nào, mà nó có **1 production +
+9 test**. Việc liệt kê kỹ một hàm không bảo vệ được hàm bên cạnh. Quy tắc rút ra: mỗi khi phase
+file nói "đổi kiểu trả / trả thêm thứ gì đó" cho **bất kỳ** hàm nào, phải `grep` call site của
+**hàm đó**, không suy từ hàm đã kiểm.
+
+Đã xử lý bằng keyword out-param có default (precedent user duyệt ở session 1 cho `_log_resolution`)
+⇒ 9 call site không phải đổi; `_resolve_ip_company_parallel` vẫn đổi thành tuple đúng quyết định
+session 3.
+
+**Bẫy #7 mới, tìm ra lúc chạy test:** `IdentityResolver(redis_client=None)` dựng Redis **thật**,
+nên test dùng chung IP mẫu rò `__none__` cho nhau và làm một test fail vì lý do hoàn toàn khác với
+triệu chứng. Sửa trong phạm vi file test.
+
+**Phạm vi bộ lọc mốc hoãn (user quyết định trong session):** 2 sweep + câu đếm gate endpoint
+resolve-all (`visitors.py:1133`). Hai câu đếm UI (`dashboard.py:108`,
+`visitors_helpers.py:195`) **giữ nguyên** → số `eligible_for_resolution` trên dashboard không đổi.
 
 ### Session 3 — 05-08-26 — EXECUTE Phase 1 + 2
 
@@ -326,9 +485,22 @@ có key`, đúng pattern `_resolve_identity_graphs_parallel` vốn đã dùng.
 
 - **Khoá `unresolvable` mới là khoá ràng buộc thật.** `_resolve_full_waterfall` đặt
   `identity_status='unresolvable'` **kể cả khi mọi provider đều chết**, mà
-  `apps/api/tasks/resolution_tasks.py` chỉ chọn `anonymous`. Nghĩa là gỡ khoá 30 ngày **chưa
+  `apps/api/tasks/resolution_tasks.py` chỉ chọn `anonymous`
+  <!-- Updated: Validation Session 3 (06-08-26) — đính chính: có HAI sweep, không phải một.
+  `resolution_runner.py:130` (LIMIT 20) và `resolution_tasks.py:79` (LIMIT 50). Phase 5 §bẫy #6. -->.
+  Nghĩa là gỡ khoá 30 ngày **chưa
   unlock ai cả** — mục tiêu business của Phase 2 mới đạt một nửa: từ nay outage không tạo khoá
   mới, nhưng 8 visitor đang kẹt vẫn kẹt. Ghi rõ trong header script audit.
+  <!-- Updated 06-08-26 (Phase 5 cook): outage **không còn ghi `unresolvable`** nữa — nó giữ
+  `anonymous` + đặt mốc hoãn, nên nguồn tạo khoá mới đã bịt. **8 visitor kẹt từ trước vẫn kẹt**:
+  Phase 5 không backfill row cũ. Muốn gỡ phải chạy tay (đổi `unresolvable` → `anonymous`) hoặc chờ
+  `revive_returning_unresolvable` khi IP đổi. -->
+
+- **`resolution_defer_count` là bộ đếm CẢ ĐỜI, không reset khi provider hồi.** Chỉ reset ở nhánh
+  terminal. Visitor hoãn 3 lần vì outage tháng này, sang tháng sau gặp outage khác chỉ còn 1 bậc
+  trước khi bị ghi `unresolvable`. Chấp nhận có chủ đích ở phase này (đơn giản, và outage lặp lại
+  nhiều lần với cùng visitor thường đúng là dấu hiệu credential hỏng), nhưng nếu coverage tụt bất
+  thường thì đây là chỗ nhìn đầu tiên.
 - Hunter, Apollo, `_enrich_email_pdl`, RB2B bước 2–3 vẫn biến 401/403 thành no-match (plan ghi
   "Không đổi"; hợp đồng trong `base.py` hiện chưa phủ hết các đường này).
 - `api_usage_logs` không nằm trong `delete_visitor_data`/`export_visitor_data` (DSAR). Trước đây

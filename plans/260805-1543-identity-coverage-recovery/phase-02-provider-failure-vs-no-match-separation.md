@@ -217,9 +217,17 @@ không chắc"); nay lỗi parser của Beam rơi về `no_match` và vẫn kho�
 
 ### Known-gap: khoá thật vẫn chưa gỡ
 
-`identity_status='unresolvable'` được đặt **kể cả khi mọi provider đều chết**, và sweep
-(`resolution_tasks.py`) chỉ chọn `anonymous`. Nên gỡ khoá 30 ngày **chưa unlock ai**: từ nay
-outage không tạo khoá mới, nhưng 8 visitor đang kẹt vẫn kẹt. Cần một quyết định riêng (đổi thời
+`identity_status='unresolvable'` được đặt **kể cả khi mọi provider đều chết**, và sweep chỉ chọn
+`anonymous`. <!-- Updated: Validation Session 3 (06-08-26) — sweep nằm ở HAI file, không phải một:
+`resolution_runner.py:130` (LIMIT 20) và `resolution_tasks.py:79` (LIMIT 50, task Celery beat).
+Dòng gốc chỉ ghi `resolution_tasks.py`. Xem Phase 5 §bẫy #6. -->
+Nên gỡ khoá 30 ngày **chưa unlock ai**: từ nay
+outage không tạo khoá mới, nhưng 8 visitor đang kẹt vẫn kẹt.
+<!-- Updated 06-08-26 — Phase 5 đã cook: nguồn tạo khoá mới ĐÃ BỊT (outage không còn ghi
+`unresolvable`, nó giữ `anonymous` + đặt `resolution_deferred_until`), và cả HAI sweep đều lọc
+mốc hoãn. Phần CHƯA giải quyết: 8 visitor kẹt từ trước vẫn kẹt — Phase 5 không backfill row cũ.
+Muốn gỡ phải chạy tay hoặc chờ `revive_returning_unresolvable` khi IP đổi. -->
+ Cần một quyết định riêng (đổi thời
 điểm đánh `unresolvable` → đổi tập visitor được sweep → ảnh hưởng chi phí). Đã ghi trong header
 `scripts/identity_locked_visitors_audit.sql`.
 
