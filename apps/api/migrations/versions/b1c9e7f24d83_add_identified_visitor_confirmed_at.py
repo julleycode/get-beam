@@ -23,7 +23,10 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "b1c9e7f24d83"
-down_revision = "a7d419e6c052"
+# Re-chained during the devjulley->main identity-vocabulary reconciliation
+# (07-08-26). Original parent was "a7d419e6c052", the shared fork point; this
+# sub-chain now hangs off main's live head so the merged branch has ONE head.
+down_revision = "c2f7a9d31b64"
 branch_labels = None
 depends_on = None
 
