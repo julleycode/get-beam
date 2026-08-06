@@ -163,6 +163,11 @@ class Settings(BaseSettings):
     resend_api_key: str = ""  # deprecated — use SendGrid
     sendgrid_api_key: str = ""
     sendgrid_webhook_secret: str = ""  # shared secret for the SendGrid event webhook URL
+    # Shared secret for the Leadpipe identity webhook URL. Same query-token shape
+    # as SendGrid above, because the Leadpipe dashboard's webhook form takes only
+    # a URL (no signing secret / custom header field). Empty = endpoint disabled
+    # (403), so it can never become an open identity-injection vector.
+    leadpipe_webhook_secret: str = ""
 
     # ─── Changelog auto-generator (GitHub → Gemini → landing-page "what's new") ───
     github_token: str = ""  # repo-scoped PAT; required for the changelog sync (repo is private)
@@ -533,6 +538,16 @@ class Settings(BaseSettings):
     # RB2B_ENABLED=false to stop it. The resolver checks the flag alongside the key.
     rb2b_enabled: bool = True
     leadpipe_enabled: bool = True
+    # Poll `GET /v1/data` inside the resolution waterfall. Separate from
+    # leadpipe_enabled so the PULL path can be retired without also disabling the
+    # webhook ingest path, which shares the provider name. Defaults True = no
+    # behavior change; both paths may run at once (the unique index on
+    # identified_visitors makes a double identification collapse into one row —
+    # the only cost of overlap is one redundant API call, never a duplicate).
+    # Flip to False once the webhook has proven itself; leave True as the fallback
+    # while it hasn't, because Leadpipe auto-disables a webhook that errors
+    # repeatedly and the pull path is then the only thing still collecting.
+    leadpipe_pull_enabled: bool = True
     # Create a Leadpipe pixel for a site's domain on first snippet fetch.
     # Defaults OFF, like every other provider-touching switch here: this is the
     # one code path that MUTATES state at the vendor (POST /v1/data/pixels), and

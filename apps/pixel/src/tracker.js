@@ -629,6 +629,23 @@
     for (var vk in vendorUrls) {
       var vendorId = script.getAttribute("data-stack-" + vk);
       if (vendorId) {
+        // Leadpipe only: hand the vendor SDK our visitor id so its webhook can
+        // name the visitor instead of us guessing by IP + time. The SDK reads
+        // this JSON block at init and spread-merges globalParams (no key
+        // whitelist), so the id rides along on every event it sends. Whether
+        // Leadpipe echoes it back on the webhook is unverified — if it does not,
+        // the server-side match simply falls through to the email tier.
+        // Written BEFORE the vendor script is appended: the SDK reads the config
+        // during its own init, so a block added afterwards would be missed.
+        if (vk === "leadpipe" && visitorId) {
+          try {
+            var cfg = document.createElement("script");
+            cfg.type = "application/json";
+            cfg.id = "pixelsdk-config-" + vendorId + "-config";
+            cfg.text = JSON.stringify({ globalParams: { beam_visitor_id: visitorId } });
+            document.head.appendChild(cfg);
+          } catch (e) {}
+        }
         var vs = document.createElement("script");
         vs.src = vendorUrls[vk](encodeURIComponent(vendorId));
         vs.async = true;

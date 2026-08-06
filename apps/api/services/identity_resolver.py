@@ -703,7 +703,10 @@ class IdentityResolver(
         # A disabled provider passes a None key, so the existing `if not api_key`
         # guard below skips it cleanly — same path as a missing key.
         providers = [
-            ("leadpipe", settings.leadpipe_api_key if settings.leadpipe_enabled else None, self._call_leadpipe_api, 0.0),
+            # leadpipe_pull_enabled gates the POLL only. Turning it off retires
+            # `GET /v1/data` from the waterfall while leaving the webhook ingest
+            # path (routers/webhooks.py) writing under the same provider name.
+            ("leadpipe", settings.leadpipe_api_key if (settings.leadpipe_enabled and settings.leadpipe_pull_enabled) else None, self._call_leadpipe_api, 0.0),
             ("capturify", settings.capturify_api_key if settings.capturify_enabled else None, self._call_capturify_api, 0.0),
             ("rb2b", settings.rb2b_api_key if settings.rb2b_enabled else None, self._call_rb2b_api, 0.09),
         ]

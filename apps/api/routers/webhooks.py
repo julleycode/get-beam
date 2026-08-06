@@ -1,12 +1,16 @@
-"""Inbound provider webhooks — SendGrid email events.
+"""Inbound provider webhooks — SendGrid email events, Leadpipe identifications.
 
 SendGrid Event Webhook → mark hard-bounced / dropped / spam-reported addresses as
 ``do_not_email`` so we never mail them again (deliverability + CAN-SPAM).
 
-Authenticated by a shared secret query token — set the SAME token in the SendGrid
-webhook URL: ``/webhooks/sendgrid?token=<SENDGRID_WEBHOOK_SECRET>``. Without a
+Leadpipe identity webhook → attach a pushed identification to one of our
+visitors as a ``provider_candidate`` (see services/leadpipe_webhook.py).
+
+Both are authenticated by a shared secret query token — set the SAME token in the
+provider's webhook URL: ``/webhooks/sendgrid?token=<SENDGRID_WEBHOOK_SECRET>``,
+``/webhooks/identity/leadpipe?token=<LEADPIPE_WEBHOOK_SECRET>``. Without a
 configured secret the endpoint is disabled (403) so it can never be used as an
-open suppression vector.
+open suppression — or identity-injection — vector.
 """
 
 import hmac
@@ -18,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from apps.api.config import settings
 from apps.api.models.database import get_db
 from apps.api.services.identity_signals import record_signal
+from apps.api.services.leadpipe_webhook import ingest_identification
 from apps.api.services.suppression import add_suppression
 
 logger = structlog.get_logger()
@@ -104,3 +109,52 @@ async def sendgrid_events(
         signals=signals,
     )
     return {"processed": len(events), "suppressed": suppressed, "signals": signals}
+
+
+@router.post("/webhooks/identity/leadpipe")
+async def leadpipe_identity(
+    request: Request,
+    token: str = Query(default=""),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Leadpipe pushes an identification the moment it recognizes a visitor.
+
+    Configured on the Leadpipe dashboard in **First Match** mode — Beam needs the
+    identity once, and Every Update would replay the same person on every
+    pageview. Redelivery is harmless either way: the unique index on
+    identified_visitors collapses it onto the existing row.
+
+    Always answers 200 for a payload we cannot use (unknown site, no visitor
+    match, quality gate refusal). Leadpipe auto-disables a webhook that keeps
+    erroring, so a non-2xx on "this one is not for us" would eventually switch
+    the whole feed off. Only a bad token (403) and unparseable JSON (400) fail.
+    """
+    secret = settings.leadpipe_webhook_secret
+    if not secret or not hmac.compare_digest(token, secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    # Three shapes accepted: a bare record, a JSON array, and the {"data": [...]}
+    # envelope the vendor's REST feed uses. The exact webhook shape is still
+    # unconfirmed, and guessing wrong on the envelope would silently discard a
+    # whole batch (every field lookup misses, every record reports
+    # "no_identity_data") rather than fail loudly — so accept all three.
+    if isinstance(body, list):
+        records = body
+    elif isinstance(body, dict) and isinstance(body.get("data"), list):
+        records = body["data"]
+    else:
+        records = [body]
+    outcomes: dict[str, int] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        outcome = await ingest_identification(db, record)
+        outcomes[outcome] = outcomes.get(outcome, 0) + 1
+
+    logger.info("leadpipe_identity_webhook_processed", count=len(records), **outcomes)
+    return {"processed": len(records), **outcomes}
