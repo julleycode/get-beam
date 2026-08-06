@@ -255,6 +255,15 @@ async def _resolution_skip_reason(
         return "below_intent_threshold"
     if not visitor.ip_address:
         return "no_ip_address"
+    # Checked before the 30-day gate: an outage-deferred visitor usually has NO
+    # ResolutionLog at all (outages deliberately write no ledger row), so the
+    # recency gate below would not fire and this would fall through to
+    # "awaiting_next_run" — technically true, but it hides the fact that the
+    # providers were down and that a retry is already scheduled.
+    deferred_until = getattr(visitor, "resolution_deferred_until", None)
+    if deferred_until is not None:
+        if deferred_until > datetime.now(timezone.utc).replace(tzinfo=None):
+            return "provider_outage"
     if last_attempt is not None:
         cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
         if last_attempt >= cutoff:
@@ -277,6 +286,7 @@ _SKIP_REASON_MESSAGES: dict[str, str] = {
     ),
     "no_ip_address": "No IP address captured for this visitor — can't run identity lookup.",
     "recently_attempted": "Already attempted in the last 30 days. Will retry automatically after the cooldown.",
+    "provider_outage": "Identity providers were unreachable on the last attempt — not a no-match. This visitor is queued for an automatic retry and hasn't been written off.",
     "daily_budget_exhausted": "Daily identification budget used up for this site. Resets tomorrow (UTC). Add your own API keys in Settings to lift the daily cap.",
     "monthly_plan_limit_reached": "You've hit your plan's monthly identification limit. Upgrade to Pro (50/mo) or Max (unlimited) — or add your own API keys to unlock.",
     "awaiting_next_run": "Eligible — couldn't identify from available providers this time.",

@@ -29,6 +29,7 @@ from apps.api.services.resolution_eligibility import (
     ai_attributable_visitor_filter,
     first_win_boost_site_ids,
     resolution_candidate_filter,
+    resolution_not_deferred_filter,
     site_resolves_all_us,
 )
 from apps.api.services.segmentation_trigger import check_and_trigger_segmentation
@@ -130,6 +131,10 @@ async def run_resolution_for_site(
             Visitor.identity_status == "anonymous",
             candidate_eligible,
             Visitor.do_not_resolve.is_(False),
+            # Skip visitors held back by a provider outage until their
+            # watermark passes. Without this they stay top-ranked by intent and
+            # re-consume this batch's 20 slots on every single run.
+            resolution_not_deferred_filter(),
             # AC2 (GUARD #2): never re-resolve the synthetic agent-derived rows
             # (they run through resolve() only via the company-resolution sweep).
             human_only_visitor_filter(),

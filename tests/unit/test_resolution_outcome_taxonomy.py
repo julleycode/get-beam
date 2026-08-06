@@ -264,9 +264,12 @@ class TestKeylessProviderIsNeverAnAttempt:
         resolver._call_pdl_ip_enrich = lambda v: called.append("pdl")
         resolver._call_ipinfo_api = lambda v: called.append("ipinfo")
 
-        domain = await resolver._resolve_ip_company_parallel(_make_visitor())
+        domain, verdict = await resolver._resolve_ip_company_parallel(_make_visitor())
 
         assert domain is None
+        # Keyless providers never looked, so the tier can prove neither a
+        # no-match nor an outage — it must not trigger a deferral.
+        assert verdict == "not_applicable"
         assert called == [], "a keyless provider must not be called"
         resolver._log_resolution.assert_not_awaited()
 

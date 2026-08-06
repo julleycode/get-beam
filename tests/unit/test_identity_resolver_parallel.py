@@ -260,9 +260,9 @@ class TestParallelIPCompany:
         resolver._call_ipinfo_api = ipinfo_result
         resolver._log_resolution = AsyncMock()
 
-        result = await resolver._resolve_ip_company_parallel(visitor)
+        domain, _verdict = await resolver._resolve_ip_company_parallel(visitor)
 
-        assert result == "pdl-company.com"
+        assert domain == "pdl-company.com"
 
     @pytest.mark.asyncio
     @patch("apps.api.services.identity_resolver.settings")
@@ -283,9 +283,9 @@ class TestParallelIPCompany:
         resolver._call_ipinfo_api = ipinfo_fallback
         resolver._log_resolution = AsyncMock()
 
-        result = await resolver._resolve_ip_company_parallel(visitor)
+        domain, _verdict = await resolver._resolve_ip_company_parallel(visitor)
 
-        assert result == "fallback.com"
+        assert domain == "fallback.com"
 
     @pytest.mark.asyncio
     @patch("apps.api.services.identity_resolver.settings")

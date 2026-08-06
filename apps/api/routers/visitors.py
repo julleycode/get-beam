@@ -52,6 +52,7 @@ from apps.api.services.resolution_eligibility import (
     first_win_boost_site_ids,
     is_resolution_candidate,
     resolution_candidate_filter,
+    resolution_not_deferred_filter,
     site_resolves_all_us,
 )
 from apps.api.services.usage_limits import (
@@ -1136,6 +1137,9 @@ async def resolve_site_visitors(
                 no_floor_site_ids=boost_ids,
             ),
             Visitor.do_not_resolve.is_(False),
+            # Mirror the sweep this endpoint is about to run: counting visitors
+            # it will then skip would report "N eligible" and resolve none.
+            resolution_not_deferred_filter(),
             human_only_visitor_filter(),
         )
     )

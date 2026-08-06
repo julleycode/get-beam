@@ -73,6 +73,42 @@ from apps.api.services.identity_providers.rb2b import RB2BMixin
 
 logger = structlog.get_logger()
 
+# ── Provider-tier verdicts ────────────────────────────────────────────────
+# A "tier" is a group of providers that can answer the same question, so a
+# visitor is only written off once EVERY tier that could have matched them has
+# actually spoken. Counted PER TIER, never merged into one pair of counters:
+# leadpipe/capturify/rb2b share one account, so a single healthy ipinfo would
+# otherwise mask all three being dead and the write-off would fire anyway.
+TIER_ANSWERED = "answered"
+TIER_ALL_UNAVAILABLE = "all_unavailable"
+TIER_NOT_APPLICABLE = "not_applicable"
+
+# Retry schedule for a visitor held back by a dead tier. ~31h total: long
+# enough to cover a full day of vendor outage, short enough that a dead
+# CREDENTIAL (which no amount of waiting fixes) stops burning sweep slots.
+# Running past the last step marks the visitor unresolvable as before.
+RESOLUTION_DEFER_BACKOFF = (
+    timedelta(minutes=15),
+    timedelta(hours=1),
+    timedelta(hours=6),
+    timedelta(hours=24),
+)
+
+
+def tier_verdict(attempted: int, unavailable: int) -> str:
+    """Classify one provider tier from its attempt counts.
+
+    ``attempted`` excludes providers that were disabled, keyless, or not
+    configured for this site: they never looked, so they can neither prove a
+    no-match nor an outage. Keeping them in the denominator would defer every
+    visitor of every site that simply has not switched a provider on.
+    """
+    if attempted == 0:
+        return TIER_NOT_APPLICABLE
+    if unavailable >= attempted:
+        return TIER_ALL_UNAVAILABLE
+    return TIER_ANSWERED
+
 
 class IdentityResolver(
     LeadpipeMixin,
@@ -522,7 +558,13 @@ class IdentityResolver(
         # Leadpipe, Capturify, RB2B run concurrently via asyncio.gather.
         # ══════════════════════════════════════════════════════════════
 
-        result = await self._resolve_identity_graphs_parallel(visitor)
+        # Verdict per tier, so the write-off at the end of this method can tell
+        # "nobody matched" from "nobody was able to answer".
+        tier_verdicts: dict[str, str] = {}
+
+        result = await self._resolve_identity_graphs_parallel(
+            visitor, tier_verdicts=tier_verdicts
+        )
         if result:
             return result
 
@@ -532,6 +574,9 @@ class IdentityResolver(
         # ══════════════════════════════════════════════════════════════
 
         company_domain: str | None = None
+        # A cache hit means this tier never ran, so it can neither prove nor
+        # disprove an outage — "not applicable" is the honest default.
+        ip_verdict = TIER_NOT_APPLICABLE
 
         # ── Redis cache check: IP → domain ──
         cache_key = f"{REDIS_RESOLUTION_PREFIX}{visitor.ip_address}"
@@ -549,15 +594,20 @@ class IdentityResolver(
                 pass  # Redis failure is non-fatal
 
         if company_domain is None and (not self.redis or not await self._redis_has_key(cache_key)):
-            company_domain = await self._resolve_ip_company_parallel(visitor)
+            company_domain, ip_verdict = await self._resolve_ip_company_parallel(
+                visitor
+            )
 
             # ── Cache the result (hit or miss) ──
             if self.redis:
                 try:
                     if company_domain:
                         await self.redis.setex(cache_key, RESOLUTION_CACHE_TTL, company_domain)
-                    else:
+                    elif ip_verdict != TIER_ALL_UNAVAILABLE:
                         await self.redis.setex(cache_key, 86400, "__none__")
+                    # An empty result from a dead tier says nothing about the IP.
+                    # Caching it as "__none__" for 24h would keep skipping the
+                    # IP→company step long after the providers came back.
                 except Exception:
                     pass
 
@@ -585,20 +635,49 @@ class IdentityResolver(
             if result:
                 return result
 
-        # No match from any provider.
+        # No match from any provider — but "nobody matched" and "nobody could
+        # answer" must not share an ending. `unresolvable` is terminal: both
+        # sweeps select `anonymous` only, so writing it during an outage deletes
+        # the visitor from every future run over a fault that was ours to wait
+        # out. When a tier that COULD have matched was entirely down, hold the
+        # row at `anonymous` behind a watermark instead and let it come back.
         #
-        # KNOWN GAP: this also fires when every provider was DOWN, which writes the
-        # visitor off permanently — the sweep (services/resolution_runner.py)
-        # selects only `anonymous` rows, so `unresolvable` removes them from every
-        # future run. Fixing it safely needs a persisted deferral watermark (a new
-        # `visitors` column) so the sweep can skip deferred rows instead of
-        # re-selecting them every 30 minutes; without that bound, a long outage
-        # would let deferred visitors occupy all 20 per-site slots and starve new
-        # ones. That needs a migration, so it is scoped as its own phase — see
-        # plans/260805-1543-identity-coverage-recovery/ §Phase 5.
-        # Until then the escape hatches are the manual per-visitor Retry
-        # (routers/visitors.py, uses force_retry) and `revive_returning_unresolvable`
-        # on an IP change.
+        # The watermark is a column, not a Redis breaker: the cost that matters
+        # is the sweep SLOT, and only a column can be part of the sweep's WHERE.
+        # A breaker skips the HTTP call but the row is still selected, still
+        # ranked top by intent, and still crowds out newer visitors.
+        person_verdict = tier_verdicts.get("person_graph", TIER_NOT_APPLICABLE)
+        if TIER_ALL_UNAVAILABLE in (person_verdict, ip_verdict):
+            attempt = (visitor.resolution_defer_count or 0) + 1
+            if attempt <= len(RESOLUTION_DEFER_BACKOFF):
+                visitor.resolution_defer_count = attempt
+                visitor.resolution_deferred_until = datetime.now(
+                    timezone.utc
+                ).replace(tzinfo=None) + RESOLUTION_DEFER_BACKOFF[attempt - 1]
+                logger.info(
+                    "resolution_deferred_provider_outage",
+                    visitor_id=visitor.visitor_id[:8],
+                    person_graph=person_verdict,
+                    ip_company=ip_verdict,
+                    attempt=attempt,
+                    deferred_until=visitor.resolution_deferred_until.isoformat(),
+                )
+                await self.db.commit()
+                return None
+            # Past the last backoff step. An outage this long is a dead
+            # credential, not a blip — waiting more only holds sweep slots.
+            logger.warning(
+                "resolution_defer_exhausted",
+                visitor_id=visitor.visitor_id[:8],
+                person_graph=person_verdict,
+                ip_company=ip_verdict,
+                attempts=attempt - 1,
+            )
+
+        # Terminal. Clear the watermark so a later revival (IP change) or manual
+        # Retry starts from a clean backoff instead of inheriting a spent one.
+        visitor.resolution_deferred_until = None
+        visitor.resolution_defer_count = 0
         visitor.identity_status = "unresolvable"
         await self.db.commit()
         return None
@@ -608,9 +687,18 @@ class IdentityResolver(
     _GRAPH_TIMEOUT = 5.0  # seconds per identity graph provider
 
     async def _resolve_identity_graphs_parallel(
-        self, visitor: Visitor
+        self, visitor: Visitor, *, tier_verdicts: dict[str, str] | None = None
     ) -> IdentifiedVisitor | None:
-        """Run Leadpipe, Capturify, RB2B in parallel. Save first match."""
+        """Run Leadpipe, Capturify, RB2B in parallel. Save first match.
+
+        ``tier_verdicts`` is an optional caller-owned dict this writes the
+        person-graph verdict into under ``"person_graph"``. It is a keyword
+        out-param rather than an extra return value so the nine existing call
+        sites that assert on the returned row keep working untouched — the same
+        shape as the ``outcome`` keyword on ``_log_resolution``. (The IP tier
+        returns its verdict instead, because its caller needs it inline, right
+        at the call site, to decide whether to write the negative cache.)
+        """
 
         # A disabled provider passes a None key, so the existing `if not api_key`
         # guard below skips it cleanly — same path as a missing key.
@@ -703,6 +791,8 @@ class IdentityResolver(
         best_data: dict | None = None
         best_idx: int | None = None
         best_elapsed = 0
+        graph_attempted = 0
+        graph_unavailable = 0
 
         for i, r in enumerate(results):
             if isinstance(r, BaseException):
@@ -715,6 +805,11 @@ class IdentityResolver(
             name, data, elapsed, attempted, unavailable_detail = r
             if not attempted:
                 continue
+            # Counted before the match short-circuit below, so a tier that both
+            # matched and had a dead member is still scored honestly.
+            graph_attempted += 1
+            if unavailable_detail:
+                graph_unavailable += 1
             # Defer ledger write for the first successful payload until after
             # _save_identified — name/email reject must not leave success=True.
             if data and best_data is None:
@@ -738,6 +833,11 @@ class IdentityResolver(
                 detail=unavailable_detail,
             )
 
+        if tier_verdicts is not None:
+            tier_verdicts["person_graph"] = tier_verdict(
+                graph_attempted, graph_unavailable
+            )
+
         if best_data and best_name is not None and best_idx is not None:
             logger.info(
                 "identity_graph_identified",
@@ -755,8 +855,18 @@ class IdentityResolver(
 
         return None
 
-    async def _resolve_ip_company_parallel(self, visitor: Visitor) -> str | None:
-        """Run PDL IP Enrich + IPinfo in parallel. Return first domain."""
+    async def _resolve_ip_company_parallel(
+        self, visitor: Visitor
+    ) -> tuple[str | None, str]:
+        """Run PDL IP Enrich + IPinfo in parallel.
+
+        Returns ``(first domain or None, tier verdict)``. The verdict is part of
+        the return rather than an out-param because the caller needs it in the
+        same breath as the domain: a bare ``None`` cannot tell "this IP belongs
+        to no company" from "both providers were down", and caching the former's
+        answer for the latter's reason blanks the IP for 24h even after the
+        providers recover.
+        """
 
         async def _fetch_domain(
             label: str, call_fn
@@ -842,6 +952,12 @@ class IdentityResolver(
                 detail=ipi_detail,
             )
 
+        ip_attempted = int(pdl_attempted) + int(ipinfo_attempted)
+        ip_unavailable = int(pdl_attempted and pdl_detail is not None) + int(
+            ipinfo_attempted and ipi_detail is not None
+        )
+        verdict = tier_verdict(ip_attempted, ip_unavailable)
+
         domain = pdl_domain or ipi_domain
         if domain:
             logger.info(
@@ -850,7 +966,7 @@ class IdentityResolver(
                 domain=domain,
                 source="pdl" if pdl_domain else "ipinfo",
             )
-        return domain
+        return (domain, verdict)
 
     async def _redis_has_key(self, key: str) -> bool:
         """Return True if redis has the key (exists check). Non-fatal."""

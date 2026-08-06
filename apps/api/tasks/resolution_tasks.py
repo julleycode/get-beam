@@ -18,6 +18,7 @@ from apps.api.services.resolution_eligibility import (
     ai_attributable_visitor_filter,
     first_win_boost_site_ids,
     resolution_candidate_filter,
+    resolution_not_deferred_filter,
     site_resolves_all_us,
 )
 from apps.api.services.segmentation_trigger import check_and_trigger_segmentation
@@ -82,6 +83,12 @@ async def _process_site(db, site_id: str) -> tuple[int, int]:
                 no_floor_site_ids=boost_ids,
             ),
             Visitor.do_not_resolve.is_(False),
+            # Provider-outage watermark. This beat task is a SECOND sweep with
+            # the same filter and a larger LIMIT than resolution_runner's, so
+            # skipping it here would leave the deferral inert: this path would
+            # keep re-resolving deferred visitors every run and push their
+            # backoff to exhaustion on its own.
+            resolution_not_deferred_filter(),
             # AC2 (GUARD #2): this Celery-beat task also fires Enricher.enrich_tier1
             # + AutoDrafter on resolved rows, so exclude synthetic agent-derived
             # rows explicitly — incidental intent_score=0 protection is not enough.

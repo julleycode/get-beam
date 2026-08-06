@@ -109,6 +109,26 @@ class Visitor(Base):
     # The sweep skips ANY visitor with a non-NULL override — that skip is the
     # enforcement mechanism for the both-directions rule.
     internal_override: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Provider-outage deferral watermark. Set when every provider tier that
+    # could have identified this visitor was down: the row stays `anonymous`
+    # (retryable) instead of going `unresolvable` (terminal), and every sweep
+    # skips it until the timestamp passes. NULL = not deferred.
+    #
+    # This has to be a COLUMN, not a Redis breaker: the scarce resource is the
+    # per-site sweep slot (LIMIT 20 / LIMIT 50, ordered by intent_score DESC),
+    # and only a column can join the sweep's WHERE clause. Deferred visitors
+    # keep gaining intent, so without this filter a long outage parks them at
+    # the top of every batch and new visitors never get looked at.
+    resolution_deferred_until: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    # How many times this visitor has been deferred; indexes into the backoff
+    # schedule (identity_resolver.RESOLUTION_DEFER_BACKOFF). Past the last step
+    # the visitor goes `unresolvable` — an outage that long is a dead
+    # credential, which waiting does not fix. Reset to 0 on any terminal write.
+    resolution_defer_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 

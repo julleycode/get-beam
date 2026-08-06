@@ -9,6 +9,7 @@ or a same-site, same-visitor ``AgentHandoffLink`` exists.
 """
 
 from collections.abc import Collection
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -77,6 +78,31 @@ def resolution_candidate_filter(
     return or_(
         resolution_intent_filter(all_us_site_ids, no_floor_site_ids),
         ai_attributable_visitor_filter(handoff_linked=handoff_linked),
+    )
+
+
+def resolution_not_deferred_filter():
+    """SQL predicate excluding visitors held back by a provider outage.
+
+    ``resolution_deferred_until`` is set when every provider tier that could
+    have identified the visitor was down (see
+    ``IdentityResolver.resolve``). Such rows stay ``anonymous`` so they get
+    another chance, which means every query that feeds ``resolve()`` has to skip
+    them until their watermark passes — otherwise "retryable" degrades into
+    "retried on every single sweep".
+
+    Both sweeps ORDER BY ``intent_score DESC`` under a LIMIT, and a deferred
+    visitor keeps gaining intent while it waits. Miss this filter in any one
+    sweep and that sweep re-selects the same deferred rows every run: it pays
+    for ``check_ip_privacy`` on each, pushes the backoff forward, and crowds
+    newer visitors out of the batch entirely.
+    """
+    from apps.api.models.visitor import Visitor
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return or_(
+        Visitor.resolution_deferred_until.is_(None),
+        Visitor.resolution_deferred_until <= now,
     )
 
 
