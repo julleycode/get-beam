@@ -563,13 +563,15 @@ re-run `alembic heads` before chaining or applying; concurrent programs move it 
 
 ## Open Questions / Outstanding Work
 
-- **GDPR exposure — PII blind-index backfill is now an erasure prerequisite** (found re-validating
-  `process/general-plans/active/pii-at-rest_22-07-26/` on 07-08-26): `graph_erasure.py`'s erasure
-  sweep matches on blind index, so pre-backfill rows with NULL bidx are silently missed by GDPR
-  erasure. Plan re-baselined (Phases 1-2 were already shipped in `be39585`/`991fff3`; census
-  mechanism repaired — 15 predicate / 35+ read sites), validated-and-held CONDITIONAL. NOT
-  executing until: backfill script RUN, Docker for Hybrid gates, high-risk evidence pack, PVL
-  refresh closing the READ-census G1 gap.
+- **GDPR backfill exposure — RESOLVED 07-08-26.** The pii-at-rest re-validation found that
+  `graph_erasure.py`'s erasure sweep matches on blind index, so pre-backfill NULL-bidx rows would
+  be silently missed. Operator ran `apps.api.scripts.backfill_pii_ciphertext` against prod same
+  day: 22/22 rows backfilled (visitor_emails 4, identified_visitors 12, enrichment_profiles 6),
+  `beam_identity_graph` had **0** pending (graph writes always used the pii pattern), re-dry-run
+  verified 0 remaining across all 4 tables. Erasure sweep now reaches every row. The pii-at-rest
+  plan itself stays validated-and-held CONDITIONAL — still NOT executing until: Docker for Hybrid
+  gates, high-risk evidence pack, PVL refresh closing the READ-census G1 gap (prereq (a) backfill
+  is ✅ done).
 - `CAMPAIGN_PLANNER_TOOLS_ENABLED=true` (planner tool loop) needs live-model validation before prod enable
 - Real-key Gemini smoke for `/ai/ask` agentic path not yet run (no key on dev machine) — check `gemini_tool_call` in structlog when run
 - Legacy `plan/` folder (11 dated pre-harness plans) is read-only history — migrate still-relevant items into `process/features/*/backlog/` opportunistically

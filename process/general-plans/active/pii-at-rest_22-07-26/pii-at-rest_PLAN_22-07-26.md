@@ -16,11 +16,16 @@ feature: general
 **This plan does NOT EXECUTE in the 07-08-26 autopilot run.** It is plan-complete-pending-prerequisites, not
 archivable. Prerequisites that must ALL hold before any EXECUTE is authorized:
 
-1. **(a) Phase-1 backfill RUN completed + verified** — `--dry-run`, real run, then re-`--dry-run` proving zero
-   remaining un-backfilled rows across all 4 tables. This is a **GDPR compliance prerequisite** (see Phase 1's
-   priority reclassification: un-backfilled `beam_identity_graph` rows are invisible to `graph_erasure.py`'s
-   cross-tenant deletion sweep because `email_bidx = NULL` never matches `= ANY(...)`). It is a **live-DB
-   operator action** — no agent can self-authorize it.
+1. **(a) Phase-1 backfill RUN completed + verified — ✅ DONE 07-08-26 (operator-run against prod).**
+   Full ritual executed via `railway run -s retarget-agent -- .venv/bin/python3.11 -m
+   apps.api.scripts.backfill_pii_ciphertext`: dry-run showed pending `{visitor_emails: 4,
+   identified_visitors: 12, beam_identity_graph: 0, enrichment_profiles: 6}`; real run updated
+   exactly 22/22 (4+12+0+6, zero failures, zero no-update stalls); re-dry-run confirmed
+   **0 pending across all 4 tables** (06:25 +07). Notably `beam_identity_graph` had **zero**
+   un-backfilled rows — the graph write path has used the pii pattern since inception, so the
+   NULL-bidx erasure-miss exposure had no rows actually affected. The GDPR prerequisite is
+   satisfied; the erasure sweep now reaches every graph row. (Original requirement text retained
+   below for audit: `--dry-run` → real run → re-`--dry-run` proving zero, live-DB operator action.)
 2. **(b) Docker available** for the migration round-trip and every Hybrid gate. **Zero Hybrid gates in this plan
    have ever run**, in any session, against any database. AC3/AC4/AC5/AC6 therefore carry no runtime evidence
    whatsoever.
