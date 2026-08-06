@@ -4,10 +4,13 @@ import type { BlogPost, BlogPostListResponse } from "@/lib/api";
 // (no auth). Distinct from the browser `api` singleton, which carries the
 // user's bearer token and runs client-side.
 //
-// The list is fetched fresh (no-store) so a publish/unpublish shows on /blog
-// immediately — a cached list would lag the publish by the revalidate window.
-// Individual post pages keep a short ISR window (they change rarely, and a
-// brand-new slug renders on-demand anyway).
+// The list fetcher defaults to no-store (freshest possible list) but callers
+// rendering a public page should opt into ISR via `{ revalidate }`. A single
+// no-store fetch marks the WHOLE route dynamic, which silently overrides any
+// `export const revalidate` on the page and makes every request a CDN MISS —
+// slow TTFB for Googlebot and wasted crawl budget. Individual post pages keep
+// the same short ISR window (they change rarely, and a brand-new slug renders
+// on-demand anyway).
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -16,17 +19,22 @@ export const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL || "https://getbeam.fyi"
 ).replace(/\/$/, "");
 
-const REVALIDATE_SECONDS = 300;
+export const REVALIDATE_SECONDS = 300;
 
 export async function fetchPublishedPosts(
   limit = 50,
-  tag?: string
+  tag?: string,
+  opts?: { revalidate?: number }
 ): Promise<BlogPost[]> {
   try {
     const qs = new URLSearchParams({ limit: String(limit) });
     if (tag) qs.set("tag", tag);
     const res = await fetch(`${API_BASE}/api/v1/blog/posts?${qs.toString()}`, {
-      cache: "no-store",
+      // Opting in keeps the calling route statically renderable; omitting it
+      // preserves the old always-fresh behaviour for non-page callers.
+      ...(opts?.revalidate !== undefined
+        ? { next: { revalidate: opts.revalidate } }
+        : { cache: "no-store" as const }),
     });
     if (!res.ok) return [];
     const data = (await res.json()) as BlogPostListResponse;

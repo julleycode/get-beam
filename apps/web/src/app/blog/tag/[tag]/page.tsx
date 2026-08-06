@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { fetchPublishedPosts, SITE_URL } from "@/lib/blog-fetch";
+import { REVALIDATE_SECONDS, fetchPublishedPosts, SITE_URL } from "@/lib/blog-fetch";
 import { PostList } from "@/components/blog/post-list";
 
-export const dynamic = "force-dynamic";
+// ISR instead of force-dynamic: a publish shows within 5 minutes instead of
+// instantly, in exchange for CDN-cacheable HTML (force-dynamic made every
+// crawler hit a cache MISS). Literal value — Next statically analyses it.
+export const revalidate = 300;
 
 type Params = { params: { tag: string } };
 
@@ -25,7 +28,9 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
 
 export default async function BlogTagPage({ params }: Params) {
   const tag = decodeTag(params.tag);
-  const posts = await fetchPublishedPosts(50, tag);
+  const posts = await fetchPublishedPosts(50, tag, {
+    revalidate: REVALIDATE_SECONDS,
+  });
 
   return (
     <div>

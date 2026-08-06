@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Markdown } from "@/components/blog/markdown";
 import {
+  REVALIDATE_SECONDS,
   SITE_URL,
   fetchPublishedPost,
   fetchPublishedPosts,
@@ -92,11 +93,15 @@ export default async function BlogPostPage({ params }: Params) {
   // Internal links out to sibling posts. Without a post→post link each post is
   // orphaned ("Referring page: None detected"), so Google leaves it
   // "Discovered - currently not indexed". Prefer same-tag siblings, backfill
-  // with recent, dedupe and drop self.
+  // with recent, dedupe and drop self. These MUST use the ISR option: a
+  // no-store fetch here would opt the whole post route out of static rendering
+  // and dead-letter the `export const revalidate` above.
   const primaryTag = post.tags?.[0];
   const [byTag, recent] = await Promise.all([
-    primaryTag ? fetchPublishedPosts(8, primaryTag) : Promise.resolve([]),
-    fetchPublishedPosts(8),
+    primaryTag
+      ? fetchPublishedPosts(8, primaryTag, { revalidate: REVALIDATE_SECONDS })
+      : Promise.resolve([]),
+    fetchPublishedPosts(8, undefined, { revalidate: REVALIDATE_SECONDS }),
   ]);
   const related = [...byTag, ...recent]
     .filter((p) => p.slug !== post.slug)
