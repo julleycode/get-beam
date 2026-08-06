@@ -24,7 +24,7 @@ from apps.api.config import settings
 from apps.api.models.campaign import Campaign, CampaignTouchpoint
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.segment import SegmentMember
-from apps.api.models.visitor import IdentifiedVisitor
+from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.services.email_providers import gmail as gmail_client
 from apps.api.services.email_providers.gmail_sender import (
     resolve_sender_for_site,
@@ -35,7 +35,10 @@ from apps.api.services.email_rate_limiter import (
     release_email_reservation,
 )
 from apps.api.services.email_sender import EmailSender
-from apps.api.services.identity_classification import is_emailable_identity
+from apps.api.services.identity_classification import (
+    is_emailable_identity,
+    is_verified_identity,
+)
 from apps.api.services.link_decorator import generate_unsubscribe_token
 from apps.api.services.suppression import is_email_suppressed
 
@@ -114,6 +117,84 @@ def _personalize(
         .replace("[Your Name]", sender)
     )
     return _tidy(out)
+
+
+class PersonalizationGateError(RuntimeError):
+    """A candidate-tier (unconfirmed) identity reached the personalized branch.
+
+    Identity-honesty Phase 2: an unconfirmed graph guess must never be addressed
+    by a guessed name/title/company. This is raised — never silently substituted —
+    so a future refactor that bypasses the send-time gate fails loudly in CI
+    instead of quietly regressing to guessing.
+    """
+
+
+def _assert_personalization_allowed(
+    identity_status: str | None,
+    visitor_id: str | None = None,
+    resolution_provider: str | None = None,
+) -> None:
+    """Fail-loud guard: only a CONFIRMED identity may be personalized.
+
+    Called at the top of the personalized branch, so the branch itself cannot be
+    entered with a candidate/anonymous/unresolvable tier. Logs at ERROR with no
+    PII (truncated visitor_id + provider only, matching this module's structlog
+    convention) and raises.
+    """
+    if is_verified_identity(identity_status):
+        return
+    logger.error(
+        "campaign_personalization_gate_violation",
+        visitor_id=(visitor_id or "")[:8] or None,
+        resolution_provider=resolution_provider,
+        identity_status=identity_status,
+    )
+    raise PersonalizationGateError(
+        "Refusing to personalize copy for a non-verified identity "
+        f"(identity_status={identity_status!r}) — candidate-tier recipients get "
+        "generic copy only."
+    )
+
+
+def _compose_generic(
+    text: str,
+    sender_name: str | None = None,
+) -> str:
+    """Generic composition for an unconfirmed (candidate-tier) recipient.
+
+    Same template engine as ``_personalize`` — deliberately called with
+    ``full_name=None`` and ``company_name=None`` so no guessed identity value can
+    reach the copy. Placeholders resolve to the neutral fallbacks ("there",
+    "your company"); the sender's own signature is still filled (that is Beam's
+    own first-party data, not a guess about the recipient).
+    """
+    return _personalize(text, None, None, sender_name)
+
+
+def _compose_for_recipient(
+    identity_status: str | None,
+    subject_tpl: str,
+    body_tpl: str,
+    full_name: str | None,
+    company_name: str | None,
+    sender_name: str | None = None,
+    visitor_id: str | None = None,
+    resolution_provider: str | None = None,
+) -> tuple[str, str]:
+    """Send-time personalization gate — returns ``(subject, body_html)``.
+
+    Verified ("identified") recipients go through ``_personalize`` byte-for-byte
+    unchanged. Everything else (candidate / anonymous / unknown) gets generic
+    copy with zero guessed name/company merge fields.
+    """
+    if is_verified_identity(identity_status):
+        _assert_personalization_allowed(identity_status, visitor_id, resolution_provider)
+        subject = _personalize(subject_tpl, full_name, company_name, sender_name)
+        body = _personalize(body_tpl, full_name, company_name, sender_name)
+    else:
+        subject = _compose_generic(subject_tpl, sender_name)
+        body = _compose_generic(body_tpl, sender_name)
+    return subject, body.replace("\n", "<br/>")
 
 
 async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
@@ -245,10 +326,34 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
             )
         ).scalar_one_or_none()
 
-        subject = _personalize(subject_tpl, iv.full_name, company_name, sender_name)
-        body_html = _personalize(
-            body_tpl, iv.full_name, company_name, sender_name
-        ).replace("\n", "<br/>")
+        # identity_status lives on Visitor (not IdentifiedVisitor), joined on
+        # (site_id, visitor_id) — the same predicate used in identity_resolver /
+        # routers.visitors / daily_digest. Read FRESH here, per recipient, inside
+        # the send loop: that is what makes a mid-campaign candidate confirmation
+        # take effect on the very next send without re-planning the campaign. A
+        # missing Visitor row yields None, which is not verified → generic copy
+        # (fails safe, never drops the recipient).
+        identity_status = (
+            await db.execute(
+                select(Visitor.identity_status).where(
+                    Visitor.site_id == campaign.site_id,
+                    Visitor.visitor_id == vid,
+                )
+            )
+        ).scalar_one_or_none()
+
+        # Identity-honesty gate: only a CONFIRMED ("identified") recipient is
+        # addressed by name/company. Candidate-tier graph guesses get generic copy.
+        subject, body_html = _compose_for_recipient(
+            identity_status,
+            subject_tpl,
+            body_tpl,
+            iv.full_name,
+            company_name,
+            sender_name,
+            visitor_id=vid,
+            resolution_provider=iv.resolution_provider,
+        )
 
         # Claim the recipient by inserting the touchpoint BEFORE sending. This
         # doubles as (a) the id carrier for tracking — the open pixel (/o/{id})

@@ -18,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.draft import Draft, DraftStatus
 from apps.api.models.visitor import Visitor
-from apps.api.services.identity_classification import VERIFIED_STATUSES
 
 logger = structlog.get_logger()
 
@@ -53,21 +52,28 @@ async def compute_kpis(db: AsyncSession, site_id: str, days: int = 30) -> dict:
         return (await db.execute(stmt)).scalar() or 0
 
     visitors = await count(base)
-    # Trusted / first-party style only — provider_candidate (RB2B etc.) excluded.
-    identified = await count(base.where(Visitor.identity_status.in_(VERIFIED_STATUSES)))
+    identified = await count(base.where(Visitor.identity_status == "identified"))
+    # Identity-honesty Phase 1 (B4) — explicit decision for this site: candidates
+    # are reported as their OWN funnel number, never folded into `identified` and
+    # never silently dropped. `identified` keeps its existing meaning (CONFIRMED
+    # identities only), so every downstream rate below stays honest.
+    candidates = await count(base.where(Visitor.identity_status == "candidate"))
     enriched = await count(base.where(Visitor.enrichment_status == "enriched"))
+    # Decision (B4): high_intent / acted_high stay CONFIRMED-only. These feed the
+    # "qualified lead" rates; counting unconfirmed guesses there would reintroduce
+    # exactly the overstatement this program exists to remove.
     high_intent = await count(
         base.where(
-            Visitor.identity_status.in_(VERIFIED_STATUSES),
+            Visitor.identity_status == "identified",
             Visitor.intent_score >= HIGH_INTENT,
         )
     )
 
     # Acted = distinct site visitors we've drafted outreach for. `acted_high` is
-    # the same but restricted to the qualified (verified + high-intent) leads.
+    # the same but restricted to the qualified (identified + high-intent) leads.
     hi_vids = select(Visitor.visitor_id).where(
         Visitor.site_id == site_id,
-        Visitor.identity_status.in_(VERIFIED_STATUSES),
+        Visitor.identity_status == "identified",
         Visitor.intent_score >= HIGH_INTENT,
     )
     site_vids = select(Visitor.visitor_id).where(Visitor.site_id == site_id)
@@ -95,6 +101,7 @@ async def compute_kpis(db: AsyncSession, site_id: str, days: int = 30) -> dict:
         "window_days": days,
         "visitors": visitors,
         "identified": identified,
+        "candidates": candidates,
         "enriched": enriched,
         "high_intent": high_intent,
         "acted": acted,

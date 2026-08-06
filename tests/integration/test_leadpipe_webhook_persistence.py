@@ -27,7 +27,6 @@ from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.models.visitor_email import VisitorEmail
 from apps.api.services import leadpipe_webhook as lw
 from apps.api.services.identity_classification import (
-    STATUS_PROVIDER_CANDIDATE,
     is_emailable_identity,
 )
 
@@ -125,8 +124,11 @@ async def test_saved_identity_is_a_candidate_and_not_emailable(test_db):
     ).scalar_one()
 
     assert row.resolution_provider == "leadpipe"
-    assert visitor.identity_status == STATUS_PROVIDER_CANDIDATE
-    assert is_emailable_identity(row.resolution_provider) is False
+    # D1: canonical vocabulary — the push-ingest path writes "candidate".
+    assert visitor.identity_status == "candidate"
+    # D2: candidate-tier identities ARE emailable (personalization gate, not an
+    # emailability block, is what restrains them).
+    assert is_emailable_identity(row.resolution_provider) is True
 
 
 @pytest.mark.asyncio

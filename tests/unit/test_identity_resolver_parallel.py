@@ -446,3 +446,273 @@ class TestGraphTimeout:
 
     def test_timeout_constant_is_5_seconds(self):
         assert IdentityResolver._GRAPH_TIMEOUT == 5.0
+
+
+# ─────────────── Identity-honesty Phase 1: candidate tier + anti-laundering ───────────────
+#
+# The "Janet Valla" class of bug: a graph GUESS presented to the owner as a
+# confirmed identity. Phase 1 lands every graph match on the candidate tier — but
+# three continuity/reuse paths could copy such a guess forward as a flat
+# "identified" without ever re-entering the graph branch. These tests pin all
+# three closed, plus the upsert fix that makes reject -> re-resolve actually work.
+
+import apps.api.main  # noqa: E402,F401  (registers ORM mappers + PII hooks)
+from sqlalchemy.exc import IntegrityError  # noqa: E402
+
+
+def _bare_resolver():
+    """Resolver whose side-effect helpers are stubbed, for _save_identified tests."""
+    resolver = _make_resolver()
+    resolver._log_owned_resolution = AsyncMock()
+    resolver._upsert_beam_identity = AsyncMock()
+    return resolver
+
+
+class TestCandidateTierAssignment:
+    """AC1/AC2: graph providers land on candidate; everything else does not."""
+
+    @pytest.mark.parametrize(
+        "provider", ["rb2b", "leadpipe", "capturify", "beam_identity_network"]
+    )
+    @pytest.mark.asyncio
+    async def test_graph_provider_lands_on_candidate(self, provider):
+        resolver = _bare_resolver()
+        visitor = _make_visitor()
+        # Deliberately the maximum plausible score: it must still not promote.
+        await IdentityResolver._save_identified(
+            resolver, visitor, {"full_name": "A Person", "confidence_score": 0.99}, provider
+        )
+        assert visitor.identity_status == "candidate"
+
+    @pytest.mark.parametrize("provider", ["form_capture", "manual", "pdl_person_enrich"])
+    @pytest.mark.asyncio
+    async def test_deterministic_provider_still_lands_on_identified(self, provider):
+        resolver = _bare_resolver()
+        visitor = _make_visitor()
+        await IdentityResolver._save_identified(
+            resolver, visitor, {"full_name": "A Person", "confidence_score": 0.4}, provider
+        )
+        assert visitor.identity_status == "identified"
+
+
+class TestSvidReconcileDoesNotLaunder:
+    """A1b: the durable-cookie path must inherit the ORIGIN's tier."""
+
+    @staticmethod
+    def _wire(origin_status: str):
+        resolver = _make_resolver()
+        prior = SimpleNamespace(
+            site_id="test-site",
+            visitor_id="v-origin",
+            email="known@example.com",
+            full_name="Known Person",
+            city=None,
+            region=None,
+            country=None,
+        )
+        resolver._identified_for_origin = AsyncMock(return_value=prior)
+        resolver._email_suppressed = AsyncMock(return_value=False)
+        resolver._save_identified = AsyncMock(return_value=SimpleNamespace())
+        resolver._check_beam_identity_network = AsyncMock(return_value=None)
+        # _origin_is_verified reads Visitor.identity_status for the origin row.
+        status_result = MagicMock()
+        status_result.scalar_one_or_none.return_value = origin_status
+        resolver.db.execute = AsyncMock(return_value=status_result)
+        return resolver
+
+    @pytest.mark.asyncio
+    async def test_candidate_origin_is_not_copied_forward(self):
+        resolver = self._wire("candidate")
+        visitor = _make_visitor(server_visitor_id="v-origin", fingerprint=None)
+
+        await resolver._check_prior_signals(visitor)
+
+        # The whole point: no svid_reconcile save happened at all.
+        providers = [c.args[2] for c in resolver._save_identified.await_args_list]
+        assert "svid_reconcile" not in providers
+
+    @pytest.mark.asyncio
+    async def test_verified_origin_is_still_copied_forward(self):
+        """Regression guard: the fix must not break the legitimate path."""
+        resolver = self._wire("identified")
+        visitor = _make_visitor(server_visitor_id="v-origin", fingerprint=None)
+
+        await resolver._check_prior_signals(visitor)
+
+        providers = [c.args[2] for c in resolver._save_identified.await_args_list]
+        assert "svid_reconcile" in providers
+
+
+class TestFingerprintMatchDoesNotLaunder:
+    """A1c: the fingerprint-continuity path must inherit the ORIGIN's tier."""
+
+    @pytest.mark.asyncio
+    async def test_query_filters_on_identified_origin(self):
+        """The SQL itself must exclude candidate-tier origins.
+
+        Asserted on the compiled WHERE clause rather than by faking a row,
+        because the exclusion happens in the database, not in Python — a test
+        that mocked the result away would pass even if the filter were deleted.
+        """
+        resolver = _make_resolver()
+        resolver._identified_for_origin = AsyncMock(return_value=None)
+        resolver._check_beam_identity_network = AsyncMock(return_value=None)
+        resolver._email_suppressed = AsyncMock(return_value=False)
+
+        empty = MagicMock()
+        empty.scalar_one_or_none.return_value = None
+        resolver.db.execute = AsyncMock(return_value=empty)
+
+        visitor = _make_visitor(fingerprint="fp2_launder_test", server_visitor_id=None)
+        await resolver._check_prior_signals(visitor)
+
+        compiled = [
+            str(c.args[0].compile(compile_kwargs={"literal_binds": True}))
+            for c in resolver.db.execute.await_args_list
+        ]
+        fp_queries = [q for q in compiled if "fingerprint" in q]
+        assert fp_queries, "fingerprint-match query never ran"
+        assert any("identity_status = 'identified'" in q for q in fp_queries)
+
+
+class TestBeamNetworkIsAlwaysCandidate:
+    """A4c: cross-tenant reuse of a graph match cannot upgrade its tier."""
+
+    @pytest.mark.asyncio
+    async def test_high_confidence_network_match_still_lands_on_candidate(self):
+        resolver = _bare_resolver()
+        visitor = _make_visitor()
+        # 0.95 stored on the node, far above the 0.5 read threshold.
+        await IdentityResolver._save_identified(
+            resolver,
+            visitor,
+            {"full_name": "Known Person", "confidence_score": 0.95},
+            "beam_identity_network",
+        )
+        assert visitor.identity_status == "candidate"
+
+
+class TestSaveIdentifiedUpsertsOnConflict:
+    """A5 (AC6 prerequisite): a re-resolution must OVERWRITE the stale row.
+
+    Before this fix the conflict handler returned the pre-existing row unchanged,
+    which left a rejected visitor permanently stuck on the rejected data.
+    """
+
+    @staticmethod
+    def _wire_conflict(existing):
+        resolver = _bare_resolver()
+        commits = {"n": 0}
+
+        async def commit():
+            commits["n"] += 1
+            if commits["n"] == 1:
+                raise IntegrityError("insert", {}, Exception("duplicate key"))
+
+        resolver.db.commit = AsyncMock(side_effect=commit)
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = existing
+        resolver.db.execute = AsyncMock(return_value=result)
+        return resolver
+
+    @pytest.mark.asyncio
+    async def test_conflict_overwrites_stale_row_and_clears_do_not_email(self):
+        existing = SimpleNamespace(
+            visitor_id="v-1",
+            site_id="test-site",
+            email="stale@example.com",
+            full_name="Stale Name",
+            city=None,
+            region=None,
+            country=None,
+            resolution_provider="rb2b",
+            confidence_score=0.5,
+            do_not_email=True,  # set by a prior reject
+        )
+        resolver = self._wire_conflict(existing)
+        visitor = _make_visitor()
+
+        row = await IdentityResolver._save_identified(
+            resolver,
+            visitor,
+            {"full_name": "Fresh Name", "confidence_score": 0.8},
+            "leadpipe",
+        )
+
+        assert row is existing
+        assert existing.full_name == "Fresh Name"
+        assert existing.confidence_score == 0.8
+        assert existing.resolution_provider == "leadpipe"
+        # A successful re-resolution supersedes the earlier rejection.
+        assert existing.do_not_email is False
+
+    @pytest.mark.asyncio
+    async def test_conflict_path_still_applies_the_candidate_tier(self):
+        existing = SimpleNamespace(
+            visitor_id="v-1", site_id="test-site", email=None, full_name="Old",
+            city=None, region=None, country=None, resolution_provider="manual",
+            confidence_score=1.0, do_not_email=True,
+        )
+        resolver = self._wire_conflict(existing)
+        visitor = _make_visitor()
+
+        await IdentityResolver._save_identified(
+            resolver, visitor, {"full_name": "Fresh", "confidence_score": 0.99}, "rb2b"
+        )
+
+        assert visitor.identity_status == "candidate"
+
+
+class TestCandidateSweepIsDeterministicOnly:
+    """B1: a candidate re-sweep may only run DETERMINISTIC upgrade checks.
+
+    Re-running the graph on a candidate could only ever produce another guess,
+    which must never promote them — so it must not run at all (and must not
+    spend provider budget doing so).
+    """
+
+    @pytest.mark.asyncio
+    async def test_deterministic_only_skips_the_beam_network_check(self):
+        resolver = _make_resolver()
+        resolver._identified_for_origin = AsyncMock(return_value=None)
+        resolver._check_beam_identity_network = AsyncMock(return_value=None)
+        empty = MagicMock()
+        empty.scalar_one_or_none.return_value = None
+        resolver.db.execute = AsyncMock(return_value=empty)
+
+        visitor = _make_visitor(fingerprint=None, server_visitor_id=None)
+        result = await resolver._check_prior_signals(visitor, deterministic_only=True)
+
+        assert result is None
+        resolver._check_beam_identity_network.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_default_still_runs_the_beam_network_check(self):
+        resolver = _make_resolver()
+        resolver._identified_for_origin = AsyncMock(return_value=None)
+        resolver._check_beam_identity_network = AsyncMock(return_value=None)
+        empty = MagicMock()
+        empty.scalar_one_or_none.return_value = None
+        resolver.db.execute = AsyncMock(return_value=empty)
+
+        visitor = _make_visitor(fingerprint=None, server_visitor_id=None)
+        await resolver._check_prior_signals(visitor)
+
+        resolver._check_beam_identity_network.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_resolve_stops_before_the_paid_waterfall(self):
+        resolver = _make_resolver()
+        resolver._check_prior_signals = AsyncMock(return_value=None)
+        resolver.was_recently_attempted = AsyncMock(return_value=False)
+        resolver.check_daily_budget = AsyncMock(return_value=True)
+        resolver._resolve_identity_graphs_parallel = AsyncMock(return_value=None)
+        resolver._is_email_opted_out = AsyncMock(return_value=False)
+
+        visitor = _make_visitor(do_not_resolve=False, identity_status="candidate")
+        result = await resolver.resolve(visitor, deterministic_only=True)
+
+        assert result is None
+        # The expensive gates must never even be consulted.
+        resolver.check_daily_budget.assert_not_called()
+        resolver._resolve_identity_graphs_parallel.assert_not_called()

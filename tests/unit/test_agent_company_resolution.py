@@ -362,7 +362,7 @@ async def test_ac2_stat_counts_excludes_agent_rows():
         captured.append(_compiled(stmt))
         m = MagicMock()
         m.one.return_value = SimpleNamespace(
-            total=1, identified=1, enriched=0,
+            total=1, identified=1, candidates=0, enriched=0,
             enriched_unsegmented=0, eligible_for_resolution=0,
         )
         m.scalar.return_value = 0

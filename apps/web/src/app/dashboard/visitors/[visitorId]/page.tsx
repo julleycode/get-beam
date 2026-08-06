@@ -301,6 +301,7 @@ export default function VisitorDetailPage() {
   const [liPosts, setLiPosts] = useState<SocialPost[] | null>(null);
   // In-flight guard for the internal-traffic override action.
   const [savingOverride, setSavingOverride] = useState(false);
+  const [savingCandidate, setSavingCandidate] = useState(false);
 
   useEffect(() => {
     if (!siteId || !visitorId) return;
@@ -387,6 +388,27 @@ export default function VisitorDetailPage() {
     }
   }
 
+  // Identity-honesty Phase 1: the human's verdict on an unconfirmed match.
+  // Confirm → identified (stamps confirmed_at). Reject → back to anonymous and
+  // the stale identity row is marked do-not-email so it can't be contacted.
+  async function handleCandidateVerdict(verdict: "confirm" | "reject") {
+    if (!siteId || !visitorId) return;
+    setSavingCandidate(true);
+    try {
+      const result =
+        verdict === "confirm"
+          ? await api.confirmCandidate(siteId, visitorId)
+          : await api.rejectCandidate(siteId, visitorId);
+      setVisitor((prev) =>
+        prev ? { ...prev, identity_status: result.status } : prev,
+      );
+    } catch {
+      // Non-fatal: the badge stays as-is until the next load.
+    } finally {
+      setSavingCandidate(false);
+    }
+  }
+
   async function handleResolveSocial(force = false) {
     if (!siteId || !visitorId) return;
     setResolving(true);
@@ -447,6 +469,15 @@ export default function VisitorDetailPage() {
     visitor.identity_status !== "unresolvable" &&
     visitor.identity_status !== "vpn_filtered";
   const isCompanyLevel = visitor.identity_level === "company";
+  // Identity-honesty Phase 1: an unconfirmed identity-graph match awaiting the
+  // owner's verdict. The score is shown, but it is explicitly NOT a promotion
+  // mechanism — only the Confirm button below moves them to "identified".
+  const isCandidate = visitor.identity_status === "candidate";
+  const candidateTooltip = `Unconfirmed match${
+    typeof visitor.confidence_score === "number"
+      ? ` — ${Math.round(visitor.confidence_score * 100)}% confidence`
+      : ""
+  }. Not personalized in outreach until confirmed.`;
 
   const canOsint = identified;
 
@@ -555,7 +586,13 @@ export default function VisitorDetailPage() {
               <h1 className="font-serif text-2xl font-semibold tracking-tight">
                 {visitor.full_name || (identified ? "Unnamed visitor" : "Anonymous visitor")}
               </h1>
-              <StatusBadge status={visitor.identity_status} />
+              {visitor.identity_status === "candidate" ? (
+                <span title={candidateTooltip}>
+                  <StatusBadge status="candidate" label="Candidate" />
+                </span>
+              ) : (
+                <StatusBadge status={visitor.identity_status} />
+              )}
               {isCompanyLevel && (
                 <StatusBadge status="company" label="Company-level" tone="warning" />
               )}
@@ -593,6 +630,29 @@ export default function VisitorDetailPage() {
                 </span>
               )}
             </div>
+
+            {isCandidate && (
+              <div className="rounded-lg border border-warning/40 bg-warning-muted/40 p-3">
+                <p className="text-sm text-muted-foreground">{candidateTooltip}</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    disabled={savingCandidate}
+                    onClick={() => handleCandidateVerdict("confirm")}
+                  >
+                    {savingCandidate ? "Saving…" : "Confirm this is them"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={savingCandidate}
+                    onClick={() => handleCandidateVerdict("reject")}
+                  >
+                    Not them
+                  </Button>
+                </div>
+              </div>
+            )}
 
             <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <Briefcase className="h-3.5 w-3.5" />

@@ -37,7 +37,7 @@ import apps.api.main  # noqa: F401 — registers ALL ORM models so a REAL
 from apps.api.models.visitor import IdentifiedVisitor
 from apps.api.services.identity_classification import (
     COMPANY_LEVEL_PROVIDERS,
-    EMAILABLE_PROVIDERS,
+    GRAPH_CANDIDATE_PROVIDERS,
     PERSON_LEVEL_PROVIDERS,
     is_emailable_identity,
 )
@@ -51,32 +51,35 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("provider", sorted(EMAILABLE_PROVIDERS))
-def test_agent_origin_overrides_emailable_providers(provider):
-    # Baseline: an emailable provider with no agent marker stays emailable.
+@pytest.mark.parametrize("provider", sorted(PERSON_LEVEL_PROVIDERS))
+def test_agent_origin_overrides_person_level(provider):
+    # Baseline: a person-level provider with no agent marker stays emailable (D2).
     assert is_emailable_identity(provider) is True
     # AC10 override: the SAME provider becomes non-emailable the instant an
     # agent-origin marker is present.
     assert is_emailable_identity(provider, source_agent_visit_id="fake-uuid") is False
 
 
-@pytest.mark.parametrize("provider", sorted(PERSON_LEVEL_PROVIDERS - EMAILABLE_PROVIDERS))
-def test_agent_origin_still_blocks_paid_graph_candidates(provider):
-    # Paid graphs are already non-emailable; agent marker must not reopen them.
-    assert is_emailable_identity(provider) is False
+@pytest.mark.parametrize("provider", sorted(GRAPH_CANDIDATE_PROVIDERS))
+def test_agent_origin_overrides_graph_candidates(provider):
+    # D2: graph candidates ARE emailable on their own; the agent-origin marker
+    # must still veto them unconditionally. This is the guardrail the whole
+    # EvalLayer program depends on — widening emailability must not reopen it.
+    assert is_emailable_identity(provider) is True
     assert is_emailable_identity(provider, source_agent_visit_id="fake-uuid") is False
 
 
 def test_non_agent_identity_unaffected():
     # form_capture is first-party → emailable when no marker is passed.
     assert is_emailable_identity("form_capture", None) is True
-    # rb2b is person-level but probabilistic → not emailable (P0 quality gates).
-    assert is_emailable_identity("rb2b", None) is False
+    # rb2b is a person-level graph candidate → emailable under D2's wide rule.
+    assert is_emailable_identity("rb2b", None) is True
     # hunter is a real company-level provider → never emailable (unchanged).
     assert is_emailable_identity("hunter", None) is False
     # Sanity: the providers used above are the real classifications.
-    assert "form_capture" in EMAILABLE_PROVIDERS
+    assert "form_capture" in PERSON_LEVEL_PROVIDERS
     assert "rb2b" in PERSON_LEVEL_PROVIDERS
+    assert "rb2b" in GRAPH_CANDIDATE_PROVIDERS
     assert "hunter" in COMPANY_LEVEL_PROVIDERS
 
 

@@ -8,12 +8,10 @@ import pytest
 import apps.api.main  # noqa: F401 — register ORM mappers for IdentifiedVisitor
 from apps.api.services.company_resolver import is_privacy_relay_ip, is_proxy_or_vpn
 from apps.api.services.identity_classification import (
-    EMAILABLE_PROVIDERS,
     PAID_PERSON_GRAPH_PROVIDERS,
-    STATUS_PROVIDER_CANDIDATE,
-    STATUS_VERIFIED,
+    PERSON_LEVEL_PROVIDERS,
     identity_level,
-    identity_status_for_provider,
+    is_graph_candidate_provider,
     is_emailable_identity,
     name_email_consistent,
 )
@@ -62,25 +60,34 @@ class TestNameEmailConsistent:
         assert name_email_consistent("", "x@y.com") is True
 
 
-class TestIdentityStatusForProvider:
-    def test_paid_graph_is_candidate(self):
-        assert identity_status_for_provider("rb2b") == STATUS_PROVIDER_CANDIDATE
-        assert identity_status_for_provider("leadpipe") == STATUS_PROVIDER_CANDIDATE
+class TestIdentityTierForProvider:
+    """Canonical vocabulary (D1): the resolver writes identity_status directly as
+    ``"candidate" if is_graph_candidate_provider(p) else "identified"``. main's
+    main's per-provider status-mapping helper and its status constants are
+    retired."""
 
-    def test_owned_is_verified(self):
-        assert identity_status_for_provider("form_capture") == STATUS_VERIFIED
-        assert identity_status_for_provider("manual") == STATUS_VERIFIED
-        assert identity_status_for_provider("svid_reconcile") == STATUS_VERIFIED
+    def test_paid_graph_is_candidate(self):
+        assert is_graph_candidate_provider("rb2b") is True
+        assert is_graph_candidate_provider("leadpipe") is True
+
+    def test_owned_is_identified(self):
+        assert is_graph_candidate_provider("form_capture") is False
+        assert is_graph_candidate_provider("manual") is False
+        assert is_graph_candidate_provider("svid_reconcile") is False
 
 
 class TestEmailableProviders:
     @pytest.mark.parametrize("provider", sorted(PAID_PERSON_GRAPH_PROVIDERS))
-    def test_paid_graphs_not_emailable(self, provider):
+    def test_paid_graphs_are_emailable_under_d2(self, provider):
+        # D2 (locked): paid graphs are person-level and therefore emailable.
+        # They stay on the candidate TIER (restrained to generic copy by the
+        # personalization gate), which is a separate, orthogonal axis.
         assert identity_level(provider) == "person"
-        assert is_emailable_identity(provider) is False
+        assert is_graph_candidate_provider(provider) is True
+        assert is_emailable_identity(provider) is True
 
-    @pytest.mark.parametrize("provider", sorted(EMAILABLE_PROVIDERS))
-    def test_owned_still_emailable(self, provider):
+    @pytest.mark.parametrize("provider", sorted(PERSON_LEVEL_PROVIDERS))
+    def test_person_level_still_emailable(self, provider):
         assert is_emailable_identity(provider) is True
 
     def test_agent_and_abuse_still_block_owned(self):

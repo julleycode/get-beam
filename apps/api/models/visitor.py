@@ -69,6 +69,21 @@ class Visitor(Base):
     is_agent_derived: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # Identity-honesty Phase 4: True for a PHANTOM Visitor row created by a CSV
+    # contact import (visitor_id = f"import:{contact_id}"). The contact has never
+    # visited the site, so the row carries no real traffic — it exists so the
+    # customer's own contact list becomes a first-class, contactable identity
+    # (tokenized link, campaigns, segments) that a later real visit can merge
+    # onto via the existing canonical_visitor_id dedup branch.
+    #
+    # Unlike is_agent_derived, the exclusion is NOT permanent: a phantom is
+    # excluded from human traffic/engagement surfaces only while it has had no
+    # real visit yet. Once a real visit merges onto it (a sibling Visitor row
+    # with identity_status="merged" and canonical_visitor_id pointing here), the
+    # phantom counts normally — see human_only_visitor_filter().
+    is_imported_contact: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     # Ingest abuse marker, aggregated from events.is_flagged_abuse via
     # BOOL_OR in aggregate_visitors_for_site. Sticky on recompute (OR-merged on
     # conflict), exactly like do_not_resolve: once a visitor's traffic looked
@@ -187,6 +202,14 @@ class IdentifiedVisitor(Base):
     email_bidx: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     full_name_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolved_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Identity-honesty Phase 1: when a HUMAN confirmed a candidate-tier match via
+    # the confirm-candidate endpoint. NULL for every row that was never a
+    # candidate and for candidates still awaiting review. Deliberately a NEW
+    # column rather than reusing `resolved_at`: `resolved_at` is set once at
+    # INSERT and means "when this row was first created" (the fingerprint-match
+    # query orders by it), so stamping confirmation into it would corrupt that
+    # meaning. Read by Phase 2's mid-campaign personalization cutover.
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class ResolutionLog(Base):

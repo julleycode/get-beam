@@ -109,6 +109,18 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   **Beam Lab (31-07→01-08):** soft-serve gate + edge `_bfm` marker live on `beamlab.nhantown.com`;
   resume at `docs/beam-lab-resume.md` (plans `agent-gate-soft-serve_31-07-26` /
   `agent-gate-lab_31-07-26` status may be stale vs lab)
+- `agent-gateway` — agent-readable site surface + agent-driven lead capture. Phase 1 (`AgentProfile`
+  per-site data model, authed CRUD, dashboard editor) and Phase 2 (public
+  `manifest.json`/`offers.json`/`llms.txt` + hand-written read-only JSON-RPC MCP server exposing
+  `get_offers`/`get_pricing`/`check_availability`) are CODE DONE + EVL-green, mounted in
+  `apps/api/main.py`; `agent_gateway_enabled` default OFF. **Phase 3/4 of this plan's own
+  consent-link design are SUPERSEDED (07-08-26, user decision) — never implemented.** The chosen
+  design is zero-click `AgentLead` (structurally isolated from `IdentifiedVisitor`/`Visitor`, no
+  human consent click, accepted tradeoff: lead quality depends on agent truthfulness), built on
+  unmerged branch `feat/ws3-agent-concierge` — not yet reconciled with sibling branch
+  `feat/ws2-agent-session-classifier` or merged to `devjulley`/`main`. See
+  `process/features/agent-gateway/active/agent-gateway_26-07-26/agent-gateway_PLAN_26-07-26.md`
+  §Decision Record and §WS3 Merge Preconditions.
 - `ads-audiences` — OAuth-linked ad channels (Meta Custom Audiences, Google Data Manager API,
   LinkedIn deferred/CSV-only) with direct segment-audience push mirroring the CRM connector
   pattern; 3-phase program. Phase 1 Foundation (models, `services/ads/` registry, router, mock-mode

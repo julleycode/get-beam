@@ -131,7 +131,13 @@ class TestAiAttributableResolution:
         assert "left outer join" in sql
         assert "select distinct agent_handoff_links.visitor_id" in sql
         assert sql.count("from agent_handoff_links") == 1
-        assert "exists" not in sql
+        # The HANDOFF correlated EXISTS must be gone (replaced by the join above).
+        # Scoped to agent_handoff_links deliberately: unrelated predicates may
+        # legitimately use EXISTS (e.g. the Phase 4 phantom-contact pointer
+        # lookup inside human_only_visitor_filter), and a bare `"exists" not in
+        # sql` would fail on those without saying anything about the handoff join.
+        assert "exists" not in sql.split("agent_handoff_links")[0]
+        assert "exists (select agent_handoff_links" not in sql
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("internal_damping_enabled", [False, True])

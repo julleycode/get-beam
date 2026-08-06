@@ -30,6 +30,9 @@ def test_known_day_populated() -> None:
         "date": "2026-06-29",
         "visitors": 10,
         "identified": 4,
+        # Identity-honesty Phase 1 (B4): candidates get their own series key,
+        # zero-filled when the day's counts don't carry one.
+        "candidates": 0,
         "high_intent": 2,
     }
     # Earlier days untouched (zero-filled).
@@ -44,5 +47,6 @@ def test_missing_metric_keys_default_zero() -> None:
         "date": "2026-06-29",
         "visitors": 5,
         "identified": 0,
+        "candidates": 0,
         "high_intent": 0,
     }

@@ -38,7 +38,8 @@ from apps.api.services.company_resolver import (
 )
 from apps.api.services.identity_classification import (
     PAID_PERSON_GRAPH_PROVIDERS,
-    identity_status_for_provider,
+    is_graph_candidate_provider,
+    is_verified_identity,
     name_email_consistent,
 )
 from apps.api.services.usage_logger import log_api_call
@@ -268,9 +269,30 @@ class IdentityResolver(
             ).scalar_one_or_none()
         return None
 
+    async def _origin_is_verified(self, prior: IdentifiedVisitor) -> bool:
+        """Whether the ORIGIN visitor behind an inherited identity is confirmed.
+
+        Identity-honesty Phase 1: the deterministic continuity paths
+        (svid_reconcile, fingerprint_match) copy an existing identity forward.
+        That copy must inherit the origin's TIER, not silently upgrade it — a
+        candidate-tier guess must never become a flat "identified" just because
+        the same person came back on a fresh client id or the same device.
+        """
+        status = (
+            await self.db.execute(
+                select(Visitor.identity_status).where(
+                    Visitor.site_id == prior.site_id,
+                    Visitor.visitor_id == prior.visitor_id,
+                ).limit(1)
+            )
+        ).scalar_one_or_none()
+        return is_verified_identity(status)
+
     # ──────────────────── Pre-waterfall: Prior Signal Check ────────────────────
 
-    async def _check_prior_signals(self, visitor: Visitor) -> IdentifiedVisitor | None:
+    async def _check_prior_signals(
+        self, visitor: Visitor, deterministic_only: bool = False
+    ) -> IdentifiedVisitor | None:
         """Check for existing identification signals BEFORE the IP waterfall.
 
         Checks (in order):
@@ -294,6 +316,18 @@ class IdentityResolver(
         if svid and svid != visitor.visitor_id:
             try:
                 prior = await self._identified_for_origin(visitor.site_id, svid)
+                # Identity-honesty Phase 1 (A1b): only inherit from an origin whose
+                # identity is actually CONFIRMED. Without this check a candidate-tier
+                # graph guess launders itself into a flat "identified" the moment the
+                # visitor returns with a wiped client id but an intact _rta_svid
+                # cookie. An unconfirmed origin falls through so this visitor runs
+                # its own waterfall instead of inheriting a guess.
+                if prior and not await self._origin_is_verified(prior):
+                    logger.info(
+                        "svid_reconcile_skipped_unverified_origin",
+                        visitor_id=visitor.visitor_id[:8],
+                    )
+                    prior = None
                 if prior and (prior.email or prior.full_name):
                     # do_not_process: the ORIGINAL may have opted out AFTER being
                     # identified. The new (wiped-client) visitor has no captured
@@ -394,6 +428,12 @@ class IdentityResolver(
                         Visitor.site_id == visitor.site_id,
                         Visitor.fingerprint == visitor.fingerprint,
                         Visitor.visitor_id != visitor.visitor_id,
+                        # Identity-honesty Phase 1 (A1c): only inherit from a
+                        # CONFIRMED origin. A fingerprint match against a
+                        # candidate-tier origin must not auto-copy "identified"
+                        # forward — it falls through so this visitor runs its own
+                        # waterfall instead of inheriting an unverified guess.
+                        Visitor.identity_status == "identified",
                     )
                     .order_by(IdentifiedVisitor.resolved_at.desc())
                     .limit(1)
@@ -432,6 +472,13 @@ class IdentityResolver(
                 logger.warning("prior_signal_fingerprint_check_failed", error=str(exc))
 
         # ── Check 3: Beam Identity Network (cross-customer graph) ──
+        # Identity-honesty Phase 1 (B1): the cross-tenant graph is a GUESS, not a
+        # deterministic signal. When the caller only wants deterministic upgrade
+        # signals (the candidate re-sweep), stop here — re-running a guess on a
+        # visitor who is already a candidate can never promote them, it would only
+        # churn the same unconfirmed data.
+        if deterministic_only:
+            return None
         result = await self._check_beam_identity_network(visitor)
         if result:
             return result
@@ -445,6 +492,7 @@ class IdentityResolver(
         visitor: Visitor,
         source_agent_visit_id: str | None = None,
         force_retry: bool = False,
+        deterministic_only: bool = False,
     ) -> IdentifiedVisitor | None:
         """Identity resolution with parallel provider execution.
 
@@ -503,9 +551,19 @@ class IdentityResolver(
         # run BEFORE the 30-day recency gate and the daily budget — a visitor who
         # failed a paid lookup but LATER submits an email via a form must still be
         # identified, not skipped for 30 days.
-        result = await self._check_prior_signals(visitor)
+        result = await self._check_prior_signals(
+            visitor, deterministic_only=deterministic_only
+        )
         if result:
             return result
+
+        # Identity-honesty Phase 1 (B1): candidate re-sweep. A candidate already
+        # HAS a graph guess on file — re-running the paid/graph waterfall could
+        # only produce another guess, which must never auto-promote them. Stop
+        # after the deterministic signals above; only a first-party capture or a
+        # human confirm moves a candidate forward.
+        if deterministic_only:
+            return None
 
         # ── Paid provider waterfall gates ──
         # The 30-day recency skip and daily budget only guard the PAID providers
@@ -1095,7 +1153,13 @@ class IdentityResolver(
             is_abuse_flagged=bool(getattr(visitor, "is_abuse_flagged", False)),
         )
         self.db.add(identified)
-        visitor.identity_status = identity_status_for_provider(provider)
+        # Identity-honesty Phase 1 (A1): a match sourced from an identity GRAPH is
+        # a guess, not a confirmation — it lands on the candidate tier no matter
+        # how high its confidence_score is. Only deterministic first-party signals
+        # and human confirmation produce a flat "identified".
+        visitor.identity_status = (
+            "candidate" if is_graph_candidate_provider(provider) else "identified"
+        )
         await self._log_owned_resolution(visitor, provider)
         # Read the ids off the instance BEFORE the commit attempt. rollback()
         # expires every instance in the session regardless of expire_on_commit,
@@ -1107,11 +1171,33 @@ class IdentityResolver(
         try:
             await self.db.commit()
         except IntegrityError:
-            # A concurrent resolution already inserted this visitor — roll back
-            # and fetch the existing record instead of crashing.
+            # Conflict on uq_identified_site_visitor. Two cases share this path:
+            #   (a) a genuine concurrent-insert race, and
+            #   (b) a RE-resolution of a visitor that already has a row (e.g.
+            #       after reject-candidate returned them to anonymous).
+            # Case (b) is why this can no longer just return the pre-existing row
+            # unchanged: doing so left the visitor permanently stuck on the stale,
+            # rejected data. Upsert semantics — overwrite the row with the fresh
+            # result — are correct for both cases (in a true race the two results
+            # are equivalent anyway).
+            #
+            # Deliberately an ORM update rather than a CORE
+            # `INSERT ... ON CONFLICT DO UPDATE`: `identified_visitors` carries
+            # before_insert/before_update PII-encryption hooks
+            # (services/pii_encryption_hooks.py) that a CORE statement bypasses,
+            # which would silently stop the *_ciphertext / email_bidx dual-write.
+            # The ORM path keeps those hooks firing.
+            #
+            # Audit posture unchanged: `resolution_logs` is the immutable,
+            # authoritative record of every resolution attempt; this row has
+            # always been the mutable current-state projection.
             await self.db.rollback()
             logger.info(
-                "save_identified_conflict_fetch_existing",
+                # devjulley's event name (the branch below is now upsert
+                # semantics, not fetch-existing) with main's post-rollback-safe
+                # variable: reading visitor.* here would lazy-refresh an expired
+                # instance and raise MissingGreenlet.
+                "save_identified_conflict_upsert",
                 visitor_id=conflict_visitor_id[:8],
                 provider=provider,
             )
@@ -1125,6 +1211,23 @@ class IdentityResolver(
             if row is None:
                 # Very unlikely: conflict resolved but row is gone — re-raise
                 raise
+            row.email = data.get("email")
+            row.full_name = data.get("full_name")
+            row.city = data.get("city")
+            row.region = data.get("region")
+            row.country = data.get("country")
+            row.resolution_provider = provider
+            row.confidence_score = data.get("confidence_score")
+            # A fresh, successful re-resolution supersedes an earlier rejection.
+            row.do_not_email = False
+            visitor.identity_status = (
+                "candidate" if is_graph_candidate_provider(provider) else "identified"
+            )
+            try:
+                await self.db.commit()
+            except Exception as exc:  # noqa: BLE001 — never crash resolve on this
+                await self.db.rollback()
+                logger.warning("save_identified_conflict_upsert_failed", error=str(exc))
             return row
         logger.info(
             "visitor_identified",

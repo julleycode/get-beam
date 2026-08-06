@@ -21,7 +21,6 @@ from apps.api.dependencies import get_current_user
 from apps.api.schemas.sites import SiteOut
 from apps.api.schemas.visitors import VisitorStatsResponse
 from apps.api.services.agent_visitor_filters import human_only_visitor_filter
-from apps.api.services.identity_classification import VERIFIED_STATUSES
 from apps.api.services.resolution_eligibility import (
     first_win_boost_site_ids,
     resolution_candidate_filter,
@@ -89,7 +88,7 @@ async def get_overview(
                 Visitor.site_id,
                 func.count().label("total"),
                 func.count()
-                .filter(Visitor.identity_status.in_(VERIFIED_STATUSES))
+                .filter(Visitor.identity_status == "identified")
                 .label("identified"),
                 func.count()
                 .filter(Visitor.enrichment_status == "enriched")

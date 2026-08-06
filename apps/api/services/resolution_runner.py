@@ -128,7 +128,12 @@ async def run_resolution_for_site(
         )
         .where(
             Visitor.site_id == site.site_id,
-            Visitor.identity_status == "anonymous",
+            # Identity-honesty Phase 1 (B1): candidate-tier visitors stay in the
+            # sweep so a LATER deterministic signal (a form capture, a _bid email
+            # click) can still upgrade them. Their pass is scoped to those
+            # deterministic checks only — see deterministic_only below — so the
+            # sweep can never auto-promote a candidate off another graph guess.
+            Visitor.identity_status.in_(("anonymous", "candidate")),
             candidate_eligible,
             Visitor.do_not_resolve.is_(False),
             # Skip visitors held back by a provider outage until their
@@ -164,7 +169,10 @@ async def run_resolution_for_site(
             break
         counters["processed"] += 1
         try:
-            identified = await resolver.resolve(visitor)
+            identified = await resolver.resolve(
+                visitor,
+                deterministic_only=(visitor.identity_status == "candidate"),
+            )
             if identified:
                 counters["resolved"] += 1
                 await increment_usage(db, site.user_id)

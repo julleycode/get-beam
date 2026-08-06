@@ -111,7 +111,12 @@ class VisitorDetailOut(VisitorOut):
 
 class VisitorStatsResponse(BaseModel):
     total_visitors: int
+    # CONFIRMED identities only (identity_status == "identified").
     identified: int
+    # Identity-honesty Phase 1: unconfirmed graph matches awaiting human
+    # confirm/reject. Reported separately — never folded into `identified`.
+    # Defaulted so existing constructors/consumers stay valid.
+    candidates: int = 0
     enriched: int
     could_enrich_more: int
     # Count feeding the auto-segmentation trigger (enriched AND not yet segmented)

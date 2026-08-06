@@ -21,9 +21,8 @@ import pytest
 from apps.api.routers import webhooks
 from apps.api.services import leadpipe_webhook as lw
 from apps.api.services.identity_classification import (
-    STATUS_PROVIDER_CANDIDATE,
-    identity_status_for_provider,
     is_emailable_identity,
+    is_graph_candidate_provider,
 )
 
 pytestmark = pytest.mark.unit
@@ -425,11 +424,15 @@ class TestBatchEnvelope:
 
 class TestOutreachGuardrail:
     def test_leadpipe_identity_is_a_candidate_not_verified(self):
-        assert identity_status_for_provider("leadpipe") == STATUS_PROVIDER_CANDIDATE
+        # D1: leadpipe matches land on the candidate tier, never a flat
+        # "identified" — only human confirmation promotes them.
+        assert is_graph_candidate_provider("leadpipe") is True
 
-    def test_leadpipe_is_never_emailable(self):
-        """The webhook path must not have quietly promoted the provider."""
-        assert is_emailable_identity("leadpipe") is False
+    def test_leadpipe_is_emailable_but_stays_a_candidate(self):
+        """D2: the webhook path yields an emailable person-level identity, but
+        it must NOT have quietly promoted it off the candidate tier."""
+        assert is_emailable_identity("leadpipe") is True
+        assert is_graph_candidate_provider("leadpipe") is True
 
 
 class TestPullFlagGate:

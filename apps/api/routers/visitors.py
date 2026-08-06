@@ -44,7 +44,6 @@ from apps.api.services.agent_visitor_filters import human_only_visitor_filter
 from apps.api.services.billing import check_usage_allowed, increment_usage
 from apps.api.services.conviction import build_conviction
 from apps.api.services.enricher import Enricher
-from apps.api.services.identity_classification import STATUS_VERIFIED
 from apps.api.services.identity_classification import identity_level
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.known_hash import email_hash
@@ -166,12 +165,24 @@ async def list_visitors(
                 IdentifiedVisitor.email,
                 IdentifiedVisitor.full_name,
                 IdentifiedVisitor.resolution_provider,
+                # Identity-honesty Phase 1 (AC5): the candidate badge shows the
+                # match's confidence, so the list rows need it too — not just
+                # the detail response.
+                IdentifiedVisitor.confidence_score,
             ).where(
                 IdentifiedVisitor.site_id == site_id,
                 IdentifiedVisitor.visitor_id.in_(vids),
             )
         )
-        id_map = {r.visitor_id: (r.email, r.full_name, r.resolution_provider) for r in id_rows}
+        id_map = {
+            r.visitor_id: (
+                r.email,
+                r.full_name,
+                r.resolution_provider,
+                r.confidence_score,
+            )
+            for r in id_rows
+        }
 
         # Merged visitors carry their identity on the canonical row, not their
         # own — resolve email/name from canonical_visitor_id so deduped
@@ -197,7 +208,13 @@ async def list_visitors(
                 )
             )
             canon_id_map = {
-                r.visitor_id: (r.email, r.full_name, r.resolution_provider) for r in canon_rows
+                r.visitor_id: (
+                    r.email,
+                    r.full_name,
+                    r.resolution_provider,
+                    r.confidence_score,
+                )
+                for r in canon_rows
             }
             for vid, cvid in canon_of.items():
                 if cvid in canon_id_map:
@@ -205,12 +222,15 @@ async def list_visitors(
 
         for v in visitors:
             if v.visitor_id in id_map:
-                v.email, v.full_name, _prov = id_map[v.visitor_id]
+                v.email, v.full_name, _prov, _conf = id_map[v.visitor_id]
                 v.identity_level = identity_level(_prov)
+                v.confidence_score = _conf
 
         # Flag rows whose email is in the owner's known-contacts list (badge).
         # One query for the page: hash this page's emails, look them up by hash.
-        page_hashes = {vid: email_hash(em) for vid, (em, _fn, _prov) in id_map.items() if em}
+        page_hashes = {
+            vid: email_hash(em) for vid, (em, _fn, _prov, _conf) in id_map.items() if em
+        }
         if page_hashes:
             from apps.api.services.known_contacts_match import known_source_map
 
@@ -847,6 +867,21 @@ async def resolve_one_visitor(
     if visitor.identity_status == "unresolvable":
         is_retry = True
         visitor.identity_status = "anonymous"
+    elif visitor.identity_status == "candidate":
+        # Identity-honesty Phase 1 (B2), explicit decision: a candidate is NOT
+        # re-processed here. Re-running the waterfall on a candidate can only
+        # produce another graph guess, and a graph guess can never promote them
+        # (see GRAPH_CANDIDATE_PROVIDERS) — so a Retry would spend paid provider
+        # budget for a status that cannot change. The correct flow is
+        # confirm-candidate (human verifies) or reject-candidate (back to
+        # anonymous, after which this endpoint and the sweep both work normally).
+        return {
+            "status": "candidate",
+            "message": (
+                "Unconfirmed match awaiting review — confirm or reject this "
+                "candidate instead of re-resolving."
+            ),
+        }
     elif visitor.identity_status != "anonymous":
         return {"status": visitor.identity_status, "message": "Already processed."}
 
@@ -1042,7 +1077,7 @@ async def manual_identify_visitor(
         )
         db.add(identified)
 
-    visitor.identity_status = STATUS_VERIFIED
+    visitor.identity_status = "identified"
     await db.commit()
 
     # Also create/update enrichment profile if company info provided
@@ -1080,6 +1115,106 @@ async def manual_identify_visitor(
         "visitor_id": visitor_id,
         "email": body.email,
         "full_name": body.full_name,
+    }
+
+
+async def _load_candidate_visitor(
+    db: AsyncSession, site_id: str, visitor_id: str, user: User
+) -> Visitor:
+    """Fetch a visitor that MUST currently be on the candidate tier.
+
+    Shared by reject-candidate / confirm-candidate. Multi-tenancy: access is
+    gated by `_verify_site_access` (Site.user_id == user.id) and a miss returns
+    404, never 403 — a cross-tenant caller must not learn whether the id exists.
+    """
+    await _verify_site_access(db, site_id, user)
+    result = await db.execute(
+        select(Visitor).where(
+            Visitor.site_id == site_id,
+            Visitor.visitor_id == visitor_id,
+            human_only_visitor_filter(),
+        )
+    )
+    visitor = result.scalar_one_or_none()
+    if not visitor:
+        raise HTTPException(status_code=404, detail="Visitor not found")
+    if visitor.identity_status != "candidate":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Visitor is not a candidate (status: {visitor.identity_status}).",
+        )
+    return visitor
+
+
+@router.post("/{site_id}/{visitor_id}/reject-candidate")
+async def reject_candidate(
+    site_id: str,
+    visitor_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Reject an unconfirmed candidate match — the human says "that isn't them".
+
+    Returns the visitor to `anonymous` (so the sweep can pick them up again) and
+    sets `do_not_email = True` on the existing IdentifiedVisitor row, which every
+    emailable/export call site already honours — the rejected match stops being
+    contactable immediately, with no new column needed.
+
+    The row itself is NOT hard-deleted (its `resolved_at` stays visible for
+    audit; `resolution_logs` remains the authoritative immutable trail). A later
+    successful re-resolution overwrites this row and clears `do_not_email` — see
+    the upsert-on-conflict path in `_save_identified`.
+    """
+    visitor = await _load_candidate_visitor(db, site_id, visitor_id, user)
+
+    visitor.identity_status = "anonymous"
+    await db.execute(
+        update(IdentifiedVisitor)
+        .where(
+            IdentifiedVisitor.site_id == site_id,
+            IdentifiedVisitor.visitor_id == visitor_id,
+        )
+        .values(do_not_email=True)
+    )
+    await db.commit()
+
+    logger.info("candidate_rejected", visitor_id=visitor_id[:8], site_id=site_id)
+    return {"status": "anonymous", "visitor_id": visitor_id, "rejected": True}
+
+
+@router.post("/{site_id}/{visitor_id}/confirm-candidate")
+async def confirm_candidate(
+    site_id: str,
+    visitor_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Confirm an unconfirmed candidate match — the human vouches for it.
+
+    Promotes the visitor to `identified` and stamps `IdentifiedVisitor.confirmed_at`.
+    Human confirmation is the ONLY path (besides deterministic first-party
+    signals) that produces a verified identity — no confidence score, however
+    high, ever promotes a candidate on its own.
+    """
+    visitor = await _load_candidate_visitor(db, site_id, visitor_id, user)
+
+    confirmed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    visitor.identity_status = "identified"
+    await db.execute(
+        update(IdentifiedVisitor)
+        .where(
+            IdentifiedVisitor.site_id == site_id,
+            IdentifiedVisitor.visitor_id == visitor_id,
+        )
+        .values(confirmed_at=confirmed_at)
+    )
+    await db.commit()
+
+    logger.info("candidate_confirmed", visitor_id=visitor_id[:8], site_id=site_id)
+    return {
+        "status": "identified",
+        "visitor_id": visitor_id,
+        "confirmed_at": confirmed_at.isoformat(),
     }
 
 

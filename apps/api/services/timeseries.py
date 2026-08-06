@@ -12,7 +12,6 @@ from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.visitor import Visitor
-from apps.api.services.identity_classification import VERIFIED_STATUSES
 from apps.api.services.kpi import HIGH_INTENT
 
 logger = structlog.get_logger()
@@ -32,6 +31,7 @@ def build_series(counts: dict, days: int, today: date) -> list:
                 "date": d,
                 "visitors": int(c.get("visitors", 0)),
                 "identified": int(c.get("identified", 0)),
+                "candidates": int(c.get("candidates", 0)),
                 "high_intent": int(c.get("high_intent", 0)),
             }
         )
@@ -47,11 +47,14 @@ async def compute_timeseries(db: AsyncSession, site_id: str, days: int = 30) -> 
     since = datetime.utcnow() - timedelta(days=days)
     day = func.date(Visitor.last_seen)
     # case()-sum instead of count().filter() for SQLite (tests) portability.
-    # Trusted statuses only (verified + legacy identified) — not provider_candidate.
-    identified_case = case((Visitor.identity_status.in_(VERIFIED_STATUSES), 1), else_=0)
+    identified_case = case((Visitor.identity_status == "identified", 1), else_=0)
+    # Identity-honesty Phase 1 (B4) — explicit decision for this site: candidates
+    # get their OWN daily series, never folded into `identified`, never dropped.
+    # The chart therefore matches the funnel's own identified/candidates split.
+    candidate_case = case((Visitor.identity_status == "candidate", 1), else_=0)
     high_intent_case = case(
         (
-            Visitor.identity_status.in_(VERIFIED_STATUSES)
+            (Visitor.identity_status == "identified")
             & (Visitor.intent_score >= HIGH_INTENT),
             1,
         ),
@@ -62,6 +65,7 @@ async def compute_timeseries(db: AsyncSession, site_id: str, days: int = 30) -> 
             day.label("date"),
             func.count().label("visitors"),
             func.sum(identified_case).label("identified"),
+            func.sum(candidate_case).label("candidates"),
             func.sum(high_intent_case).label("high_intent"),
         )
         .where(Visitor.site_id == site_id, Visitor.last_seen >= since)
@@ -72,6 +76,7 @@ async def compute_timeseries(db: AsyncSession, site_id: str, days: int = 30) -> 
         str(r.date)[:10]: {
             "visitors": int(r.visitors or 0),
             "identified": int(r.identified or 0),
+            "candidates": int(r.candidates or 0),
             "high_intent": int(r.high_intent or 0),
         }
         for r in result.all()

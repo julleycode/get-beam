@@ -132,15 +132,118 @@ consented record.
 
 ## Current Execution State
 
-- Last updated: 26-07-26
-- Current phase: 0 of 4 (not yet started — plan just written)
-- Phase 1 status: not started
-- Phase 1 EVL: n/a
-- Phase 1 report: n/a
-- Phase 2 status: not started
-- Phase 3 status: not started
-- Phase 4 status: not started
-- Next phase: Phase 1 — Agent-facing site content, Step 1 (RESEARCH)
+- Last updated: 07-08-26 (UPDATE PROCESS reconciliation — this entry was stale; it still said
+  "0 of 4, not yet started" while Phase 1+2 code has been live and EVL-green since 26-07-26)
+- Current phase: 2 of 4 — CODE DONE (EVL-green with 2 known-gaps); Phase 3/4 SUPERSEDED (see
+  `## Decision Record — Consent-Link (Design A) Superseded by Zero-Click AgentLead (Design B)`
+  below)
+- Phase 1 status: CODE DONE — EVL-green. Evidence: `AgentProfile` model registered
+  (`apps/api/main.py:44`), `agent_profile` router mounted at `/api/v1/agent-profile`
+  (`apps/api/main.py:52,515`); `apps/api/models/agent_profile.py` (58 lines) on disk;
+  migration `a4f7c2e9d31b_add_agent_profile.py` present. Known-gap: migration live round-trip
+  (Docker-gated, per `agent-gateway_REPORT_26-07-26.md`).
+- Phase 1 EVL: cycle 2 HALTED_SUCCESS (`results.tsv` row 4) — full unit lane green, guardrail
+  regression 36/36, boundary audit clean.
+- Phase 1 report: `agent-gateway_REPORT_26-07-26.md` + `agent-gateway-evl-iteration-001_REPORT_26-07-26.md`
+- Phase 2 status: CODE DONE — EVL-green. Evidence: `agent_gateway.router` mounted at
+  `/api/v1/agent` (`apps/api/main.py:52,520`, live routes confirmed —
+  `GET /{site_id}/manifest.json`, `/offers.json`, `/llms.txt` at
+  `apps/api/routers/agent_gateway.py:67,84,129`); `agent_mcp.router` mounted at
+  `/api/v1/agent` (`apps/api/main.py:52,521`) exposing exactly 3 read tools —
+  `get_offers`/`get_pricing`/`check_availability` (`apps/api/routers/agent_mcp.py:99-109`), no
+  action tool present (confirmed by `test_no_write_or_action_tool_is_exposed_in_phase_2`, per
+  `agent-gateway_REPORT_26-07-26.md`). `agent_gateway_enabled` default OFF
+  (`apps/api/config.py`).
+- Phase 2 report: same two files as Phase 1 (joint EXECUTE + EVL pass).
+- Phase 3 status: **SUPERSEDED, never implemented.** Confirmed on disk 07-08-26: no
+  `apps/api/models/agent_action.py`, no `apps/api/models/consent_receipt.py`, no
+  `apps/api/services/consent_capture.py`, no `apps/web/src/app/c/` route exist anywhere in this
+  worktree. The consent-link design this plan's Phase 3/4 describe was never built — the user
+  chose the alternative zero-click `AgentLead` design instead (see Decision Record below).
+- Phase 4 status: **SUPERSEDED, never implemented.** Same verification method as Phase 3 —
+  `identity_classification.py` on this worktree has NOT had `"agent_consent"` added to
+  `PERSON_LEVEL_PROVIDERS` and `visitor_email.py` has NOT had `"agent_consent"` added to
+  `VISITOR_EMAIL_SOURCES` (git history for these files, `git log --oneline -- apps/api/services/identity_classification.py`, shows no agent-gateway-attributed commit touching them).
+- Next phase: none within this plan's original Phase 3/4 design — see Decision Record and the
+  WS3 Merge Preconditions checklist below for the actual forward path (`feat/ws3-agent-concierge`,
+  unmerged).
+
+## Decision Record — Consent-Link (Design A) Superseded by Zero-Click AgentLead (Design B)
+
+**Date:** 07-08-26. **Recorded by:** UPDATE PROCESS, at explicit user instruction. This section
+documents a user architecture decision — it does not re-argue it.
+
+**The situation:** two mutually incompatible, independently-built designs existed for the agent
+gateway's action-taking surface (this program's Phase 3/4 vs. a separate branch's approach). The
+user was presented with both and chose one.
+
+**Design A — consent-link mandatory (REJECTED, this plan's own Phase 3/4, below).** A human must
+click a consent link and submit an email; identity is then written via
+`IdentityResolver._save_identified` (never the `manual` shortcut at
+`apps/api/routers/visitors.py:939-949`), with `source_agent_visit_id` never set. Fully designed in
+this plan's Phase 3 ("Action + Consent Link") and Phase 4 ("Identity Capture + Dashboard") sections
+below — **never implemented** (confirmed on disk 07-08-26: no `agent_action.py`,
+`consent_receipt.py`, `consent_capture.py`, or `apps/web/src/app/c/` exist in this worktree).
+
+**Design B — zero-click `AgentLead` (CHOSEN).** Lives on branch `feat/ws3-agent-concierge`
+(pushed to `origin/feat/ws3-agent-concierge`, **not merged** to `devjulley`/`main`). Exposes
+`request_quote`/`book_demo` MCP tools that write a structurally isolated `AgentLead` row —
+confirmed via `git ls-tree -r feat/ws3-agent-concierge`: `apps/api/models/agent_lead.py`,
+migrations `c5e0f2b8d163_add_agent_leads_and_tool_calls.py` and `c9d2f7b4e1a6_add_consent_mode.py`,
+extended `apps/api/routers/agent_gateway.py` / `agent_mcp.py`, `agent_lead_notify.py`. No
+`visitor_id` column on `AgentLead`; zero imports of `IdentifiedVisitor`/`Visitor` from that model
+(not independently re-verified line-by-line in this UPDATE PROCESS pass — read the branch file
+directly before relying on this). No consent click at all — the agent's tool call itself creates
+the lead. Code is reported DONE and EVL-green on that branch, gated behind an unrelated WS0 "wild
+kill test" that never ran (see open question below).
+
+**The accepted tradeoff (user's words, relayed verbatim — do not soften):** an agent-asserted lead
+with no human confirmation click. The emailability guardrail (`is_emailable_identity`,
+`tests/unit/test_agent_origin_exclusion.py`) survives because `AgentLead` is structurally
+isolated from `IdentifiedVisitor`/`Visitor` — but lead quality now depends on the agent being
+truthful, which this design does not verify. This is a real, accepted risk, not an oversight.
+
+**Why Design A lost:** it required a human click-through before any lead is created, which is
+higher-friction than Design B's zero-click tool call. The user weighed the resulting quality
+guarantee (a human-confirmed email) against the friction cost and chose to accept lower
+confidence-per-lead in exchange for a frictionless agent-to-lead path. Beam's outbound-safety
+guardrails (no auto-send, human-approves-before-send) are unaffected either way — both designs
+only ever produce a *draft* lead entering the existing enrichment → segment → outreach pipeline,
+never an auto-sent message.
+
+**Status of this plan's own Phase 3/4 sections below:** SUPERSEDED, not deleted, not completed.
+The original design and rationale are preserved verbatim below for a future reader who needs to
+understand why consent-link was the first design and what specifically it would have required
+(the guardrail-preservation logic in Phase 4's Rationale section, in particular, remains a
+correct and reusable reference even though this exact implementation was not built). Do not
+resume EXECUTE on Phase 3/4 as written below without first re-opening this decision with the
+user — it was explicitly superseded, not merely paused.
+
+## WS3 Merge Preconditions (`feat/ws3-agent-concierge` — unmerged; do NOT perform any of these
+here, checklist only)
+
+1. **Branch is unmerged.** `feat/ws2-agent-session-classifier` is a sibling branch, and the
+   `agent-native-revenue` program's umbrella docs live on the ws2 branch (per repo memory:
+   `agent-native-revenue-branch-topology.md`). A merge of ws3 needs that reconciled separately —
+   umbrella state currently lives split across two unpushed-to-main branches.
+2. **Migration re-chain required at merge time.** The ws3 branch carries its own migrations
+   (`c5e0f2b8d163_add_agent_leads_and_tool_calls.py`, `c9d2f7b4e1a6_add_consent_mode.py`) which
+   must be re-chained onto the TRUE live alembic head at merge time — always re-run
+   `.venv/bin/python3.11 -m alembic -c apps/api/alembic.ini heads` live immediately before
+   merging or writing any `down_revision`; never trust a value recorded in any plan or context
+   doc, including this one. This repo has a documented pattern of concurrent-session migration
+   collisions (see `concurrent-program-migration-collision-rechain.md` memory note).
+3. **WS0 "wild kill test" gate status is an OPEN QUESTION — not decided here.** The gate
+   (AC-WS3-5/6 on the ws3 branch, real ChatGPT/Claude calling a live tool over ~a week) never
+   ran. This UPDATE PROCESS pass did not read the ws3 branch's own SPEC/VALIDATE artifacts in
+   enough depth to determine whether the user's choice of Design B implies that gate still blocks
+   merge, or is superseded by the architecture decision itself. **Do not assume either answer —
+   whoever picks up the ws3 merge must explicitly resolve this against that branch's own
+   validate-contract before treating the branch as merge-ready.**
+4. **Regression tests that must pass unchanged after any merge:**
+   - `tests/unit/test_agent_origin_exclusion.py`
+   - `tests/unit/test_cadence_bot_flag.py` (asserts `is_emailable_identity` 3-param signature)
+   - `tests/unit/test_handoff_emailability_separation.py`
 
 ## Pre-PVL Conflict Resolution
 
@@ -505,7 +608,14 @@ posture-reversal note is written and cross-referenced.
 
 ---
 
-# Phase 3 — Action + Consent Link (agent acts, human consents)
+# Phase 3 — Action + Consent Link (agent acts, human consents) — **SUPERSEDED 07-08-26**
+
+> **SUPERSEDED, not deleted.** The user chose the zero-click `AgentLead` design
+> (`feat/ws3-agent-concierge`) over this consent-link design — see
+> `## Decision Record — Consent-Link (Design A) Superseded by Zero-Click AgentLead (Design B)`
+> near the top of this plan. This section was never implemented (confirmed on disk 07-08-26: no
+> `agent_action.py`, `consent_receipt.py`, or `apps/web/src/app/c/` exist). Preserved verbatim
+> below as design history — do not resume EXECUTE on this section without re-opening the decision.
 
 **Risk class: HIGH.** First public write-adjacent surface, first identity-adjacent data
 (`AgentAction`, `ConsentReceipt`), new default-OFF flag, agent-attribution logic, and the consent
@@ -695,7 +805,16 @@ and passing.
 
 ---
 
-# Phase 4 — Identity Capture + Dashboard
+# Phase 4 — Identity Capture + Dashboard — **SUPERSEDED 07-08-26**
+
+> **SUPERSEDED, not deleted.** The user chose the zero-click `AgentLead` design
+> (`feat/ws3-agent-concierge`) over this consent-link design — see
+> `## Decision Record — Consent-Link (Design A) Superseded by Zero-Click AgentLead (Design B)`
+> near the top of this plan. This section was never implemented (confirmed on disk 07-08-26: no
+> `"agent_consent"` in `PERSON_LEVEL_PROVIDERS`/`VISITOR_EMAIL_SOURCES`, no `consent_capture.py`).
+> The guardrail-preservation reasoning below remains a correct, reusable reference even though
+> this exact write path was not built — do not resume EXECUTE on this section without
+> re-opening the decision with the user.
 
 **Risk class: HIGH.** This phase writes to the identity system for the first time in this
 program. The guardrail-preservation design is the single most load-bearing part of the whole
