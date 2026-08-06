@@ -231,16 +231,31 @@ Hai đường đi hợp lệ (B đã bị loại):
 
 | Đường | Ưu | Nhược | Dùng khi |
 |---|---|---|---|
-| **A. Dán tay từng site** ✅ **ĐÃ CHỌN** | Đơn giản, đang chạy trên lab | Không scale; mỗi site sửa HTML thủ công + tạo pixel thủ công trên dashboard | 1–2 site, giai đoạn thử nghiệm |
-| ~~B. `data-stack` + pixel-id toàn cục~~ | — | **LOẠI — sai về bản chất.** Pixel gắn cứng 1 domain; `sites.py:284` đã ghi rõ "global pixel id only, `Site` has no leadpipe_pixel_id column". Dùng chung 1 UUID cho site khác domain → Leadpipe không nhận diện gì | **Không dùng** |
-| **C. Provisioning tự động** | Đúng mô hình multi-tenant | Phải viết: gọi `POST /v1/data/pixels` khi tạo site + cột lưu `pixel_id` theo site (**cần migration** — vi phạm ràng buộc hiện tại) | Khi có khách thật, plan sau |
+| ~~A. Dán tay từng site~~ | Đơn giản | Không scale; mỗi site sửa HTML + tạo pixel thủ công trên dashboard | Đã bị C thay thế |
+| ~~B. `data-stack` + pixel-id toàn cục~~ | — | **LOẠI — sai về bản chất.** Pixel gắn cứng 1 domain | **Không dùng** |
+| **C. Provisioning tự động** ✅ **ĐÃ LÀM 06-08-26** | Đúng mô hình multi-tenant | Cần migration | Đã thực hiện |
 
-**Quyết định (validation session 2): giữ A.** Chỉ đầu tư vào **C** sau khi đường ống đã chứng minh
-chạy end-to-end trên một domain — viết provisioning cho một đường ống chưa chứng minh được là đặt
-cược sai chỗ. **B không còn là lựa chọn hợp lệ ở bất kỳ chỗ nào trong plan này.**
+<!-- Updated: 06-08-26 — quyết định session 2 (giữ A) đã bị THAY bằng C. Lý do ghi ngay dưới. -->
 
-Vì giữ A: **không bật `data-stack`** trên site lab. Nếu sau này bật, phải **gỡ thẻ dán tay trước**,
-nếu không pixel nạp 2 lần.
+**Quyết định MỚI 06-08-26: đã làm C, không phải A.** Ba bằng chứng thu được sau session 2 đảo
+ngược lựa chọn cũ:
+
+1. **`/v1/data` không phân biệt được "chưa cài pixel" với "cài rồi nhưng vắng khách"** — cả hai đều
+   trả `200 {"data":[],"meta":{"total":0}}` (probe org thật 06-08-26). Không có gate pixel thì
+   trường hợp đầu bị ghi thành `no_match` và khoá visitor 30 ngày. Gate bắt buộc phải có, mà gate
+   thì cần biết pixel của từng site → cần cột.
+2. **Pixel lab thuộc org KHÁC với API key Beam đang dùng** (`to-s-workspace` vs `Beam ai`). Đường A
+   không phát hiện được lớp lỗi này; nó chỉ hiện ra khi có provisioning gắn pixel với đúng key.
+3. **Org đã khoẻ** (`To's workspace`, trial, `POST /v1/data/pixels` chạy được) → điều kiện "chỉ đầu
+   tư C sau khi đường ống chứng minh được" đã thoả ở mức đủ để viết code.
+
+Đã thực hiện: migration `b4c9a71e35d8` (cột `Site.leadpipe_pixel_id`),
+`apps/api/services/leadpipe_pixels.py` (`POST` → 409 → `GET pixels` → khớp domain), cấp phát lazy
+trong `get_pixel_snippet`, gate sau cờ `LEADPIPE_PIXEL_AUTOPROVISION_ENABLED` (mặc định OFF).
+Hai setting `LEADPIPE_DEFAULT_PIXEL_ID` / `_DOMAIN` đã gỡ hẳn.
+
+Chi tiết đầy đủ + bằng chứng probe:
+`plans/reports/scout-260806-1053-leadpipe-pixel-provisioning-gap-report.md`.
 
 ### Trình tự còn lại
 
@@ -300,18 +315,29 @@ nếu không pixel nạp 2 lần.
 
 <!-- Updated: Validation Session 2 - tiêu chí bám org mới; bỏ nhánh B -->
 
-- [ ] Org free mới đã tạo; `POST /v1/data/pixels` trả **201** kèm `id` mới
-- [ ] Thẻ script trên `infra/cloudflare/beam-lab/public/index.html` đã thay sang pixel id mới;
-      pixel id cũ `3ead3e50-…` không còn xuất hiện ở đâu
-- [ ] `GET /v1/data` trả **200 kèm dữ liệu visitor thật** (không phải mảng rỗng); kết quả ghi vào
-      handoff doc
-- [ ] Mỗi provider có quyết định giữ/bỏ/hoãn kèm lý do (Leadpipe: giữ, org mới; Capturify: vô hiệu,
-      không liên hệ; RB2B: giữ, đo lại sau khi bug ledger lên PROD)
-- [ ] Đường A được giữ: **không** bật `data-stack`, **không** viết provisioning
-- [ ] Không có site nào nạp pixel Leadpipe 2 lần
-- [ ] Handoff doc đã sửa các khẳng định lỗi thời (404, `pixels_active=0`)
-- [ ] Hạn chế "chưa đo được precision vì thiếu traffic US" được ghi rõ, không lấp liếm
+<!-- Updated: 06-08-26 — tiêu chí bám org mới thay bằng org sẵn có + đường C -->
+
+- [x] Org khoẻ đã xác định: `To's workspace` (`status: trial`, `healthy: true`, 500 credit chưa
+      dùng). **Không cần tạo org mới** — org này đã sở hữu sẵn pixel lab
+- [x] ~~Thay thẻ script bằng pixel id mới~~ — **không còn cần**: pixel `3ead3e50-f6c0-…` vẫn
+      `status: active` và thuộc đúng org này. Việc phải làm là đổi `LEADPIPE_API_KEY` sang key của
+      org này, không phải đổi pixel
+- [ ] `GET /v1/data` trả **200 kèm dữ liệu visitor thật** — hiện **200 nhưng rỗng**. Chưa phân biệt
+      được chưa-có-traffic / traffic-không-phải-US / Leadpipe-chưa-match. **Đây là tiêu chí duy nhất
+      còn treo, và là thứ chặn Phase 4**
+- [x] Mỗi provider có quyết định giữ/bỏ/hoãn kèm lý do (Leadpipe: giữ; Capturify: vô hiệu bằng flag;
+      RB2B: giữ, đo lại sau khi bug ledger lên PROD)
+- [x] ~~Giữ đường A~~ → **đã làm đường C** (provisioning tự động) — lý do ở §Hai đường đi hợp lệ
+- [x] Không có site nào nạp pixel Leadpipe 2 lần (site lab dán tay; các site khác chỉ nhận pixel
+      riêng của mình qua `data-stack`, và chỉ khi cờ autoprovision bật)
+- [x] Handoff doc + `docs/visitor-identity-flow-architecture.md` đã sửa khẳng định lỗi thời
+- [x] Hạn chế "chưa đo được precision vì thiếu traffic US" được ghi rõ
 - [ ] `auto_identify_enabled` chỉ bật sau khi `/v1/data` xanh **và** có backup
+
+**Ba việc vận hành còn lại (ngoài code), phải theo đúng thứ tự:**
+1. Apply migration `b4c9a71e35d8` lên PROD
+2. Đổi `LEADPIPE_API_KEY` sang key org `To's workspace`
+3. Chỉ sau ①② mới bật `LEADPIPE_PIXEL_AUTOPROVISION_ENABLED=true`
 
 ## Risk Assessment
 

@@ -308,8 +308,9 @@ param `/v1/data` đều vô nghĩa nếu bước này thiếu.
 ```mermaid
 flowchart LR
     subgraph SETUP["① Cài đặt (một lần, thường bị bỏ sót)"]
-        E1["ENV: LEADPIPE_DEFAULT_PIXEL_ID"]
-        E2["GET /sites/id/pixel-snippet<br/>→ data-stack=1 data-stack-leadpipe=ID"]
+        E0["FLAG: LEADPIPE_PIXEL_AUTOPROVISION_ENABLED<br/>(mặc định OFF)"]
+        E1["POST /v1/data/pixels domain=host<br/>409 → GET pixels → khớp domain<br/>→ lưu Site.leadpipe_pixel_id"]
+        E2["GET /sites/id/pixel<br/>→ data-stack=1 data-stack-leadpipe=ID"]
         E3["Khách DÁN LẠI snippet lên site"]
         E4["tracker.js nạp<br/>leadpipe.aws53.cloud/p/ID.js"]
     end
@@ -320,13 +321,14 @@ flowchart LR
     end
 
     subgraph BEAM["③ Beam kéo về (sweep mỗi giờ)"]
+        B0["GET /v1/data/pixels (cache 1h)<br/>domain có pixel active?<br/>KHÔNG → ProviderNotConfiguredError<br/>(không ghi sổ, không khoá 30 ngày)"]
         B1["GET /v1/data?domain=host"]
         B2["Lọc LOCAL:<br/>IP trùng VÀ lệch ≤30 phút"]
         B3["_save_identified<br/>provider_candidate"]
     end
 
-    E1 --> E2 --> E3 --> E4 --> V1 --> V2
-    B1 --> B2 --> B3
+    E0 --> E1 --> E2 --> E3 --> E4 --> V1 --> V2
+    B0 --> B1 --> B2 --> B3
     V2 -.->|"chỉ có dữ liệu nếu ① hoàn tất"| B1
 
     style SETUP fill:#fff4e6
@@ -337,8 +339,9 @@ flowchart LR
 
 | # | Lỗ hổng | Bằng chứng | Hệ quả |
 |---|---|---|---|
-| 1 | **Snippet cũ không tự cập nhật.** `data-stack` chỉ xuất hiện khi env pixel-id đã set. Khách dán snippet trước thời điểm đó thì file HTML của họ vĩnh viễn không có attribute này | [sites.py:279-313](apps/api/routers/sites.py#L279-L313) | Pixel vendor không bao giờ nạp → feed rỗng |
-| 2 | ~~Pixel-id theo từng site là code chết~~ — **ĐÃ SỬA 05-08-26.** `getattr(site, "leadpipe_pixel_id", None)` đọc một cột không tồn tại, luôn trả `None`. Đã bỏ, chỉ dùng global setting và ghi rõ giới hạn trong comment | [sites.py:284](apps/api/routers/sites.py#L284) | Mọi site vẫn dùng chung 1 pixel-id; muốn tách per-site phải thêm cột (schema change) |
+| 1 | **Snippet cũ không tự cập nhật** — VẪN CÒN. Khách dán snippet trước khi pixel được cấp thì file HTML của họ vĩnh viễn thiếu attribute. Chỉ sửa triệt để được nếu `tracker.js` hỏi stack-config lúc runtime thay vì đọc attribute | [sites.py:271-322](apps/api/routers/sites.py#L271-L322) | Pixel vendor không bao giờ nạp → feed rỗng |
+| 2 | ~~Pixel-id theo từng site là code chết~~ — **ĐÃ GIẢI QUYẾT 06-08-26.** Cột `Site.leadpipe_pixel_id` đã có (migration `b4c9a71e35d8`), cấp phát lazy qua `POST /v1/data/pixels` khi khách lấy snippet lần đầu. Hai setting global `LEADPIPE_DEFAULT_PIXEL_ID` / `..._DOMAIN` đã bị gỡ hẳn | [leadpipe_pixels.py](apps/api/services/leadpipe_pixels.py), [sites.py:288-299](apps/api/routers/sites.py#L288-L299) | Mỗi site có pixel riêng đúng domain của nó. Gated sau `LEADPIPE_PIXEL_AUTOPROVISION_ENABLED` (mặc định OFF) |
+| 2b | **Plugin WordPress không đi qua đường này** | [wordpress_plugin_generator.py:22](apps/api/services/wordpress_plugin_generator.py#L22) | Snippet hardcode, không có `data-stack` (và không có `data-consent`) → khách cài bằng plugin không có Leadpipe |
 | 3 | **Capturify chỉ có biến global**, không có nhánh per-site, và request **không gửi kèm scope nào** | [capturify.py:25-32](apps/api/services/identity_providers/capturify.py#L25-L32) | Chỉ đọc 10 record mới nhất toàn tài khoản |
 
 ### 6.4 Sai lệch kiến trúc: Beam dùng PULL, vendor có PUSH
@@ -395,11 +398,16 @@ script 200 sẽ tưởng mọi thứ ổn — không phải.
 3. **Account expired → ĐÚNG.** Đây là blocker thật, và là việc tài khoản phía vendor —
    **không có gì trong code Beam cần sửa** để khôi phục.
 
-**Cần thêm — Beam không có code tạo pixel:** docs Leadpipe yêu cầu
-`POST /v1/data/pixels {domain, name}` → trả `{id, code, …}` để đăng ký từng domain. Grep toàn
-repo: **0 lần gọi**. Vì pixel gắn cứng một domain, một `leadpipe_default_pixel_id` toàn cục
-không thể phục vụ nhiều site khách — đây là khoảng trống chặn multi-tenant, không chỉ là thiếu
-một cột trong `Site`.
+**~~Cần thêm — Beam không có code tạo pixel~~ — ĐÃ LÀM 06-08-26.**
+`apps/api/services/leadpipe_pixels.py` gọi `POST /v1/data/pixels {domain, name}`; khi trùng
+domain, API trả **409 và KHÔNG kèm id**, nên phải `GET /v1/data/pixels` rồi khớp domain để lấy id
+(kiểm chứng trên org thật 06-08-26). Kết quả lưu vào `Site.leadpipe_pixel_id`.
+
+**Kiểm chứng thực nghiệm 06-08-26 — vì sao gate pixel là bắt buộc:** `GET /v1/data` trả **giống
+hệt nhau** cho domain chưa có pixel và domain có pixel nhưng chưa ai ghé:
+`200 {"data":[],"meta":{"total":0}}`. Chỉ `/v1/data/pixels` phân biệt được. Không có gate thì
+trường hợp đầu bị ghi thành `no_match` → khoá visitor 30 ngày cho một câu hỏi mà provider chưa
+từng ở vị trí trả lời được.
 
 **Vấn đề thật còn lại — pixel dán tay, Beam không quản lý:**
 
@@ -409,8 +417,13 @@ vào HTML. Với site lab thì chạy được; nhưng cơ chế `data-stack` c�
 
 Và payload pixel ghi cứng `"domain"` → **pixel là per-domain**. Điều này xác nhận lỗ hổng #2 ở
 §6.3 nghiêm trọng hơn tưởng: một `LEADPIPE_DEFAULT_PIXEL_ID` toàn cục **không thể dùng chung cho
-nhiều site khách**. Muốn scale phải có pixel-id theo từng site (cần cột trong `Site`) hoặc tạo
-pixel động qua API.
+nhiều site khách**. Đã xử lý 06-08-26 bằng cột `Site.leadpipe_pixel_id` + cấp phát động qua API.
+
+**Không tự tạo org cho từng khách được (probe 06-08-26).** `POST /v1/organizations` có tồn tại
+nhưng nằm ở mặt phẳng auth khác: nó từ chối `X-API-Key` hoàn toàn và đòi
+`Authorization: Bearer <token phiên đăng nhập dashboard>`. Org API key không bao giờ gọi sang
+được. Nên chỉ có hai mô hình: **một org của Beam + pixel theo domain khách** (đang dùng), hoặc
+**BYOK** — khách tự đăng ký Leadpipe qua web rồi dán key.
 
 **Về RB2B:** handoff doc ghi `13 attempts / 8 success logs` nhưng **toàn bộ 8 success dồn vào 1
 visitor false-positive**. Trùng khớp độc lập với audit script 05-08-26 (8 success → 1 identity,
