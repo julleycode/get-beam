@@ -322,9 +322,20 @@ Chi tiết đầy đủ + bằng chứng probe:
 - [x] ~~Thay thẻ script bằng pixel id mới~~ — **không còn cần**: pixel `3ead3e50-f6c0-…` vẫn
       `status: active` và thuộc đúng org này. Việc phải làm là đổi `LEADPIPE_API_KEY` sang key của
       org này, không phải đổi pixel
-- [ ] `GET /v1/data` trả **200 kèm dữ liệu visitor thật** — hiện **200 nhưng rỗng**. Chưa phân biệt
-      được chưa-có-traffic / traffic-không-phải-US / Leadpipe-chưa-match. **Đây là tiêu chí duy nhất
-      còn treo, và là thứ chặn Phase 4**
+<!-- Updated: 06-08-26 — tiêu chí cũ "phải có dữ liệu thật" ĐÃ BỊ THAY. Lý do ngay dưới. -->
+
+- [x] **Đường ống xanh** (thay cho tiêu chí cũ "`/v1/data` trả dữ liệu visitor thật"): key hợp lệ
+      (401 không xảy ra), org `healthy: true`, pixel `status: active` cho domain, và
+      `GET /v1/data?domain=X` trả **200** (không phải 403). Đã đạt đủ 4/4 ngày 06-08-26.
+
+      **Vì sao đổi tiêu chí:** "phải có dữ liệu" gộp hai câu hỏi khác nhau — *đường ống có chạy
+      không* (việc setup) và *có ai ghé đúng loại không* (việc traffic). Feed rỗng trên một đường
+      ống đúng là trạng thái hoàn toàn hợp lệ. Tệ hơn: tiêu chí cũ **không bao giờ thoả được** nếu
+      không có traffic US — mà chính plan này đã **hoãn chính thức** nguồn traffic US ở bước 4. Nó
+      tự mâu thuẫn, và giữ nó sẽ khoá Phase 4 vĩnh viễn vì một lý do không liên quan tới Phase 4.
+
+      Số lượng bản ghi trong feed là chỉ số **coverage**, thuộc Phase 4, không phải điều kiện
+      nghiệm thu setup của phase này.
 - [x] Mỗi provider có quyết định giữ/bỏ/hoãn kèm lý do (Leadpipe: giữ; Capturify: vô hiệu bằng flag;
       RB2B: giữ, đo lại sau khi bug ledger lên PROD)
 - [x] ~~Giữ đường A~~ → **đã làm đường C** (provisioning tự động) — lý do ở §Hai đường đi hợp lệ

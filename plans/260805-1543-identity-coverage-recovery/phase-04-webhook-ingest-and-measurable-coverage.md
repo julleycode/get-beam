@@ -12,12 +12,26 @@ dependencies: [3]
 
 Chuyển Leadpipe từ **pull polling** sang **webhook push**, và dựng bộ đo coverage thật.
 
-<!-- Updated: Validation Session 2 - điều kiện tiên quyết bám org mới -->
+<!-- Updated: 06-08-26 — điều kiện tiên quyết cũ SAI, thay bằng điều kiện thật. -->
 
-**Điều kiện tiên quyết cứng (Phase 3 phải xanh trước):** org free mới đã tạo, pixel mới đã thay
-vào site lab, và `GET /v1/data` trả **200 kèm dữ liệu visitor thật**. Pixel nạp 200 **không phải**
-tín hiệu đủ — pixel cũ vẫn nạp 200 trong khi org hết hạn. Đăng ký webhook cũng cần org còn hiệu
-lực, nên phase này bị chặn cứng sau Phase 3.
+**Điều kiện tiên quyết — đã ĐẠT 06-08-26.** Bản trước ghi "phải có `GET /v1/data` trả dữ liệu
+visitor thật". Sai: feed rỗng trên một đường ống đúng là trạng thái hợp lệ, và số bản ghi trong
+feed chính là **chỉ số coverage mà phase NÀY sinh ra để đo** — lấy nó làm điều kiện vào phase là
+lập luận vòng tròn.
+
+Điều kiện thật chỉ có hai, và cả hai đã đạt:
+
+| Điều kiện | Vì sao cần | Trạng thái 06-08-26 |
+|---|---|---|
+| Org còn hiệu lực | Đăng ký webhook làm **trên dashboard**, org hết hạn thì không vào được | ✅ `To's workspace`, `status: trial`, `healthy: true` |
+| Pixel active cho domain | Không có pixel thì không có sự kiện nào để webhook bắn | ✅ `3ead3e50-f6c0-…`, `status: active` |
+
+Pixel nạp HTTP 200 vẫn **không phải** tín hiệu đủ (pixel cũ nạp 200 trong khi org hết hạn) — dùng
+`GET /v1/data/account` + `GET /v1/data/pixels` để kiểm, không dùng URL pixel.
+
+**Không có API đăng ký webhook.** Toàn bộ 40 endpoint trong `llms.txt` không có endpoint webhook
+nào; `guides/set-up-webhooks` chỉ mô tả cấu hình trên dashboard (URL, segment, pixel, trigger,
+status; auto-disable khi lỗi liên tiếp). Nên bước 2 là **thao tác tay**, không code được.
 
 Phase này kế thừa `phase-02-wire-candidate-ingest-from-vendor-callbacks.md` của program
 `identity-coverage-pixel-fppro_02-08-26` (viết cho Customers.ai) và đổi vendor chính sang
@@ -64,12 +78,35 @@ nào của mình. Xếp theo độ tin cậy giảm dần:
 3. IP + cửa sổ thời gian                      ← chính là cách đoán đang dùng, kém nhất
 ```
 
-**Phải kiểm tra Leadpipe có cho gắn custom param vào pixel không** (kiểu `custom_args` mà
-SendGrid echo lại trong webhook — Beam đã dùng pattern này ở `identity_signals`). Nếu có, gắn
-`visitor_id` của Beam vào pixel và bài toán ghép biến mất hoàn toàn. Nếu không, rơi về (2) rồi (3),
-và phải ghi rõ giới hạn thay vì giả vờ là deterministic.
+<!-- Updated: 06-08-26 — câu hỏi custom param ĐÃ trả lời được một nửa, bằng cách đọc SDK thật. -->
 
-Đây là câu hỏi cần trả lời **trước** khi viết code webhook — nó quyết định toàn bộ thiết kế.
+**✅ Phía client: CÓ.** Đọc SDK thật (`cdn.pixel.leadpipe.com/pixels/50eb9810-…/p.js`, 06-08-26):
+
+```js
+// SDK đọc <script type="application/json" id="pixelsdk-config-<pid>-config">
+preInitialize: globalParams = {...globalParams, ...scriptAttrs.globalParams}   // spread-merge
+// rồi khi gửi:
+const r = {...t.event_data};
+if (Object.keys(e).length) r.static_params = e;          // e = globalParams đã merge
+fetch(endpoint, {body: JSON.stringify({...t, event_data: r, pixel_id, organization_id})})
+// endpoint: https://api.sitelytics.tech/pixel/core/api/send-event
+```
+
+Spread-merge, **không whitelist key** → key tuỳ ý (vd `beam_visitor_id`) đi tới server Leadpipe,
+mang trong `event_data.static_params`.
+
+**❓ Phía server: CHƯA biết** — Leadpipe có echo `static_params` lại trong webhook payload không
+thì SDK không trả lời được. Cách kiểm rẻ nhất: gắn một marker vào `globalParams` trên site lab,
+tạo một lượt truy cập, rồi đọc `/v1/data` xem marker có xuất hiện. Làm **trước** bước 3.
+
+Nếu server có echo → gắn `visitor_id` của Beam, bài toán ghép biến mất. Nếu không → rơi về (2) rồi
+(3), và phải ghi rõ giới hạn thay vì giả vờ deterministic.
+
+**⚠️ Phát hiện kèm theo, cần cân nhắc trước khi bật rộng:** SDK còn có `sendHemEnrichment()` (gửi
+email đã hash sha1/md5/sha256 tới `/hem/enrichment`) và `inject444Script()` — nó **nạp thêm script
+bên thứ ba nữa**. Nghĩa là nhúng pixel Leadpipe qua `data-stack` sẽ kéo theo một chuỗi vendor mà
+Beam không kiểm soát. Ảnh hưởng trực tiếp tới `consent_mode` và tuyên bố quyền riêng tư — phải
+xử lý trước khi bật cho site khách thật, không phải việc của riêng phase này nhưng không được quên.
 
 ### Luồng
 
