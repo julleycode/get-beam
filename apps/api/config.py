@@ -466,6 +466,55 @@ class Settings(BaseSettings):
     # "pageview-only" (no click/scroll/time_on_page/conversion). Operator-tunable.
     cadence_bot_flag_max_engagement_ratio: float = 0.05
 
+    # ─── WS2 agent-driven session classifier ───
+    # Labels human-SHAPED but agent-OPERATED sessions (Comet, Claude-in-Chrome,
+    # Playwright/CDP) via ws2_session_classifier.py + ws2_session_classifier_sweep.py.
+    #
+    # VISIBILITY-ONLY: is_agent_operated is NEVER read by is_emailable_identity(),
+    # never sets is_abuse_flagged/do_not_resolve, never excluded from any aggregate
+    # FILTER, never enters a render/redirect/blocking path. A labeled visitor stays
+    # fully emailable and fully counted — the flag is a dashboard badge, nothing more.
+    #
+    # OFF-by-default, same operator-gated posture as cadence_bot_flag_enabled and
+    # agent_detection_enabled. ROLLOUT ORDER: (1) LIVE-APPLY both migrations first
+    # (b8e3f6a2c904 events.agent_sig, then c9f4a7b31e85 visitors.is_agent_operated);
+    # (2) let real agent_sig samples accumulate and calibrate the placeholder
+    # thresholds below against them — they are conservative placeholders, never ship
+    # them live untuned; (3) only then flip this flag in a real environment.
+    #
+    # KNOWN LIMITATION (not a bug): this is a periodic sweep, so it flags a session
+    # AFTER identity resolution has already fired for it. Visibility-only keeps a
+    # flagged visitor out of nothing — it prevents outreach-pool confusion, it does
+    # NOT recover the identity-resolution budget already spent. A resolution-time
+    # gate on the Stage-1 signals is a separate, unscoped future workstream.
+    ws2_classifier_enabled: bool = False
+
+    # How often the batch sweep runs. Batch-only by design: nothing here ever runs
+    # on the POST /ingest hot path. Independent interval from the cadence sweep —
+    # the two features' tuning cadences differ.
+    ws2_classifier_sweep_interval_minutes: int = 60
+
+    # NON-NEGOTIABLE bounded-read cap, same rationale as
+    # cadence_bot_flag_lookback_days: every sweep query carries
+    # `events.created_at >= now() - ws2_classifier_lookback_days`.
+    ws2_classifier_lookback_days: int = 90
+
+    # Minimum click floor per session, evaluated BEFORE any ratio math
+    # (precondition-before-ratio). Below this the decision is False
+    # unconditionally: too few clicks to judge a dead-centre rate.
+    ws2_classifier_min_clicks: int = 5
+
+    # Pointer-entropy CEILING below which movement counts as "robotic". Normalized
+    # 0..1. The pixel currently reports a coarse PROXY (0 = no pointermove seen
+    # before first interaction, 1 = real movement occurred), so any threshold in
+    # [0, 1) behaves identically today; the setting stays a float so a finer-grained
+    # entropy signal can replace the proxy without a config change.
+    ws2_classifier_max_pointer_entropy: float = 0.15
+
+    # Dead-centre-click-rate FLOOR above which clicking counts as synthetic.
+    # Operator-tunable. Placeholder — calibrate before enabling.
+    ws2_classifier_min_dead_center_rate: float = 0.6
+
     # ─── Outlier / internal-traffic damping ───
     # Damps the influence of statistical-outlier visitors (measured live
     # 27-07-26: 3 of 4 sites draw 89-95% of their 90-day events from <20

@@ -173,9 +173,17 @@ class TestAC13IntervalJobHardening:
         assert [c for c in cron if "jitter" in _kwargs(c)] == []
 
     def test_the_asserted_set_is_derived_not_hardcoded(self):
-        """E20 arithmetic: 17 total / 15 interval / 2 cron — all AST-derived.
+        """E20 arithmetic: 19 total / 17 interval / 2 cron — all AST-derived.
 
-        Was 16/14/2; +1 interval job for promotion_sweep (identity-honesty
+        Was 18/16/2; +1 interval job for graph_erasure_sweep (cross-tenant
+        identity-graph erasure queue drain — the only destructive actor in that
+        feature, and the one job here that ships flag-ON by default, because it
+        gates the REMOVAL of data Beam promised to delete).
+        Before that 17/15/2; +1 interval job for ws2_classifier_sweep (WS2 agent-operated
+        session classifier — batch-only, flag-gated OFF, visibility-only).
+        Note: job-change detection adds NO add_job call — its two sweeps are
+        Celery beat entries (celery_app.py), not APScheduler jobs.
+        Before that 16/14/2; +1 interval job for promotion_sweep (identity-honesty
         Phase 5 — promotes tokenized-link clicks to a verified identity off the
         ingest hot path). Before that 15/13/2; +1 interval job for
         agent_ip_range_refresh (re-fetches the
@@ -189,8 +197,8 @@ class TestAC13IntervalJobHardening:
         """
         calls = _add_job_calls()
         interval = [c for c in calls if _is_interval(c)]
-        assert len(calls) == 17, f"expected 17 add_job calls, found {len(calls)}"
-        assert len(interval) == 15, (
-            f"expected 15 interval calls, found {len(interval)}; if a job was "
+        assert len(calls) == 19, f"expected 19 add_job calls, found {len(calls)}"
+        assert len(interval) == 17, (
+            f"expected 17 interval calls, found {len(interval)}; if a job was "
             "added or removed, update E20's arithmetic — do not relax this gate"
         )

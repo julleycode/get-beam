@@ -1,7 +1,6 @@
 (function() {
   "use strict";
 
-  if (navigator.webdriver === true) return;
   var script = document.currentScript;
   if (!script) return;
 
@@ -267,6 +266,9 @@
     if (DEAD) return; // site deleted — stop collecting
     evt._fp = fingerprint;
     if (fingerprint3) evt._fp3 = fingerprint3;
+    // WS2 signals. AS is assigned only AFTER the consent gate (G7) — falsy
+    // until then, so nothing is collected or attached pre-gate.
+    if (AS) evt._asig = AS();
     evt.optout = OPTOUT;
     // Idempotency key — server drops duplicate event_ids (retry/replay safe).
     evt.event_id = uuid();
@@ -507,6 +509,24 @@
   var consentDecision = GATED ? (getCookie(CONSENT_KEY) || lsGet(CONSENT_KEY)) : "g";
   if (GATED && consentDecision === "d") OPTOUT = true; // persisted decline
 
+  // --- WS2 agent-operated session signals (SPEC AC1/AC2, INNOVATE D2/D3) ---
+  // Strictly AFTER the GATED/consentDecision assignment (Hard Guardrail G7), so
+  // a GATED site's EU consent-hold is never bypassed. Replaces the old line-4
+  // navigator.webdriver early-return (D3) that discarded whole agent sessions.
+  // Stage 1: webdriver + UA-CH Headless. Stage 2 (piggybacked on the existing
+  // click listener): pointer-entropy proxy + dead-centre click count. Wire keys
+  // are abbreviated for the <6KB gzip budget; the sweep's _extract_agent_sig
+  // expands them to the classifier's field names.
+  var AWD = navigator.webdriver === true, AHL = false, APM = 0, ADC = 0;
+  try {
+    var ab = navigator.userAgentData && navigator.userAgentData.brands;
+    if (ab) AHL = JSON.stringify(ab).indexOf("Headless") >= 0;
+  } catch (e) {}
+  document.addEventListener("pointermove", function() { APM = 1; }, { once: 1, passive: 1 });
+  // d is a per-event DELTA (reset on read) so the sweep's cross-event sum is a
+  // true total, not a running tally counted repeatedly.
+  var AS = function() { var s = { w: AWD, h: AHL, p: APM, d: ADC, c: clickCount }; ADC = 0; return s; };
+
   // --- Per-site capture config (Phase 3, SPEC AC12) ---
   // The more consent-sensitive mechanisms (mailto, URL-param) are opt-OUT-able
   // per site. DEFAULT is "on" for every flag so current installs keep their
@@ -643,6 +663,10 @@
         if (looksEmail(addr)) captureEmail(addr, "mailto_click");
       }
       clickCount++;
+      // Stage-2 proxy: did this click land dead-centre? Coarse by design.
+      var r = el.getBoundingClientRect();
+      if (Math.abs(e.clientX - (r.left + r.width / 2)) <= r.width * 0.1 &&
+          Math.abs(e.clientY - (r.top + r.height / 2)) <= r.height * 0.1) ADC++;
       pushEvent({
         type: "click",
         element_text: (el.textContent || "").trim().slice(0, 80),

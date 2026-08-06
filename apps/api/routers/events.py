@@ -407,6 +407,12 @@ async def ingest_events(
             # that stores the row, so there is no window where flood traffic is
             # durable and unmarked.
             is_flagged_abuse=abuse_flagged,
+            # WS2 agent-operated session signals. Purely additive and purely
+            # observational: nothing on this request path reads it, no branch
+            # depends on it, and no session is ever dropped or blocked because of
+            # it (SPEC AC-7). Whitelisted/bounded by the schema validator before
+            # it reaches here — never the raw client object.
+            agent_sig=event.agent_sig,
             created_at=event.ts.replace(tzinfo=None) if event.ts.tzinfo else event.ts,
         )
         for event in batch.events
@@ -434,6 +440,23 @@ async def ingest_events(
         visitor_id=batch.visitor_id[:8],
         count=len(batch.events),
     )
+
+    # Job-change detection Trigger A: a returning visitor is the cheapest signal
+    # that their stored profile is worth re-checking. Fire-and-forget dispatch
+    # ONLY — no DB read, no await on the result, so the ingest response is
+    # unaffected whether or not a re-check ends up happening.
+    #
+    # The identity_status / stored-profile checks deliberately live inside the
+    # task, not here: this handler holds no Visitor ORM row (visitor rows are
+    # built by the aggregator), so gating here would cost an extra query on the
+    # hot path for a check the task must repeat anyway.
+    if _settings.job_change_detection_enabled:
+        try:
+            from apps.api.tasks.job_change_tasks import recheck_returning_visitor
+
+            recheck_returning_visitor.delay(batch.visitor_id, batch.site_id)
+        except Exception as exc:
+            logger.debug("job_change_trigger_dispatch_failed", error=str(exc))
 
     # Durable identity reconciliation: the HttpOnly _rta_svid cookie carries the
     # ORIGINAL visitor_id even after the client id (_rta_vid) is wiped by Safari

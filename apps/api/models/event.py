@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 
 from apps.api.models.database import Base
@@ -58,6 +59,14 @@ class Event(Base):
     # NULL for the overwhelming majority of events — most visitors arrive with no
     # marker, and every event before this column existed has none.
     link_marker: str | None = Column(String(32), nullable=True)
+    # WS2 agent-operated session signals as collected by the pixel (abbreviated
+    # keys: w/h/p/d/c — see schemas/events.py). Read ONLY by the batch sweep
+    # ws2_session_classifier_sweep; never on the ingest hot path, never by
+    # is_emailable_identity(), never by any drop/block decision.
+    #
+    # NULL for every event written before this column existed and for every older
+    # pixel build — the sweep fails safe (flags nobody) when it is absent.
+    agent_sig: dict | None = Column(JSONB, nullable=True)
     created_at: datetime = Column(DateTime, default=func.now(), nullable=False)
 
     __table_args__ = (

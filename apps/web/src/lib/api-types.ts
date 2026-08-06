@@ -305,6 +305,11 @@ export interface Visitor {
   // pageview-only. VISIBILITY-ONLY badge — never affects emailability,
   // aggregates, or resolution.
   is_bot_suspect?: boolean;
+  // WS2 agent-operated session: the session BEHAVED like browser automation or
+  // an AI agent (within-session behavior, unlike is_bot_suspect's cross-day
+  // cadence). VISIBILITY-ONLY badge — never affects emailability, aggregates,
+  // or resolution.
+  is_agent_operated?: boolean;
   // Outlier / internal-traffic damping: this visitor's traffic volume is a
   // statistical outlier for THIS site. Inferred, never proven — copy must say
   // "unusually high activity" and must never assert who they are.

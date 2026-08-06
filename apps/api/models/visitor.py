@@ -105,6 +105,18 @@ class Visitor(Base):
     is_bot_suspect: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # WS2 agent-operated session flag (visibility-only, see
+    # ws2_session_classifier.py). A human-SHAPED but agent-OPERATED session
+    # (Comet, Claude-in-Chrome, Playwright/CDP) — a DIFFERENT thing from
+    # is_bot_suspect's cron-like revisit cadence, hence a separate column.
+    #
+    # Same posture as is_bot_suspect: never read by is_emailable_identity();
+    # never excluded from any aggregate FILTER clause; set by the batch sweep
+    # only (ws2_session_classifier_sweep.py), never on the ingest hot path.
+    # Sticky: OR-merged, a later clean window never un-flags.
+    is_agent_operated: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     # Outlier / internal-traffic damping (see outlier_traffic_damping.py).
     # Visibility + damping signal: a visitor whose event volume is a statistical
     # outlier WITHIN this site, sustained across days, WITH engagement present.
@@ -193,6 +205,13 @@ class IdentifiedVisitor(Base):
     # Visitor.is_bot_suspect by the batch sweep. A flagged row stays fully
     # emailable and fully counted — the flag is a dashboard badge, nothing more.
     is_bot_suspect: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
+    # WS2 agent-operated session flag — mirrored from Visitor.is_agent_operated by
+    # the batch sweep. Visibility-only, sticky, never read by
+    # is_emailable_identity(). A flagged row stays fully emailable and fully
+    # counted — the flag is a dashboard badge, nothing more.
+    is_agent_operated: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
     # Outlier / internal-traffic damping — mirrored from Visitor.is_internal_suspect

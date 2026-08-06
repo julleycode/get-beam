@@ -114,17 +114,64 @@ class TestPixelConsent:
         assert "_rta_c" in pixel_code
 
 
+class TestWS2AgentSignalPlacement:
+    """WS2 agent-session signals (SPEC AC-1/AC-2, INNOVATE D3).
+
+    Source-position checks: the old ``navigator.webdriver`` early-return is gone,
+    and every ``agent_sig`` read sits strictly AFTER the consent gate. These are
+    textual/positional assertions, not execution proofs — real-browser proof is
+    ``apps/pixel/e2e/agent-sig.spec.ts``.
+    """
+
+    def test_no_webdriver_early_return_before_bootstrap(self, pixel_code: str):
+        """AC-1: bootstrap must not short-circuit on navigator.webdriver alone."""
+        prologue = pixel_code.split("document.currentScript")[0]
+        assert "return" not in prologue, (
+            "an early-return precedes document.currentScript — the WS2 activation "
+            "deleted tracker.js:4 and nothing may reinstate a pre-bootstrap exit"
+        )
+        assert "if (navigator.webdriver === true) return;" not in pixel_code
+
+    def test_webdriver_still_read_as_a_signal(self, pixel_code: str):
+        """D3 deleted the early-return but KEPT webdriver as a Stage-1 signal."""
+        assert "navigator.webdriver === true" in pixel_code
+
+    def test_agent_sig_collection_is_after_consent_gate(self, pixel_code: str):
+        """AC-2 / Hard Guardrail G7: no signal read before GATED resolves."""
+        gate_idx = pixel_code.index("var consentDecision = GATED")
+        for marker in (
+            "navigator.webdriver === true",
+            "navigator.userAgentData",
+            '"pointermove"',
+            "var AS = function()",
+        ):
+            assert pixel_code.index(marker) > gate_idx, (
+                f"{marker!r} is read before the consent gate — bypasses the EU "
+                "consent-hold (G7)"
+            )
+
+    def test_agent_sig_attached_to_outgoing_events(self, pixel_code: str):
+        assert "evt._asig = AS()" in pixel_code
+
+    def test_dead_center_counter_uses_existing_click_listener(self, pixel_code: str):
+        """D2: Stage-2 proxies piggyback the existing click listener."""
+        assert pixel_code.count('document.addEventListener("click"') == 1
+        assert "getBoundingClientRect" in pixel_code
+
+
 class TestPixelSize:
     """Pixel should be small and efficient."""
 
-    def test_source_under_32kb(self, pixel_code: str):
-        # Raw source has grown twice: past 16KB with the consent banner, then
+    def test_source_under_36kb(self, pixel_code: str):
+        # Raw source has grown three times: past 16KB with the consent banner,
         # past 20KB with the first-party email capture expansion (value-based
-        # field matching, mailto/URL-param, shadow-DOM/iframe). This is only a
-        # sanity guard against someone dumping something huge into the source.
+        # field matching, mailto/URL-param, shadow-DOM/iframe), and past 32KB
+        # with the WS2 agent-session signal collector. This is only a sanity
+        # guard against someone dumping something huge into the source — raw
+        # source carries comments, which cost nothing in the served artifact.
         # The binding budget applies to the SERVED (minified) tracker.min.js at
         # <6KB gzipped — see test_pixel_fingerprint.py.
-        assert len(pixel_code.encode()) < 32000, f"Pixel source is {len(pixel_code.encode())} bytes, should be under 32KB"
+        assert len(pixel_code.encode()) < 36000, f"Pixel source is {len(pixel_code.encode())} bytes, should be under 36KB"
 
     def test_is_iife(self, pixel_code: str):
         """Should be wrapped in an IIFE for isolation."""

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class UTMParams(BaseModel):
@@ -55,9 +55,54 @@ class Event(BaseModel):
     # audio render. Async on the client, so early events in a session may carry
     # _fp without _fp3. Older pixel builds never send it.
     fp3: str | None = Field(None, alias="_fp3")
+    # WS2 agent-operated session signals, collected by the pixel strictly after
+    # the consent gate. Abbreviated wire keys keep the pixel inside its <6KB gzip
+    # budget: w=webdriver, h=UA-CH Headless brand, p=pointer-entropy proxy,
+    # d=dead-centre click delta for THIS event, c=cumulative click count.
+    # Optional — older pixel builds never send it, and the batch sweep fails safe
+    # (never flags) when it is absent. Visibility-only: never read by
+    # is_emailable_identity() or any drop/block path.
+    agent_sig: dict | None = Field(None, alias="_asig")
     # Privacy opt-out: pixel sets true when navigator.globalPrivacyControl (GPC)
     # or doNotTrack (DNT) is on. Defaults False for older pixel builds.
     optout: bool = False
+
+    # mode="before" is load-bearing, not stylistic: with the default "after" mode
+    # a non-dict _asig raises a ValidationError and 422s the WHOLE batch, so one
+    # malformed optional signal would drop a page's worth of legitimate events.
+    # SPEC AC-7 forbids classification ever causing a drop — this field must
+    # degrade to None, never reject.
+    @field_validator("agent_sig", mode="before")
+    @classmethod
+    def _sanitize_agent_sig(cls, v: object) -> dict | None:
+        """Whitelist + bound the agent_sig object before it is ever persisted.
+
+        /ingest is public and unauthenticated, so this dict is attacker-supplied.
+        Storing it raw would let anyone write unbounded JSONB into the largest
+        table in the schema. Only the five known keys survive, each coerced to a
+        bounded scalar; anything else is dropped. An object with no usable key
+        normalises to None so the sweep sees "absent" and fails safe.
+        """
+        if not isinstance(v, dict):
+            return None
+        out: dict = {}
+        for key in ("w", "h"):
+            if key in v:
+                out[key] = bool(v[key])
+        if "p" in v:
+            try:
+                p = float(v["p"])
+            except (TypeError, ValueError):
+                p = None
+            if p is not None:
+                out["p"] = min(max(p, 0.0), 1.0)
+        for key in ("d", "c"):
+            if key in v:
+                try:
+                    out[key] = min(max(int(v[key]), 0), 10_000)
+                except (TypeError, ValueError):
+                    pass
+        return out or None
 
 
 class EventBatch(BaseModel):

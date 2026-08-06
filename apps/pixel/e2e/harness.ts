@@ -1,4 +1,4 @@
-import { Page, Route, Request } from "@playwright/test";
+import { Page, Route, Request, test } from "@playwright/test";
 
 // Shared harness for pixel capture specs.
 //
@@ -32,6 +32,28 @@ export interface Ingest {
 export async function interceptIngest(page: Page): Promise<Ingest> {
   const batches: CapturedBatch[] = [];
   let calls = 0;
+
+  // Transport fix (harness-only — tracker.js is untouched).
+  //
+  // tracker.js flush() uses a readable XHR only for the FIRST flush of a
+  // session, then navigator.sendBeacon for every flush after. page.route
+  // intercepts sendBeacon in chromium but NOT in webkit/firefox, so on those
+  // two engines every post-first-flush batch was invisible to this recorder —
+  // any assertion about a later batch passed without testing anything.
+  //
+  // Stubbing sendBeacon to return false makes flush() fall through to its own
+  // XHR path (same payload), which page.route does see everywhere.
+  //
+  // Gated on project name deliberately: chromium CAN intercept sendBeacon, and
+  // sendBeacon is the transport production actually uses for every flush after
+  // the first. Stubbing it unconditionally would leave no engine covering that
+  // transport at all — relocating the same "green but testing nothing" problem.
+  const project = test.info().project.name;
+  if (project === "webkit" || project === "firefox") {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "sendBeacon", { value: () => false, configurable: true });
+    });
+  }
 
   await page.route("**/api/v1/events/ingest", async (route: Route, request: Request) => {
     calls++;

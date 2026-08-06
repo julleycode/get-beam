@@ -51,6 +51,13 @@ class VisitorOut(BaseModel):
     # sessions are pageview-only. VISIBILITY-ONLY badge — never affects
     # emailability, aggregates, or resolution. Batch-computed, default False.
     is_bot_suspect: bool = False
+    # WS2 agent-operated session: the session BEHAVED like it was driven by an AI
+    # agent or browser automation (deterministic webdriver/UA-CH tell, or low
+    # pointer entropy AND a high dead-centre-click rate). Distinct from
+    # is_bot_suspect, which is about revisit CADENCE across days, not
+    # within-session behavior. VISIBILITY-ONLY badge — never affects emailability,
+    # aggregates, or resolution. Batch-computed, default False.
+    is_agent_operated: bool = False
     # Outlier / internal-traffic damping. True when this visitor's event volume
     # is a statistical outlier for THIS site, sustained across days, with real
     # engagement. Inferred, never proven — UI copy must say "unusually high

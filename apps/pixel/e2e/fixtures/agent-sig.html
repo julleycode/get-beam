@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Beam pixel harness — WS2 agent-sig</title>
+  <!-- Playwright's chromium reports navigator.webdriver === true. The tracker no
+       longer early-returns on it (WS2 activation deleted that line), but it DOES
+       read it as a Stage-1 signal. Override to false so this spec exercises the
+       Stage-2 behavioral path rather than short-circuiting on Stage 1. This
+       override is test-harness-only, never shipped. -->
+  <script>
+    Object.defineProperty(navigator, "webdriver", { get: function () { return false; } });
+  </script>
+  <script src="/src/tracker.js" data-site="test-site" data-api="http://127.0.0.1:8788"></script>
+</head>
+<body>
+  <h1>agent-sig fixture</h1>
+  <button id="b1" style="width:200px;height:60px">target one</button>
+  <button id="b2" style="width:200px;height:60px">target two</button>
+</body>
+</html>
