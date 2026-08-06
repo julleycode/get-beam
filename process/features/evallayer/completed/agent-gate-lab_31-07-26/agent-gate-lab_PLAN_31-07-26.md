@@ -4,12 +4,48 @@ feature: evallayer
 type: PLAN
 complexity: SIMPLE
 date: 31-07-26
-status: awaiting-execute-approval
+status: superseded
+superseded-by: process/features/evallayer/completed/agent-gate-soft-serve_31-07-26/agent-gate-soft-serve_PLAN_31-07-26.md
 branch: dev_nhantc2
 owner: fast-mode
 ---
 
 # Beam Lab — AI-agent gate
+
+## UPDATE PROCESS Reconciliation (07-08-26)
+
+**Status corrected from `awaiting-execute-approval` to `superseded`.** This plan's checklist WAS
+executed and deployed (commit history shows the hard-403 gate shipped, then was replaced —
+see `git log --oneline -- infra/cloudflare/beam-lab/`), but `status:` in the frontmatter was
+never updated afterward, leaving a stale `awaiting-execute-approval` marker sitting on top of
+code that had already shipped and then been reverted-in-behaviour. This pass corrects the field
+to reflect what actually happened.
+
+**This is not "completed" — it is abandoned by design decision, not by failure to finish.** The
+hard-403 interstitial approach described in this plan was built, deployed, and then **empirically
+rejected by real traffic**: real ChatGPT-User (ASN 8075) hit the 403 twice, sent no custom
+headers, never POSTed the `/agent-gate` check-in, and reported the page as unreadable to its own
+user — so the experiment measured only that the agent gives up, not what it would volunteer if
+asked. See `docs/beam-lab-resume.md` lines 47-49 and
+`process/features/evallayer/completed/agent-gate-soft-serve_31-07-26/agent-gate-soft-serve_PLAN_31-07-26.md`
+§Why for the full rejection writeup.
+
+**What replaced it:** `agent-gate-soft-serve_31-07-26` (now archived to `completed/`), which
+inverts the design — always serve 200 + the real page, and ask the identification question
+*inside* the page via `HTMLRewriter` injection instead of gating access to it. Confirmed live in
+`infra/cloudflare/beam-lab/functions/_middleware.js` (current code has no `gateInterstitial`
+function and no 403 path for content — `applyAgentGate`/`gateInterstitial` from this plan were
+fully replaced by `handleGateRoute`/`classifyAgentRequest` from the soft-serve plan).
+
+**What survives from this plan, unchanged, inside the current soft-serve code:** the HMAC
+check-in token mechanism (`mintGateToken`/`verifyGateToken`), the `POST /agent-gate` contract,
+the header-retry admission path (`x-agent-vendor`/`x-agent-purpose`), and the
+`GET /agent-gate` machine-readable spec. Only the *default* unauthenticated-agent behaviour
+changed (403 → 200-with-invitation) — the admission mechanisms this plan designed are still live.
+
+**Do not delete this file.** It is kept as design history — the reasoning for why the hard-block
+approach was tried and rejected is not duplicated anywhere else, and matters if anyone
+reconsiders a hard-gate approach in the future.
 
 ## Goal
 

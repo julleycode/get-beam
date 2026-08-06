@@ -4,12 +4,51 @@ feature: evallayer
 type: PLAN
 complexity: SIMPLE
 date: 31-07-26
-status: awaiting-execute-approval
+status: shipped-with-known-gaps
 branch: dev_nhantc2
-supersedes-behaviour-of: process/features/evallayer/active/agent-gate-lab_31-07-26/agent-gate-lab_PLAN_31-07-26.md
+supersedes-behaviour-of: process/features/evallayer/completed/agent-gate-lab_31-07-26/agent-gate-lab_PLAN_31-07-26.md
 ---
 
 # Soft-serve the agent gate
+
+## UPDATE PROCESS Reconciliation (07-08-26)
+
+**Status corrected from `awaiting-execute-approval` to `shipped-with-known-gaps`.** Verified live
+via repo evidence:
+- `git log --oneline -- infra/cloudflare/beam-lab/` shows commit `74e85b1` "feat(beam-lab):
+  soft-serve gate, edge _bfm stamps, deep pages" on the current branch.
+- `infra/cloudflare/beam-lab/functions/_middleware.js` (842 lines) contains
+  `classifyAgentRequest`, `handleGateRoute`, the `served_uninstrumented`/`served_identified_*`
+  decision names, and an HTML-comment-wrapped invitation block
+  (`<!-- beam-agent-invitation beam-lab-agent-gate ... -->`) — matching this plan's structure. No
+  `gateInterstitial` function remains in the file (confirms the predecessor's 403 path is gone).
+- **One deviation from the plan as written, already anticipated by the plan itself:** the shipped
+  invitation block is an HTML **comment**, not the visible `<section id="beam-agent-invitation">`
+  markup this plan's "Injection: exact anchor and markup" section specifies. The plan explicitly
+  flagged this as acceptable ("if the owner dislikes the visible block, switching it to an HTML
+  comment is a one-line change" — open-gaps, 2nd bullet), so this is a sanctioned deviation, not
+  an unreviewed drift.
+
+**Not fully "Ready for archival" in the strict sense — reclassified as `shipped-with-known-gaps`
+rather than a clean `✅ VERIFIED`.** Per this plan's own Verification Evidence table, gates
+L1-L3 and P1-P10 require a live wrangler deploy + manual curl runs that were not independently
+re-run during this UPDATE PROCESS pass (no test harness exists for Cloudflare Pages Functions
+code in this repo — this was already a `CONDITIONAL` gate in the plan's own Validate Contract).
+The deployment IS confirmed committed and merged into the codebase; the running Cloudflare
+deployment's *live* behaviour was not independently re-verified in this pass — treat as
+UNVERIFIED-BUT-ASSUMED per `docs/beam-lab-resume.md`, not confirmed-live-tested today.
+
+**Open items carried forward as an explicit known-gap backlog note** (none dropped silently):
+see `process/features/evallayer/backlog/beam-lab-soft-serve-known-gaps_NOTE_07-08-26.md` for the
+full list — `_bfm` TTL policy undecided, human click-through unverified, two `link_marker`
+migrations pending production apply, `BEAM_FULL_LOG="1"` still on, Gemini-via-AWS-fetcher traffic
+silently dropped, ChatGPT deep-page browse intermittency.
+
+**Archived** to `process/features/evallayer/completed/agent-gate-soft-serve_31-07-26/` as part of
+this reconciliation pass — the shipped behaviour is the current live design (superseding the
+hard-403 approach), even though the known gaps above remain open. Archival here means "resolved
+as the working design," not "zero remaining follow-up work" — see the backlog note above for
+what remains.
 
 ## Why
 
