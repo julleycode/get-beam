@@ -30,6 +30,19 @@ phụ thuộc, và quan trọng hơn — dựng cơ chế để lần sau *biế
 **Nguyên tắc xuyên suốt:** không tối ưu thuật toán ghép người khi chưa chứng minh được provider
 thực sự trả dữ liệu. Mọi thay đổi phải đo được trước và sau.
 
+### ⚠️ Bối cảnh 05-08-26 — BA DÒNG DƯỚI ĐÂY ĐÃ SAI, xem đính chính 06-08-26
+
+<!-- Updated 06-08-26: probe bằng API key thứ hai lật lại 3 kết luận của session trước. -->
+
+| Kết luận 05-08 | Đính chính 06-08-26 |
+|---|---|
+| "API Leadpipe chặn cứng `403 org expired`" → coi như hạ tầng Leadpipe hỏng | **Sai một nửa.** 403 là của org `Beam ai` (key Beam đang dùng). Org `To's workspace` — chủ thật của pixel lab — `status: trial`, `healthy: true`, API chạy bình thường |
+| "`pixels_total=0` là số liệu không đáng tin khi org hết hạn" | **Sai.** `GET /v1/data/account` trả **200 kể cả khi expired**. `pixels.total: 0` là **số thật**: org `Beam ai` chưa từng có pixel nào. Pixel lab thuộc org khác → hai bể chứa tách rời, đọc mãi không ra dữ liệu |
+| "Beam không có code đăng ký domain / tạo pixel" | **Đã làm 06-08-26** — `services/leadpipe_pixels.py` + cột `Site.leadpipe_pixel_id` |
+
+Bài học giữ lại: pixel nạp HTTP 200 **không** chứng minh gì về org. Kiểm bằng
+`GET /v1/data/account` (sống cả khi expired) chứ đừng kiểm bằng URL pixel.
+
 ### Bối cảnh đã điều tra (05-08-26)
 
 | Phát hiện | Bằng chứng | Nguồn |
@@ -61,17 +74,31 @@ thực sự trả dữ liệu. Mọi thay đổi phải đo được trước v�
 |-------|------|--------|
 | 1 | [Ground clearing and truth reconciliation](./phase-01-ground-clearing-and-truth-reconciliation.md) | **Complete** (05-08-26) |
 | 2 | [Provider failure vs no-match separation](./phase-02-provider-failure-vs-no-match-separation.md) | **Complete** (05-08-26) — 1 known-gap |
-| 3 | [Vendor decision and Leadpipe restoration](./phase-03-vendor-decision-and-leadpipe-restoration.md) | Pending — chặn ở thao tác tài khoản vendor (ngoài code) |
-| 4 | [Webhook ingest and measurable coverage](./phase-04-webhook-ingest-and-measurable-coverage.md) | Pending — chặn cứng sau Phase 3 |
-| 5 | [Outage deferral watermark](./phase-05-outage-deferral-watermark.md) | Pending — **cần migration**; đã thử ở session 3 và REVERT |
+| 3 | [Vendor decision and Leadpipe restoration](./phase-03-vendor-decision-and-leadpipe-restoration.md) | **Code xong 06-08-26** — còn 3 thao tác vận hành (apply migration → đổi API key → bật cờ) |
+| 4 | [Webhook ingest and measurable coverage](./phase-04-webhook-ingest-and-measurable-coverage.md) | Pending — **KHÔNG còn bị chặn** (điều kiện tiên quyết cũ sai, đã sửa 06-08-26) |
+| 5 | [Outage deferral watermark](./phase-05-outage-deferral-watermark.md) | Pending — **sẵn sàng cook**; cần migration; đã thử session 3 và REVERT (5 bẫy ghi trong phase file) |
 
-Phase 1–2 **không phụ thuộc vendor** — chạy được ngay.
-Phase 3 là **gate quyết định business**, chặn Phase 4.
+Phase 1–2 **không phụ thuộc vendor** — đã xong.
+Phase 5 phụ thuộc **chỉ Phase 2** → chạy song song được với 3/4.
 
 ```
-Phase 1 ──► Phase 2 ──► [GATE: quyết định vendor] ──► Phase 3 ──► Phase 4
-(dọn nền)   (đo đúng)         ↑ user quyết          (khôi phục)  (webhook + benchmark)
+Phase 1 ──► Phase 2 ──┬─► Phase 3 (code xong) ──► Phase 4 (webhook + coverage)
+(dọn nền)   (đo đúng)  │
+                       └─► Phase 5 (outage deferral)  ← độc lập, cook được ngay
 ```
+
+<!-- Updated 06-08-26 -->
+
+**Trạng thái sau session 06-08-26:**
+
+- Phase 3 code hoàn tất: mỗi site có pixel Leadpipe riêng (`Site.leadpipe_pixel_id`, migration
+  `b4c9a71e35d8`), cấp phát lazy qua `POST /v1/data/pixels`, gate sau cờ
+  `LEADPIPE_PIXEL_AUTOPROVISION_ENABLED` (mặc định OFF). Commits `12d6059`, `4e1f0cc`, `191b919`, `ffd76a4`.
+- Phase 4 **không còn bị chặn**: điều kiện tiên quyết cũ ("`/v1/data` phải trả dữ liệu thật") là
+  lập luận vòng tròn — số bản ghi trong feed chính là chỉ số coverage mà Phase 4 sinh ra để đo.
+  Điều kiện thật (org còn hiệu lực + pixel active) đã đạt.
+- Phase 5 **sẵn sàng cook**: trần backoff chốt **4 lần** (15p→1h→6h→24h), và phase file đã ghi
+  bẫy thứ 5 do thay đổi 06-08-26 tạo ra (`attempted=False` là trạng thái thứ ba).
 
 ## Câu hỏi quyết định trung tâm
 
