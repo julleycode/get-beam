@@ -21,17 +21,18 @@ All strategies use the existing vc-system agents and skills. The question is onl
 
 ## Model Selection Policy
 
-Every spawned agent — across ALL four strategies (sequential, parallel subagents, dynamic workflow, agent team) — defaults to **sonnet**. Spawn opus ONLY when the agent is carrying out real source-code or build execution (writing/editing code, running builds, applying migrations). Planning, research, analysis, validation, review, and synthesis all run on sonnet.
+**Sonnet is banned in this repo.** Every spawned agent — across ALL four strategies (sequential, parallel subagents, dynamic workflow, agent team) — runs on **opus** or **fable**, never sonnet.
 
 Concrete rules:
 
-- **Default = sonnet** for any teammate, parallel subagent, or `agent()` call in a workflow. State the model explicitly when spawning.
-- **opus ONLY for execution work**: the agent that actually implements code (the vc-execute-agent leg, or a workflow `agent()` step whose job is to modify source / run a build). The RIPER-5 phase that runs on opus is EXECUTE; all other phases (RESEARCH, SPEC, INNOVATE, PLAN, VALIDATE, UPDATE PROCESS) run on sonnet.
-- **Agent-team members**: assign sonnet to reviewers, researchers, validators, and planners; assign opus only to the teammate doing real code execution.
-- **Dynamic workflows**: pass `model: 'sonnet'` on `agent()` calls by default; pass `model: 'opus'` only on the execution stage that writes code or runs builds.
-- **Parallel subagents**: fan-out investigation/review subagents are sonnet; only an implementing subagent is opus.
+- **opus** for anything producing or gating a durable artifact, or touching source: EXECUTE, PLAN, VALIDATE, RESEARCH, TESTER, quick-fix, fast-mode.
+- **fable** for lighter read/discuss/reformat roles: SPEC, INNOVATE, UPDATE PROCESS, code-review, code-simplifier, debugger, ui-ux-designer, git-manager.
+- **State the model explicitly** on every spawn and every strategy recommendation. Never leave it unstated in a way that could resolve to sonnet.
+- **Agent-team members**: match the role to the tier above — a teammate writing code or a plan is opus; a teammate reviewing or scouting is fable.
+- **Dynamic workflows**: pass `model: 'opus'` or `model: 'fable'` on every `agent()` call. Never `model: 'sonnet'`.
+- **Parallel subagents**: prefer fable for breadth (fan-out reviewers, dimension agents, scouts); opus for the legs that write artifacts or code.
 
-Rationale: opus is reserved for the one place judgment-under-execution materially changes code quality. Everything upstream is sonnet-cheap without quality loss, and this keeps fan-outs (which multiply agent count) on the cost-efficient tier. This mirrors the live agent frontmatter: `vc-execute-agent`, `vc-fast-mode-agent`, and `vc-quick-fix-agent` are opus; every other vc-agent is sonnet.
+Rationale: this repo trades cost for judgment on the artifact-producing legs, and uses fable to keep wide fan-outs affordable without dropping to sonnet. The tier list above IS the live agent frontmatter (`.claude/agents/*.md` `model:` fields) — changing one without the other is drift; reconcile both in the same patch.
 
 ---
 
@@ -183,7 +184,7 @@ After computing the score and filling the table, output a single recommendation 
 Score: [N]/7 — signals: [list present signal IDs]
 Recommended strategy: [Sequential (one agent at a time) | Parallel subagents (independent work, no coordination) | Workflow (automated pipeline) | Agent team (specialists coordinating live)]
 Agent count: [explicit math per row above]
-Model: [sonnet for all spawned agents; opus ONLY for the code-execution leg — see §Model Selection Policy]
+Model: [opus for artifact-producing/source-touching legs; fable for lighter read/review roles; NEVER sonnet — see §Model Selection Policy]
 Cost guard: [triggered / not triggered]
 Rationale: [one sentence on dominant signal and why this strategy fits]
 ```

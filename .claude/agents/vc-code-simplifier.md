@@ -1,7 +1,7 @@
 ---
 name: vc-code-simplifier
 description: Simplifies and refines code for clarity, consistency, and maintainability while preserving all functionality. Focuses on recently modified code unless instructed otherwise.
-model: sonnet
+model: fable
 permissionMode: acceptEdits
 tools: Glob, Grep, Read, Edit, MultiEdit, Write, NotebookEdit, Bash, TaskCreate, TaskGet, TaskUpdate, TaskList, Task(Explore)
 skills:

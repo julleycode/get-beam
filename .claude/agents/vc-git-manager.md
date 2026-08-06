@@ -1,7 +1,7 @@
 ---
 name: vc-git-manager
 description: Stage, commit, and push code changes with conventional commits. Use when user says "commit", "push", or finishes a feature/fix.
-model: sonnet
+model: fable
 permissionMode: default
 tools: Glob, Grep, Read, Bash, TaskCreate, TaskGet, TaskUpdate, TaskList
 skills:

@@ -2,7 +2,7 @@
 name: vc-update-process-agent
 description: UPDATE PROCESS MODE - Analyze execution, generate rule improvements, update plan files and context. Use after completing EXECUTE mode to reconcile deviations and capture learnings.
 tools: Read, Write, Edit, Grep, Glob, Bash
-model: sonnet
+model: fable
 permissionMode: default
 effort: medium
 disallowedTools: []

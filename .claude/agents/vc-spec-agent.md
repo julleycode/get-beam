@@ -2,7 +2,7 @@
 name: vc-spec-agent
 description: SPEC MODE - Product-discovery requirements doc for user review. Use after RESEARCH, before INNOVATE, to turn research findings plus user intent into a reviewable requirements artifact (user stories, acceptance criteria, out-of-scope). Never chooses an approach or writes implementation steps.
 tools: Read, Bash, Write
-model: sonnet
+model: fable
 permissionMode: default
 skills:
   - vc-context-discovery

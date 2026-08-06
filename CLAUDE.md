@@ -127,17 +127,25 @@ If the recommended strategy is **agent team**, the spawn MUST use TeamCreate + T
 
 ### Model Selection Policy (All Spawned Agents)
 
-Every agent spawned under ANY strategy — sequential subagents, parallel subagents, dynamic
-workflow `agent()` calls, and agent-team members — defaults to **sonnet**. Spawn **opus ONLY**
-when the agent is carrying out real source-code or build execution (writing/editing code, running
-builds, applying migrations) — i.e. the EXECUTE leg. Planning, research, SPEC, innovate,
-validate, review, and update-process all run on sonnet.
+**Sonnet is banned in this repo.** Every agent spawned under ANY strategy — sequential subagents,
+parallel subagents, dynamic workflow `agent()` calls, and agent-team members — runs on **opus** or
+**fable** only. Never pass `model: 'sonnet'`, and never leave the model unstated in a way that
+could resolve to sonnet.
 
-- The orchestrator MUST name the model when spawning and when recommending a strategy.
-- In RIPER-5 terms: **EXECUTE = opus; every other phase = sonnet.** This matches the live agent
-  frontmatter (`vc-execute-agent`, `vc-fast-mode-agent`, and `vc-quick-fix-agent` are opus; all other vc-agents sonnet).
-- In a fan-out, only the implementing subagent/teammate/workflow-stage is opus; all reviewers,
-  researchers, validators, and planners are sonnet.
+Tier split:
+
+- **opus** — anything that produces or gates a durable artifact or touches source: EXECUTE,
+  PLAN, VALIDATE, RESEARCH, TESTER, quick-fix, fast-mode.
+- **fable** — lighter roles that read, discuss, or reformat: SPEC, INNOVATE, UPDATE PROCESS,
+  code-review, code-simplifier, debugger, ui-ux-designer, git-manager.
+
+Rules:
+
+- The orchestrator MUST name the model explicitly when spawning and when recommending a strategy.
+- This table IS the live agent frontmatter — `.claude/agents/*.md` `model:` fields match it exactly.
+  Changing one without the other is drift; reconcile both in the same patch.
+- In a fan-out, prefer fable for breadth (reviewers, scouts, dimension agents) and opus for the
+  legs that write artifacts or code.
 - Full rules: `.claude/skills/vc-agent-strategy-compare/SKILL.md` §Model Selection Policy.
 
 ### Communication Principles (All Human-Facing Output)
