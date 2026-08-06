@@ -312,6 +312,10 @@ class Enricher:
         # Non-fatal, flag-gated, high-intent only. Writes to social_context.
         await self._fetch_and_store_content(visitor, profile, person_data)
 
+        # ── Step 4b (opt-in): read the visitor's PUBLIC GitHub profile ──
+        # Non-fatal, flag-gated, only when github_url is already known.
+        await self._fetch_and_store_github(visitor, profile)
+
         # ── Avatar (secondary): if Twitter gave no image, try OSINT profiles.
         # Read after Step 4 so any freshly-written social_context is included.
         if not profile.avatar_url:
@@ -828,6 +832,62 @@ class Enricher:
         except Exception as exc:
             logger.warning(
                 "content_reader_enrich_failed",
+                visitor_id=visitor.visitor_id[:8],
+                error=str(exc)[:200],
+            )
+
+    # ──────────────── GitHub public-profile reader (→ persona) ────────────
+
+    async def _fetch_and_store_github(
+        self, visitor: Visitor, profile: EnrichmentProfile
+    ) -> None:
+        """Read the visitor's PUBLIC GitHub profile into ``profile.social_context``.
+
+        Flag-gated (``enable_github_reader``, default OFF), and only when
+        ``profile.github_url`` is already known — never guesses a login.
+        Non-fatal: any error is logged and swallowed so a GitHub hiccup can't
+        break the enrichment cascade.
+
+        Known limitation (pre-existing, out of scope here): a downstream
+        Celery-beat sweep (``apps/api/tasks/resolution_tasks.py``) can still
+        wholesale-overwrite ``social_context`` via
+        ``SocialIntelligence.store_social_context()`` for the same visitor in the
+        same pass, destroying the ``github`` key written below along with the
+        pre-existing ``osint_scan``/``deep_research``/``youtube``/``reddit``
+        sub-keys. This plan documents that behavior rather than fixing it —
+        converting ``store_social_context`` to a read-modify-write merge has its
+        own blast radius (auto-draft generation reads the overwritten value) and
+        deserves its own plan. Tracked in
+        ``process/features/visitors-identity/backlog/social-context-wholesale-overwrite-bug_NOTE_07-08-26.md``.
+        """
+        if not settings.enable_github_reader:
+            return
+        github_url = getattr(profile, "github_url", None)
+        if not github_url:
+            return
+
+        try:
+            from apps.api.services.github_reader import fetch_github_profile
+
+            data = await fetch_github_profile(github_url)
+            if not data:
+                return
+
+            # Read-modify-write: preserve osint_scan / social_resolution /
+            # deep_research / youtube / reddit sub-keys already on social_context.
+            merged = dict(profile.social_context or {})
+            merged["github"] = data
+            profile.social_context = merged
+            profile.social_context_updated_at = datetime.now(timezone.utc)
+
+            logger.info(
+                "github_reader_stored",
+                visitor_id=visitor.visitor_id[:8],
+                repos=len(data.get("top_repos") or []),
+            )
+        except Exception as exc:
+            logger.warning(
+                "github_reader_enrich_failed",
                 visitor_id=visitor.visitor_id[:8],
                 error=str(exc)[:200],
             )

@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from apps.api.services import content_reader as cr
+from apps.api.services import github_reader as gh
 from apps.api.services.enricher import Enricher
 
 pytestmark = pytest.mark.unit
@@ -157,3 +158,66 @@ class TestEnricherContentGate:
         # Must not raise.
         await _enricher()._fetch_and_store_content(_visitor(), prof, {"reddit_handle": "u"})
         assert prof.social_context is None  # nothing written, no crash
+
+
+# ──────────────── GitHub public-profile reader call site ────────────────────
+
+
+def _gh_profile(github_url="https://github.com/octocat", social_context=None):
+    return SimpleNamespace(
+        visitor_id="visitor-abcdef123",
+        github_url=github_url,
+        social_context=social_context,
+        social_context_updated_at=None,
+    )
+
+
+class TestEnricherGithubGate:
+    """AC10 — flag OFF means the reader is never invoked and social_context is
+    untouched by this feature."""
+
+    async def test_flag_off_no_op(self, monkeypatch):
+        monkeypatch.setattr("apps.api.services.enricher.settings.enable_github_reader", False)
+        called = AsyncMock()
+        monkeypatch.setattr(gh, "fetch_github_profile", called)
+        prof = _gh_profile()
+        await _enricher()._fetch_and_store_github(_visitor(), prof)
+        called.assert_not_called()
+        assert prof.social_context is None
+
+    async def test_no_github_url_skips(self, monkeypatch):
+        monkeypatch.setattr("apps.api.services.enricher.settings.enable_github_reader", True)
+        called = AsyncMock()
+        monkeypatch.setattr(gh, "fetch_github_profile", called)
+        prof = _gh_profile(github_url=None)
+        await _enricher()._fetch_and_store_github(_visitor(), prof)
+        called.assert_not_called()
+        assert prof.social_context is None
+
+    async def test_writes_and_merges(self, monkeypatch):
+        monkeypatch.setattr("apps.api.services.enricher.settings.enable_github_reader", True)
+        monkeypatch.setattr(
+            gh, "fetch_github_profile",
+            AsyncMock(return_value={"login": "octocat", "top_repos": [{"name": "x"}]}),
+        )
+        # Existing sub-keys must survive (read-modify-write).
+        prof = _gh_profile(social_context={"deep_research": "keep", "reddit": {"a": 1}})
+        await _enricher()._fetch_and_store_github(_visitor(), prof)
+        assert prof.social_context["github"]["login"] == "octocat"
+        assert prof.social_context["deep_research"] == "keep"
+        assert prof.social_context["reddit"] == {"a": 1}
+        assert prof.social_context_updated_at is not None
+
+    async def test_empty_result_writes_nothing(self, monkeypatch):
+        monkeypatch.setattr("apps.api.services.enricher.settings.enable_github_reader", True)
+        monkeypatch.setattr(gh, "fetch_github_profile", AsyncMock(return_value={}))
+        prof = _gh_profile()
+        await _enricher()._fetch_and_store_github(_visitor(), prof)
+        assert prof.social_context is None
+
+    async def test_fetch_error_is_nonfatal(self, monkeypatch):
+        monkeypatch.setattr("apps.api.services.enricher.settings.enable_github_reader", True)
+        monkeypatch.setattr(gh, "fetch_github_profile", AsyncMock(side_effect=RuntimeError("boom")))
+        prof = _gh_profile()
+        await _enricher()._fetch_and_store_github(_visitor(), prof)  # must not raise
+        assert prof.social_context is None

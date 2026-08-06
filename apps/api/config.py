@@ -911,6 +911,19 @@ class Settings(BaseSettings):
     enable_content_reader: bool = False          # master gate — off until explicitly enabled
     content_reader_max_items: int = 5            # number of recent videos/posts to keep per source
 
+    # ─── GitHub public-profile reader (read public bio + top repos for persona /
+    # campaign personalization; behind a flag, default OFF) ───
+    enable_github_reader: bool = False           # master gate — off until explicitly enabled (G5)
+    # DELIBERATELY SEPARATE from `github_token` above (G4). `github_token` is a
+    # repo-scoped PAT for the private changelog sync — reusing it here would burn
+    # the same 5000 req/hr budget as an unrelated internal job AND widen the blast
+    # radius of a credential that can read a private repo. This one is a plain
+    # public-API PAT (classic with no scopes, or fine-grained with zero repo
+    # access). Empty is fine: the public REST endpoints work unauthenticated at a
+    # lower 60 req/hr ceiling; a token raises it to 5000 req/hr.
+    github_osint_token: str = ""
+    github_reader_max_repos: int = 5             # top-N most-recently-pushed repos to keep
+
     # ─── phantommm sidecar (LinkedIn outreach automation) ───
     # Beam NEVER talks to LinkedIn directly and NEVER stores the raw LinkedIn
     # session cookie. The cookie lives encrypted inside the phantommm sidecar;
