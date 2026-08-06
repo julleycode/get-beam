@@ -87,5 +87,11 @@ class Site(Base):
     last_aggregated_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True
     )
+    # This site's own Leadpipe pixel, provisioned on first snippet fetch. A
+    # Leadpipe pixel is bound 1-1 to a domain (the API 409s on duplicates), so a
+    # shared id would load on every site and collect on none of them. NULL =
+    # not provisioned yet (or Leadpipe not configured) → the snippet simply
+    # omits the vendor tag.
+    leadpipe_pixel_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

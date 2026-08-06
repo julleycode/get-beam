@@ -192,7 +192,11 @@ class Settings(BaseSettings):
     # ─── Identity Graph (person-level from IP) ───
     rb2b_api_key: str = ""          # RB2B API Suite — IP → hashed email → person (US traffic)
     leadpipe_api_key: str = ""      # Leadpipe — pixel-based identity graph (500 free IDs)
-    leadpipe_default_pixel_id: str = ""  # Default Leadpipe pixel ID for all sites
+    # NOTE: there is deliberately no `leadpipe_default_pixel_id` here anymore.
+    # A Leadpipe pixel is bound 1-1 to a domain (POST /v1/data/pixels answers
+    # 409 on a duplicate), so one shared id served to every site loaded on all
+    # of them and collected on none. Each site now carries its own
+    # `Site.leadpipe_pixel_id`, provisioned by services/leadpipe_pixels.py.
     capturify_api_key: str = ""           # Capturify — identity graph (500 free leads)
     capturify_pixel_id: str = ""          # Capturify pixel ID
     fullcontact_pixel_id: str = ""        # FullContact Acumen webtag ID
@@ -529,6 +533,14 @@ class Settings(BaseSettings):
     # RB2B_ENABLED=false to stop it. The resolver checks the flag alongside the key.
     rb2b_enabled: bool = True
     leadpipe_enabled: bool = True
+    # Create a Leadpipe pixel for a site's domain on first snippet fetch.
+    # Defaults OFF, like every other provider-touching switch here: this is the
+    # one code path that MUTATES state at the vendor (POST /v1/data/pixels), and
+    # pixels consume an org's quota and cannot be moved between orgs. An
+    # always-on default would also make any test that fetches an install snippet
+    # provision a real pixel for its fixture domain. Turn on deliberately, after
+    # confirming LEADPIPE_API_KEY points at the org that should own the pixels.
+    leadpipe_pixel_autoprovision_enabled: bool = False
     # Defaults OFF, unlike its siblings: the configured host `api.capturify.io` has
     # no DNS record (NXDOMAIN, checked 05-08-26), so every call fails to connect and
     # the provider has never produced a single `resolution_logs` row. The parsing

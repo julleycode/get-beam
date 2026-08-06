@@ -23,6 +23,8 @@ from apps.api.schemas.sites import (
     SiteUpdate,
 )
 from apps.api.services.billing import get_effective_plan, get_site_limit
+from apps.api.services.identity_providers.base import _url_to_host
+from apps.api.services.leadpipe_pixels import ensure_pixel_for_domain
 from apps.api.services.platform_detector import detect_platform
 from apps.api.services.pixel_verifier import verify_pixel
 from apps.api.services.wordpress_plugin_generator import generate_plugin_zip
@@ -281,12 +283,20 @@ async def get_pixel_snippet(
     # Attr key must match vendorUrls keys in apps/pixel/src/tracker.js.
     stack_vendors: list[tuple[str, str]] = []
 
-    # Leadpipe: global pixel id only. `Site` has no leadpipe_pixel_id column, so
-    # every site shares one pixel id and Leadpipe separates them by the `domain`
-    # filter on /v1/data. A per-site override needs that column added first — the
-    # getattr that used to read as a per-site fallback here could only return None.
-    if settings.leadpipe_default_pixel_id:
-        stack_vendors.append(("leadpipe", settings.leadpipe_default_pixel_id))
+    # Leadpipe: each site gets its OWN pixel, because a Leadpipe pixel is bound
+    # 1-1 to a domain (the API 409s on duplicates). Provisioned lazily right
+    # here — the one point that knows the customer is about to install — rather
+    # than at create_site, which would burn a pixel slot for every site created
+    # and abandoned. Idempotent: the id is stored, and the API's own 409 covers
+    # the race where two snippet fetches land at once.
+    leadpipe_pixel_id = site.leadpipe_pixel_id
+    if not leadpipe_pixel_id:
+        leadpipe_pixel_id = await ensure_pixel_for_domain(_url_to_host(site.url))
+        if leadpipe_pixel_id:
+            site.leadpipe_pixel_id = leadpipe_pixel_id
+            await db.commit()
+    if leadpipe_pixel_id:
+        stack_vendors.append(("leadpipe", leadpipe_pixel_id))
 
     if settings.capturify_pixel_id:
         stack_vendors.append(("capturify", settings.capturify_pixel_id))
