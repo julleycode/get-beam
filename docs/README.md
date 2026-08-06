@@ -16,6 +16,7 @@ Human-facing documentation for the Beam monorepo. Agent harness context lives se
 | [system-architecture.md](./system-architecture.md) | Components, data flows, diagrams |
 | [agent-detection-architecture.md](./agent-detection-architecture.md) | AI-agent layer: 5 detection layers, confidence tiers, handoff correlation, agent-facing gateway, Beam Lab soft-serve gate + edge `_bfm` marker (§5d) — plus what it cannot do yet. Read before touching Agents/Visitors |
 | [ai-behind-solution-old-vs-new.md](./ai-behind-solution-old-vs-new.md) | Giải pháp “người đứng sau AI”: SA 3 tầng, cách cũ (temporal) vs cách mới (marker F2 `_bam`), edge marker `_bfm` (§4b), phần identity còn thiếu |
+| [leadpipe-webhook-team-brief.md](./leadpipe-webhook-team-brief.md) | **Trình bày team** — Leadpipe tự báo danh tính thay vì Beam đi hỏi: trước/sau, ảnh hưởng, việc phải làm tay, ít thuật ngữ |
 | [beam-lab-team-brief.md](./beam-lab-team-brief.md) | **Trình bày team** — quá trình / được / hỏng, sơ đồ luồng, ít thuật ngữ |
 | [beam-lab-resume.md](./beam-lab-resume.md) | Evergreen handoff kỹ thuật Beam Lab: file khoá, `_bam` vs `_bfm`, env, việc còn mở |
 | [project-roadmap.md](./project-roadmap.md) | Shipped vs pending (roadmap + `process/features/`) |
