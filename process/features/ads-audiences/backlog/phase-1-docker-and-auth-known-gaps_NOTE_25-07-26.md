@@ -1,6 +1,6 @@
 ---
 name: plan:ads-audiences-phase-1-docker-and-auth-known-gaps
-description: "Ad Audiences Phase 1+2 — env-only known-gaps and resolution paths (G1/G2 Phase 1; E3/AC7/AC13 Phase 2)"
+description: "Ad Audiences Phase 1+2+3 — env-only known-gaps and resolution paths (G1/G2 Phase 1; E3/AC7/AC13 Phase 2; G2/E4 sandbox smoke, live-ingest ack, enable HARD STOP Phase 3)"
 date: 25-07-26
 metadata:
   node_type: memory
@@ -134,12 +134,85 @@ open.
   (hard-forbidden to Phase 2). Safe to defer — `fresh_access_token`'s `getattr` guard already makes
   today's omission harmless, and a unit test pins that behavior.
 
+## Phase 3 (Google Live) — added 07-08-26
+
+**Status:** open — all gaps are environment-only or operator-side, not code defects. None block
+Phase 3's code-complete/EVL-green classification (26-07-26, commit `e3adae3`, results.tsv row 7:
+G1–G7 all PASS, vc-tester independent, HALTED_SUCCESS); they DO block `✅ VERIFIED` per the phase
+plan's own Phase Completion Rules.
+
+### G2/E4 — Hybrid Google sandbox smoke not run
+
+**What's missing:** the phase plan's E4/G2 Hybrid manual smoke against the zero-approval Google
+test-account sandbox path. Requires a real Google Cloud OAuth test app (`google_ads_client_id`/
+`_secret` set to real values), a Google Ads test account, and a real (test-tier)
+`google_ads_developer_token` — none exist in this environment.
+
+**Resolution path:** run the phase plan's Operator Checklist
+(`phase-3-google-live_PLAN_25-07-26.md` §Operator Checklist): obtain the 22-char developer token
+via the Google Ads UI API Center, confirm Test Account Access (zero-approval default), confirm
+consent-screen publish status (Testing-status refresh tokens expire in 7 days — expect roughly
+weekly re-mint while in Testing), then execute the E4 Hybrid smoke and record the result in a
+phase addendum before Phase 3 can be marked `✅ VERIFIED`.
+
+### Real OAuth offline-consent round-trip unproven
+
+**What's missing:** the `access_type=offline` + `prompt=consent` → refresh-token issuance →
+`refresh_tokens(refresh_token)` grant round-trip is unit-proven against mocked responses only
+(E1b/G7 green); no live Google token endpoint has ever acked it.
+
+**Resolution path:** proven implicitly by the G2/E4 sandbox smoke above (the connect flow mints a
+real refresh token; a follow-up push exercises the refresh path). Batch with G2/E4 — no separate
+operator step needed.
+
+### `audienceMembers:ingest` acceptance shape doc-sourced, never live-acked
+
+**What's missing:** the Data Manager API request shape (camelCase consent fields,
+`termsOfService.customerMatchTermsOfServiceStatus: "ACCEPTED"`, `encoding: HEX`, 10000-member
+batch cap, async `requestId` → `requestStatus:retrieve` polling) is sourced from the live
+discovery doc (rev 20260722) but no real ingest call has ever been acknowledged. This includes the
+Customer Match ToS **error** shape for an unaccepted account — the Google analogue of Phase 2's
+AC13 Agent-Probe residual: unknown real error code/shape; current handling fails safe.
+
+**Resolution path:** confirm via the G2/E4 sandbox smoke (one real ingest + one status-retrieve
+call; deliberately trigger the ToS-unaccepted path on a fresh test account if feasible), then
+back any observed error shape with a real fixture in `tests/unit/test_ads_google.py` — same
+upgrade pattern as Phase 2 AC13.
+
+### `ad_audiences_enabled` flip — operator HARD STOP
+
+**What's missing / rule:** flipping `ad_audiences_enabled` in any real environment is an explicit
+operator action gated on the **live migration apply** landing first. Re-run
+`alembic -c apps/api/alembic.ini heads` immediately before applying — the head has moved since
+this program's EVL (`d5b1f7c3a908` then; now past `f1a7c3e05b92` — see all-context.md Migration
+head status for the per-branch truth and the one-edit re-chain). Never trust a hash recorded in
+this note.
+
+### AC7 Playwright legs — still blocked on Clerk auth-harness gap
+
+**What's missing:** same pre-existing G2 (Phase 1) Clerk auth-harness gap — Phase 3's UI
+assertions cannot run until it is fixed. Not a Phase 3 defect; resolution path unchanged (see G2
+above).
+
+### Backlog idea (future optimization, not a gap)
+
+Data Manager discovery doc rev 20260722 now exposes `accountTypes.accounts.userLists.create` — a
+capability that did not exist at VALIDATE's 25-07-26 fetch. It could collapse the current locked
+two-API sequence (Google Ads API `userLists:mutate` creates the list → Data Manager
+`audienceMembers:ingest` fills it) into a single Data Manager API flow, dropping the
+`google_ads_developer_token` dependency for the create step. Record only — the as-built two-API
+architecture was implemented as specified and is correct; revisit in whichever future phase next
+touches `services/ads/google.py`.
+
 ## Cross-references
 
 - Phase 1 plan: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-1-foundation_PLAN_25-07-26.md`
 - Phase 1 report: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-1-foundation_REPORT_25-07-26.md`
 - Phase 2 plan: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-2-meta-live_PLAN_25-07-26.md`
 - Phase 2 report: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-2-meta-live_REPORT_26-07-26.md`
+- Phase 3 plan: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-3-google-live_PLAN_25-07-26.md`
+- Phase 3 report: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-3-google-live_REPORT_26-07-26.md`
 - Umbrella plan: `process/features/ads-audiences/active/ad-audiences_25-07-26/ad-audiences-umbrella_PLAN_25-07-26.md`
 - `results.tsv` iteration 3 (Phase 1 EVL confirmation, HALTED_SUCCESS); iteration 5 (Phase 2 EVL
-  confirmation, HALTED_SUCCESS)
+  confirmation, HALTED_SUCCESS); rows 6–7 (Phase 3 inner-PVL Gate PASS + EVL G1–G7 confirmation,
+  HALTED_SUCCESS)

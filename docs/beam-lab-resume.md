@@ -38,18 +38,25 @@ validate the AI-agent detection chain end-to-end on a domain Beam fully controls
 | `apps/api/migrations/versions/f3c8b2e91d47_*.py` | `agent_fetch_events.link_marker` (dev Postgres only) |
 | `apps/api/migrations/versions/a7d419e6c052_*.py` | `events.link_marker` (dev Postgres only) |
 
-## Plans (status reconcile needed)
+## Plans (reconciled 07-08-26)
 
-Both plans in `process/features/evallayer/active/` still carry `status: awaiting-execute-approval`,
-but the soft-serve behaviour is **already live on the lab deployment**. Treat the plan-status field
-as stale until a UPDATE PROCESS pass reconciles it.
+Both plans have been moved to `process/features/evallayer/completed/` and their `status:`
+frontmatter corrected via a UPDATE PROCESS pass. Neither file was deleted.
 
-- `agent-gate-lab_31-07-26/` — the original hard-403 gate. **Rejected by reality**: real
-  ChatGPT-User hit the 403 twice, sent no headers, never checked in, and told its user the page was
-  unreadable, so it served a stale answer instead.
-- `agent-gate-soft-serve_31-07-26/` — supersedes the above **behaviourally** (the hard-403 file was
-  not deleted). Always 200 + full HTML; the identification ask moves inside the page as an HTML
-  comment via `HTMLRewriter`, and no `x-agent-gate` response headers are set.
+- `agent-gate-lab_31-07-26/` — the original hard-403 gate, `status: superseded`. **Rejected by
+  reality**: real ChatGPT-User hit the 403 twice, sent no headers, never checked in, and told its
+  user the page was unreadable, so it served a stale answer instead. Kept for design history.
+- `agent-gate-soft-serve_31-07-26/` — `status: shipped-with-known-gaps`. Supersedes the above
+  **behaviourally** (the hard-403 file was not deleted). Always 200 + full HTML; the
+  identification ask moves inside the page as an HTML comment via `HTMLRewriter`, and no
+  `x-agent-gate` response headers are set on the human/identified path. Confirmed committed
+  (`74e85b1`) and present in `_middleware.js`; the live Cloudflare deployment's running code was
+  **not** independently re-fetched/diffed in this reconciliation pass — treat deploy/repo parity
+  as UNVERIFIED-BUT-ASSUMED, not confirmed-live-tested today.
+- Open items (TTL policy, human click-through, pending migrations, `BEAM_FULL_LOG` still on,
+  Gemini-via-AWS-fetcher gap, ChatGPT browse intermittency) are now tracked as an explicit backlog
+  note, not left implicit in this doc:
+  `process/features/evallayer/backlog/beam-lab-soft-serve-known-gaps_NOTE_07-08-26.md`.
 
 ## Two markers — do not confuse them
 
@@ -112,13 +119,16 @@ Deploy: `npx wrangler pages deploy public --project-name beam-lab` from
 6. Turn `BEAM_FULL_LOG` back off once the current debug window is done — it logs every visitor,
    not just AI ones.
 7. F14 Web Bot Auth (RFC 9421) remains open; unrelated to this session's work.
-8. Run a UPDATE PROCESS pass to reconcile the two plan files' `status: awaiting-execute-approval`
-   against the fact that soft-serve behaviour is already live on the lab deployment.
+8. ~~Run a UPDATE PROCESS pass to reconcile the two plan files' `status: awaiting-execute-approval`
+   against the fact that soft-serve behaviour is already live on the lab deployment.~~ **Done
+   07-08-26** — see `## Plans (reconciled 07-08-26)` above and
+   `process/features/evallayer/backlog/beam-lab-soft-serve-known-gaps_NOTE_07-08-26.md` for what
+   was carried forward.
 
 ## References
 
 - [agent-detection-architecture.md](./agent-detection-architecture.md) — §5d has the full write-up
 - [ai-behind-solution-old-vs-new.md](./ai-behind-solution-old-vs-new.md) — §4b compares `_bam` vs `_bfm`
 - [deployment-guide.md](./deployment-guide.md) — Beam Lab ops section
-- `process/features/evallayer/active/agent-gate-lab_31-07-26/`
-- `process/features/evallayer/active/agent-gate-soft-serve_31-07-26/`
+- `process/features/evallayer/completed/agent-gate-lab_31-07-26/`
+- `process/features/evallayer/completed/agent-gate-soft-serve_31-07-26/`

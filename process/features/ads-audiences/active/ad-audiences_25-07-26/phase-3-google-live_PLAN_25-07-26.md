@@ -13,13 +13,13 @@ metadata:
 
 **Program:** ad-audiences
 **Umbrella plan:** process/features/ads-audiences/active/ad-audiences_25-07-26/ad-audiences-umbrella_PLAN_25-07-26.md
-**Phase status:** ⏳ PLANNED
+**Phase status:** 🧪 TESTING (code-complete + EVL-green 26-07-26, commit e3adae3; pending G2/E4 Hybrid Google sandbox smoke before ✅ VERIFIED)
 **Report destination:** process/features/ads-audiences/active/ad-audiences_25-07-26/phase-3-google-live_REPORT_{dd-mm-yy}.md (flat in the program task folder)
 
 **Complexity:** COMPLEX
 Complexity: COMPLEX
 Date: 25-07-26
-Status: PLANNED
+Status: 🧪 TESTING (code-complete + EVL-green 26-07-26)
 
 ## Overview
 
@@ -448,8 +448,8 @@ Orchestrator reads this before deciding which subagent to spawn next. The canoni
 - [x] 3. PLAN-SUPPLEMENT — plan-agent: existing phase plan updated with docs-fetch findings; Inner Loop Refresh Note if sections changed (or "n/a — research clean")
 - [x] 4. PVL — vc-validate-agent: full V1-V7; validate-contract written per `.claude/skills/vc-validate-findings/references/example-validate-output.md` — Gate: PASS (outer PVL, 25-07-26, re-confirm pass after PVL-supplement cycle 1 closed the config.py registry gap and OQ3 known-gap tagging); see Validate Contract below
 - [x] 5. EXECUTE — all checklist items done; per-section test gates run and green (or gaps documented)
-- [ ] 6. EVL — all EVL gates green; follow-up stubs registered; EVL HANDOFF SUMMARY written
-- [ ] 7. UPDATE PROCESS — phase report written, umbrella state updated, commit done
+- [x] 6. EVL — all EVL gates green (results.tsv row 7, 26-07-26: vc-tester independent confirmation, G1–G7 all PASS — 574 unit + 30 google/eea + 23 ads integration incl. Meta regression + guardrail 18 + tsc + frozen zero-diff + no-live-call grep + single head `d5b1f7c3a908`; dev-token Agent-Probe promoted to automated test; only G2/E4 sandbox smoke open, env-only; HALTED_SUCCESS, no regression P1/P2/P3)
+- [x] 7. UPDATE PROCESS — this session (07-08-26): umbrella `## Current Execution State` rewritten, Phase 3 known-gaps appended to backlog note, all-context.md feature entry updated. **Process commit pending user** (user declined commits this run — commit the process artifacts when ready). Plan stays in `active/` — 🧪 TESTING pending G2/E4 operator sandbox gate; not archive-ready.
 
 **Validate-contract required before execute.** If step 4 (PVL) is unchecked or `## Validate Contract`
 reads "(placeholder — vc-validate-agent writes this section before EXECUTE)", orchestrator must

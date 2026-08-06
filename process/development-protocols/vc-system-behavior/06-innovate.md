@@ -24,7 +24,7 @@ INNOVATE runs *after* SPEC (`RESEARCH → SPEC → INNOVATE → PLAN`). It is th
 
 ## Agent and Tools
 
-**Agent:** `vc-innovate-agent` (sonnet)
+**Agent:** `vc-innovate-agent` (fable)
 
 **Tools allowed:** Read, Grep, Glob ONLY
 

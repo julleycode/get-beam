@@ -13,9 +13,9 @@ metadata:
 
 **Date:** 25-07-26
 **Complexity:** COMPLEX
-**Status:** ⏳ PLANNED
+**Status:** 🧪 TESTING (all 3 phases code-complete; Phase 1 ✅ VERIFIED; Phases 2–3 EVL-green pending operator sandbox gates)
 Date: 25-07-26
-Status: PLANNED
+Status: 🧪 TESTING
 
 ## Overview
 
@@ -275,7 +275,7 @@ During /goal execution of this phase program:
 | 0 — Pre-program (plan creation) | 🔨 CODE DONE (this write) |
 | 1 — Foundation | ✅ VERIFIED (2 env-only known-gaps: G1 migration round-trip, G2 Playwright auth harness — see backlog) |
 | 2 — Meta live | 🧪 TESTING (code-complete, EVL-green; 3 env-only known-gaps: E3 sandbox smoke, AC7 Playwright legs, AC13 error shape — see backlog) |
-| 3 — Google live | ⏳ PLANNED |
+| 3 — Google live | 🧪 TESTING (code-complete, EVL-green 26-07-26, commit `e3adae3`; 1 env-only known-gap: G2/E4 Google sandbox smoke — see backlog) |
 
 Status values: ⏳ PLANNED | 🔨 CODE DONE | 🧪 TESTING | ✅ VERIFIED | 🚧 BLOCKED | ✅ COMPLETE
 
@@ -363,38 +363,48 @@ node .claude/skills/vc-audit-vc/scripts/validate-guide-sync.mjs
 
 ## Current Execution State
 
-Last updated: 26-07-26
+Last updated: 07-08-26 (UPDATE PROCESS — Phase 3 closeout bookkeeping reconciled; code state
+  unchanged since 26-07-26)
 Current phase: 3 of 3 (Phase 3 — Google Live)
 Phase 3 name: Google Live
-Phase 2 status: 🧪 TESTING (code-complete, EVL-green) — NOT ✅ VERIFIED. Inner-PVL Gate: PASS
-  (cycle 4, `generated-by: inner-pvl: phase-2`). 3 env-only known-gaps: E3 Hybrid Meta sandbox
-  smoke (no real Meta developer app/Business Manager in this environment), AC7 Playwright UI legs
-  (Clerk auth harness gap G2, pre-existing), AC13 exact error code/subcode (Agent-Probe residual,
-  fails safe). All 3 have resolution paths; none block Phase 3 start. (Note: the Phase 2 EVL
-  handoff also flagged T1 conftest fix as "not yet landed on main" — independently re-verified
-  26-07-26 as STALE: T1 is already fixed and committed, `c88444a`. See backlog note's correction.)
-  See backlog
-  note `process/features/ads-audiences/backlog/phase-1-docker-and-auth-known-gaps_NOTE_25-07-26.md`
-  (extended with a Phase 2 section).
-Phase 2 EVL: green — 14 gates: unit 539 full regression + 48 ads-scope, guardrail agent-origin
-  18/18, 5/5 integration files (fresh-schema), frontend typecheck clean, frozen-ads-file drift
-  clean, no-raw-token-logging grep clean, no-live-Meta-calls grep clean, alembic single head
-  `d5b1f7c3a908` (`results.tsv` iteration 5, HALTED_SUCCESS). No regression against Phase 1 surfaces.
-Phase 2 report: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-2-meta-live_REPORT_26-07-26.md`
+Phase 3 status: 🧪 TESTING (code-complete + EVL-green 26-07-26, commit `e3adae3`) — NOT
+  ✅ VERIFIED. Inner-PVL Gate: PASS (`generated-by: inner-pvl: phase-3`, results.tsv row 6,
+  HALTED_SUCCESS). 1 env-only known-gap blocks VERIFIED: G2/E4 Hybrid Google sandbox smoke
+  (needs Google Cloud OAuth test app + Google Ads test account + real developer_token — none in
+  this environment). Resolution path in backlog note
+  `process/features/ads-audiences/backlog/phase-1-docker-and-auth-known-gaps_NOTE_25-07-26.md`
+  (extended with a Phase 3 section, 07-08-26). AC7 Playwright legs remain blocked on the same
+  pre-existing Clerk auth-harness gap (G2, Phase 1).
+Phase 3 EVL: green — G1–G7 all PASS (results.tsv row 7, 26-07-26, vc-tester independent,
+  HALTED_SUCCESS): 574 unit + 30 google/eea + 23 ads integration incl. Meta regression + guardrail
+  agent-origin 18/18 + frontend typecheck + frozen-file zero-diff + no-live-call grep + alembic
+  single head `d5b1f7c3a908` at EVL time. Dev-token Agent-Probe row promoted to an automated test.
+  No regression against Phase 1/2/3 surfaces.
+Phase 3 report: `process/features/ads-audiences/active/ad-audiences_25-07-26/phase-3-google-live_REPORT_26-07-26.md`
+Phase 2 status: 🧪 TESTING (code-complete, EVL-green 26-07-26) — NOT ✅ VERIFIED. Inner-PVL Gate:
+  PASS (cycle 4, `generated-by: inner-pvl: phase-2`). 3 env-only known-gaps: E3 Hybrid Meta
+  sandbox smoke, AC7 Playwright UI legs (Clerk auth harness gap G2), AC13 exact error code/subcode
+  (Agent-Probe residual, fails safe). All have resolution paths in the backlog note (Phase 2
+  section). Phase 2 EVL: 14 gates green (results.tsv iteration 5, HALTED_SUCCESS); report:
+  `phase-2-meta-live_REPORT_26-07-26.md`. (T1-conftest-not-landed claim re-verified STALE 26-07-26
+  — T1 fixed at `c88444a`; see backlog note's correction.)
 Phase 1 status: ✅ VERIFIED — Gate: PASS (cycle 2); 2 named env-only known-gaps (G1 migration
-  round-trip, G2 Playwright auth harness), unchanged this phase.
-Note: alembic head has moved twice since Phase 1 closeout, both by concurrent programs, not this
-  program — currently `d5b1f7c3a908` (single head, re-verified live 26-07-26 via `alembic heads`).
-  Phase 3's RESEARCH step must re-confirm the head again before any migration work, per the
-  umbrella's Global Constraints check.
-Next phase: Phase 3 — Google Live, inner-loop Step 1 RESEARCH (pending — not yet spawned). Read
-  Phase 3 plan (`phase-3-google-live_PLAN_25-07-26.md`) and this umbrella before spawning
-  vc-research-agent. Phase 3 does not depend on Phase 2 (see Join Conditions) — its Phase 1
-  dependency is already satisfied.
+  round-trip, G2 Playwright auth harness), unchanged.
+Note: alembic head moves with concurrent programs — `d5b1f7c3a908` was the verified single head at
+  this program's last EVL (26-07-26), but the repo head has since moved past `f1a7c3e05b92`
+  (see all-context.md Migration head status). Re-run `alembic -c apps/api/alembic.ini heads`
+  before any live migration apply, and apply migrations live BEFORE flipping
+  `ad_audiences_enabled` in any real environment (operator HARD STOP).
+Next phase: none — program is at the operator-gate boundary. All 3 phases are code-complete; no
+  further agent-side phase work exists. Remaining path to Program Net Gate is operator-side:
+  (1) Meta E3 sandbox smoke (Phase 2), (2) Google G2/E4 sandbox smoke (Phase 3), (3) Clerk
+  auth-harness fix unblocking AC7 legs, (4) live migration apply + `ad_audiences_enabled` flip
+  (HARD STOP, operator-only). See backlog note for procedures.
 
-Program Net Gate: IN PROGRESS (1 of 3 phases VERIFIED; Phase 2 code-complete/EVL-green pending
-  Hybrid+UI evidence; Phase 3 not started)
-Latest validator run: 26-07-26 — see this UPDATE PROCESS session's Tier-1 audit results
+Program Net Gate: IN PROGRESS — 1 of 3 phases VERIFIED (Phase 1); 2 code-complete-TESTING
+  (Phases 2–3, each pending env-only Hybrid/operator evidence). No open agent-side work.
+Latest validator run: 26-07-26 (Phase 3 EVL). Process commit for this 07-08-26 bookkeeping pass:
+  pending user.
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read this section plus the current phase plan's "## Phase Loop Progress"

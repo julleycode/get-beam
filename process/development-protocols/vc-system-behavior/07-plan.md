@@ -26,7 +26,7 @@ For non-trivial work the SPEC is always present upstream (it is the user-review 
 
 ## Agent and Tools
 
-**Agent:** `vc-plan-agent` (sonnet)
+**Agent:** `vc-plan-agent` (opus)
 
 **Tools:** Read, Grep, Glob, Bash (safe read-only only, plus `date +%d-%m-%y`), Write (only inside `process/*/active/`)
 

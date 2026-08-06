@@ -20,7 +20,7 @@ RESEARCH is the first phase of every non-trivial task. The agent reads the codeb
 
 ## Agent and Tools
 
-**Agent:** `vc-research-agent` (sonnet)
+**Agent:** `vc-research-agent` (opus)
 
 **Tools allowed:** Read, Grep, Glob, Bash (safe commands only), WebSearch
 

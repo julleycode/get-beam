@@ -73,7 +73,7 @@ runtime behavior. Fields in scope for this program:
 
 - `effort` — token-budget hint for the spawning model. Valid values: `low`, `medium`, `high`, `max`.
   Use `max` for opus-based execution agents (vc-execute-agent, vc-fast-mode-agent, vc-quick-fix-agent),
-  `high` for planning/validation agents on sonnet, `medium` for lightweight agents, `low` for vc-git-manager.
+  `high` for planning/validation agents, `medium` for lightweight agents, `low` for vc-git-manager.
 - `skills` — list of skill slugs preloaded into the agent context window. Each slug must resolve to a
   real directory under `.claude/skills/`. Drop any slug that does not resolve; record as a known-gap
   in the phase report.

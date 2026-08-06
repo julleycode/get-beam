@@ -84,7 +84,43 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
 
 - `visitors-identity` — pixel visitors → identity resolution waterfall → enrichment → OSINT →
   first-party capture expansion (value-based field matching, mailto/URL-param, cross-browser
-  autofill, shadow-DOM/same-origin-iframe) feeding the owned identity graph
+  autofill, shadow-DOM/same-origin-iframe) feeding the owned identity graph. Active task folders
+  (07-08-26 autopilot run reconciled the set; none pushed/merged):
+  - `graph-erasure-compliance_07-08-26` — SPEC + COMPLEX PLAN, **planned, not yet VALIDATE'd**.
+    Closes the gap where per-visitor GDPR erasure (`apps/api/routers/visitors.py:403-439`) never
+    deletes cross-tenant `beam_identity_graph` rows, plus stale public legal copy.
+  - `github-reader_07-08-26` — **EXECUTED + EVL green 8/8 (07-08-26).** New
+    `apps/api/services/github_reader.py` (flag `enable_github_reader` default OFF,
+    `github_osint_token`, 7d cache, fail-closed rate limit, single-host SSRF guard, `clean_text`
+    sanitization) + enricher call site `_fetch_and_store_github`; zero migrations, 1197-unit lane
+    green. Known-gaps: live GitHub response shape unproven; CONCERN-2 sibling-clobber documented
+    not fixed (`backlog/social-context-wholesale-overwrite-bug_NOTE_07-08-26.md` — its overwrite
+    half is resolved by social-context-merge below).
+  - `social-context-merge_07-08-26` — **EXECUTED + EVL green (07-08-26).** `store_social_context`
+    (`apps/api/services/social_intelligence.py`) now merge-preserving (the 1 overwrite writer of 9
+    fixed; census of 9 writers verified), deep-research meter stamp removed. PVL converged after 3
+    passes; AC-7 Hybrid deferred pending Docker (accepted); 4 backlog notes written.
+  - `identity-coop_07-08-26` — Phase 1 **Dependency-BLOCKED** on graph-erasure reaching LIVE
+    (entry gate); plan converged via supplement (bool-return accrual gating,
+    write-nothing-when-blocked privacy invariant, site_id-only ledger, partial-unique dedup).
+    `backlog/identity-coop-entry-gate-spec-a-live_NOTE_07-08-26.md` tracks 4 clearing conditions;
+    phases 2-3 skipped.
+  - `identity-p1p2-status-observability_02-08-26` — audit verdict 07-08-26: ALL 3 phases
+    DONE-ON-DISK (vocabulary since renamed by identity-vocab-reconcile); its own `plan.md` says
+    `status: completed`. Archive-ready debt — RECOMMEND moving to `completed/` (not yet moved).
+  - `identity-coverage-pixel-fppro_02-08-26` — audit verdict 07-08-26: Ph.01 done (manual gate
+    transferred to recovery program); Ph.02 SUPERSEDED by `plans/260805-1543-identity-coverage-recovery/`
+    on branch `dev_nhantc2` (outside `process/`, invisible to plan-discovery); Ph.03 backlog
+    needs-live-provider (fp3 may obviate — measure first); Ph.04 docs half EXECUTED 07-08-26
+    (`benchmark-template.csv` + `benchmark-runbook.md`; measurement half needs human panel +
+    Leadpipe revival).
+  - `identity-vocab-reconcile_07-08-26` — **EXECUTED and user-accepted, unpushed.** Reconciles
+    `devjulley` onto `main`'s `identified`/`candidate` vocabulary; PVL closed `HALTED_ACCEPTED` at
+    supplement cycle 9 of 10 (`Gate: CONDITIONAL`, accepted). `devjulley` is rebased onto `main` at
+    `5293cbc`, working tree clean, but nothing is pushed to `origin/devjulley` (ahead 32, behind 5).
+    Kept in `active/` — see the "Migration head status" note above for the still-pending
+    Alembic re-chain this plan carries. Known-gap:
+    `process/features/visitors-identity/backlog/resolver-privacy-relay-callsite-coverage_NOTE_07-08-26.md`.
 - `campaigns-outreach` — AI segmentation, campaign planning, email + social outreach, drafts
 - `billing` — Gumroad MoR billing, plans/quotas, BYOK keys
 - `marketing-site` — public site: landing, blog, changelog, SEO (content sources in `marketing/`)
@@ -106,9 +142,13 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   (`settings.agent_detection_enabled`), and the `/dashboard/agents` empty state branches on it
   (flag-off vs no-visits-yet copy) — shipped 04-08-26, PVL/EVL green, archived to
   `process/features/evallayer/completed/agents-flag-empty-state_04-08-26/`.
-  **Beam Lab (31-07→01-08):** soft-serve gate + edge `_bfm` marker live on `beamlab.nhantown.com`;
-  resume at `docs/beam-lab-resume.md` (plans `agent-gate-soft-serve_31-07-26` /
-  `agent-gate-lab_31-07-26` status may be stale vs lab)
+  **Beam Lab (31-07→01-08, reconciled 07-08-26):** soft-serve gate + edge `_bfm` marker live on
+  `beamlab.nhantown.com`; resume at `docs/beam-lab-resume.md`. Plans archived to
+  `process/features/evallayer/completed/agent-gate-soft-serve_31-07-26/` (status
+  `shipped-with-known-gaps`) and `.../completed/agent-gate-lab_31-07-26/` (status `superseded` —
+  the hard-403 predecessor, empirically rejected by real ChatGPT-User traffic). Open items tracked
+  in `process/features/evallayer/backlog/beam-lab-soft-serve-known-gaps_NOTE_07-08-26.md`. Live
+  deployment code was not independently re-verified against the repo in this reconciliation pass.
 - `agent-gateway` — agent-readable site surface + agent-driven lead capture. Phase 1 (`AgentProfile`
   per-site data model, authed CRUD, dashboard editor) and Phase 2 (public
   `manifest.json`/`offers.json`/`llms.txt` + hand-written read-only JSON-RPC MCP server exposing
@@ -130,7 +170,16 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   warning) code-complete + EVL-green 26-07-26 (14 gates, no regression); 3 env-only known-gaps
   before `✅ VERIFIED`/production-enable: Meta sandbox Hybrid smoke (mandatory pre-enable operator
   step), AC7 Playwright UI legs (blocked on the same Clerk auth-harness gap as Phase 1), AC13 exact
-  error code/subcode (Agent-Probe residual, fails safe). Phase 3 (Google live) in progress — see
+  error code/subcode (Agent-Probe residual, fails safe). Phase 3 (Google live — real OAuth with
+  offline-consent refresh flow, two-API audience create/upload via Google Ads API
+  `userLists:mutate` + Data Manager `audienceMembers:ingest`, EEA fail-closed exclusion)
+  code-complete + EVL-green 26-07-26 (commit `e3adae3`, G1–G7 all PASS, no regression) — 🧪
+  TESTING pending the operator sandbox gate: G2/E4 Hybrid Google sandbox smoke (needs Google Cloud
+  OAuth test app + Google Ads test account + real developer_token) before `✅ VERIFIED`. Program is
+  at the operator-gate boundary — 1 of 3 phases VERIFIED, no open agent-side work; remaining path
+  is operator-side sandbox smokes + live migration apply before any `ad_audiences_enabled` flip.
+  Known-gaps + procedures:
+  `process/features/ads-audiences/backlog/phase-1-docker-and-auth-known-gaps_NOTE_25-07-26.md`; see
   `process/features/ads-audiences/active/ad-audiences_25-07-26/ad-audiences-umbrella_PLAN_25-07-26.md`
 
 ## Context Group Lifecycle
@@ -242,56 +291,43 @@ structurally separate from human Visitor/Event data, never as a targetable outre
 - `apps/api/services/agent_aggregator.py` — read-only vendor/page/verification-method analytics,
   `GET /api/v1/agents/{site_id}/analytics`
 - Feature flag: `agent_detection_enabled` in `apps/api/config.py` — **defaults OFF**
-- 12 migrations pending live-apply, in order (Docker-gated, never run against a real Postgres in
-  the sandbox that built this — chain verified by reading each file's `revision`/`down_revision`
-  header; **TRUE current head re-confirmed LIVE 26-07-26 (at cadence-bot-flag EXECUTE) via
-  `alembic -c apps/api/alembic.ini heads`: `e6b2d4a1c837` — single head, no branching**):
-  `d11b39a6c843` (agent_visits
-  table) → `a1c7e4f92b83` (Phase 5 visitor.is_agent_derived / IdentifiedVisitor.source_agent_visit_id)
-  → `b3f9a1d2c7e5` (AI-referral, see below) → `c4e8f1a9d2b7` (Handoff Detection Phase H1,
-  agent_fetch_events) → `f8a2c1d9b3e7` (company_graph, owned-data-layer Phase 1) →
-  `a3e9f1c7d2b5` (identity_signals, owned-data-layer Phase 2) → `e2a4c7f81b93` (Handoff
-  Detection Phase 2, agent_handoff_links) → `a9f2c1e7b4d6` (`ck_visitor_emails_source` CHECK
-  constraint, first-party-capture Phase 3) → `c7d3b8e1f624` (ingest-abuse-hardening P4, see
-  Ingest Abuse Hardening section below) → `b7d3e9f1a4c2` (add_ad_connections, ads-audiences) →
-  `c8e4f2a6b1d9` (add_ad_audience_links, ads-audiences) → `d5b1f7c3a908`
-  (add_site_last_aggregated_at, capacity-hardening) → `e6b2d4a1c837` (add_cadence_bot_flag,
-  cadence-bot-flag — **current head**). Apply all twelve in order before enabling
-  `agent_detection_enabled`, `company_graph_enabled`, `identity_signals_enabled`,
-  `site_ingest_limit_enabled`, `ingest_velocity_enabled`, or `cadence_bot_flag_enabled` in any real
-  environment. Re-confirm via `alembic heads` before applying — other work may advance the head
-  further (it already has, repeatedly, from concurrent programs — see migration-collision memory
-  note). Round-trip (`upgrade head` → `downgrade -1` → `upgrade head`) proven clean on a disposable
-  Postgres container 24-07-26 for the chain up to `a9f2c1e7b4d6` only, as part of
-  owned-data-layer/first-party-capture closure. The 5 migrations added after that point
-  (`c7d3b8e1f624`, `b7d3e9f1a4c2`, `c8e4f2a6b1d9`, `d5b1f7c3a908`, `e6b2d4a1c837`) are offline
-  `--sql`-validated only, NOT live-round-tripped — this is NOT a production live-apply, which
-  remains a separate explicit operator action. Note: an unscoped `alembic upgrade head --sql` fails
-  mid-chain because `b7d3e9f1a4c2_add_ad_connections.py` calls `sa.inspect(bind)` (unsupported
-  against alembic's offline `MockConnection`) — offline validation of the tail of the chain must use
-  an explicit `<from>:<to>` range (e.g. `upgrade d5b1f7c3a908:head --sql`), confirmed at
-  cadence-bot-flag EXECUTE 26-07-26; see `process/context/tests/all-tests.md` for the gotcha.
-- **CORRECTION 06-08-26 (identity-coverage-recovery Phase 5) — the block above is stale on two
-  counts. Read this before trusting any number in it.**
-  - **TRUE current head: `c2f7a9d31b64`** (`add_resolution_deferral_watermark`), re-confirmed LIVE
-    via `alembic -c apps/api/alembic.ini heads` — single head, no branching. `e6b2d4a1c837` is
-    **9 revisions behind**. The chain continues: `e6b2d4a1c837` → `a4f7c2e9d31b` (agent_profiles)
-    → `b1e7f3c9d425` (sites.last_daily_digest_sent_at) → `f3a7c9e21b48` (outlier/internal damping)
-    → `a2f8d61c9e37` (request_logs) → `c1e7a94f3d28` (agent_fetch_events.dedup_key) →
-    `f3c8b2e91d47` (agent_fetch_events.link_marker) → `a7d419e6c052` (events.link_marker) →
-    `b4c9a71e35d8` (sites.leadpipe_pixel_id) → `c2f7a9d31b64` (**current head**).
-  - The counts "12 migrations" / "apply all twelve" are wrong twice over: the list above already
-    enumerates **13**, and the real pending chain is now **22**. Do not quote either number —
-    derive the list from `alembic history` at apply time.
-  - **Live-apply status improved.** The whole chain from an EMPTY database through
-    `c2f7a9d31b64` was applied live on a disposable `postgres:16-alpine` on 06-08-26 and
-    succeeded, so "offline `--sql`-validated only" no longer holds for the tail. Precisely what
-    is proven: **forward** apply of every migration on a real Postgres; **down→up round-trip**
-    only for `c2f7a9d31b64` itself. Earlier revisions still have no downgrade evidence. Note this
-    also means the `sa.inspect(bind)` gotcha is offline-only — a real connection handles it fine.
-  - Unchanged: **none of this is a production live-apply**, which remains a separate explicit
-    operator action, and `c2f7a9d31b64` needs no feature flag (the deferral column is always-on
-    and inert until a provider tier actually goes down).
+- **Migration head status, consolidated 07-08-26 (identity-vocab-reconcile UPDATE PROCESS —
+  supersedes the two stacked corrections this replaced).** Beam currently has two live branches
+  with two different, independently-verified Alembic heads — always re-derive with
+  `alembic -c apps/api/alembic.ini heads` per branch rather than trusting any hash recorded here:
+  - **`main` head: `c2f7a9d31b64`** (`add_resolution_deferral_watermark`), 56 revisions from the
+    `cd811a8b1f32` baseline, single head, no branching (re-verified live 07-08-26 by walking every
+    `revision`/`down_revision` header on disk). The pending-live-apply chain starting from the old
+    `e6b2d4a1c837` (`add_cadence_bot_flag`) marker continues: `e6b2d4a1c837` → `a4f7c2e9d31b`
+    (agent_profiles) → `b1e7f3c9d425` (sites.last_daily_digest_sent_at) → `f3a7c9e21b48`
+    (outlier/internal damping) → `a2f8d61c9e37` (request_logs) → `c1e7a94f3d28`
+    (agent_fetch_events.dedup_key) → `f3c8b2e91d47` (agent_fetch_events.link_marker) →
+    `a7d419e6c052` (events.link_marker) → `b4c9a71e35d8` (sites.leadpipe_pixel_id) →
+    `c2f7a9d31b64` (**main head**). Do not quote a "12 migrations pending" or "13 migrations"
+    count — derive the pending list from `alembic history` at apply time; it changes as concurrent
+    programs land migrations (see migration-collision memory note).
+  - **`devjulley` head: `f1a7c3e05b92`** (`add_fingerprint_v3`), 60 revisions, single head, no
+    branching (re-verified live 07-08-26, same method). `devjulley`'s identity-vocab-reconcile
+    sub-chain (`b1c9e7f24d83` → `c2f8a5d31e97` → `e9d2a4c71f68` → `f1a7c3e05b92`) currently forks
+    off `main` upstream of `main`'s real head — see the ONE-EDIT re-chain below.
+  - **Re-chain is exactly ONE edit**: `b1c9e7f24d83.down_revision` currently points at a stale
+    ancestor; retargeting it to `main`'s live head (`c2f7a9d31b64`) yields a single unified DAG
+    with one head and every revision reachable, verified by simulation
+    (`process/features/visitors-identity/active/identity-vocab-reconcile_07-08-26/`). This
+    re-chain has not been applied — it is a plan artifact, not yet executed against the tree.
+  - **Live-apply status.** Forward apply of every `main`-side migration from an EMPTY database
+    through `c2f7a9d31b64` was proven on a disposable `postgres:16-alpine` on 06-08-26; only
+    `c2f7a9d31b64` itself has down→up round-trip evidence, earlier revisions do not. `devjulley`'s
+    tail (`c7d3b8e1f624` onward through `f1a7c3e05b92`) is offline `--sql`-validated only — NOT
+    live-round-tripped (Docker unavailable in every session that has touched this chain). Note: an
+    unscoped `alembic upgrade head --sql` fails mid-chain because `b7d3e9f1a4c2_add_ad_connections.py`
+    calls `sa.inspect(bind)` (unsupported against alembic's offline `MockConnection`) — use an
+    explicit `<from>:<to>` range instead; see `process/context/tests/all-tests.md` for the gotcha.
+  - **None of this is a production live-apply**, which remains a separate explicit operator
+    action. Apply the full re-chained sequence in order before enabling `agent_detection_enabled`,
+    `company_graph_enabled`, `identity_signals_enabled`, `site_ingest_limit_enabled`,
+    `ingest_velocity_enabled`, `cadence_bot_flag_enabled`, or `candidate_outreach_enabled` in any
+    real environment.
 - Docker/live-integration known-gaps consolidated in
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`
 
@@ -484,13 +520,10 @@ Adds the two signals the v2 hash was missing, without disturbing v2:
 - **Still missing from Layer 2**: extension enumeration, and CPU clock skew (not reachable from
   JS at all — it needs TCP-stack timing at the edge, not the pixel).
 
-**Alembic head note:** the migration chain listed in the EvalLayer section below is STALE — it
-ends at `e6b2d4a1c837`, but the chain has since advanced through `c2f8a5d31e97` →
-`e9d2a4c71f68` (add_site_tombstones) → `f1a7c3e05b92` (add_fingerprint_v3, **current head**,
-confirmed live via `alembic -c apps/api/alembic.ini heads` on 07-08-26 — single head, no
-branching). Always re-run `alembic heads` before chaining or applying; concurrent programs move
-it repeatedly. `f1a7c3e05b92` is offline `--sql`-validated only — live round-trip NOT run
-(Docker daemon down in the implementing environment).
+**Alembic head note:** `f1a7c3e05b92` (`add_fingerprint_v3`) is the current `devjulley` head — see
+the consolidated "Migration head status" note in the AI-Agent-Traffic Layer section above for both
+branches' true heads, the pending-chain list, and the ONE-EDIT re-chain that unifies them. Always
+re-run `alembic heads` before chaining or applying; concurrent programs move it repeatedly.
 
 ## Key Patterns and Conventions
 
@@ -530,25 +563,27 @@ it repeatedly. `f1a7c3e05b92` is offline `--sql`-validated only — live round-t
 
 ## Open Questions / Outstanding Work
 
+- **GDPR exposure — PII blind-index backfill is now an erasure prerequisite** (found re-validating
+  `process/general-plans/active/pii-at-rest_22-07-26/` on 07-08-26): `graph_erasure.py`'s erasure
+  sweep matches on blind index, so pre-backfill rows with NULL bidx are silently missed by GDPR
+  erasure. Plan re-baselined (Phases 1-2 were already shipped in `be39585`/`991fff3`; census
+  mechanism repaired — 15 predicate / 35+ read sites), validated-and-held CONDITIONAL. NOT
+  executing until: backfill script RUN, Docker for Hybrid gates, high-risk evidence pack, PVL
+  refresh closing the READ-census G1 gap.
 - `CAMPAIGN_PLANNER_TOOLS_ENABLED=true` (planner tool loop) needs live-model validation before prod enable
 - Real-key Gemini smoke for `/ai/ask` agentic path not yet run (no key on dev machine) — check `gemini_tool_call` in structlog when run
 - Legacy `plan/` folder (11 dated pre-harness plans) is read-only history — migrate still-relevant items into `process/features/*/backlog/` opportunistically
 - e2e coverage gaps: billing + exports (see `tests/all-tests.md` Known Gaps)
 - Docs drift: `PRODUCT_ROADMAP.md` + `README.md` still say Claude/`claude-sonnet-4` for segmentation — code runs Gemini (see AI Layer)
 - EvalLayer + AI-referral + owned-data-layer + first-party-capture + ingest-abuse-hardening +
-  cadence-bot-flag: `agent_detection_enabled`, `company_graph_enabled`, `identity_signals_enabled`,
-  `site_ingest_limit_enabled`, `ingest_velocity_enabled`, `cadence_bot_flag_enabled` all default
-  OFF; 12 migrations pending PRODUCTION live-apply (`d11b39a6c843` → `a1c7e4f92b83` →
-  `b3f9a1d2c7e5` → `c4e8f1a9d2b7` → `f8a2c1d9b3e7` → `a3e9f1c7d2b5` → `e2a4c7f81b93` →
-  `a9f2c1e7b4d6` → `c7d3b8e1f624` → `b7d3e9f1a4c2` → `c8e4f2a6b1d9` → `d5b1f7c3a908` →
-  `e6b2d4a1c837` — <!-- Updated 06-08-26: NO LONGER the head. True head is `c2f7a9d31b64`, 9
-  revisions later, and the pending chain is 22 not 12; the whole chain now applies live (forward)
-  on a disposable Postgres. Full correction + revision list in the AI-Agent-Traffic Layer section
-  above — read it instead of this line. --> head as of 26-07-26 only; round-trip verified clean on
-  a disposable dev Postgres up to `a9f2c1e7b4d6` (24-07-26), and forward-apply of the FULL chain
-  verified live 06-08-26; NONE are applied to any real environment) — see
-  AI-Agent-Traffic Layer + Owned Identity Data Layer + First-Party Email Capture Expansion + Ingest
-  Abuse Hardening sections above,
+  cadence-bot-flag + identity-vocab-reconcile (candidate_outreach_enabled): `agent_detection_enabled`,
+  `company_graph_enabled`, `identity_signals_enabled`, `site_ingest_limit_enabled`,
+  `ingest_velocity_enabled`, `cadence_bot_flag_enabled`, `candidate_outreach_enabled` all default
+  OFF. Do not quote a migration count here — `main` and `devjulley` currently have two different
+  heads (`c2f7a9d31b64` and `f1a7c3e05b92` respectively) and neither chain is applied to any real
+  environment. See the consolidated "Migration head status" note in the AI-Agent-Traffic Layer
+  section above for the true per-branch heads, the pending chain, and the one-edit re-chain that
+  unifies them — see
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`,
   `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`
   (RESOLVED), `process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`

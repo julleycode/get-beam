@@ -227,7 +227,12 @@ session gap, execute-agent MUST:
 4. Attach the merged `agent_sig` object (webdriver, ua_ch_headless, no_pointermove_before_click,
    dead_center_ct, click_ct) to the outgoing payload on the same channel `_fp`/`_fp3` already use
    (confirm the exact `pushEvent`/batch-payload shape before wiring — grep `_fp3` and `alias=` in
-   `schemas/events.py` to confirm client/server key-name agreement, e.g. `_asig`).
+   `schemas/events.py` to confirm client/server key-name agreement, e.g. `_asig`). **Pass-3
+   VALIDATE guidance (non-blocking, advisory — see the Byte-Budget Falsifiability Assessment
+   below): given the 233B live headroom, prefer short/abbreviated wire-key names (e.g. single- or
+   two-letter keys) over the full descriptive names shown for illustration in the Public
+   Contracts section, on the FIRST implementation attempt — do not spend a trim-and-remeasure
+   cycle discovering this the hard way.**
 5. **Regenerate `tracker.min.js`** using the project's existing minify/build step (confirm exact
    command via `package.json` scripts in `apps/pixel/` before running — do not hand-edit the
    `.min.js` file).
@@ -250,16 +255,19 @@ style) asserting: (a) no early-return pattern precedes `document.currentScript`,
 
 ### Step 2 — Byte-budget checkpoint (AC-2, AC-3 — the riskiest element, hard pass/fail gate)
 
-This step exists specifically to catch the two failure modes INNOVATE flagged: (a) exceeding the
-308B headroom, or (b) shrinking Stage 2 so far it never actually fires (reproducing WS2's
+This step exists specifically to catch the two failure modes INNOVATE flagged: (a) exceeding
+available headroom, or (b) shrinking Stage 2 so far it never actually fires (reproducing WS2's
 original dead-Stage-1 pathology in new form).
 
 1. Re-measure current baseline BEFORE this step's edits are counted (already measured this
-   session: `tracker.min.js` = 5782B gzip (re-verified post-rebase-resolution, supersedes
-   earlier 5688-5692B pass-2 snapshot) / re-measure raw bytes live, do not trust this
-   plan's snapshot):
+   session, re-confirmed live at VALIDATE pass 3 07-08-26: `tracker.min.js` = 13626B raw / 5767B
+   gzip via the TEST'S OWN method — `gzip.compress(path.read_bytes())`, matching
+   `tests/unit/test_pixel_fingerprint.py:290` exactly — 233B headroom remaining to the binding
+   `<6000` gate. **Do not use `gzip -9 -c file | wc -c` to self-check — it reads 5782B on the
+   same file, a 15B discrepancy from the test's method that matters at this margin. Measure the
+   way the gate measures.**):
    ```
-   gzip -9 -c apps/pixel/src/tracker.min.js | wc -c
+   .venv/bin/python3.11 -c "import gzip,pathlib; d=pathlib.Path('apps/pixel/src/tracker.min.js').read_bytes(); print(len(d), len(gzip.compress(d)))"
    ```
 2. After Step 1's edits + rebuild, re-run the same command. Compute delta.
 3. **Pass condition (both must hold):**
@@ -273,14 +281,17 @@ original dead-Stage-1 pathology in new form).
      `no_pointermove_before_click` (i.e., not silently stuck at their initial state). This is a
      structural sanity check, not a claim about real-world detection accuracy (that remains
      AC-12's Known-Gap).
-4. **If either condition fails:** first try trimming field precision (e.g. drop
-   `ua_ch_headless` if UA-CH is unavailable in most browsers anyway, or reduce counter bit-width
-   in the JSON key names). Only as a LAST RESORT, raise the gzip gate itself
-   (`test_under_6kb_gzipped`'s `< 6000` threshold) — this requires explicit justification in the
-   phase report with the measured byte count that forced it, and is a deviation from the SPEC's
-   stated preference, not a default path.
+4. **If either condition fails:** first try trimming field precision (start with short wire-key
+   names per the Step 1.4 pass-3 guidance above; then drop `ua_ch_headless` if UA-CH is
+   unavailable in most browsers anyway, or reduce counter bit-width). Only as a LAST RESORT, raise
+   the gzip gate itself (`test_under_6kb_gzipped`'s `< 6000` threshold) — this requires explicit
+   justification in the phase report with the measured byte count that forced it, and is a
+   deviation from the SPEC's stated preference, not a default path.
 5. Record the final measured byte count and headroom remaining in the phase report — this is
-   AC-3's explicit evidence requirement, not optional bookkeeping.
+   AC-3's explicit evidence requirement, not optional bookkeeping. **Re-measure at Step 2 start
+   regardless of any number cited anywhere in this plan or its validate-contract — the 233B figure
+   is a live pass-3 snapshot, not a guarantee; this repo's shared tree has already shown it move
+   twice within one plan's VALIDATE lifecycle (312B → 233B).**
 
 **Test gate:**
 ```
@@ -392,10 +403,13 @@ has the same `agent_sig` value on read-back.
    and assert `is_emailable_identity(provider=...)` returns the SAME result as an otherwise-
    identical visitor with neither flag set, for every `PERSON_LEVEL_PROVIDERS` entry. This closes
    AC-9's previously-identified gap (no existing test proves visibility-only flags don't leak).
-3. Confirm all 3 existing call sites (`campaign_sender.py:283`, `csv_exporter.py:79`,
-   `routers/campaigns.py:725`) are unmodified — grep each, diff against the pre-plan state, assert
+3. Confirm all 3 existing call sites (`campaign_sender.py`, `csv_exporter.py`,
+   `routers/campaigns.py`) are unmodified — grep each, diff against the pre-plan state, assert
    zero lines changed in this plan's blast radius at those 3 sites. This proves AC-8's "implemented
-   consistently" requirement without touching production call-site code.
+   consistently" requirement without touching production call-site code. **Pass-3 note: exact line
+   numbers drift session to session (currently `campaign_sender.py:313`, `csv_exporter.py:84`,
+   `routers/campaigns.py:730`, all re-confirmed present at VALIDATE pass 3) — locate by grepping
+   `is_emailable_identity(`, never by trusting a hardcoded line number.**
 
 **Test gate:**
 ```
@@ -515,152 +529,207 @@ Status: CONDITIONAL
 Date: 07-08-26
 date: 2026-08-07
 generated-by: inner-pvl: phase-1
-supersedes: 2026-08-07 (inner-pvl: phase-1) — PVL cycle 2 re-validation; cycle 1's
-`SUPPLEMENT_APPLIED` folded E1–E7 into the plan body above, this pass re-verifies that folding
-against live source and reports one NEW environmental finding (see below)
+supersedes: 2026-08-07 (inner-pvl: phase-1) — PVL pass 3, re-validation from V1 against the
+twice-supplemented plan (cycle 1 folded E1-E7; cycle 2 folded E8 + 3 citation refreshes). This
+pass re-verifies both cycles' fold-ins against a FRESH live tree (HEAD `5293cbc2de233a8431412ad1a4501a2a1eccfebb`,
+branch `devjulley`, clean working tree — no rebase/merge/cherry-pick in progress) and finds 0 new
+design gaps.
 
 Parallel strategy: sequential
 Rationale: Signal score 3/7 (S1 multi-package: pixel+api+web; S2 schema surface: 2 additive
 migrations; S7: 13-15 files in blast radius) — MEDIUM by the threshold table, but the plan's 6
 steps are sequentially dependent (Step 5's emailability proof depends on Step 4's classifier,
 which depends on Step 3's persistence, which depends on Step 2's byte-budget shape). A single
-sequential `vc-validate-agent` pass following the plan's own dependency chain was used both
+sequential `vc-validate-agent` pass following the plan's own dependency chain was used all three
 passes, matching the plan's own Strategy Recommendation for VALIDATE.
 
-## Cycle-2 Re-Verification of E1–E7 (all CONFIRMED correctly folded)
+## Cycle-1/Cycle-2 Continuity Re-Verification (pass 3, against fresh HEAD `5293cbc`)
 
-Every correction from cycle 1 was re-checked against live source in this pass. All 7 landed
-correctly and none introduced a new defect:
+Both prior supplement cycles were re-checked against live source in this pass, independent of the
+prior passes' own citations. All land correctly; no regressions from either fold-in:
 
-| # | Cycle-1 fix | Cycle-2 confirmation |
+| # | What pass 3 checked | Live evidence (this pass) |
 |---|---|---|
-| **E3** | Step 3.5 retargeted to `event_rows`/`pg_insert(Event)` block | **CONFIRMED CORRECT.** `event_rows = [` starts at devjulley-tip line 375, `link_marker=` at 404 — matches the plan's "~L375-422" citation exactly. `_process_signal_events()` (starts ~line 525 at devjulley tip, matches "~L540-606") independently confirmed to write `fp`/`fp3` onto the **Visitor** row via a `pg_insert(Visitor)...on_conflict_do_update` — a structurally different table, confirming the original E3 finding was correct and the retarget is safe. |
-| E1 | `-m unit` stripped from Steps 1/2 gate commands | **CONFIRMED.** `grep -c "pytest.mark" tests/unit/test_pixel.py tests/unit/test_pixel_fingerprint.py` → 0/0. Both commands as written in the plan body now select tests correctly. |
-| E2 | New `apps/pixel/e2e/agent-sig.spec.ts`, mirrors `fingerprint-v3.spec.ts` | **CONFIRMED ACHIEVABLE.** `fingerprint-v3.spec.ts` exists at devjulley tip using `interceptIngest`/`fixture`/`settle` imported from `./harness` — all three helpers confirmed exported live from `apps/pixel/e2e/harness.ts`. The pattern (goto fixture → drive interaction → poll intercepted ingest payload → assert field values) is directly reusable for the click-driven `agent_sig` assertions this step needs. Playwright config (`apps/pixel/playwright.config.ts`) confirmed compatible — zero-infra static server, chromium/webkit/firefox projects, `testMatch: /.*\.spec\.ts/` picks up any new file in `e2e/` automatically. |
-| E4 | AC-6 reclassified Agent-Probe everywhere; 3 inline sites named; shared-component assumption removed | **CONFIRMED consistent across all 4 locations**: SPEC AC→Step traceability table (line 68), Verification Evidence (line 416), Step 6 test-gate header (line 397), and Touchpoints (dashboard badge bullet) all say Agent-Probe / inline-3-sites. No stray "Hybrid" or "shared component" language remains anywhere in the plan body. |
-| E5 | Step 1 unconditionally requires a NEW behavioral test | **CONFIRMED.** Step 1's test-gate note now reads "No behavioral webdriver-exit assertion currently exists to 'update'... Write a NEW source-position regex test" — no longer conditional ("if such an assertion exists"). |
-| E6 | Scheduler path/line confirmed, hedge removed | **CONFIRMED at devjulley tip**: `apps/api/jobs/scheduler.py`, `_cadence_bot_flag_sweep_job` at line 244, `id="cadence_bot_flag_sweep"` registration at line ~566-569 — matches the plan's "~565-569" citation. Step 4.6 no longer says "confirm exact path via grep." |
-| E7 | `JSONB` (not `JSON`) + legacy `Column(...)` style | **CONFIRMED** in Step 3.3, Touchpoints, and Public Contracts (all three say `JSONB` / `Column(...)`, not `Mapped[...]`). |
+| E1 | `-m unit` dropped from Step 1/Step 2 gate commands | `grep -c "pytest.mark" tests/unit/test_pixel.py tests/unit/test_pixel_fingerprint.py` → 0/0. Both files still carry zero markers. Ran the corrected command live: `pytest tests/unit/test_pixel.py tests/unit/test_pixel_fingerprint.py -q` → **72 passed**. |
+| E2 | New `apps/pixel/e2e/agent-sig.spec.ts` pattern achievability | `fingerprint-v3.spec.ts` present; `interceptIngest`/`fixture`/`settle` all confirmed exported live from `apps/pixel/e2e/harness.ts` (`grep -n "^export"` — 3 matching function/interface exports). `playwright.config.ts` `testMatch: /.*\.spec\.ts/` auto-picks up any new file dropped in `e2e/`. |
+| E3 | `agent_sig` persistence site: `event_rows`/`pg_insert(Event)`, NOT `_process_signal_events()` | Re-confirmed independently at the true current line numbers: `event_rows = [` at L375, `link_marker=` at L404, `pg_insert(Event)` at L419 (inside the cited ~L375-422 range). `_process_signal_events()` starts L525, `pg_insert(Visitor)` at L602 — confirmed writing to the Visitor row via a structurally separate `pg_insert(Visitor)...on_conflict_do_update`, not the Event row. The retarget remains correct and load-bearing. |
+| E4 | AC-6 Agent-Probe reclassification + 3 inline badge sites, no shared component | Unchanged in plan body (traceability table, Verification Evidence, Step 6, Touchpoints) — confirmed no stray "Hybrid" language remains. Not independently re-scanned for site line numbers this pass (frontend files outside this pass's read list; no code in this plan's blast radius depends on their exact line numbers being current, only on the pattern existing, which E4 already established). |
+| E5 | Step 1 unconditionally requires a NEW behavioral test | Text unchanged and still unconditional in the plan body. |
+| E6 | Scheduler registration file/line pattern | `apps/api/jobs/scheduler.py`: `_cadence_bot_flag_sweep_job` at L244, `id="cadence_bot_flag_sweep"` registration at L566-569 — matches the plan's "~565-569" citation almost exactly (1-line drift, non-blocking). |
+| E7 | `JSONB` (not `JSON`) + legacy `Column(...)` style | Confirmed unchanged in Step 3.3, Touchpoints, Public Contracts. |
+| E8 | Step 0a pre-flight guard exists and is actionable | Confirmed present in the checklist body (numbered 4-step procedure: check rebase/merge state, check branch, STOP-BLOCKED on failure with explicit "never auto-resolve" instruction, re-verify citations by grep). Live-tested this pass: `git status --short --branch` → clean, `devjulley...origin/devjulley [ahead 32, behind 5]`, no rebase-merge/rebase-apply/MERGE_HEAD markers; `git rev-parse --abbrev-ref HEAD` → `devjulley` (not detached). **Step 0a would PASS cleanly if run right now.** |
 
-## [NEW — pass 2] Environmental Pre-Condition: concurrent rebase invalidates live-tree line
-citations at VALIDATE time (not a plan defect)
+**Consent boundary G7 (re-confirmed at fresh HEAD):** `consentDecision = GATED` at L507,
+`OPTOUT = true` decline-guard at L508 — matches the plan's own citation exactly (this is the
+figure cycle 2 already corrected from the earlier L501-504; still correct at this pass's HEAD, no
+further drift). `tracker.js:4`'s webdriver early-return is still present, single reference, as
+expected pre-EXECUTE. Click listener at L632 — matches cycle 2's grep-found correction exactly, no
+further drift. `pagehide` listener at L710 (plan cites "~706" from an earlier snapshot — 4-line
+drift, cosmetic, non-blocking, does not affect any edit target).
 
-**Finding.** At the time of this VALIDATE pass (07-08-26), `git status` on the working tree at
-`/Users/apple/getbeam` (the plan's own `Work context`) showed: `interactive rebase in progress;
-onto 332b3a8` — branch `devjulley` is mid-replay of its own commit history onto a new base, with
-HEAD currently detached at an intermediate checkpoint that has **not yet replayed** commit
-`3528c00` ("feat(identity): fingerprint v3 with installed-font and audio probes" — the commit
-`ORIG_HEAD` points at, i.e. devjulley's true pre-rebase tip).
+**`is_emailable_identity()` invariant (re-confirmed at fresh HEAD):** signature at
+`apps/api/services/identity_classification.py:119-123` is exactly `provider,
+source_agent_visit_id=None, is_abuse_flagged=False`; grepped the function body for
+`is_agent_operated`/`is_bot_suspect` — zero matches. This file is no longer in `git status`'s
+modified list (it was mid-diff during pass 2; it is now committed/clean) — the D1 guardrail check
+this pass performed is against a stable, non-transient state, strictly stronger evidence than pass
+2's "diff is purely additive" argument.
 
-This intermediate state is missing ~75 lines of `tracker.js` (the `fontFp()`/`audioFp()` probes)
-and the accompanying `test_pixel_fingerprint.py` budget-raise (`5KB → 6KB` gzip). Effect,
-independently confirmed for every touchpoint this plan cites:
+**3 call sites (re-confirmed, line numbers drifted, all present):** `campaign_sender.py:313`
+(was cited 283), `csv_exporter.py:84` (was cited 79), `routers/campaigns.py:730` (was cited 725).
+Drift is consistent, small, and expected — these are grep-confirm targets in the plan, never
+hardcoded edit anchors, so the drift is cosmetic and does not require a plan-body fix.
 
-| Touchpoint | Plan's citation (= devjulley tip / `ORIG_HEAD`) | Live tree right now (mid-rebase) | Verified match to `ORIG_HEAD`? |
-|---|---|---|---|
-| `tracker.js:4` (webdriver early-return) | line 4 | line 4 | Yes — unaffected |
-| `tracker.js` consent-gate anchor | `consentDecision = GATED` at ~502, `OPTOUT` guard at ~503 (cited "501-504") | now at lines 411-412 | Yes, at `ORIG_HEAD` |
-| `tracker.js` click listener | `addEventListener("click"` at line 628 | now at line 536 | Yes, at `ORIG_HEAD` |
-| `tracker.js` `pushEvent`/`_fp3` site | lines 266-275 | unaffected (matches at both) | Yes |
-| `apps/pixel/e2e/fingerprint-v3.spec.ts` | exists, pattern to mirror (E2) | **absent from live e2e/ dir** | Yes, exists at `ORIG_HEAD` |
-| `tests/unit/test_pixel_fingerprint.py::TestPixelSizeLimit::test_under_6kb_gzipped`, `< 6000` | cited throughout (AC-3, Step 2, traceability, Verification Evidence) | live tree only has `test_under_5kb_gzipped`, `< 5000` (the pre-fingerprint-v3 test) | Yes, `test_under_6kb_gzipped` / `< 6000` exists at `ORIG_HEAD` line 222-224 |
-| `tracker.min.js` gzip size | plan's own live measurement: 5688-5692B | live tree right now: **4842B** (matches the fingerprint-v3 commit message's stated pre-raise baseline, "4843B") | Yes — `ORIG_HEAD`'s `tracker.min.js` gzips to 5673B, consistent with the plan's 5688-5692B range |
-| `alembic -c apps/api/alembic.ini heads` | expects single head | **currently reports 2 heads** (`c2f7a9d31b64`, `e9d2a4c71f68`) — rebase-intermediate migration-file set is incoherent | N/A — inherently unstable mid-rebase, must be re-run once the rebase resolves (Step 0 already mandates re-running this before each migration; this pass shows the instruction is genuinely load-bearing, not boilerplate) |
-| `apps/api/jobs/scheduler.py` sweep-registration lines | "~565-569" | currently at ~553 (minor drift, same pattern) | Yes, at `ORIG_HEAD` (~565-569) |
+**Migration head (re-confirmed at fresh HEAD):** `alembic -c apps/api/alembic.ini heads` →
+single head `f1a7c3e05b92` — matches iteration-002's post-rebase-resolution figure exactly. No new
+collision since cycle 2.
 
-**Root-cause conclusion:** every plan citation is **independently re-verified as correct** against
-`git show ORIG_HEAD:<path>` (`ORIG_HEAD` = `3528c00`, devjulley's actual tip before this
-unrelated rebase started). This is **not a plan defect** — it is a live, external git-state
-hazard: an unrelated, concurrent operation on the shared working tree this plan's `Work context`
-points at. The plan itself was written against, and is accurate for, devjulley's real tip.
+**Pixel build script (re-confirmed):** `apps/pixel/package.json` `"build"` script is
+`npx --yes esbuild@0.24.0 src/tracker.js --minify --target=es2017 --outfile=src/tracker.min.js` —
+matches Step 1.5's "confirm via package.json scripts" instruction; `npm run build` is the correct
+invocation.
 
-**Why this matters for EXECUTE.** If `vc-execute-agent` started against the tree in its CURRENT
-(mid-rebase) state, Step 1 would delete `tracker.js:4` and add `agent_sig` collection code onto a
-version of the file that is missing the fingerprint-v3 probes — an edit that would either (a) get
-silently lost/conflicted when the rebase later resumes and replays `3528c00`, or (b) leave the
-repository in a state where `agent_sig` collection was added to the wrong base and the eventual
-rebase completion re-introduces `fontFp()`/`audioFp()` on top without the classifier author ever
-reconciling the two. Step 2's byte-budget gate would also be measured against the wrong baseline
-(4842B, not 5673-5692B), and `test_under_6kb_gzipped` (the actual proving test) does not exist yet
-in the live tree.
+**WS2 branch source (re-confirmed reachable via `git show`, not checked out):**
+`git cat-file -e feat/ws2-agent-session-classifier:apps/api/services/ws2_session_classifier.py`
+succeeds. `test_ws2_session_classifier.py` and `test_ws2_zero_import.py` on the branch both carry
+`pytestmark = pytest.mark.unit` at module scope (confirmed via `git show`) — the `-m unit` gate
+commands for AC-5/AC-8/AC-9/structural-guardrail will correctly select these tests once ported.
+None of the WS2 implementation files exist yet on `main`/`devjulley` (confirmed: zero hits for
+`ws2_classifier|is_agent_operated|agent_sig` across `config.py`, `models/visitor.py`,
+`models/event.py`, `schemas/events.py`) — EXECUTE has not started, as expected.
 
-**Resolution — binding Execute-Agent Instruction, not a plan-body defect fix:** see **E8** below.
-Given the fix required is "wait for/confirm resolution of an external git operation," not a plan
-text correction, and it is fully mitigated by a single binding pre-flight check (same mechanism as
-E1-E7), this is captured as an Execute-Agent Instruction rather than requiring a new
-`SUPPLEMENT_APPLIED` fold into the checklist body — **see the Gate rationale below for why this
-pass still routes through one more supplement cycle rather than treating E8 as sufficient on its
-own.**
+## [NEW — pass 3] Byte-Budget Falsifiability Assessment (advisory CONCERN, non-blocking)
 
-## Verification of Locked Decisions and Named Hazards (re-confirmed this pass)
+**Live re-measurement (test's own method, `gzip.compress(path.read_bytes())`):** `tracker.min.js`
+= 13626B raw / **5767B gzip** → **233B headroom** to the binding `<6000` gate. Identical to
+iteration-002's figure — stable, no further drift since cycle 2 (the concurrent-session
+`tracker.min.js` rebuild that shrank headroom from 312B→233B has itself settled: the file is no
+longer in `git status`'s modified list, i.e. it is now committed).
 
-- **G7 consent boundary** — CONFIRMED intact at `ORIG_HEAD`: `agent_sig` collection is specified
-  to land after `consentDecision = GATED` (line ~502) and `consentBlocked()` (`return GATED &&
-  consentDecision == null`, line 555) — both precede any point the plan's Step 1.2 could plausibly
-  insert code, per the plan's own "before or interleaved with [the URL-param block], never before
-  it" instruction. `pagehide`/beacon flush (`navigator.sendBeacon`, ~line 321-322;
-  `addEventListener("pagehide", ...)`, ~line 706) confirmed present and unrelated to this plan's
-  edits (task brief's "L238, L702" citations are in the right neighborhood — within a few lines of
-  the confirmed real locations 238/706 — consistent with normal re-measurement variance, not a
-  defect).
-- **`is_emailable_identity()` exactly-3-parameters invariant** — CONFIRMED: signature at
-  `apps/api/services/identity_classification.py:109-113` is exactly `provider,
-  source_agent_visit_id=None, is_abuse_flagged=False`. This file shows as locally modified
-  (`M`) in the current mid-rebase working tree, but the diff against `ORIG_HEAD` is purely
-  **additive** (a new `PAID_PERSON_GRAPH_PROVIDERS` constant and a new helper function appended
-  *after* `is_emailable_identity()`) — the guarded function itself is byte-identical. D1's
-  guardrail is not at risk from the concurrent rebase.
-- **3 call sites** (`campaign_sender.py:283`, `csv_exporter.py:79`, `routers/campaigns.py:725`)
-  — all 3 confirmed present via live grep, matching the plan's citations exactly.
-- **Migration safety / "live head moved once already"** — confirmed true, and moved again:
-  pass-1 measured `f1a7c3e05b92` (single head); this pass finds 2 heads
-  (`c2f7a9d31b64`, `e9d2a4c71f68`), a symptom of the same concurrent rebase above, not a second
-  independent collision. Step 0's "re-verify before every migration, never assume stability
-  across a session gap" instruction is reconfirmed as load-bearing.
-- **Byte-budget gate falsifiability** — confirmed real and correctly specified: the gate is a
-  genuine `assert len(compressed) < 6000` in `test_under_6kb_gzipped` (`ORIG_HEAD`, line 224), not
-  a tautology; a regression would fail it.
-- **Feasibility probe carry-forward** — `ws2-webdriver-assumption_FEASIBILITY_07-08-26.md`
-  verdict **INCONCLUSIVE** re-confirmed still open; plan body re-scanned this pass for any claim of
-  empirical support for the `navigator.webdriver` default-value assumption — none found. AC-14
-  stays Known-Gap as before. Not re-probed (per task brief).
+**Falsifiability judgment (explicitly requested this pass):** the gate itself
+(`assert len(compressed) < 6000`) remains a genuine, non-tautological assertion — a regression
+would fail it. The question is whether D2's trimmed Stage-1+Stage-2 signal set can plausibly fit
+inside 233B of GZIPPED headroom. This cannot be answered with certainty without implementing the
+code, but a reasoned estimate: the plan's own Public Contracts section illustrates the wire shape
+with full descriptive keys (`webdriver`, `ua_ch_headless`, `no_pointermove_before_click`,
+`dead_center_ct`, `click_ct`) — those 5 key names alone sum to ~90 raw ASCII characters before any
+JS detection logic (UA-CH brand try/catch, dead-center bounding-box math, one-shot pointermove
+listener, object merge/attach). Gzip compresses repeated tokens well (many of the surrounding JS
+keywords — `function`, `document`, `addEventListener`, `navigator` — already recur elsewhere in
+the file and cost little marginally), but genuinely NEW distinct tokens (the 5 field names, plus
+`userAgentData`, `HeadlessChrome`, `getBoundingClientRect` if not already present, `pointermove`)
+compress far less efficiently on first occurrence. **Judgment: plausible tight fit, real risk of a
+first-attempt gate failure, not a certain failure.** This is a CONCERN worth surfacing explicitly
+with reasoning (as instructed), but it is NOT a plan design defect requiring a new SUPPLEMENT — the
+plan's own Step 2 already designs exactly the self-correcting mechanism this risk calls for
+(mandatory live re-measure against the test's own method, explicit trim-first fallback ladder,
+gate-raise only as a justified last resort). This pass adds one concrete, actionable refinement
+directly into Step 1.4 and Step 2.4 above (prefer short/abbreviated wire-key names on the FIRST
+attempt, not as a reactive fallback after a failed measurement) — a cheap, low-risk plan-body
+clarification, not a design change, and not something requiring a SUPPLEMENT REQUEST cycle to
+apply (it doesn't touch any Step's sequencing, dependencies, or test gates — it only tightens
+existing Step 1.4/Step 2.4 guidance that already pointed at the same trim-first strategy).
+
+`grep -n "6000\|6144\|gzip.compress" tests/unit/test_pixel_fingerprint.py tests/unit/test_pixel.py`
+reconfirms the gate anchors exactly: `test_pixel_fingerprint.py:290-291` (`gzip.compress`, `< 6000`),
+`test_pixel.py:154-155` (`gzip.compress`, `< 6144`).
+
+## [NEW — pass 3] Feasibility Probe Correction: verdict updated from INCONCLUSIVE to a real,
+partial empirical result (informational — not a design gap, does not require SUPPLEMENT)
+
+**Correction to prior contract text.** Pass 2's contract (and the task brief that spawned this
+pass) both stated the feasibility probe `ws2-webdriver-assumption_FEASIBILITY_07-08-26.md`
+returned **INCONCLUSIVE**. Reading the file fresh this pass (per instructions: read-only, no
+re-probe performed), it now contains a **materially different, populated verdict**:
+`verdict: NOT-VIABLE`, with real browser measurements the coordinator captured after the prior
+pass's citation was written. This is a genuine external-evidence update this pass discovered
+mid-flight (the same class of "concurrent session editing files under this VALIDATE run" hazard
+the task brief warned about generally — this instance just landed on the feasibility file, not a
+plan/config/migration file).
+
+**What the file now actually says:** for the ONE real agentic-browsing surface the probe could
+reach this session — Claude-in-Chrome (extension-driven browser automation, not CDP/WebDriver) —
+`navigator.webdriver` measured `false` and `userAgentData.brands` was byte-identical to a plain
+human Chrome session (no `HeadlessChrome` entry). Comet, Operator, and Atlas remain entirely
+unmeasured (not installed on the probe machine) — the hypothesis is NOT settled globally, only for
+this one product class.
+
+**Why this does not block PASS/CONDITIONAL or require a plan-body SUPPLEMENT:**
+1. It does not touch any Step, AC, or test gate's mechanics — AC-14 was already, deliberately,
+   scoped as `Agent-Probe`/Known-Gap in both the SPEC and this plan, not blocking `✅ VERIFIED`.
+2. It does not contradict D1-D4 — if anything it **reinforces** D2's own design choice: the
+   VERDICT's "Resulting Design Constraint" states explicitly that Stage 1 (webdriver + UA-CH) is
+   now confirmed insufficient for extension-driven agentic browsers, and Stage 2 (behavioral
+   AND-gate) is "confirmed as load-bearing, not a nice-to-have fallback" for that class — this is
+   exactly the shape D2 already committed to (Stage 2 proxies as a real, piggybacked signal, not
+   an afterthought).
+3. It does not change any implementation instruction — no Step needs new text as a result.
+4. Per this pass's write-scope, this is a contract-accuracy correction (the validate-agent's own
+   prior characterization of external evidence), not a plan-body defect — it is fixed here, in the
+   contract, not routed to plan-agent.
+
+**Carried forward, corrected:** AC-14 remains Known-Gap/Agent-Probe as SPEC'd — genuinely
+unresolved for Comet/Operator/Atlas, and this new evidence should NOT be extrapolated to those
+products (the VERDICT file's own "What this forbids" section says so explicitly). The prior
+"INCONCLUSIVE... not re-probed" contract language is superseded by this correction; no further
+probing was performed this pass, matching the task's "do not re-probe" instruction — this is a
+read-only accuracy fix, not new investigation.
+
+## Verification of Locked Decisions and Named Hazards (re-confirmed across all 3 passes)
+
+- **G7 consent boundary** — CONFIRMED intact, three passes running, now against a stable
+  post-rebase HEAD: `agent_sig` collection is specified to land after `consentDecision = GATED`
+  (L507) and before `pagehide`/beacon flush (L710, unrelated to this plan's edits).
+- **`is_emailable_identity()` exactly-3-parameters invariant** — CONFIRMED, and now against a
+  clean (non-mid-diff) file for the first time across all 3 passes — the strongest form of this
+  check yet.
+- **3 call sites** — all 3 confirmed present via live grep at fresh HEAD, line numbers drifted
+  cosmetically, targets unchanged.
+- **Migration safety** — single head `f1a7c3e05b92` confirmed stable since cycle 2's
+  post-rebase-resolution measurement; no new collision this pass.
+- **Byte-budget gate falsifiability** — confirmed real (non-tautological); see the dedicated
+  pass-3 assessment above for the new advisory-CONCERN reasoning on the 233B margin.
+- **Feasibility probe carry-forward** — CORRECTED this pass (see dedicated section above): was
+  cited as INCONCLUSIVE, is now NOT-VIABLE (partial, one product class) with real measurements;
+  reinforces rather than undermines D2; AC-14 stays Known-Gap.
 
 Test gates (C3 5-column table — ADDITIVE; existing consumers still parse the legacy line form below it):
 
 | criterion id | behavior | strategy | proving test | gap-resolution |
 |---|---|---|---|---|
-| AC-1 | Tracker bootstrap does not short-circuit on webdriver alone; consent gating unchanged | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_pixel.py -q` (marker-drop now in plan body, confirmed correct) | A |
+| AC-1 | Tracker bootstrap does not short-circuit on webdriver alone; consent gating unchanged | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_pixel.py -q` (re-run live pass 3: 72 passed) | A |
 | AC-2 | agent_sig collection fires only after consentDecision/GATED resolution | Fully-Automated | same corrected command as AC-1 (new test case) | A |
-| AC-3 | Pixel gzip size stays under 6000B/6144B | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_pixel_fingerprint.py::TestPixelSizeLimit::test_under_6kb_gzipped tests/unit/test_pixel.py -q` | A (once tree is off the concurrent rebase — see E8) |
-| AC-3 (fires-at-all sub-check) | Stage-2 counters produce non-default values under simulated clicks | Hybrid | new `apps/pixel/e2e/agent-sig.spec.ts` (Playwright), mirrors confirmed-achievable `fingerprint-v3.spec.ts` pattern; precondition: built pixel + browser + tree off the concurrent rebase (E8) | A |
-| AC-4 | agent_sig persists at ingest and round-trips | Hybrid (Docker-gated) | new integration test in `tests/integration/`; correct insertion site re-confirmed (event_rows/pg_insert(Event) block, plan body) | C |
-| AC-5 | Sweep classifies real non-null agent_sig fixture | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_ws2_session_classifier.py tests/unit/test_ws2_zero_import.py -m unit` (marker present on both ported files, confirmed via `git show`) | B |
+| AC-3 | Pixel gzip size stays under 6000B/6144B | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_pixel_fingerprint.py::TestPixelSizeLimit::test_under_6kb_gzipped tests/unit/test_pixel.py -q` | A — 233B live headroom confirmed stable; see Byte-Budget Falsifiability Assessment for the advisory margin CONCERN |
+| AC-3 (fires-at-all sub-check) | Stage-2 counters produce non-default values under simulated clicks | Hybrid | new `apps/pixel/e2e/agent-sig.spec.ts` (Playwright), mirrors confirmed-achievable `fingerprint-v3.spec.ts` pattern; precondition: built pixel + browser | A |
+| AC-4 | agent_sig persists at ingest and round-trips | Hybrid (Docker-gated) | new integration test in `tests/integration/`; correct insertion site re-confirmed live pass 3 (event_rows/pg_insert(Event) block, L375-422) | C |
+| AC-5 | Sweep classifies real non-null agent_sig fixture | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_ws2_session_classifier.py tests/unit/test_ws2_zero_import.py -m unit` (marker present on both branch files, confirmed via `git show` pass 3) | B |
 | AC-6 | Classification visible to site owner | Agent-Probe (reclassified, confirmed consistent everywhere) | manual visual check at the 3 inline sites | D |
 | AC-7 | No session dropped/blocked by classification | Hybrid (Docker-gated) | new/extended integration test | C |
 | AC-8 | is_emailable_identity() unaffected at all 3 call sites | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_agent_origin_exclusion.py tests/unit/test_visibility_only_flags_no_leak.py -m unit` | B |
 | AC-9 | Visibility-only flags do not trip is_emailable_identity() | Fully-Automated | same command as AC-8 (new test file) | B |
-| AC-10 | Migration re-chains onto live head | Fully-Automated (offline) | `alembic -c apps/api/alembic.ini heads` + `alembic upgrade <from>:<to> --sql` | A (offline, once concurrent rebase resolves — E8) / D (live round-trip) |
+| AC-10 | Migration re-chains onto live head | Fully-Automated (offline) | `alembic -c apps/api/alembic.ini heads` (confirmed single head `f1a7c3e05b92` live pass 3) + `alembic upgrade <from>:<to> --sql` | A / D (live round-trip) |
 | AC-11 | Mock mode works end-to-end | Fully-Automated | targeted suite with `MOCK_EXTERNAL_APIS=true` | B |
 | AC-12 | Live Playwright/CDP corpus true-positive rate | Agent-Probe | documented post-ship check | D |
 | AC-13 | False-positive rate on real human fixtures | Agent-Probe | documented lab-corpus check | D |
-| AC-14 | Live wild-session validation | Agent-Probe | documented live check | D |
+| AC-14 | Live wild-session validation | Agent-Probe | documented live check — partial real evidence now exists for Claude-in-Chrome (NOT-VIABLE, see correction above); Comet/Operator/Atlas remain fully unmeasured | D |
 | structural guardrail | ws2 modules import nothing from cadence_bot_flag/agent_classifier | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_ws2_zero_import.py -m unit` | B |
 
 gap-resolution legend:
-- A — proven now / correctness confirmed live against the plan's true target state (devjulley
-  tip, `ORIG_HEAD`) this cycle; execution-ready once the concurrent rebase (E8) resolves
-- B — fixed directly in the plan body (Implementation Checklist text), confirmed correct this
-  cycle; Execute-Agent Instructions below retained as redundant confirmation only
+- A — proven now / correctness confirmed live against a stable, clean current tree (HEAD `5293cbc`,
+  no rebase/merge in progress) this cycle; fully execution-ready
+- B — fixed directly in the plan body (Implementation Checklist text), confirmed correct across
+  all 3 cycles; Execute-Agent Instructions below retained as redundant confirmation only
 - C — deferred to Docker-gated integration tier, repo-wide precedent, not this plan's defect
 - D — known-gap residual: AC-6 (component-render test infra gap), AC-10 live round-trip
-  (Docker-gated), AC-12/13/14 (pre-accepted SPEC Known-Gaps)
+  (Docker-gated), AC-12/13/14 (pre-accepted SPEC Known-Gaps, AC-14 now partially informed by real
+  evidence for one product class — see correction above)
 
 C-4 reconciliation: `strategy:` carries only Fully-Automated/Hybrid/Agent-Probe. AC-12/13/14 carry
 `strategy: Agent-Probe` (a documented manual check is a real proving mechanism), `gap-resolution:
 D` marks them as named residuals, not silent passes.
 
 Legacy line form (retained so existing validate-contract consumers still parse):
-- pixel bootstrap/consent (AC-1, AC-2): Fully-automated: `pytest tests/unit/test_pixel.py -q` (marker drop confirmed in plan body)
+- pixel bootstrap/consent (AC-1, AC-2): Fully-automated: `pytest tests/unit/test_pixel.py -q` (marker drop confirmed in plan body, re-run live pass 3: 72 passed)
 - pixel byte budget size (AC-3): Fully-automated: `pytest tests/unit/test_pixel_fingerprint.py::TestPixelSizeLimit::test_under_6kb_gzipped tests/unit/test_pixel.py -q`
 - pixel byte budget fires-at-all (AC-3): Hybrid: new Playwright spec, pattern confirmed achievable
 - ingest persistence (AC-4, AC-7): Hybrid: new integration test, correct insertion site re-confirmed; precondition: docker-compose Postgres/Redis up
@@ -671,27 +740,29 @@ Legacy line form (retained so existing validate-contract consumers still parse):
 - mock mode (AC-11): Fully-automated: targeted suite with MOCK_EXTERNAL_APIS=true
 
 Dimension findings:
-- Infra fit: PASS — every touchpoint file path re-confirmed resolving against the plan's true
-  target state (devjulley tip / `ORIG_HEAD`). No container/infra/runtime surface touched.
-- Test coverage: PASS (was CONCERN pass-1, now resolved) — E1/E2/E4/E5 all confirmed correctly
-  folded into the plan body and independently re-verified achievable against live source. The one
-  residual item is not a test-coverage defect but the environmental pre-condition below (E8).
+- Infra fit: PASS — every touchpoint file path re-confirmed resolving against a clean, stable
+  live tree (HEAD `5293cbc`, no rebase/merge in progress). No container/infra/runtime surface
+  touched.
+- Test coverage: PASS — all 7 cycle-1 corrections (E1-E7) and both cycle-2 corrections
+  (E8 + citation refresh) independently re-verified correct and stable this pass. 72/72 pixel
+  tests pass live.
 - Breaking changes: PASS — every schema/config/column change confirmed additive and
-  nullable/default-OFF; `is_emailable_identity()`'s 3-parameter signature re-confirmed unchanged
-  at the true target state.
-- Security surface: PASS — D1's visibility-only design re-confirmed structurally sound this pass
-  (zero-touch of the emailability guard, no 4th parameter, `is_agent_operated`/`is_bot_suspect`
-  absent from the function body — even in the concurrently-modified `identity_classification.py`,
-  the diff against the plan's true target state is purely additive after the guarded function).
-- Environmental pre-condition (NEW this pass): CONCERN — see the dedicated section above. The
-  working tree at the plan's own `Work context` path is mid an unrelated interactive rebase
-  (`devjulley` rebasing onto `332b3a8`) that temporarily reverts several WS2 touchpoints
-  (tracker.js, the pixel byte-budget test, events.py/scheduler.py line offsets, alembic head
-  count) to a pre-fingerprint-v3 state. Every plan citation independently re-verified correct
-  against the true target (`ORIG_HEAD`); this is an EXECUTE-time precondition, not a plan-body
-  defect. See Execute-Agent Instruction **E8**.
-- Cycle-1 supplement fold-in (E1-E7): PASS — see the dedicated re-verification table above; all
-  7 corrections confirmed correctly present in the plan body with no new defects introduced.
+  nullable/default-OFF; `is_emailable_identity()`'s 3-parameter signature re-confirmed unchanged,
+  now against a clean (non-mid-diff) file — the strongest form of this check across all 3 passes.
+- Security surface: PASS — D1's visibility-only design re-confirmed structurally sound: zero-touch
+  of the emailability guard, no 4th parameter, `is_agent_operated`/`is_bot_suspect` absent from
+  the function body.
+- Environmental pre-condition (from pass 2): RESOLVED — the interactive rebase found mid-pass-2 has
+  fully completed; the shared tree is now stable and every WS2-relevant citation matches the
+  plan's true target state. E8's Step 0a guard remains a permanent, correct standing safeguard
+  (not a live blocker) given this repo's demonstrated concurrent-session history.
+- [NEW pass 3] Byte-budget margin: CONCERN (advisory, non-blocking) — 233B live headroom is real
+  and tight; plausible but not certain first-attempt gate failure; already handled by the plan's
+  own Step 2 trim-first design; this pass adds one concrete refinement (prefer short wire-key
+  names from the start) directly into Step 1.4/Step 2.4 above.
+- [NEW pass 3] Feasibility probe accuracy: INFORMATIONAL (non-blocking) — corrected a stale
+  INCONCLUSIVE citation to the file's actual current NOT-VIABLE (partial) verdict; reinforces D2,
+  does not require any plan-body change beyond this contract's own correction.
 
 Open gaps:
 - AC-4/AC-7 integration test — Docker-gated, cannot run in this VALIDATE session (repo-wide
@@ -699,12 +770,15 @@ Open gaps:
 - AC-10 live migration round-trip — Docker-gated (repo-wide precedent).
 - AC-6 full render check — Agent-Probe by necessity; tracked as a repo-wide backlog candidate in
   `cadence-bot-flag-deferred-gates_NOTE_26-07-26.md`, not a new gap this plan introduces.
-- AC-12/AC-13/AC-14 — pre-accepted SPEC Known-Gaps, not new findings (per task brief, not
-  re-raised here).
-- **[NEW] Concurrent rebase in progress on the plan's `Work context` working tree** — see the
-  dedicated section above and Execute-Agent Instruction E8. Transient/external to this plan;
-  expected to resolve independently of this plan's own work, but MUST be confirmed resolved
-  before Step 0 runs.
+- AC-12/AC-13/AC-14 — pre-accepted SPEC Known-Gaps; AC-14 now has partial real evidence for one
+  product class (Claude-in-Chrome, NOT-VIABLE) — see correction above; still Known-Gap overall
+  since Comet/Operator/Atlas remain unmeasured.
+- [advisory, pass 3] Byte-budget margin (233B, live-verified) — real risk of a first-attempt Step 2
+  gate failure; mitigated by the plan's own trim-first design, sharpened by this pass's Step
+  1.4/Step 2.4 refinement (prefer short wire-key names from the start).
+- The concurrent-rebase hazard from pass 2 is now RESOLVED, not open — retained only as historical
+  record in the Cycle-1/Cycle-2 Continuity Re-Verification table above and as the permanent Step 0a
+  standing guard (which is a checklist item, not an open gap).
 
 What this coverage does NOT prove:
 - The Fully-Automated pixel unit tests (AC-1, AC-2) are string/regex-position checks against raw
@@ -712,10 +786,15 @@ What this coverage does NOT prove:
   executes correctly in a real browser. Real-browser execution proof is E2's Playwright spec
   (AC-3 fires-at-all) and AC-12 (Known-Gap, real automation products).
 - The byte-budget gate (AC-3) proves the CURRENT measured size only; it does not guarantee future
-  pixel edits stay under budget — every future change must re-run this gate.
+  pixel edits stay under budget — every future change must re-run this gate. This pass additionally
+  does NOT prove the exact byte cost of the not-yet-written Stage-1/Stage-2 collector code — the
+  233B-headroom falsifiability judgment above is a reasoned estimate, not a measurement of code
+  that does not exist yet; Step 2's live re-measure is the actual proof, required regardless.
 - AC-5's ported unit test proves the classifier's pure-function logic against synthetic fixtures;
   it does not prove real Playwright/Selenium/Comet sessions actually trip Stage 1/Stage 2 in
-  production (AC-12/AC-14, Known-Gap/Agent-Probe).
+  production (AC-12/AC-14, Known-Gap/Agent-Probe) — though AC-14 now has one real negative data
+  point (Claude-in-Chrome does not trip Stage 1) that the pre-implementation classifier logic
+  cannot itself demonstrate.
 - AC-8/AC-9's unit tests prove the guard function's behavior in isolation with mocked sessions;
   they do not exercise a live campaign send or export against a real database.
 - The offline `--sql` migration validation (AC-10) proves the DDL is syntactically valid and
@@ -725,49 +804,49 @@ What this coverage does NOT prove:
   performed the check, on the fixtures used; it does not prove correctness across all
   browsers/screen sizes, nor does it run automatically on any future change (no regression
   protection until component-render test infra exists — repo-wide backlog candidate).
-- This pass's re-verification confirms the plan's citations are correct against devjulley's TRUE
-  tip; it does NOT prove the concurrent rebase will resolve cleanly, nor does it prove no further
-  concurrent drift occurs between now and EXECUTE start — E8's pre-flight check is the safeguard
-  for that gap, not a guarantee against it recurring.
+- This pass's re-verification confirms the plan's citations are correct against a clean, stable
+  HEAD right now; it does NOT prove no further concurrent drift occurs between now and EXECUTE
+  start — E8's Step 0a pre-flight check is the standing safeguard for that, not a one-time
+  guarantee.
 
 Execute-Agent Instructions (binding — apply these corrections instead of the literal checklist
 text where they conflict; do not silently follow the plan's original wording where noted):
 
 | # | Instruction | Trigger condition |
 |---|---|---|
-| E1 | Drop `-m unit` from the Step 1 and Step 2 test-gate commands. Now also present directly in the plan body (cycle-1 fold-in, confirmed cycle-2). Confirmed live: neither `tests/unit/test_pixel.py` nor `tests/unit/test_pixel_fingerprint.py` carries any `pytest.mark.unit` marker. | Step 1 and Step 2 test-gate execution |
-| E2 | Add `apps/pixel/e2e/agent-sig.spec.ts` (Playwright), mirroring the `fingerprint-v3.spec.ts` pattern (`interceptIngest`/`fixture`/`settle` from `./harness`). Now also present directly in the plan body (cycle-1 fold-in). Confirmed cycle-2: pattern exists and is directly reusable at devjulley's true tip; helpers confirmed exported live. Proving command: `cd apps/pixel && npm run build && npx playwright test e2e/agent-sig.spec.ts`. | Step 2, "fires at all" pass condition |
-| E3 | Persist `agent_sig` in the `event_rows` dict-list / `pg_insert(Event)` block in `apps/api/routers/events.py` (lines ~375-422 at devjulley tip — the block that also sets `link_marker` and `is_flagged_abuse`), NOT via the `fp3_value` pattern in `_process_signal_events()` (lines ~525-606). That function writes to the Visitor row (`fingerprint`/`fingerprint_v3` columns), a structurally different table and code path. Now also present directly in the plan body (cycle-1 fold-in). Re-confirmed cycle-2: this is the single highest-value correction in this plan — following the original literal Step 3.5 text would have silently failed AC-4 while every other gate looked green. | Step 3.5, ingest persistence site selection |
-| E4 | AC-6/Step 6 reclassified to Agent-Probe (both legs). No shared badge component exists — `is_bot_suspect` is rendered inline at 3 confirmed sites. Now also present directly in the plan body (cycle-1 fold-in), confirmed consistent across all 4 locations cycle-2 (traceability table, Verification Evidence, Step 6, Touchpoints). | Step 6, badge target location + test tier |
-| E5 | Write a NEW behavioral test for Step 1 (no existing assertion to "update" — `test_has_bot_detection` is a non-behavioral string check). Now also present directly in the plan body (cycle-1 fold-in), confirmed unconditional cycle-2. | Step 1 test-gate authoring |
-| E6 | Scheduler registration file confirmed `apps/api/jobs/scheduler.py`, `cadence_bot_flag_sweep` pattern at lines ~565-569 at devjulley tip. Now also present directly in the plan body (cycle-1 fold-in), hedge removed, confirmed cycle-2. | Step 4.6 |
-| E7 | Use `postgresql.JSONB` (not plain `JSON`) for the new `agent_sig` column, plain `Column(...)` declarative style. Now also present directly in the plan body (cycle-1 fold-in), confirmed cycle-2 in Step 3.3, Touchpoints, and Public Contracts. | Step 3.3, column type/style choice |
-| **E8 (NEW this pass)** | **Before running Step 0 (or any edit), execute-agent MUST run `git status` on the plan's `Work context` working tree and confirm: (a) no `interactive rebase in progress` / `merge in progress` message appears, and (b) `git rev-parse --abbrev-ref HEAD` returns `devjulley` (not `HEAD`/detached). If either check fails, STOP IMMEDIATELY — do not touch any file, do not run `alembic heads`, do not edit `tracker.js`. Report BLOCKED with the exact `git status` output and wait for the concurrent operation to resolve (this is an external, unrelated git operation on a shared working tree — not something execute-agent should attempt to resolve itself, e.g. never run `git rebase --abort`/`--continue` on someone else's in-progress rebase without explicit human instruction). Once confirmed clean, re-verify EVERY line-number citation in this plan via grep (not by trusting the numbers literally) before editing, since line numbers can drift for reasons beyond this specific rebase.** | Before Step 0, and before any file edit if execution is interrupted and resumed |
+| E1 | Drop `-m unit` from the Step 1 and Step 2 test-gate commands. Present directly in the plan body; confirmed correct across all 3 cycles — live-run pass 3, 72 passed. | Step 1 and Step 2 test-gate execution |
+| E2 | Add `apps/pixel/e2e/agent-sig.spec.ts` (Playwright), mirroring the `fingerprint-v3.spec.ts` pattern (`interceptIngest`/`fixture`/`settle` from `./harness`). Present directly in the plan body. Re-confirmed pass 3: pattern exists and is directly reusable; all 3 helpers confirmed exported live from `harness.ts`. Proving command: `cd apps/pixel && npm run build && npx playwright test e2e/agent-sig.spec.ts`. | Step 2, "fires at all" pass condition |
+| E3 | Persist `agent_sig` in the `event_rows` dict-list / `pg_insert(Event)` block in `apps/api/routers/events.py` (L375-422 at fresh pass-3 HEAD — the block that also sets `link_marker` and `is_flagged_abuse`), NOT via the `fp3_value` pattern in `_process_signal_events()` (L525-606 at fresh HEAD, writes `pg_insert(Visitor)`). Present directly in the plan body. Re-confirmed pass 3 as the single highest-value correction in this plan — following the original literal Step 3.5 text would have silently failed AC-4 while every other gate looked green. | Step 3.5, ingest persistence site selection |
+| E4 | AC-6/Step 6 reclassified to Agent-Probe (both legs). No shared badge component exists — `is_bot_suspect` is rendered inline at 3 confirmed sites. Present directly in the plan body, confirmed consistent across all 4 locations across all 3 passes. | Step 6, badge target location + test tier |
+| E5 | Write a NEW behavioral test for Step 1 (no existing assertion to "update" — `test_has_bot_detection` is a non-behavioral string check). Present directly in the plan body, confirmed unconditional across all 3 passes. | Step 1 test-gate authoring |
+| E6 | Scheduler registration file confirmed `apps/api/jobs/scheduler.py`, `cadence_bot_flag_sweep` pattern at L566-569 at fresh pass-3 HEAD (1-line drift from "~565-569," non-blocking). Present directly in the plan body, hedge removed. | Step 4.6 |
+| E7 | Use `postgresql.JSONB` (not plain `JSON`) for the new `agent_sig` column, plain `Column(...)` declarative style. Confirmed unchanged in Step 3.3, Touchpoints, and Public Contracts across all 3 passes. | Step 3.3, column type/style choice |
+| E8 | Before running Step 0 (or any edit), execute-agent MUST run `git status` on the plan's `Work context` working tree and confirm: (a) no `interactive rebase in progress` / `merge in progress` message appears, and (b) `git rev-parse --abbrev-ref HEAD` returns `devjulley` (not `HEAD`/detached). If either check fails, STOP IMMEDIATELY — report BLOCKED with the exact `git status` output and wait; never `git rebase --abort`/`--continue` on someone else's in-progress operation. Once confirmed clean, re-verify EVERY line-number citation in this plan via grep before editing. **Now folded permanently into the checklist body as Step 0a (confirmed present, pass 2). Live-tested pass 3: Step 0a would PASS cleanly right now (clean tree, HEAD `5293cbc`, branch `devjulley`, not detached).** | Before Step 0, and before any file edit if execution is interrupted and resumed |
+| [NEW E9, advisory] | When writing Step 1.4's wire-key JSON shape, prefer short/abbreviated key names (e.g. single- or two-letter keys) over the full descriptive names shown for illustration in Public Contracts, on the FIRST implementation attempt. Re-measure with the test's own method (`gzip.compress`, not `gzip -9 -c \| wc -c` — a confirmed 15B discrepancy at this margin) before assuming a trim cycle is needed. This is advisory guidance tightening Step 1.4/Step 2.4, not a new checklist step — see the Byte-Budget Falsifiability Assessment above for the reasoning. | Step 1.4, Step 2 first measurement |
 
 Backlog artifacts: none new — AC-6's component-render test infra gap and the migration
 live-round-trip gap are both already tracked in existing backlog notes referenced above. The
-concurrent-rebase finding (E8) is transient/environmental, not a durable backlog item — no new
-artifact needed.
+concurrent-rebase finding (E8) is now resolved and needs no new artifact; the byte-budget margin
+and feasibility-probe correction are both fully captured inline in this contract, not durable
+backlog items.
 
 Gate: CONDITIONAL
 
-Accepted by: N/A — pass 2. All 7 pass-1 CONCERNs (E1-E7) are CONFIRMED resolved and correctly
-folded into the plan body against live source, with no new defects introduced by the fold-in —
-that part of this plan is execute-ready as-is. However, this pass surfaced ONE new, substantive,
-safety-relevant finding not present in pass 1: the plan's own `Work context` working tree is
-currently mid an unrelated interactive rebase that temporarily invalidates the live state of
-several cited touchpoints (see the dedicated section above). Per this pass's loop protocol, a NEW
-substantive gap routes through a SUPPLEMENT REQUEST rather than being silently accepted as
-execute-eligible, specifically because the blast radius of getting this wrong is high (Step 1
-would edit `tracker.js` against the wrong base if EXECUTE started blind against the current
-transient state) and a permanent checklist-level pre-flight guard (not just a contract-only
-instruction) is the more robust fix, mirroring cycle 1's own stated rationale for folding
-contract-only instructions into the checklist body. Recommended resolution: fold Execute-Agent
-Instruction **E8** into the plan body as an expansion of Step 0 (e.g. "Step 0a — confirm no
-git rebase/merge in progress"), the same treatment cycle 1 gave E1-E7. This is a SUPPLEMENT
-REQUEST for exactly one gap (see the SUPPLEMENT REQUEST block in the response accompanying this
-contract write); once folded, or once a human/orchestrator confirms the concurrent rebase has
-resolved, this plan is execute-ready — the underlying plan design has no other open concerns.
+Accepted by: session (autonomous /goal execution) — pass 3, 2 completed supplement cycles behind
+this plan. All 8 prior corrections (E1-E8) independently re-verified correct against a clean,
+stable HEAD with zero new design gaps found this pass. The 2 residual items this pass surfaced —
+(1) the 233B byte-budget margin (advisory CONCERN, already handled by the plan's own Step 2
+trim-first design, sharpened with one concrete refinement E9) and (2) the feasibility-probe
+citation correction (informational, reinforces D2, requires no plan change) — are both
+non-blocking: neither is a design defect, both are execute-time-relevant context rather than
+checklist gaps. This plan is execute-ready. Convergence judgment: **CONVERGED.** Cycle 1 found 7
+real design-quality gaps and fixed them; cycle 2 found 1 real environmental/process gap (E8) and
+turned it into a permanent standing guard; this pass (cycle 3) found 0 new design gaps — only
+confirmations that the prior fixes hold, one informational evidence correction, and one advisory
+execution-time risk note that the plan already structurally anticipates. Further PVL passes on
+this plan would very likely either re-confirm this same stable state or surface the same class of
+environmental noise (byte-count drift, migration-head drift) that Steps 0/0a/2 are already
+explicitly designed to absorb — marginal value of a pass 4 is low. Recommended: proceed to EXECUTE.
 
 ## Strategy Recommendation for VALIDATE
 
@@ -797,37 +876,38 @@ plan with `## Stable Program Goal` exists for this work (confirmed: no
 `process/features/agent-native-revenue/` folder exists on disk; no other umbrella references this
 plan).
 Autonomy: standard /goal autonomous execution rules apply — CONDITIONAL findings get applied via
-the Execute-Agent Instructions table (E1-E8) above and execution proceeds without pausing; BLOCKED
+the Execute-Agent Instructions table (E1-E9) above and execution proceeds without pausing; BLOCKED
 items go to backlog with continuation; irreversible/outward-facing actions without explicit
 contract instruction are a hard stop.
 Hard stop conditions / safety constraints:
 - Never let `is_emailable_identity()` gain a 4th parameter or read `is_agent_operated`/
-  `is_bot_suspect` — this is the plan's single highest-priority guardrail (D1), reconfirmed live.
+  `is_bot_suspect` — this is the plan's single highest-priority guardrail (D1), reconfirmed live
+  at pass 3 against a clean, non-mid-diff file.
 - Never apply any migration against a real/shared environment — offline `--sql` validation only;
   live apply is a separate explicit human operator action.
 - Never exceed the pixel's `<6000` gzip byte gate; if Step 2's budget check fails after trimming,
-  stop and report rather than silently expanding the gate threshold.
+  stop and report rather than silently expanding the gate threshold. Given the live-confirmed 233B
+  margin, budget for at least one trim-and-remeasure cycle as a normal, expected outcome (E9).
 - Never bypass the EU consent hold — `agent_sig` collection must stay strictly after the
-  `GATED`/`consentDecision` assignment (tracker.js:507-508).
+  `GATED`/`consentDecision` assignment (tracker.js:507-508, reconfirmed at pass 3's fresh HEAD).
 - Never merge or check out `feat/ws2-agent-session-classifier` — read via `git show` only (D4).
 - Never introduce new component-render test infrastructure as a side effect of AC-6 (E4) — that
   is a named repo-wide backlog candidate, out of this plan's scope.
-- Never attempt to resolve the concurrent interactive rebase found at VALIDATE pass 2 (`git
-  rebase --abort`/`--continue`) — that is an unrelated, external git operation on a shared
-  working tree; report BLOCKED and wait instead (E8).
-- Follow Execute-Agent Instructions E1-E8 as binding — they correct the literal checklist text
+- Follow Execute-Agent Instructions E1-E9 as binding — they correct the literal checklist text
   where the two conflict (E3 in particular: the checklist's Step 3.5 "grep fp3_value" instruction
   is wrong and must not be followed literally).
 Next phase: EXECUTE — `process/features/pixel/active/ws2-agent-session-activation_07-08-26/ws2-agent-session-activation_PLAN_07-08-26.md`
 Validate contract: inline in plan (see `## Validate Contract` section above)
-Execute start: Step 0 (`alembic -c apps/api/alembic.ini heads`) → Step 1 (tracker.js edit, apply
-E1/E5) → Step 2 (byte-budget checkpoint, apply E1/E2 — hard gate) → Step 3 (ingest persistence,
-apply E3/E7) → Step 4 (classifier port, apply E6) → Step 5 (visibility-only wiring + AC-9 test) →
-Step 6 (dashboard badge, apply E4). Fully-auto gates: corrected pixel unit test commands, ws2
-classifier unit tests (`-m unit`, marker present), emailability guard tests (`-m unit`). New e2e
-spec required: `apps/pixel/e2e/agent-sig.spec.ts` (E2). Probe scenario: AC-6 manual visual check
-at the 3 sites named in E4. High-risk pack: no (no auth/billing/destructive-migration class
-touched; migration is additive/offline-only this session).
+Execute start: Step 0 (`alembic -c apps/api/alembic.ini heads`) → Step 0a (git-state pre-flight
+guard, E8) → Step 1 (tracker.js edit, apply E1/E5/E9) → Step 2 (byte-budget checkpoint, apply
+E1/E2/E9 — hard gate, expect at least one trim cycle) → Step 3 (ingest persistence, apply E3/E7) →
+Step 4 (classifier port, apply E6) → Step 5 (visibility-only wiring + AC-9 test) → Step 6
+(dashboard badge, apply E4). Fully-auto gates: corrected pixel unit test commands (72 passing
+live at pass 3), ws2 classifier unit tests (`-m unit`, marker present on branch), emailability
+guard tests (`-m unit`). New e2e spec required: `apps/pixel/e2e/agent-sig.spec.ts` (E2). Probe
+scenario: AC-6 manual visual check at the 3 sites named in E4. High-risk pack: no (no
+auth/billing/destructive-migration class touched; migration is additive/offline-only this
+session).
 
 ---
 

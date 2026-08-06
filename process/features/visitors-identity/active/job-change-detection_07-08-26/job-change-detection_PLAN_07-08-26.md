@@ -11,7 +11,11 @@ metadata:
 # Job-Change Detection — Plan
 
 Date: 07-08-26
-Status: VALIDATED — Gate: PASS — pending EXECUTE
+Status: EXECUTED 07-08-26 — backend code-complete, flag-OFF, 1093/1093 unit tests green.
+**NOT archivable** — 1 gate unexecuted (integration lane env-blocked). AC-9 descoped to its API leg 07-08-26 (user-approved); dashboard UI leg deferred to backlog.
+See `job-change-detection_REPORT_07-08-26.md` and
+`process/features/visitors-identity/backlog/job-change-detection-deferred-gates_NOTE_07-08-26.md`.
+5 deviations recorded (D-1..D-5), all within blast radius — see `## Deviations` at the end of this file.
 Complexity: COMPLEX (single plan, 3 internal phases — not a phase program: phases are small,
 tightly interdependent, and share one migration/one validate-contract)
 **Feature:** visitors-identity
@@ -108,6 +112,7 @@ tightly interdependent, and share one migration/one validate-contract)
   actually 8 new counting tests; ~7 modified: celery_app beat schedule, event-ingest hookup,
   hot_contacts service+router, segmenter, visitors.py delete loop, config.py).
 - **Packages:** `apps/api` only. No `apps/web`, no `apps/pixel`.
+  **Reconciliation note (07-08-26, user-approved descope):** the validate-contract previously contradicted this line by assigning AC-9 a Hybrid Playwright gate against `apps/web/e2e/job-change-dashboard.spec.ts` — no such file/component was ever built, correctly, per this Blast Radius scope guard. This line (`apps/api` only) is authoritative. AC-9's validate-contract row is now descoped to the delivered API-level gate only; the dashboard UI leg is a backlog follow-up — see `process/features/visitors-identity/backlog/job-change-dashboard-ui_NOTE_07-08-26.md`.
 - **Risk class:** HIGH — three named classes present: (1) PII-adjacent history table (mitigated by
   AC-14 no-plaintext-email schema + erasure cascade AC-12), (2) budget/credit accounting surface
   (AC-4, dedicated Redis counter, must not touch `Site.daily_resolution_budget`), (3) outreach
@@ -400,8 +405,7 @@ the SPEC's own stated strategy for those two rows.
 | Unit: `corroborate()` — (a) high-confidence + work-email-domain match → passes; (b) low-confidence → rejected; (c) company differs, only personal-email domain, no other signal → rejected | Fully-Automated | AC-6 |
 | Integration: trigger confirmed job change → exactly one `JobChangeEvent` row with correct before/after values; `EnrichmentProfile.company_name` updated to new value | Fully-Automated | AC-7 |
 | Integration: trigger confirmed job change → campaign/draft record created with `status == "draft"`; assert zero SendGrid call occurs in the same flow | Fully-Automated | AC-8 |
-| Playwright: job-change trigger element present/visible on dashboard for a site with a seeded confirmed event | Hybrid | AC-9 (automated presence check) |
-| Agent-Probe: UX/content placement judgment on the job-change dashboard surface | Agent-Probe | AC-9 (supplementary) |
+| Integration: `GET /api/v1/sites/{site_id}/job-changes` is site-scoped via `verify_site_access`, ordered newest-first, response has no `email` key | Fully-Automated | AC-9 (API delivered leg) |
 | Unit/integration: visitor with confirmed job-change event is identifiable via segmenter's signal-reading path (mocked segmenter input, no live Gemini call) | Fully-Automated | AC-10 |
 | Integration: job-change detection run makes zero `beam_identity_graph` reads/writes (spy/mock on graph access functions), even when a cross-tenant graph row exists for the same person | Fully-Automated | AC-11 |
 | Integration: seed `JobChangeEvent` row for a visitor, call `DELETE /{site_id}/{visitor_id}/data`, assert row is gone after commit — extended per step 20 to also assert the pre-existing 6-table tuple still deletes correctly (closes the pre-existing regression-coverage gap) | Fully-Automated | AC-12 |
@@ -453,6 +457,11 @@ the SPEC's own stated strategy for those two rows.
    vocabulary at EXECUTE time, not hardcoded from this plan's draft-time assumption. **VALIDATE
    confirmed the live value today is `"anonymous"`** (see step 11 note) — this is the current
    baseline to diff against if the vocab has moved by EXECUTE time.
+6. **AC-9 dashboard UI — RESOLVED-BY-DESCOPE (07-08-26).** The plan's Blast Radius ("`apps/api`
+   only, no `apps/web`") contradicted the validate-contract's AC-9 Hybrid Playwright gate. User
+   decision: descope AC-9's proving gate to the delivered API leg
+   (`test_job_changes_endpoint_is_site_scoped`); the dashboard UI trigger is out of scope for v1.
+   See `process/features/visitors-identity/backlog/job-change-dashboard-ui_NOTE_07-08-26.md`.
 
 ---
 
@@ -491,8 +500,8 @@ Test gates (C3 5-column table):
 | AC-6 | `corroborate()` confidence + personal-email-exclusion gate | Fully-Automated | `tests/unit/test_job_change_detector.py::test_corroborate_gate_cases` | B |
 | AC-7 | one minimal before/after row per confirmed transition; profile updated in place | Fully-Automated | `tests/integration/test_job_change_detection.py::test_confirmed_change_writes_minimal_row` | B |
 | AC-8 | confirmed change → draft-status campaign, zero SendGrid calls in-flow | Fully-Automated | `tests/integration/test_job_change_detection.py::test_confirmed_change_creates_draft_only` | B |
-| AC-9 | dashboard surface shows job-change trigger for a seeded event | Hybrid | Playwright smoke — `apps/web/e2e/job-change-dashboard.spec.ts` (precondition: seeded confirmed event + running app) | B |
-| AC-9 (supplementary) | UX/content placement judgment | Agent-Probe | manual/agent review of dashboard placement against SPEC US-1/US-2 | B |
+| AC-9 | `hot_contacts` job-changes API endpoint is site-scoped, ordered newest-first, PII-free | Fully-Automated | `tests/integration/test_job_change_detection.py::test_job_changes_endpoint_is_site_scoped` | A |
+| AC-9 (descoped) | dashboard UI trigger (originally Hybrid Playwright + Agent-Probe) — descoped 07-08-26 per user decision, out of scope for v1; see backlog note `job-change-dashboard-ui_NOTE_07-08-26.md` | — | — | D |
 | AC-10 | job-change event readable as a segmenter signal | Fully-Automated | `tests/unit/test_segmenter.py::test_job_changed_at_signal_readable` (mocked segmenter input) | B |
 | AC-11 | zero `beam_identity_graph` reads/writes during detection | Fully-Automated | `tests/integration/test_job_change_detection.py::test_no_beam_identity_graph_access` (spy/mock on graph functions) | B |
 | AC-12 | erasure cascade includes `job_change_events`; regression-extended to cover the full 6-table tuple | Fully-Automated | `tests/integration/test_job_change_detection.py::test_erasure_cascade_deletes_job_change_events` | B |
@@ -504,6 +513,14 @@ Test gates (C3 5-column table):
 | Regression | 4-gate structural template consistency | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_identity_signals.py -q` | A |
 | Migration | offline `--sql` upgrade/downgrade clean | Fully-Automated | `alembic -c apps/api/alembic.ini upgrade <observed-head>:head --sql` (both directions) | B |
 | Migration (live round-trip) | schema applies cleanly on a disposable Postgres | Hybrid | Docker-gated live round-trip — Known-Gap #1 | D |
+
+**Alembic head note (post-EXECUTE, EVL cycle 1, 07-08-26):** this plan's migration
+`a4f2b8c15d70_add_job_change_events` is no longer the chain tip. Two concurrent WS2 migrations
+landed on top of it: `a4f2b8c15d70` → `b8e3f6a2c904` (add_events_agent_sig) → `c9f4a7b31e85`
+(**TRUE current head**). This plan's migration chains cleanly beneath them — no branching, single
+head — and was offline `--sql` validated up and down within that chain. Re-run
+`alembic -c apps/api/alembic.ini heads` before any live apply; the head moves repeatedly under
+concurrent programs. Known-Gap #1 (live round-trip) is unchanged and still open.
 
 gap-resolution legend:
 - A — proven now (gate passes in this cycle; these 3 regression suites already exist and are green pre-EXECUTE)
@@ -717,3 +734,32 @@ Next phase: EXECUTE — `process/features/visitors-identity/active/job-change-de
 Validate contract: inline in plan (see `## Validate Contract` above), Gate: PASS, 07-08-26
 Execute start: Phase 1 checklist item 1 (`apps/api/models/job_change_event.py`) | full AC matrix in Verification Evidence | high-risk pack: yes (PII-adjacent table, budget/credit surface, outreach-trigger generation — see Blast Radius §Risk class)
 ```
+
+---
+
+## Deviations (recorded at EXECUTE, 07-08-26)
+
+All 5 are within-blast-radius (implementation detail / pre-authorized), none hard-stop class.
+Full rationale in `job-change-detection_REPORT_07-08-26.md` §Plan Deviations.
+
+| # | What deviated | Why | Impact |
+|---|---|---|---|
+| D-1 | Trigger A's `identity_status` check moved from the ingest call site (step 13) into the Celery task | The ingest handler holds no `Visitor` ORM row — checking there costs a DB round-trip on the hot path for a check the task repeats anyway | None observable; AC-2 asserts the outcome |
+| D-2 | Budget reserved AFTER gates+baseline instead of before gates (step 9 order) | A gated-out or baseline-less visitor should not burn a paid re-check credit | Strictly more conservative with spend; AC-4 semantics unchanged |
+| D-3 | `AutoDrafter.generate_for_visitor` gained optional `trigger_reason` | Pre-authorized by the Touchpoints note. Required: the method returns `None` without a social post, making AC-8 otherwise unsatisfiable | Default `None` = byte-identical prior behavior |
+| D-4 | Budget counter fails CLOSED on Redis error (E-1's OSINT template fails OPEN) | OSINT scans are free; every re-check spends a provider credit. Fail-open would turn a Redis outage into uncapped spend | INCR+EXPIRE idiom still copied verbatim; only the error branch differs |
+| D-5 | `tests/unit/test_content_campaign.py` mock `side_effect` list extended by one | The segmenter's new third batch query exhausted a 2-element mock | Fixture-only; no assertion weakened |
+
+### Execute-Agent Instruction outcomes
+
+- **E-1** applied — budget counter copies `usage_limits.py`'s OSINT `INCR`+`EXPIRE` shape (see D-4 for the one intentional divergence).
+- **E-2** N/A — `alembic heads` run LIVE returned **exactly one head** (`f1a7c3e05b92`). No merge migration needed. New head is `a4f2b8c15d70`.
+- **E-3** applied — AC-12 test asserts the pre-existing tuple tables delete too, and pre-asserts each was seeded so the post-delete assertion cannot pass vacuously.
+- **E-4** applied — read the `hot_contacts.py` route-order docstring; `/{site_id}/job-changes` has a literal second segment and was verified live at route index 33, ahead of `contacts/{visitor_id}` at 36. No shadowing either direction.
+- **E-5** applied — `identity_status` re-verified live: `"anonymous"` is still current (`events.py:614`, `models/visitor.py`). `identity-vocab-reconcile` has not landed a replacement vocabulary.
+
+### Constraint C-1 outcome
+
+Re-read `delete_visitor_data` live before editing: still the unrestructured 6-string-literal tuple,
+so `graph-erasure-compliance_07-08-26` has **not** executed. Took the "NOT yet executed" branch —
+pure additive tuple entry (`"job_change_events"` before `"visitors"`).

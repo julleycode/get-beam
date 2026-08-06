@@ -1,0 +1,4 @@
+cycle	date	domain	gates_total	gates_green	gates_failed	gates_env_blocked	gap_count	loop_status	report
+0	2026-08-07	tests	11	9	1	1	1	BASELINE	job-change-detection_REPORT_07-08-26.md
+1	2026-08-07	tests	11	9	1	1	1	FIX_DISPATCHED	job-change-detection-evl-iteration-001_REPORT_07-08-26.md
+1b	2026-08-07	tests	11	10	0	1	0	HALTED_SUCCESS	job-change-detection-evl-iteration-001_REPORT_07-08-26.md

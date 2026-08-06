@@ -25,7 +25,66 @@ without silently reverting `main`'s independently-built vocabulary. Read that SP
 ---
 
 **Date**: 07-08-26
-**Status**: DRAFT — PLAN supplement cycle 5 applied (S12-S15), resolving PVL cycle 4's Finding 7
+
+---
+
+## UPDATE PROCESS closeout note (07-08-26)
+
+**Classification: keep in `active/` — NOT archived.** Code is executed and user-accepted (see
+`EXECUTED AND ACCEPTED` block below), but the plan-lifecycle bar for archival is not met:
+`devjulley` is unpushed (`ahead 32, behind 5` vs `origin/devjulley`), and 3 human actions from the
+execute report §9 remain outstanding (live prod pre-check, the push decision, and the migration
+re-chain has not been applied — see "Migration head status" in `all-context.md`). Archive once
+pushed and the prod pre-check is run. Bookkeeping backfilled this session: PVL iteration reports
+007/008/009 were reconstructed from `results.tsv` (they never existed on disk — see each report's
+`reconstructed_note`); the `is_privacy_relay_ip` known-gap has a backlog note:
+`process/features/visitors-identity/backlog/resolver-privacy-relay-callsite-coverage_NOTE_07-08-26.md`.
+
+## EXECUTED AND ACCEPTED — status block (PLAN supplement cycle 9, S23)
+
+**Status: EXECUTED — result accepted by the user. Gate: CONDITIONAL, accepted.** The remaining
+supplement items applied this cycle (S20, S21, S22) are **plan-text corrections for archival
+accuracy and future reference — NOT outstanding code work.** The shipped code is correct on every
+one of them; see the spot-verification table below.
+
+**Governance record (factual):**
+
+- The rebase was executed by a **concurrent session while PVL cycle 8 was still open** and the gate
+  was `CONDITIONAL` with `Accepted by: PENDING`. That execute-agent self-flagged the discrepancy in
+  its own report (`identity-vocab-reconcile-execute_REPORT_07-08-26.md`): it saw `results.tsv` row 7
+  stating "EXECUTE is NOT yet unblocked" but the plan on disk still carried cycle 6's stale contract,
+  and proceeded.
+- **The orchestrator spot-verified the executed result and reported the findings to the user**
+  (privacy guard present; E-8 gate correct; E-9 clean; no duplicate test classes; `IntegrityError`
+  handler correct). **On the basis of that report — not a personal review of the diff or code — the
+  user directed that the result be kept and the plan text corrected**, instructing verbatim:
+  *"giữ kết quả, sửa §3.2, xác nhận nốt MissingGreenlet"* ("keep the result, fix §3.2, confirm the
+  MissingGreenlet item"). The Validate Contract's
+  `Accepted by:` marker is set to record the user's acceptance of the CONDITIONAL gate this session,
+  replacing `PENDING`. That acceptance is **retroactive to an already-completed EXECUTE**.
+
+**Current state (re-derived live at PLAN supplement cycle 9, 07-08-26):**
+
+| Fact | Value | Reproducing command |
+|---|---|---|
+| `devjulley` tip | `5293cbc` — rebased onto `main` | `git rev-parse --short devjulley` |
+| `main` tip | `332b3a8` | `git rev-parse --short main` |
+| Mid-rebase? | no — `HEAD` is `refs/heads/devjulley`, not detached | `git symbolic-ref -q HEAD` |
+| Pushed? | **NO — nothing pushed** (`ahead 32, behind 5` vs `origin/devjulley`) | `git status --short --branch` |
+
+**Orchestrator spot-verification of the executed result — all confirmed present/correct:**
+
+| Item | Check | Result |
+|---|---|---|
+| `is_privacy_relay_ip` guard (S20) | `git grep -c "is_privacy_relay_ip" devjulley -- apps/api/services/identity_resolver.py` | **2 hits — the guard SURVIVED** |
+| E-8 corrected gate | `apps/api/routers/events.py:591` | `if fp_value or fp3_value or svid:` — correct |
+| E-9 vocabulary sweep | zero `VERIFIED_STATUSES` in `dashboard.py`, `visitors_helpers.py`, `kpi.py`, `timeseries.py` | clean |
+| `IntegrityError` handler (S21) | `conflict_visitor_id`/`conflict_site_id` read BEFORE `try: await self.db.commit()` (~L1181-1185); devjulley upsert semantics + `save_identified_conflict_upsert` event name used inside the handler | **hybrid form shipped correctly** |
+| `tests/integration/test_events_ingest.py` | 5 classes, zero duplicate class names | clean |
+
+---
+
+**Status (historical — pre-execution planning trail)**: DRAFT — PLAN supplement cycle 5 applied (S12-S15), resolving PVL cycle 4's Finding 7
 (Gate: BLOCKED — `devjulley`'s real tip had moved past what the plan documented). The plan is now
 **derivation-based**: every branch-tip fact (commit list, migration set, `main` head) is re-derived
 live by EXECUTE rather than hardcoded, per explicit user decision (U2) — the branch is NOT frozen and
@@ -426,6 +485,13 @@ discovered, not originally enumerated)**, state exactly which side wins and what
 
 ### 3.1 `apps/api/services/identity_classification.py`
 
+> **AUTO-MERGE WARNING (added PLAN supplement cycle 9, S22 — see Execute-Agent Instruction E-11):**
+> git will NOT stop on most of this file. Only the `identity_status_for_provider` vs
+> `is_graph_candidate_provider`/`is_verified_identity` swap carries real conflict markers;
+> `EMAILABLE_PROVIDERS`, the `STATUS_*`/`VERIFIED_STATUSES` family, and `is_emailable_identity()`'s
+> body all auto-merge **silently to `main`'s content**. Apply this section's instructions explicitly
+> regardless of what git reports. Read **E-11** before starting.
+
 **STATUS: UNBLOCKED as of PLAN supplement cycle 3 (S6) — the D10 redesign moved the
 `candidate_outreach_enabled` wiring entirely out of this file and into a wrapper at 3 call sites
 (§6). This section is now pure vocabulary adopt-devjulley, no D5/D10 content remains here.**
@@ -488,7 +554,40 @@ hunks, so this is additive layering, not a 3-way semantic conflict.
 
 **devjulley's writer logic wins** (line ~888/940: `"candidate" if is_graph_candidate_provider(provider)
 else "identified"`, replacing main's `identity_status = identity_status_for_provider(provider)` at
-line ~1098). Because this file has 3 large hunks (~130+ changed lines per branch — see diff summary
+line ~1098) — **with ONE explicit carve-out, added at PLAN supplement cycle 9 (S21): the
+`_save_identified` `IntegrityError` handler. The blanket "devjulley wins" rule does NOT apply to that
+hunk and must not be applied to it.**
+
+> **§3.2 CARVE-OUT — `_save_identified` `IntegrityError` handler (S21). This is a HYBRID, not a
+> side-pick.**
+>
+> **Why the blanket rule is unsafe here:** devjulley's version accesses `visitor.visitor_id[:8]` and
+> `visitor.site_id` *inside* the `except IntegrityError:` block, i.e. **after
+> `await self.db.rollback()`**. `rollback()` expires every instance in the session **regardless of
+> `expire_on_commit`**, so that attribute access triggers a synchronous lazy refresh and raises
+> `MissingGreenlet` — masking the real integrity conflict behind an unrelated, misleading error.
+> `main`'s version documents exactly this hazard and reads the ids into locals **before** the commit
+> attempt.
+>
+> **Correct resolution (hybrid):** read the ids into locals BEFORE `try: await self.db.commit()`
+> (main's safety), then use devjulley's upsert semantics and devjulley's
+> `save_identified_conflict_upsert` event name INSIDE the handler, referencing those pre-read locals.
+>
+> **Reference resolution — this is the form actually shipped and orchestrator-verified on
+> `devjulley` (`git show devjulley:apps/api/services/identity_resolver.py`, ~L1181-1242):**
+>
+> ```
+> conflict_visitor_id = visitor.visitor_id      # ~L1181  (pre-read, main's fix)
+> conflict_site_id = visitor.site_id            # ~L1182
+> try:
+>     await self.db.commit()                    # ~L1184
+> except IntegrityError:                        # ~L1185
+>     ...                                        # devjulley upsert semantics +
+>     "save_identified_conflict_upsert"          # ~L1212 devjulley event name
+>     visitor_id=conflict_visitor_id[:8]         # ~L1213 uses the PRE-READ local, never visitor.*
+> ```
+>
+> Confirm with `git show devjulley:apps/api/services/identity_resolver.py` around lines 1170-1215. Because this file has 3 large hunks (~130+ changed lines per branch — see diff summary
 below), do NOT attempt a line-level 3-way auto-merge blind; resolve as: **take devjulley's full file
 as the base**, then re-apply main's independent additions on top:
 - Provider-outage vs no-match separation (main-only logic, D4) — must be ported into devjulley's
@@ -496,6 +595,31 @@ as the base**, then re-apply main's independent additions on top:
   `provider_outage` in main's version) against devjulley's file and re-inserting it.
 - Resolution deferral watermark (main-only, D4) — same re-insertion approach.
 - RB2B provider rework (main-only, D4) — same.
+- **`is_privacy_relay_ip()` — the FOURTH main-only addition (ADDED at PLAN supplement cycle 9, S20;
+  this porting checklist previously named only three, which was a plan-text defect).** `main` added a
+  **fail-closed iCloud Private Relay check** (`is_privacy_relay_ip`, matching prefix
+  `2a09:bac3::/32`) at ~main line 528-538, placed **before** the pre-existing
+  `check_ip_privacy` / `is_ip_suspicious` IPinfo check, specifically so that an unset
+  `settings.ipinfo_token` cannot let masked traffic reach paid identity providers. It sets
+  `visitor.identity_status = "vpn_filtered"`.
+
+  **Why this stayed invisible for 8 PVL cycles (recorded inline so it is not re-lost):** the guard
+  sits **outside every real conflict hunk** in this file — the three real hunks are the import block,
+  the vocabulary-write block, and the log-message/id-caching block — so `git` never surfaces it during
+  a rebase; **and no test in the suite exercises the resolver's call site.**
+  `tests/unit/test_identity_quality_gates.py` and `tests/unit/test_company_resolver.py` only test the
+  standalone `company_resolver.is_privacy_relay_ip()` function, and
+  `tests/unit/test_leadpipe_webhook.py` patches it on a different module. Verify all of this with
+  `git grep -n "is_privacy_relay_ip" <ref> -- apps/api/services/identity_resolver.py tests/`.
+
+  **Failure mode if dropped:** a masked Private Relay IP reaches paid RB2B/Leadpipe/Capturify
+  lookups — burning budget and breaking the documented fail-closed guarantee — **with zero test
+  failure.**
+
+  **VERIFIED PRESENT on the executed result (S23 spot-check):**
+  `git grep -c "is_privacy_relay_ip" devjulley -- apps/api/services/identity_resolver.py` → **2 hits
+  (import at L37, call site at L602). The guard survived.** Only this plan's §3.2 text was wrong; the
+  shipped code is correct.
 - devjulley's origin-status-inherits-tier logic for `svid_reconcile`/`fingerprint_match` (mentioned
   in `GRAPH_CANDIDATE_PROVIDERS` docstring) must be preserved verbatim — this is new devjulley logic
   main never had.
@@ -1129,7 +1253,25 @@ re-approve it:
 
 ## Test Infra Improvement Notes
 
-(none identified yet)
+**KNOWN GAP (added PLAN supplement cycle 9, S20) — the `identity_resolver.py` `is_privacy_relay_ip`
+call site has NO covering test.** `tests/unit/test_identity_quality_gates.py` and
+`tests/unit/test_company_resolver.py` only exercise the standalone
+`company_resolver.is_privacy_relay_ip()` function; `tests/unit/test_leadpipe_webhook.py` patches it
+on a *different* module. Nothing asserts that the resolver actually calls the guard, that it fires
+**before** the `check_ip_privacy` / `is_ip_suspicious` IPinfo check, or that it sets
+`visitor.identity_status = "vpn_filtered"`.
+
+This is a **real coverage hole independent of this reconciliation** — it is exactly why the guard was
+invisible to 8 PVL cycles (see §3.2's fourth porting item): the guard could be silently dropped in
+any future merge and **no test would fail**, while masked Private Relay IPs reached paid
+RB2B/Leadpipe/Capturify lookups.
+
+**Resolution: backlog (option D).** Write a follow-up backlog artifact —
+`resolver-privacy-relay-callsite-coverage_NOTE_07-08-26.md` in
+`process/features/visitors-identity/backlog/` — proposing a Fully-Automated unit test that asserts
+(a) the resolver short-circuits on a `2a09:bac3::/32` IP, (b) it sets `identity_status ==
+"vpn_filtered"`, and (c) no paid provider is invoked. Not in this plan's blast radius; recorded so it
+is not lost.
 
 ## Autonomous Goal Block
 
@@ -1180,26 +1322,171 @@ Status: CONDITIONAL
 Date: 07-08-26
 date: 2026-08-07
 generated-by: outer-pvl
-supersedes: 2026-08-07 (outer-pvl) — this is PVL cycle 6, re-validating from V1 after PLAN
-supplement cycle 5 (S12-S15) resolved cycle 4's Finding 7 (branch-tip drift). It supersedes PVL
-cycle 4's Gate: BLOCKED contract.
+supersedes: 2026-08-07 (outer-pvl) — this is PVL cycle 8, re-validating from V1 after PLAN
+supplement cycle 7 (S16-S19) fixed the §3.11 svid-gate wording, the fork-point conflation (§5),
+the migration-facts labelling, and struck the cycle-6 self-acceptance. Cycle 8 independently
+re-verifies cycle 7's fixes AND runs a fresh deep pass across the six under-verified conflict
+files. It supersedes PVL cycle 6's `Gate: CONDITIONAL` contract (cycle 7 itself was a PLAN-
+supplement pass and did not carry its own Gate verdict).
 
-**PVL cycle: 6 of max 10.**
+**PVL cycle: 8 of max 10.**
 
 Parallel strategy: sequential
 Rationale: Signal count re-scored this cycle: 1/7 (single feature area, no phase program, no
 multi-package scope — unchanged since cycle 1). Sequential remains correct regardless of fan-out
 availability. **Fan-out disclosure (explicit, not silently substituted): this validate-agent
 invocation again has NO Agent/Task tool in its toolset (tools available: Read, Bash, Write only) —
-the 5th consecutive cycle without the designed two-layer fan-out (4 Layer-1 dimension agents + N
-Layer-2 per-section agents in parallel). In its place, this cycle performed a single, sequential,
-deep-verification pass, budgeted specifically toward re-executing the ground-truth commands
-(`git`, `alembic`, `git merge-tree`, `git diff`, `grep`) rather than re-trusting the plan's prose
-or PLAN supplement cycle 5's claims, per the task's explicit "do not take on trust" instruction.
-This substitution should be treated as lower-confidence than a true parallel fan-out on breadth
-(fewer independent reviewer perspectives, e.g. on UI/copy/product framing), but every prior cycle
-that ran this same deep-single-pass substitution surfaced a real, previously-undetected finding —
-this cycle is no exception (see Part C below).**
+the 7th consecutive cycle without the designed two-layer fan-out (4 Layer-1 dimension agents + N
+Layer-2 per-section agents in parallel) running INSIDE this agent. Per the task brief, the
+orchestrator is again running 2 external adversarial verifier agents in parallel outside this
+session, scoped to the six under-verified conflict files this cycle names explicitly
+(`identity_classification.py`, `identity_resolver.py`, `test_identity_classification.py`,
+`kpi.py`, `timeseries.py`, `status-badge.tsx`, `test_events_ingest.py`); this contract records only
+THIS agent's own single, sequential, deep-verification pass — it does not fabricate or anticipate
+the external verifiers' findings. This cycle's pass was budgeted toward re-executing ground-truth
+commands (`git show`/`diff`/`merge-tree`/`merge-file`/`ls-tree`/`reflog`/`rev-parse`, `alembic`)
+against explicitly PINNED commit hashes rather than the floating `devjulley`/`main` branch names,
+after this pass itself caught the `devjulley` ref moving mid-session (see Finding 13 below) and had
+to discard and re-run several checks that had silently resolved against the wrong tree. Every one
+of the 7 prior cycles that ran this same deep-single-pass substitution surfaced a real, previously
+undetected finding; this cycle is no exception (Findings 12 and 13 below).**
+
+### PVL Cycle 8 — Independent Verification (NEW findings, this cycle only)
+
+**Method:** every claim below was re-derived live against explicitly PINNED commit hashes
+(`main` = `332b3a8`, `devjulley` = `ae7ffb9e1be44c321152de0713fcfbb3c7b2b9a3` — the hash cycle 5-7
+confirmed and the plan is written against), using `git show <hash>:<path>`, `git diff <hash>
+<hash>`, `git merge-tree --write-tree --merge-base=<db180c44...> main <hash>`, and
+`git merge-file` for literal conflict-marker reconstruction. Repo state note: the working tree is
+mid an in-progress, unauthorized interactive rebase (detached HEAD, `UU
+apps/api/services/identity_resolver.py`) that the orchestrator has already flagged as an incident
+under user inspection — this validate pass did not touch git state and did not read the working
+tree as branch content, per the task's explicit safety constraints.
+
+**Re-verified and CONFIRMED HOLDING (no defect, high confidence):**
+
+- `is_emailable_identity()` on pinned `devjulley` (`ae7ffb9`) has exactly 3 parameters (`provider`,
+  `source_agent_visit_id`, `is_abuse_flagged`) — hard constraint from S6 intact.
+- `identity_classification.py`: `PERSON_LEVEL_PROVIDERS` includes `"contact_import"`;
+  `EMAILABLE_PROVIDERS` is absent from `devjulley`, present on `main` — matches §3.1 exactly.
+- `kpi.py` / `timeseries.py` diffs (main vs pinned devjulley) are 100% vocabulary-only — zero D4
+  content to re-port, confirming §3.3/§3.4's "pure adopt-devjulley" claim.
+- `identity_resolver.py`: `ae7ffb9`'s 43+/14- fp3 delta (fingerprint-match block ~L368-430,
+  `BeamIdentityNode` upsert ~L982-1013, graph-lookup ~L1070-1100+) is confirmed **fully disjoint**
+  from the vocabulary write sites (L888/L940 at the pre-`ae7ffb9` `1c5ae32` snapshot §3.2 actually
+  targets) — read every hunk of the real diff, not just trusted the plan's characterization.
+- `identity_resolver.py` D4 content genuinely absent from pinned `devjulley`: provider-outage
+  handling and the `resolution_deferred_until`/`resolution_defer_count` watermark columns (migration
+  `c2f7a9d31b64`) exist only on `main` relative to pinned `ae7ffb9` — §3.2's "must be ported" claim
+  holds. (This required a self-correction — see Finding 13 below; an initial pass against the
+  floating `devjulley` branch NAME wrongly suggested this content was already shared, because the
+  ref had moved mid-session to a post-rebase-merge tree that naturally includes main's history.)
+- `status-badge.tsx`: `vpn_filtered` and `merged` confirmed absent from pinned `devjulley`'s tone
+  map but confirmed LIVE-ASSIGNED (`identity_resolver.py:559,859`, `promotion_sweep_runner.py`,
+  `routers/visitors.py:192`) — §3.8's "must re-add both keys" claim holds.
+- `apps/api/routers/dashboard.py` / `visitors_helpers.py` (§3.5/§3.6, Findings 8/9's sibling,
+  E-9): reconstructed the ACTUAL git 3-way auto-merge output tree (not just the conflict list) and
+  confirmed E-9's precise claim — the clean auto-merge silently produces **main's verbatim old
+  vocabulary** (`from apps.api.services.identity_classification import VERIFIED_STATUSES` still
+  present, `.filter(Visitor.identity_status.in_(VERIFIED_STATUSES))` still present) for both files.
+  E-9 is not just correctly diagnosed, it is now proven byte-for-byte accurate.
+- `tests/integration/test_events_ingest.py` (§3.9): reconstructed the literal 3-way merge conflict
+  markers via `git merge-file`. Confirmed the conflict is exactly as trivial as §3.9 describes —
+  `main`'s side of the conflicted hunk is EMPTY (main added nothing beyond `TestCookieFpPhase2`,
+  which is present byte-identically on both branches from a shared ancestor insertion point) and
+  `devjulley`'s side has the full 93-line `TestUnknownSiteObservability` addition. "Concatenate,
+  keep both" (§3.9) reduces to "accept devjulley's side wholesale" — verified via literal conflict
+  reconstruction, not inferred from the diff summary.
+- Full merge-tree conflict sweep, redone independently against the pinned hash: exactly 8
+  CONFLICT files (`events.py`, `identity_classification.py`, `identity_resolver.py`, `kpi.py`,
+  `timeseries.py`, `status-badge.tsx`, `test_events_ingest.py`, `test_identity_classification.py`).
+  `tracker.js` auto-merges with zero conflict markers (§3.10 confirmed). 8-for-8 match the plan's
+  §3 spec list — reproduces cycle 6's V1 verifier claim with a third independent method.
+- §5 migration re-chain: `a7d419e6c052` confirmed NOT a git object (`git cat-file -t` fails);
+  `git merge-base main devjulley` = `db180c44...`, distinct from the Alembic revision id — S17's
+  correction holds. `b1c9e7f24d83.down_revision` on pinned `devjulley` = `a7d419e6c052`; `main`'s
+  true head (nothing references it as a `down_revision`) = `c2f7a9d31b64`. One edit
+  (`b1c9e7f24d83.down_revision` → `c2f7a9d31b64`) yields a single valid 60-revision chain — S18
+  holds.
+- §3.11 events.py gate: confirmed §3.11 step 5 now reads `if fp_value or fp3_value or svid:` in
+  the plan body (S16's fix applied and intact) — no stale wording survives elsewhere.
+- Confirm-gate wrapper call sites: exactly the 3 claimed production wrapper targets
+  (`campaign_sender.py`, `routers/campaigns.py`, `csv_exporter.py`) plus the 2 claimed exclusions
+  (`hot_alert.py`, `outcome_digest.py`) call `is_emailable_identity()` on pinned `devjulley` — S7/S8
+  holds.
+- `Accepted by: PENDING` marker intact; no self-acceptance language present (S19 holds).
+
+**NEW Finding 12 (CONCERN) — plan cites a test function name that does not exist, in 4 places.**
+
+`test_candidates_are_emailable_not_blocked_by_tier` is cited at §3.1 (line ~455), §3.7 (line ~546),
+§6's historical rejection narrative (line ~908), and the Validate Contract's own Test Gates table
+(line ~966) as a pre-existing `devjulley` regression test proving the D10 wrapper redesign left
+`is_emailable_identity()` untouched. **This function does not exist anywhere in the codebase**,
+confirmed via `git show ae7ffb9:tests/unit/test_identity_classification.py | grep -n
+"candidates_are_emailable_not_blocked_by_tier"` (zero matches) and a full listing of the file's
+test names. The real, similarly-purposed test in that exact file is
+`test_candidates_remain_emailable` (line 115) — same docstring intent ("test exists to catch a
+future change that 'helpfully' folds the candidate tier into `is_emailable_identity`"), different
+name. A second, genuinely different test with an almost-identical name,
+`test_graph_candidates_are_emailable_not_blocked_by_tier`, exists in a DIFFERENT file
+(`tests/unit/test_outbound_identity_gate.py`, line 36). The plan's cited name appears to be a
+conflation of these two real tests into a name that matches neither.
+
+Impact: does not break the actual Fully-Automated gate (`pytest
+tests/unit/test_identity_classification.py -v` runs the whole file regardless of individual test
+names, and `test_candidates_remain_emailable` genuinely exists and genuinely proves the intended
+regression). The risk is narrower but real: any execute-agent or reviewer trying to confirm "the
+cited pre-existing test passed unmodified" by searching pytest output for the literal cited string
+will find nothing, and could wrongly conclude the D10 safety-net test is missing or was deleted —
+wasted investigation at best, an unnecessary duplicate-test "fix" at worst.
+
+**Recorded as Execute-Agent Instruction E-10 below.**
+
+**NEW Finding 13 (OBSERVATION, not counted as CONCERN) — `devjulley` branch ref moved again,
+mid-validate-session, traced to the already-flagged unauthorized rebase.**
+
+`git rev-parse devjulley` returned `ae7ffb9e1be44c321152de0713fcfbb3c7b2b9a3` early in this
+session and `3528c00de20252ecda5ad9e82efa66315de6b57f` later in the SAME session. `git reflog show
+devjulley` confirms the mechanism: `devjulley@{0}: branch: Reset to HEAD` — the branch pointer was
+explicitly reset to track the in-progress rebase's current position. This is structurally
+different from cycle 4's Finding 7 (a genuine new commit landing organically): `3528c00` carries
+the SAME commit message as `ae7ffb9` ("feat(identity): fingerprint v3...") but its tree differs by
+132 files / +281,130/-387 lines from `ae7ffb9`'s tree, because it now sits on top of `main`
+(`332b3a8`) per the in-progress, unauthorized rebase, rather than on `devjulley`'s own pre-rebase
+base.
+
+This is not treated as a plan-content defect — no plan text needs to change, because S12's
+derivation-based design (every fact paired with the live command that reproduces it) already
+assumes the branch is not frozen. It is recorded because: (1) it is fresh, concrete, this-session
+evidence that EXECUTE absolutely cannot begin while the rebase is unresolved, independently
+corroborating cycle 7's `Accepted by: PENDING` / "EXECUTE is NOT yet unblocked" status rather than
+introducing a new reason; (2) it is a **methodology correction for this validate pass itself** —
+several of this cycle's initial checks (the D4-content-in-`identity_resolver.py` check, in
+particular) were first run against the floating `devjulley:` ref NAME rather than the pinned hash,
+and produced a WRONG intermediate result (D4 content appeared already-shared, when it is genuinely
+main-only relative to the plan's actual target `ae7ffb9`) until this was caught and every affected
+check was re-run against the pinned hash. All findings and confirmations in this contract are from
+the pinned-hash re-run, not the contaminated intermediate pass. Any future validate or execute
+pass against this repo, while any rebase might be in flight, MUST pin explicit commit hashes and
+must not trust `main`/`devjulley` as stable ref names.
+
+**Late-session addendum (same Finding 13, observed in the final minutes of this cycle):**
+`devjulley` moved a **third** time within this single validate session — `git rev-parse devjulley`
+now returns `5293cbc2de233a8431412ad1a4501a2a1eccfebb`, distinct from both the original pinned
+`ae7ffb9` and the mid-session `3528c00...` this finding first documented. `git status` no longer
+reports an in-progress rebase — the working tree is now a clean checkout of `devjulley` with a
+large, unrelated set of modifications (agent `.md` files, `apps/api/config.py`,
+`apps/api/main.py`, a new `job_change_event` model/migration/test, two `evallayer` plan files
+moved from `active/` to `completed/`) that were not present at session start and are outside this
+plan's blast radius. `main` is unchanged (`332b3a8`, matches every pinned value used throughout
+this contract). This is read as the rebase having been resolved or aborted by the user during this
+session, consistent with the task brief's statement that the user is personally inspecting and
+resolving it — not as a new incident. It does not change any content-level finding above (all were
+verified against immutable, explicitly pinned commit hashes, which remain true regardless of what
+`devjulley` points to now); it is one more concrete data point that the branch is genuinely live
+and the mandatory step-0 pre-flight in the Next Instruction section is not optional.
+
+---
 
 ### Independent Verification Performed (PVL cycle 6 — re-derived from live git/alembic state,
 cross-checked against source on both branches; nothing below is re-quoted from cycle 5's
@@ -1427,7 +1714,25 @@ independently re-verified again this cycle; kept for the audit trail, not re-lit
   introduced (§3.10 tracker.js, §3.11 events.py) both correctly specified (with Finding 8's precise
   correction to one line of §3.11).
 
-### Layer 1 dimensions
+### PVL Cycle 8 additions to "Findings Carried Forward as RESOLVED"
+
+- **Finding 8 (was CONCERN, cycle 6)** — §3.11 step 5's literal gating condition dropped `or svid`.
+  **RESOLVED** by PLAN supplement cycle 7 (S16); re-confirmed this cycle: plan body now reads
+  `if fp_value or fp3_value or svid:` verbatim, no stale wording survives elsewhere in the file.
+- **Finding 9 (was CONCERN, cycle 6)** — `dashboard.py`/`visitors_helpers.py` auto-merge cleanly
+  but silently retain main's retired vocabulary. **Not a plan-text defect** (E-9 already correctly
+  diagnosed and worded this at cycle 6) — this cycle independently reconstructed the actual git
+  auto-merge output tree and confirmed E-9's claim is byte-for-byte accurate. Status: E-9 stands
+  as-is, re-confirmed sufficient, no further plan change needed.
+- **Finding 10 (was CONCERN, cycle 6)** — §5 conflated the Alembic revision id `a7d419e6c052` with
+  the git merge-base. **RESOLVED** by PLAN supplement cycle 7 (S17); re-confirmed this cycle via
+  `git cat-file -t a7d419e6c052` (fails — not a git object) and `git merge-base main devjulley`
+  (`db180c44...`, the correct value).
+- **Finding 11 (was an out-of-scope observation, cycle 6)** — `process/context/all-context.md`
+  records a stale Alembic head. Confirmed still true and still correctly out-of-scope for this
+  plan (belongs to UPDATE PROCESS); this plan's own `<PROD_HEAD>` derivation design remains immune.
+
+### Layer 1 dimensions (cycle 6 snapshot — kept as audit trail; see "PVL Cycle 8 additions" above for Findings 8/9's resolution and the cycle 8 totals immediately below this table for the CURRENT authoritative verdict)
 
 | Layer 1 dimensions | Status |
 |---|---|
@@ -1456,8 +1761,14 @@ independently re-verified again this cycle; kept for the audit trail, not re-lit
 | Implementation Checklist / Touchpoints / Blast Radius | PASS (upgraded from cycle 4's FAIL) — re-derived live state matches exactly what is recorded; zero drift found this cycle |
 | §10 open items | 6 of 7 prior items RESOLVED and re-confirmed stable; item 7 (structural "not frozen" caveat) remains a standing, non-closeable design feature, not a defect |
 
-**Totals: 0 FAILs / 3 CONCERNs (Test coverage, §3.5/§3.6 dashboard.py+visitors_helpers.py, §3.11
-events.py) / 11 PASSes**
+**Cycle 6 historical totals (superseded): 0 FAILs / 3 CONCERNs (Test coverage,
+§3.5/§3.6 dashboard.py+visitors_helpers.py, §3.11 events.py) / 11 PASSes**
+
+**PVL Cycle 8 current totals: 0 FAILs / 1 CONCERN (Finding 12 — non-existent test name cited 4×)
+/ 1 OBSERVATION not counted (Finding 13 — branch ref instability, environmental, no plan-text
+change required) / 14 PASSes (11 carried forward + §3.11 events.py, §3.5/§3.6 dashboard.py+
+visitors_helpers.py, and §5 migration re-chain upgraded from CONCERN to PASS via cycle 7's fixes,
+independently re-confirmed this cycle).**
 
 **→ Net Gate: CONDITIONAL**
 
@@ -1483,6 +1794,8 @@ step 12/§3.11 and step 3/§3.5-§3.6 respectively)
 |---|---|---|
 | E-8 | When implementing §3.11's combined `events.py` resolution, gate the merged fingerprint/svid block on **`if fp_value or fp3_value or svid:`** — NOT `if fp_value or fp3_value:` as §3.11 step 5 literally states. Main's actual condition (confirmed via `git show main:apps/api/routers/events.py`) is `if fp_value or svid:`; the merged design must preserve the `or svid` clause so that an event batch carrying only the durable `_rta_svid` server-cookie value (no fp2/fp3 present) still creates/upserts the `Visitor` stub row via the `pg_insert(...).on_conflict_do_update(...)` path — this is the exact race main's redesign exists to fix, for `svid` as much as for `fingerprint`. | Implementation Checklist step 12, §3.11 conflict resolution |
 | E-9 | `apps/api/routers/dashboard.py` (§3.5) and `apps/api/routers/visitors_helpers.py` (§3.6) will NOT stop a `git rebase` with a conflict marker — both auto-merge cleanly, and the clean auto-merge result still imports and uses `VERIFIED_STATUSES` from `identity_classification.py` (verbatim from `main`), which §3.1 deletes. Do not treat "git reported no conflict" as "no manual work needed" for these two files — apply §3.5/§3.6's "devjulley's structure wins" rewrite explicitly, as Implementation Checklist step 3 already lists them, regardless of what git's rebase machinery reports. If this step is accidentally skipped, the failure surfaces immediately and loudly as an `ImportError` at the App boot smoke gate or the first pytest collection — if that specific error appears, this is the cause. | Implementation Checklist step 3, §3.5/§3.6 conflict resolution |
+| E-11 | **§3.1 `apps/api/services/identity_classification.py` carries the SAME auto-merge trap E-9 warns about for `dashboard.py`/`visitors_helpers.py`, and until PLAN supplement cycle 9 (S22) carried no warning — despite §3.1 being the highest-priority file in this plan.** The file's real conflict markers span ONLY the `identity_status_for_provider` vs `is_graph_candidate_provider`/`is_verified_identity` swap. `EMAILABLE_PROVIDERS`, the `STATUS_VERIFIED`/`STATUS_PROVIDER_CANDIDATE`/`STATUS_IDENTIFIED_LEGACY`/`VERIFIED_STATUSES` family, and **`is_emailable_identity()`'s own body** all sit **outside any conflict marker** and will **auto-merge silently to `main`'s content** (the merge base already had `identity_level(...) == "person"`; `main` changed it and `devjulley` did not, so a 3-way merge keeps `main`'s side). Do NOT treat "git reported no conflict for these symbols" as "§3.1 is done" — apply §3.1's deletions and devjulley-body retention **explicitly**, exactly as §3.1's prose specifies. §3.1's prose is symbol-correct and produces the right file if followed literally; the hazard is skipping it because git stayed quiet. **Partial mitigation (do not rely on it alone):** devjulley's own `test_abuse_flag_default_false_preserves_existing_behavior` asserts `is_emailable_identity("rb2b") is True`, which fails loudly if `main`'s body is kept. | Implementation Checklist step 3, §3.1 conflict resolution |
+| E-10 | Wherever the plan text (§3.1, §3.7, §6) or this contract cites `test_candidates_are_emailable_not_blocked_by_tier` as a pre-existing regression test, treat it as a plan-text typo for **`test_candidates_remain_emailable`** (the real test, in `tests/unit/test_identity_classification.py`, docstring: "test exists to catch a future change that 'helpfully' folds the candidate tier into `is_emailable_identity`"). Do NOT create a new test under the cited-but-nonexistent name, and do NOT rename the real test to match the plan's wrong citation — the existing Fully-Automated gate (`pytest tests/unit/test_identity_classification.py -v`) already runs and already proves this test unmodified; only the plan's prose citation is wrong. A distinct, similarly-named test, `test_graph_candidates_are_emailable_not_blocked_by_tier`, exists in a DIFFERENT file (`tests/unit/test_outbound_identity_gate.py`) — do not conflate the two. | §3.1/§3.7 citation review, before or during Implementation Checklist step 4's spot-check |
 
 ### Test gates (C3 5-column table)
 
@@ -1548,11 +1861,32 @@ Legacy line form (retained for existing consumers):
 
 ### Open gaps
 
-- **Finding 8 (CONCERN) — §3.11 step 5's literal gating condition is wrong; corrected via
-  Execute-Agent Instruction E-8 above.** No plan supplement required; execute-agent should apply
-  the corrected condition directly.
-- **Finding 9 (CONCERN) — `dashboard.py`/`visitors_helpers.py` will not surface as git conflicts;
-  corrected via Execute-Agent Instruction E-9 above.** No plan supplement required.
+- **Test-coverage known-gap (S20, PLAN supplement cycle 9):** the `identity_resolver.py`
+  `is_privacy_relay_ip` call site has no covering test — see `## Test Infra Improvement Notes` above
+  for the full statement and the backlog pointer. Classified **Known-Gap / backlog**, not a blocker
+  for this already-executed reconciliation (the guard is verified present on `devjulley`, 2 hits).
+- ~~Finding 8 (CONCERN, cycle 6) — §3.11 step 5's literal gating condition was wrong.~~
+  **RESOLVED by PLAN supplement cycle 7 (S16), independently re-confirmed cycle 8.** E-8 remains
+  in place as belt-and-braces.
+- ~~Finding 9 (CONCERN, cycle 6) — `dashboard.py`/`visitors_helpers.py` will not surface as git
+  conflicts.~~ **Not a plan-text defect; E-9's diagnosis independently proven byte-for-byte
+  accurate at cycle 8** via literal reconstruction of git's auto-merge output tree. E-9 remains
+  the operative instruction.
+- **Finding 12 (CONCERN, NEW cycle 8) — plan cites a non-existent test function name
+  (`test_candidates_are_emailable_not_blocked_by_tier`) in 4 places; corrected via Execute-Agent
+  Instruction E-10 above.** No plan supplement strictly required (the underlying automated gate
+  already passes under the test's real name, `test_candidates_remain_emailable`) — E-10 prevents
+  an execute-agent or reviewer from being misled by the wrong citation. Low severity, but genuine.
+- **Finding 13 (OBSERVATION, NEW cycle 8, not counted toward CONDITIONAL) — `devjulley` branch ref
+  moved again mid-session** (`ae7ffb9` → `3528c00...`, confirmed via `git reflog show devjulley`:
+  `Reset to HEAD`, traced to the already-flagged unauthorized in-progress rebase). No plan-text
+  change required — S12's derivation-based design and the Next Instruction section's mandatory
+  step-0 pre-flight (below) already exist specifically to catch this. Recorded because it is
+  fresh, this-session evidence that EXECUTE cannot begin while the rebase is unresolved, and
+  because it forced a mid-cycle methodology correction (see the PVL Cycle 8 findings section
+  above) — a caution for any future agent working in this repo while a rebase might be live: pin
+  explicit commit hashes, never trust `main`/`devjulley` as stable ref names until confirmed
+  otherwise.
 - Migration live round-trip on disposable Postgres — known-gap: documented (Docker unavailable at
   all 5 VALIDATE cycles to date for this plan), matches program precedent (owned-data-layer,
   ingest-abuse-hardening, cadence-bot-flag all share this acknowledged gap class in
@@ -1583,8 +1917,21 @@ Legacy line form (retained for existing consumers):
   it uses a derivation-based `<PROD_HEAD>` placeholder (S12) and explicitly forbids
   literal-substituting `e6b2d4a1c837`.
 
-Accepted by: **PENDING** — CONDITIONAL gaps not yet accepted by the user; supplement cycle 7 in
-progress.
+Accepted by: **USER — accepted this session (PLAN supplement cycle 9, 07-08-26).** The acceptance
+was made on the basis of the orchestrator's reported spot-verification of the executed result — not
+a personal review of the diff or code by the user; the user's verbatim instruction was *"giữ kết
+quả, sửa §3.2, xác nhận nốt MissingGreenlet"* ("keep the result, fix §3.2, confirm the
+MissingGreenlet item"). This acceptance of the CONDITIONAL gate is therefore **retroactive to an
+already-completed EXECUTE** (see the EXECUTED AND ACCEPTED status
+block at the top of this plan for the full governance record). PVL cycle 8 had lowered the open
+CONCERN count from 2 (cycle 6: Findings 8, 9) to 1 (cycle 8: Finding 12), with Findings 8/9 RESOLVED
+and Finding 13 recorded as a non-counted environmental observation.
+
+> ~~SUPERSEDED (PLAN supplement cycle 9, S23) — this line previously read *"Accepted by: **PENDING**
+> — CONDITIONAL gaps not yet accepted by the user … Still requires explicit user acceptance (or a
+> further supplement cycle) before EXECUTE."*~~ Struck: the user has now explicitly accepted. The
+> cycle-7 (S19) correction that an **agent cannot accept its own CONDITIONAL verdict** stands
+> unchanged — this acceptance is the user's, not an agent's.
 
 > ~~SUPERSEDED (PLAN supplement cycle 7, S19) — this line previously read
 > *"Accepted by: session (validate-agent, PVL cycle 6)"*.~~ Struck: **an agent cannot accept its own
@@ -1592,52 +1939,64 @@ progress.
 > are untouched and stand — Findings 8 and 9, and Execute-Agent Instructions E-8 and E-9, are sound
 > and were independently corroborated by two external adversarial verifiers.
 
-Proposed acceptance rationale (for the user to accept or reject, not self-granted): both CONCERNs
-(Findings 8, 9) are addressable via the embedded Execute-Agent Instructions E-8/E-9 above, which are
-precise, scoped, and implementable without reopening any Locked Decision or returning to PLAN. The
-Test coverage CONCERN (Layer 1) is the same two findings, not double-counted. Known-gaps (migration
-live round-trip, live prod pre-check, fan-out unavailability) match established program precedent
-and every prior cycle's treatment of the same environmental constraints.
+Proposed acceptance rationale (for the user to accept or reject, not self-granted): the sole
+remaining CONCERN (Finding 12) is addressable via the embedded Execute-Agent Instruction E-10
+above, precise, scoped, and implementable without reopening any Locked Decision or returning to
+PLAN — it is a plan-prose citation fix, not a code-behavior fix. Findings 8 and 9 (cycle 6) are now
+RESOLVED, independently re-confirmed this cycle. Finding 13 (branch-ref instability) is an
+environmental observation, not counted toward the CONDITIONAL gate, and does not require plan
+acceptance — it requires the rebase to be resolved before EXECUTE, which the existing Next
+Instruction section below already gates on via the mandatory step-0 pre-flight. Known-gaps
+(migration live round-trip, live prod pre-check, fan-out unavailability) match established program
+precedent and every prior cycle's treatment of the same environmental constraints.
 
 Gate: CONDITIONAL
 
 ## Next Instruction
 
-**EXECUTE is NOT yet unblocked.** The gate is CONDITIONAL and its gaps are **not yet accepted by the
-user** (see the `Accepted by: PENDING` marker above — supplement cycle 7 corrected an invalid
-validate-agent self-acceptance). EXECUTE becomes appropriate once the PVL loop returns `Gate: PASS`,
-**or** once the user explicitly accepts the CONDITIONAL gaps. When it does, it remains subject to the
-2 embedded Execute-Agent Instructions above (E-8, E-9) being followed exactly as written during the
-relevant Implementation Checklist steps. This is the first cycle in this plan's validate history to reach CONDITIONAL
-rather than BLOCKED — cycle 2's Findings 4/5 (in-helper design) and cycle 4's Finding 7 (branch-tip
-drift) are both independently re-confirmed RESOLVED this cycle, with zero new drift found in
-`devjulley`'s branch tip.
+**EXECUTE is NOT yet unblocked — this is now doubly confirmed.** The gate is CONDITIONAL and its
+gaps are **not yet accepted by the user** (see the `Accepted by: PENDING` marker above). EXECUTE
+becomes appropriate once the PVL loop returns `Gate: PASS`, **or** once the user explicitly accepts
+the CONDITIONAL gap (Finding 12). When it does, it remains subject to the 3 embedded Execute-Agent
+Instructions above (E-8, E-9, E-10, E-11) being followed exactly as written during the relevant
+Implementation Checklist steps. **Independent of the CONDITIONAL gate itself: PVL cycle 8 directly
+observed the `devjulley` branch ref move mid-session** (see Finding 13), traced to the
+already-flagged unauthorized in-progress rebase — this is live, this-session proof that step 1
+below is not a theoretical precaution, it is currently load-bearing. EXECUTE must not begin while
+that rebase remains unresolved, regardless of the CONDITIONAL gate's disposition.
 
 **Before EXECUTE begins, in this exact order:**
 
-1. Run the Implementation Checklist's **mandatory step-0 pre-flight** (`git rev-parse main`,
+1. Confirm the in-progress rebase (detached HEAD, `UU apps/api/services/identity_resolver.py` as
+   of PVL cycle 7/8) has been resolved or aborted by the user — EXECUTE must not run against a
+   mid-rebase working tree under any circumstances.
+2. Run the Implementation Checklist's **mandatory step-0 pre-flight** (`git rev-parse main`,
    `git rev-parse devjulley`, `git log main..devjulley --oneline`,
    `git diff --name-only main...devjulley -- apps/api/migrations/versions/`) as the FIRST action —
    do not reuse this VALIDATE session's confirmed values (`main`=`332b3a8`, `devjulley`=`ae7ffb9`)
-   as frozen facts. The branch is explicitly not frozen (U2) and time may have passed since this
-   contract was written.
-2. If the pre-flight output differs from what is recorded in this plan: STOP, do not proceed on a
+   as frozen facts. The branch is explicitly not frozen (U2), and PVL cycle 8 itself directly
+   observed it move mid-session (Finding 13) — treat that as confirmation this step is necessary,
+   not boilerplate.
+4. If the pre-flight output differs from what is recorded in this plan: STOP, do not proceed on a
    stale assumption, return to PLAN for a fresh supplement cycle (same process PLAN supplement
    cycle 5 already ran once for `ae7ffb9`).
-3. If the pre-flight output matches: proceed through the Implementation Checklist in the corrected
+5. If the pre-flight output matches: proceed through the Implementation Checklist in the corrected
    order it specifies, applying **Execute-Agent Instruction E-8** at step 12/§3.11 (the merged
    `events.py` gating condition must be `if fp_value or fp3_value or svid:`, not the plan prose's
-   literal `if fp_value or fp3_value:`) and **Execute-Agent Instruction E-9** at step 3/§3.5-§3.6
+   literal `if fp_value or fp3_value:`), **Execute-Agent Instruction E-9** at step 3/§3.5-§3.6
    (apply the manual `VERIFIED_STATUSES` → `identity_status ==` rewrite to `dashboard.py` and
    `visitors_helpers.py` explicitly — git will not flag either file as a rebase conflict, so do not
-   rely on git's conflict-stop behavior to know this work is needed).
-4. The live prod pre-check (`railway run ...`, §5 step 0) is a human-in-the-loop gate that must be
+   rely on git's conflict-stop behavior to know this work is needed), and **Execute-Agent
+   Instruction E-10** wherever the plan cites `test_candidates_are_emailable_not_blocked_by_tier`
+   (treat as a citation typo for the real test `test_candidates_remain_emailable`; do not create a
+   duplicate test or rename the real one).
+6. The live prod pre-check (`railway run ...`, §5 step 0) is a human-in-the-loop gate that must be
    run by the user, not simulated or skipped, both before EXECUTE begins (baseline) and immediately
    before the final push (§5 step 0, second run / Implementation Checklist step 15).
-5. The migration live round-trip on a disposable Postgres remains a documented known-gap if Docker
+7. The migration live round-trip on a disposable Postgres remains a documented known-gap if Docker
    is unavailable in the EXECUTE environment (confirmed unavailable in every VALIDATE session to
    date) — do not block on it, matches program precedent.
-6. Never `git push --force` on `devjulley` — only `--force-with-lease`. Never delete or move
+8. Never `git push --force` on `devjulley` — only `--force-with-lease`. Never delete or move
    `backup/main-06-08-26` or `backup/devjulley-pre-rebase-06-08-26`. Any push to `main` requires
    explicit human sign-off (production DDL + deploy event via Railway's auto-apply-on-boot).
 

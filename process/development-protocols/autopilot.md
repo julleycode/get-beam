@@ -126,7 +126,7 @@ The provisional goal block is a copy-pasteable contract emitted to chat immediat
 SESSION GOAL: [concise task description]
 ENTRY PHASE: [phase name and which phases are already complete in parens]
 REMAINING PHASES:
-  [ ] [phase name] — [strategy e.g. "agent team (3 sonnet planners)"]
+  [ ] [phase name] — [strategy e.g. "agent team (3 opus planners)"]
   [ ] ...
 CLARIFICATIONS LOCKED:
   1. [locked decision 1]
