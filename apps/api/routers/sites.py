@@ -1,15 +1,18 @@
 import re
 import uuid
+from datetime import datetime, timedelta, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.models.database import get_db
 from apps.api.models.site import Site
+from apps.api.models.site_tombstone import SiteTombstone
 from apps.api.models.user import User
 from apps.api.dependencies import get_current_user, verify_site_access
 from apps.api.schemas.sites import (
@@ -117,17 +120,73 @@ async def create_site(
                 },
             )
 
+    # site_id reuse: if THIS user previously deleted a site for THIS normalized
+    # url within the reclaim window, re-issue that same site_id so the tracking
+    # snippet still installed on their page resumes working with no edit.
+    #
+    # SECURITY: the owner filter is a SQL WHERE predicate, never a post-fetch
+    # Python check — a missing user_id predicate would let one user's re-create
+    # silently adopt another user's old id. Mirrors verify_site_access.
+    #
+    # `variants` (built in the dedup block above and always defined by the time
+    # we get here) carries the www/trailing-slash normalization, so the
+    # tombstone match uses exactly the same url shapes dedup does.
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        days=settings.site_id_reclaim_window_days
+    )
+    tombstone_result = await db.execute(
+        select(SiteTombstone)
+        .where(
+            SiteTombstone.user_id == user.id,
+            SiteTombstone.normalized_url.in_(variants),
+            SiteTombstone.deleted_at >= cutoff,
+        )
+        .order_by(SiteTombstone.deleted_at.desc())
+        .limit(1)
+    )
+    tombstone = tombstone_result.scalars().first()
+
     site = Site(
-        site_id=_generate_site_id(),
+        site_id=tombstone.site_id if tombstone else _generate_site_id(),
         user_id=user.id,
         name=body.name,
         url=normalized_url,
         description=body.description,
         category=body.category,
     )
-    db.add(site)
-    await db.commit()
+    reused_tombstone = tombstone is not None
+    try:
+        # Savepoint so a unique violation on sites.site_id (concurrent re-create
+        # racing for the same reused id) is recoverable instead of poisoning the
+        # session.
+        async with db.begin_nested():
+            db.add(site)
+            if tombstone is not None:
+                # Consume the tombstone in the same transaction — an id is
+                # reclaimed at most once.
+                await db.delete(tombstone)
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        logger.info("site_id_reuse_collision", attempted_site_id=site.site_id)
+        # Retry exactly ONCE with a fresh random id and no tombstone
+        # consumption. A second failure propagates (500) — never loop.
+        reused_tombstone = False
+        site = Site(
+            site_id=_generate_site_id(),
+            user_id=user.id,
+            name=body.name,
+            url=normalized_url,
+            description=body.description,
+            category=body.category,
+        )
+        db.add(site)
+        await db.commit()
+
     await db.refresh(site)
+    logger.info(
+        "site_created", site_id=site.site_id, reused_tombstone=reused_tombstone
+    )
     return SiteOut.model_validate(site)
 
 
@@ -227,6 +286,20 @@ async def delete_site(
         )
         deleted["beam_identity_graph"] = r.rowcount
 
+        # Tombstone the site's identity so a later re-create for the same
+        # normalized url by the same owner can reuse this site_id and keep the
+        # already-installed pixel working. Rides the SAME transaction as the
+        # cascade below: if any part of the delete fails and rolls back, the
+        # tombstone rolls back too, so a tombstone can never exist for a site
+        # that still exists. Id/url/owner/timestamp only — no site data.
+        db.add(
+            SiteTombstone(
+                site_id=site.site_id,
+                normalized_url=site.url,
+                user_id=site.user_id,
+            )
+        )
+
         # The site row last (blog_posts.site_id FK -> SET NULL fires here).
         await db.delete(site)
 
@@ -236,7 +309,7 @@ async def delete_site(
         logger.error("site_delete_failed", site_id=site_id, error=str(exc))
         raise HTTPException(status_code=500, detail="Failed to delete site")
 
-    logger.info("site_deleted", site_id=site_id, deleted=deleted)
+    logger.info("site_deleted", site_id=site_id, deleted=deleted, tombstoned=True)
     return Response(status_code=204)
 
 
@@ -376,6 +449,7 @@ async def verify_pixel_endpoint(
         status=verify_result["status"],
         verified=verify_result["verified"],
         message=verify_result["message"],
+        found_site_id=verify_result.get("found_site_id"),
     )
 
 

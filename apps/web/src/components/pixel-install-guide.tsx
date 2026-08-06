@@ -56,6 +56,7 @@ export function PixelInstallGuide({
   const [verifyResult, setVerifyResult] = useState<{
     status: string;
     message: string;
+    found_site_id?: string | null;
   } | null>(null);
   const [shopifyShop, setShopifyShop] = useState("");
   const [connectingShopify, setConnectingShopify] = useState(false);
@@ -118,7 +119,11 @@ export function PixelInstallGuide({
     setVerifyResult(null);
     try {
       const result = await api.verifyPixel(siteId);
-      setVerifyResult({ status: result.status, message: result.message });
+      setVerifyResult({
+        status: result.status,
+        message: result.message,
+        found_site_id: result.found_site_id,
+      });
       if (result.verified) {
         setTimeout(onVerified, 1500);
       }
@@ -326,6 +331,15 @@ export function PixelInstallGuide({
             }`}
           >
             {verifyResult.message}
+          </p>
+        )}
+
+        {/* Display only — the found id is a bare string echoed back from the
+            page's own HTML. No lookup, no fetch, no owner resolution. */}
+        {verifyResult?.status === "wrong_site" && verifyResult.found_site_id && (
+          <p className="text-xs mt-1 text-center text-muted-foreground">
+            Installed ID on your page:{" "}
+            <span className="font-mono">{verifyResult.found_site_id}</span>
           </p>
         )}
       </div>

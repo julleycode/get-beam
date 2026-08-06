@@ -89,6 +89,11 @@ class PixelVerifyResponse(BaseModel):
     status: str
     verified: bool
     message: str
+    # The foreign Beam site id found installed on the page — populated only when
+    # status == "wrong_site", None otherwise. Additive + optional: existing
+    # clients that ignore it are unaffected. A bare string already public in the
+    # page's HTML; never resolved to an owner (see pixel_verifier).
+    found_site_id: str | None = None
 
 
 class ShopifyConnectRequest(BaseModel):

@@ -96,10 +96,22 @@ def _fake_db(existing: Site | None = None, count: int = 0) -> Mock:
             if getattr(obj, attr, None) is None:
                 setattr(obj, attr, default)
 
+    class _Savepoint:
+        """create_site wraps the insert in db.begin_nested() so a site_id reuse
+        collision is recoverable. A no-op async CM is enough for these tests."""
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
     db.execute = _execute
     db.add = Mock()
     db.commit = AsyncMock()
     db.refresh = _refresh
+    db.delete = AsyncMock()
+    db.begin_nested = Mock(return_value=_Savepoint())
     return db
 
 

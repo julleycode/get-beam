@@ -31,6 +31,11 @@ class VerifyResult(TypedDict):
     status: str  # verified | wrong_site | not_found | fetch_error
     verified: bool
     message: str
+    # The FOREIGN Beam site id found in the fetched HTML, populated ONLY on the
+    # `wrong_site` branch; None for every other status. See the security note in
+    # _verify_pixel_static: it is a bare string already public in that domain's
+    # HTML and is never resolved to an owner.
+    found_site_id: str | None
 
 
 async def verify_pixel(
@@ -93,6 +98,7 @@ async def _verify_via_events(
         status="verified",
         verified=True,
         message="Pixel verified via live traffic — your site is sending events.",
+        found_site_id=None,
     )
 
 
@@ -109,6 +115,7 @@ async def _verify_pixel_static(url: str, site_id: str) -> VerifyResult:
             status="fetch_error",
             verified=False,
             message="Could not reach your website. Please check the URL is correct.",
+            found_site_id=None,
         )
 
     try:
@@ -126,6 +133,7 @@ async def _verify_pixel_static(url: str, site_id: str) -> VerifyResult:
             status="fetch_error",
             verified=False,
             message="Could not reach your website (timeout). Please check the URL and try again.",
+            found_site_id=None,
         )
     except Exception as e:
         logger.warning("pixel_verify_fetch_failed", url=url, error=str(e))
@@ -133,6 +141,7 @@ async def _verify_pixel_static(url: str, site_id: str) -> VerifyResult:
             status="fetch_error",
             verified=False,
             message=f"Could not reach your website. Please check the URL is correct.",
+            found_site_id=None,
         )
 
     # Check for tracker.js with correct site_id
@@ -175,15 +184,50 @@ async def _verify_pixel_static(url: str, site_id: str) -> VerifyResult:
             status="verified",
             verified=True,
             message="Pixel is installed and working correctly!",
+            found_site_id=None,
         )
 
     if has_tracker and not has_correct_site:
-        logger.info("pixel_wrong_site", url=url, site_id=site_id)
+        # Surface WHICH id is actually installed. Generic-capture parallel of
+        # the has_correct_site patterns above: same _win window, same key-only
+        # case-insensitivity, capturing the id SHAPE instead of matching a known
+        # id. Deliberately no html.unescape() here either, for the same
+        # false-positive reason documented above. First match wins.
+        #
+        # SECURITY BOUNDARY (AC5): the captured value is returned as a BARE
+        # STRING already present in that domain's public HTML. We do NOT look it
+        # up in the database, do NOT resolve its owner, do NOT enrich it with any
+        # site name/url, and build NO reverse index. Any future "reconnect"
+        # affordance must be gated on tombstone.user_id == current_user.id and is
+        # out of scope here.
+        _id_shape = r"(site_[0-9a-f]{6,32})"
+        found_match = re.search(
+            rf"(?i:data-site){_win}{_id_shape}(?![0-9a-zA-Z])", html
+        ) or re.search(
+            rf"(?:[?&]|&amp;|&#0*38;)site={_id_shape}(?![0-9a-zA-Z])", html
+        )
+        found_site_id = found_match.group(1) if found_match else None
+
+        logger.info(
+            "pixel_wrong_site", url=url, site_id=site_id, found_site_id=found_site_id
+        )
+        if found_site_id:
+            message = (
+                f"This page currently has Beam site {found_site_id} installed, "
+                "not this site. Update the snippet on your page to this site's "
+                "ID, or re-create the site for this domain to reuse the "
+                "installed ID."
+            )
+        else:
+            message = (
+                "A Beam pixel was found, but its Site ID does not match this "
+                "site. Make sure you installed the snippet generated for THIS site."
+            )
         return VerifyResult(
             status="wrong_site",
             verified=False,
-            message="A Beam pixel was found, but its Site ID does not match this site. "
-            "Make sure you installed the snippet generated for THIS site.",
+            message=message,
+            found_site_id=found_site_id,
         )
 
     logger.info("pixel_not_found", url=url, site_id=site_id)
@@ -191,4 +235,5 @@ async def _verify_pixel_static(url: str, site_id: str) -> VerifyResult:
         status="not_found",
         verified=False,
         message="Pixel not found on your website. Make sure you've added the code snippet and saved your changes.",
+        found_site_id=None,
     )

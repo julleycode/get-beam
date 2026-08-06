@@ -105,3 +105,84 @@ async def test_no_tracker_is_not_found(fake_fetch):
     res = await _verify(fake_fetch, html)
     assert res["status"] == "not_found"
     assert res["verified"] is False
+
+
+# ──────────────────── wrong_site found-id surfacing (AC4/AC5) ────────────────────
+#
+# `_verify` calls verify_pixel WITHOUT a db session (E2): passing one would route
+# through _verify_via_events, which can override a wrong_site verdict with
+# `verified` when the CURRENT site_id has recent traffic — masking the static
+# result these tests are about.
+
+
+async def test_wrong_site_returns_found_id(fake_fetch):
+    html = '<script src="/tracker.js" data-site="site_ffffffffffff"></script>'
+    res = await _verify(fake_fetch, html)
+    assert res["status"] == "wrong_site"
+    assert res["found_site_id"] == "site_ffffffffffff"
+    assert "site_ffffffffffff" in res["message"]
+
+
+async def test_wrong_site_found_id_escaped_rsc_shape(fake_fetch):
+    html = (
+        '<script src="/tracker.js"></script>'
+        '<script>self.__next_f.push([1,"data-site\\":\\"site_ffffffffffff\\""])</script>'
+    )
+    res = await _verify(fake_fetch, html)
+    assert res["status"] == "wrong_site"
+    assert res["found_site_id"] == "site_ffffffffffff"
+
+
+async def test_wrong_site_found_id_entity_escaped_shape(fake_fetch):
+    html = (
+        '<script src="/tracker.js"></script>'
+        "&lt;script data-site=&quot;site_ffffffffffff&quot;&gt;"
+    )
+    res = await _verify(fake_fetch, html)
+    assert res["status"] == "wrong_site"
+    assert res["found_site_id"] == "site_ffffffffffff"
+
+
+async def test_wrong_site_found_id_query_param_shape(fake_fetch):
+    html = '<script src="/tracker.js?site=site_ffffffffffff"></script>'
+    res = await _verify(fake_fetch, html)
+    assert res["status"] == "wrong_site"
+    assert res["found_site_id"] == "site_ffffffffffff"
+
+
+async def test_wrong_site_without_extractable_id_falls_back(fake_fetch):
+    html = '<script src="/tracker.js"></script>'
+    res = await _verify(fake_fetch, html)
+    assert res["status"] == "wrong_site"
+    assert res["found_site_id"] is None
+    assert "does not match" in res["message"]
+
+
+async def test_found_site_id_is_none_for_other_statuses(fake_fetch):
+    verified = await _verify(
+        fake_fetch, f'<script src="/tracker.js" data-site="{SITE_ID}"></script>'
+    )
+    assert verified["status"] == "verified"
+    assert verified["found_site_id"] is None
+
+    missing = await _verify(fake_fetch, "<html><body>nothing</body></html>")
+    assert missing["status"] == "not_found"
+    assert missing["found_site_id"] is None
+
+
+async def test_wrong_site_never_resolves_foreign_owner(fake_fetch):
+    """AC5 — the found id is a bare public string, never resolved to a tenant."""
+    html = '<script src="/tracker.js" data-site="site_ffffffffffff"></script>'
+    res = await _verify(fake_fetch, html)
+
+    assert set(res) == {"status", "verified", "message", "found_site_id"}
+    assert res["found_site_id"] == "site_ffffffffffff"
+    blob = repr(res).lower()
+    for leak in ("user_id", "owner", "email", "site_name", "tenant"):
+        assert leak not in blob
+
+    import inspect
+
+    source = inspect.getsource(pixel_verifier)
+    assert "models.site import" not in source
+    assert "select(Site" not in source

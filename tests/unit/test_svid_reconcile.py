@@ -51,6 +51,7 @@ def _result_returning(obj):
 def _prior(email="cto@acme.com", full_name="Real Person"):
     return SimpleNamespace(
         email=email, full_name=full_name, city="Austin", region="TX", country="US",
+        site_id="test-site", visitor_id="v-orig-aaaa1111",
     )
 
 
@@ -68,6 +69,11 @@ class TestSvidReconcileCheck:
         resolver = _make_resolver()
         visitor = _make_visitor(server_visitor_id="v-orig-aaaa1111")
         resolver._identified_for_origin = AsyncMock(return_value=_prior())
+        # Identity-honesty Phase 1 (A1b): svid inheritance only fires when the
+        # ORIGIN visitor is a CONFIRMED identity — a candidate-tier origin must
+        # not launder itself into a flat "identified". This test covers the
+        # verified-origin path, so the gate is satisfied explicitly.
+        resolver._origin_is_verified = AsyncMock(return_value=True)
         resolver._email_suppressed = AsyncMock(return_value=False)
         sentinel = object()
         resolver._save_identified = AsyncMock(return_value=sentinel)
@@ -118,6 +124,7 @@ class TestSvidReconcileCheck:
         resolver = _make_resolver()
         visitor = _make_visitor(server_visitor_id="v-orig-dddd4444", fingerprint=None)
         resolver._identified_for_origin = AsyncMock(return_value=_prior())
+        resolver._origin_is_verified = AsyncMock(return_value=True)
         resolver._email_suppressed = AsyncMock(return_value=True)
         resolver.db.execute = AsyncMock(return_value=_result_returning(None))
         resolver._check_beam_identity_network = AsyncMock(return_value=None)
@@ -133,8 +140,12 @@ class TestSvidReconcileCheck:
         resolver = _make_resolver()
         visitor = _make_visitor(server_visitor_id="v-orig-cccc3333", fingerprint=None)
         resolver._identified_for_origin = AsyncMock(
-            return_value=SimpleNamespace(email=None, full_name=None, city=None, region=None, country=None)
+            return_value=SimpleNamespace(
+                email=None, full_name=None, city=None, region=None, country=None,
+                site_id="test-site", visitor_id="v-orig-cccc3333",
+            )
         )
+        resolver._origin_is_verified = AsyncMock(return_value=True)
         resolver._email_suppressed = AsyncMock(return_value=False)
         resolver.db.execute = AsyncMock(return_value=_result_returning(None))
         resolver._check_beam_identity_network = AsyncMock(return_value=None)
