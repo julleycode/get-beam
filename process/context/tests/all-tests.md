@@ -86,6 +86,20 @@ pytest config: `pyproject.toml` — `asyncio_mode=auto`, markers `unit` / `integ
 - `source .venv/bin/activate` fails in CI — `playwright.config.ts` uses a `process.env.CI` conditional
 - Redis async GC prints "Event loop is closed" tracebacks at teardown — noise, not failure; check the pytest summary line
 - Handlers passed to `gemini_agent_loop` share one AsyncSession: sequential only, never commit inside a tool handler
+- **`which docker` LIES on this machine — never use it to decide whether the container runtime is
+  available.** Docker Desktop runs, but the CLI is not on `PATH`; it lives at
+  `/Applications/Docker.app/Contents/Resources/bin/docker`. Any agent shelling out to `docker` gets
+  `command not found` and wrongly concludes the runtime is absent. Three consecutive PVL cycles of
+  the roster-precision plan deferred the ENTIRE Hybrid lane on that false premise (07-08-26).
+  **Correct detection — check the listening ports, not the CLI:**
+  ```bash
+  lsof -nP -iTCP -sTCP:LISTEN | grep -E '5433|6379'   # infra-postgres-1 / infra-redis-1
+  ```
+  Consequence for planning: **"environment-blocked" / `needs-container` is NOT a valid known-gap
+  category in this repo.** A Hybrid gate left unrun must name a specific, non-environmental blocker.
+  Several backlog notes under `process/features/*/backlog/*deferred-gates*` and
+  `*docker-verification*` still defer gates on the false premise — treat their environment claims as
+  stale and re-check the ports before believing them.
 - Alembic offline `--sql` dry-run needs an EXPLICIT `<from-rev>:<to-rev>` range in this repo — the `upgrade head --sql` / `downgrade -1 --sql` shorthand fails partway through the chain because `b7d3e9f1a4c2_add_ad_connections.py` calls `sa.inspect(bind)`, unsupported against alembic's offline `MockConnection`; use e.g. `alembic upgrade d5b1f7c3a908:head --sql` scoped past that migration (confirmed at cadence-bot-flag EXECUTE, 26-07-26)
 
 **Playwright rules (canonical — from repeated CI failures):**

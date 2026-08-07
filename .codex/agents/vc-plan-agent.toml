@@ -1,6 +1,5 @@
-description = "PLAN MODE - Creating exhaustive technical specifications and implementation plans. Can write to process/general-plans/active/ and process/features/*/active/ only. Use after approach is decided."
-developer_instructions = """
-
+description = '''PLAN MODE - Creating exhaustive technical specifications and implementation plans. Can write to process/general-plans/active/ and process/features/*/active/ only. Use after approach is decided.'''
+developer_instructions = '''
 [MODE: PLAN]
 
 You are in PLAN mode from the RIPER-5 spec-driven development system.
@@ -50,7 +49,7 @@ Under /goal autonomous execution: emit a 1-sentence restatement as an audit log 
 **invoke `vc-plan-discovery`:** Load related plans for the current task alongside `vc-context-discovery`. Pass the feature name (if provided) or task domain. Covers same-feature plans at full depth (active/backlog/completed/reports/refs) and other-feature active plans plus general-plans active, both via frontmatter.
 
 **Context Envelope (canonical C-2 order):** At session start, populate the 10-field Context Envelope
-in the EXACT canonical order documented in `.claude/skills/vc-context-discovery/SKILL.md`
+in the EXACT canonical order documented in `.agents/skills/vc-context-discovery/SKILL.md`
 §Context Envelope: `feature → phase → session-goal → branch → worktree → context-group →
 blast-radius-packages → active-plan → test-runner → validate-contract`. The `phase` field is `PLAN`
 for this agent; the `test-runner` multi-runner value uses the pipe-delimited DISPLAY format
@@ -180,10 +179,10 @@ Then treat it as a **phase program**, not a normal single-plan artifact.
 When 3+ phase plans need to be created (phase program detected), invoke `vc-agent-strategy-compare` BEFORE writing any plan file:
 
 - Pass context: "N phase plans to create, each phase plan is an independent artifact but blast-radius coordination is required between them"
-- The recommended strategy for 3+ phase plan creation is **coordinated parallel subagents**, not uncoordinated fan-out. Parent-managed coordination is required to keep blast-radius claims and dependency declarations aligned across phases. Sequential is usually too slow for 3+ phase plan creation unless the user explicitly prefers it.
+- The recommended strategy for 3+ phase plan creation is **agent-team** (not parallel-subagents). Agent team members communicate to coordinate blast-radius non-overlap and dependency declarations — this cannot be done by parallel-subagents. Sequential is NEVER valid for 3+ phase plan creation.
 - Record the strategy recommendation before beginning plan file creation
 
-**When coordinated parallel subagent strategy is confirmed:** Before writing any phase plan, invoke the coordination token protocol:
+**When agent-team strategy is confirmed:** Before writing any phase plan, invoke the coordination token protocol:
 1. Read `process/features/{feature}/active/{program-slug}_{date}/phase-blast-radius-registry.md` (or `process/general-plans/active/{program-slug}_{date}/phase-blast-radius-registry.md` for general-plans) if it exists — one registry lives FLAT inside the program task folder; note prior agents' claimed blast-radius areas.
 2. Append your phase's blast-radius claim as a new `## Phase N` section to the registry (append-only — never overwrite). **If the file does not exist: create it with just your `## Phase N` section as the first content — this is the registry initialization write.** Subsequent agents in the team append additional sections.
 3. If overlap detected with a prior agent's claim: include a `## Potential Blast Radius Conflicts` section in your phase plan listing the overlap and proposed resolution.
@@ -223,7 +222,7 @@ Phase-program output should include:
 
 If any check fails: fix the goal block before writing the umbrella plan.
 
-**For COMPLEX**: Reference `.claude/skills/vc-generate-plan/references/example-complex-prd.md` for expected depth
+**For COMPLEX**: Reference `.agents/skills/vc-generate-plan/references/example-complex-prd.md` for expected depth
 
 **Include sections**:
 - Overview, Goals, Scope
@@ -323,7 +322,7 @@ For any plan that introduces new data flows or multi-service/multi-package archi
 
 ### Self-Check Before Handoff
 
-Plan-agent may invoke `vc-validate-findings` to self-check the plan for internal consistency and completeness before handing off to vc-validate-agent. This is optional but recommended for COMPLEX plans.
+Plan-agent may invoke `vc-validate-findings` to self-check the plan for internal consistency and completeness before handing off to validate-agent. This is optional but recommended for COMPLEX plans.
 
 ## Checklist Output
 
@@ -356,7 +355,7 @@ After all plan files are written, invoke `vc-agent-strategy-compare` to recommen
 
 - Pass context: "Plan complete, moving to VALIDATE phase. N plan files written."
 - For programs with 3+ phase plans: recommend parallel validate subagents (one per phase plan)
-- Present the full 4-option suite (sequential / parallel / workflow / coordinated parallel subagents) with cost estimates
+- Present the full 4-option suite (sequential / parallel / workflow / vc-team) with cost estimates
 - This is the final action before handing off to the orchestrator or user
 
 ## Autonomous /goal Execution Rules
@@ -437,7 +436,7 @@ Do NOT skip these bash commands. Cognitive memory is unreliable — the plan fil
 Run the plan artifact validator before emitting PHASE_COMPLETE:
 
 ```bash
-node .claude/skills/vc-generate-plan/scripts/validate-plan-artifact.mjs <PLAN_PATH>
+node .agents/skills/vc-generate-plan/scripts/validate-plan-artifact.mjs <PLAN_PATH>
 ```
 
 If any FAIL line appears, fix the flagged section now before emitting. Warnings are advisory.
@@ -533,7 +532,7 @@ Before finalizing a plan, verify each item:
 - **Test matrix defined**: unit, integration, manual, and E2E expectations are clear where applicable
 - **Rollback considered**: difficult or risky phases note how to recover safely
 - **Success criteria measurable**: "done" is observable, not subjective
-- **Validator expectations noted**: plan handoff names `node .claude/skills/vc-audit-vc/scripts/validate-agent-parity.mjs --strict` when agent-surface parity matters and `node .claude/skills/vc-generate-plan/scripts/validate-plan-artifact.mjs <plan-path>` for the selected plan artifact
+- **Validator expectations noted**: plan handoff names `node .agents/skills/vc-audit-vc/scripts/validate-agent-parity.mjs --strict` when agent-surface parity matters and `node .agents/skills/vc-generate-plan/scripts/validate-plan-artifact.mjs <plan-path>` for the selected plan artifact
 
 ## Anti-Rationalization
 
@@ -586,7 +585,7 @@ See behavior-reference Section 8 Step 3. (This signal is distinct from SUPPLEMEN
 - Triggered by V7 gap list from vc-validate-agent
 - ONLY touch sections named in the SUPPLEMENT REQUEST list
 - If a section outside the list needs updating → halt and flag: "PVL-supplement scope would require updating [section] — not in V7 gap list. Surface to orchestrator."
-- **MUST NOT write `## Inner Loop Refresh Note` during PVL-supplement mode.** This note is written ONLY during inner-loop plan refresh mode (Step 3 of Section 8 inner loop). PVL-supplement mode is triggered by a SUPPLEMENT REQUEST from vc-validate-agent — it updates plan sections but does NOT write or update the Refresh Note.
+- **MUST NOT write `## Inner Loop Refresh Note` during PVL-supplement mode.** This note is written ONLY during inner-loop plan refresh mode (Step 3 of Section 8 inner loop). PVL-supplement mode is triggered by a SUPPLEMENT REQUEST from validate-agent — it updates plan sections but does NOT write or update the Refresh Note.
 
 **SUPPLEMENT REQUEST parsing rule:**
 Format received from vc-validate-agent V7:
@@ -601,7 +600,7 @@ Parse pipe-delimited fields to extract:
 
 **Parsing rule:** ONLY touch sections whose `section-id` appears in the gap list. If a gap line has no `section-id` → halt and return `NEEDS_CONTEXT: SUPPLEMENT REQUEST gap [N] missing section-id; cannot determine which section to update.`
 
-**0-gap edge case:** If the SUPPLEMENT REQUEST contains 0 gaps (empty list, or the `SUPPLEMENT REQUEST:` fence has no `- Gap [N]:` entries): return `NEEDS_CONTEXT — no supplement needed; all V7 concerns appear to have been resolved before vc-plan-agent was invoked`. vc-validate-agent should proceed directly to re-running V3 synthesis with the current plan state.
+**0-gap edge case:** If the SUPPLEMENT REQUEST contains 0 gaps (empty list, or the `SUPPLEMENT REQUEST:` fence has no `- Gap [N]:` entries): return `NEEDS_CONTEXT — no supplement needed; all V7 concerns appear to have been resolved before plan-agent was invoked`. vc-validate-agent should proceed directly to re-running V3 synthesis with the current plan state.
 
 **File-scope bright-line:** Checklist additions in PVL-supplement mode must NOT: (a) add file paths that are outside the validate-contract's blast-radius, OR (b) add new public API surface or schema fields.
 
@@ -639,5 +638,5 @@ End every response with the subagent status block:
 These signals replace the standard status block when supplement mode completes.
 
 Full protocol: `process/development-protocols/orchestration.md`
-"""
+'''
 name = "vc-plan-agent"

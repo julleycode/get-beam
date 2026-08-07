@@ -148,6 +148,27 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
     Kept in `active/` — see the "Migration head status" note above for the still-pending
     Alembic re-chain this plan carries. Known-gap:
     `process/features/visitors-identity/backlog/resolver-privacy-relay-callsite-coverage_NOTE_07-08-26.md`.
+  - `roster-precision_07-08-26` — **SPLIT after PVL cycle 4; Part A SHIPPED + EVL-green,
+    UNCOMMITTED.** Makes the Hunter/Apollo company-level pick *informed* instead of arbitrary
+    (Hunter already returns and bills for 5 employees; `hunter.py:56` keeps `emails[0]` and discards
+    4). **Part A** = `apps/api/services/roster_ranking.py` (392 lines, **zero imports**,
+    AST-enforced pure deterministic scorer: page→role affinity, geo affinity, weighted score with
+    a drop-from-both-numerator-and-denominator degradation rule, deterministic tie-break) +
+    `tests/unit/test_roster_ranking.py` (44 tests). **Zero existing files modified.** Gates
+    confirmed by three independent tester runs: unit **1324 passed / 2 skipped / 0 failed**,
+    integration **537 passed** unchanged, `identity_classification.py` diff empty. The scorer is
+    **not called by anything yet** — it is dead code until Part B lands.
+  - `roster-precision-wiring_07-08-26` — **Part B, PLANNED, never validated.** The resolver wiring
+    Part A does not include: roster retention, exclusion + suppression + the mandatory site-wide
+    `email_bidx` merge-collision guard, redaction of all candidates, `IdentifiedVisitor.roster_selection`
+    JSONB + migration, the `roster_excluded` ledger outcome, merge-preserving upsert, and the
+    detail-endpoint surface. Inherits all four PVL cycles of findings (F-H1 predicate mismatch,
+    F-H2-rev ledger taxonomy, F-H3 parse-vs-storage allow-lists, F3 hash-live-on-both-sides, F6
+    merge-preserving upsert, the seven-site `identity_status` census, exact integration fixture
+    shapes) rather than re-deriving them. **Needs its own PVL loop from V1** with a parallel
+    adversarial verifier — that second leg found the top defect in all four prior cycles and
+    overturned an orchestrator decision twice. `roster_precision_enabled` default OFF; nothing
+    becomes emailable (`is_emailable_identity("hunter")` stays `False`, regression-gated).
 - `campaigns-outreach` — AI segmentation, campaign planning, email + social outreach, drafts
 - `billing` — Gumroad MoR billing, plans/quotas, BYOK keys
 - `marketing-site` — public site: landing, blog, changelog, SEO (content sources in `marketing/`)
@@ -353,8 +374,10 @@ structurally separate from human Visitor/Event data, never as a targetable outre
   - **Live-apply status.** Forward apply of every `main`-side migration from an EMPTY database
     through `c2f7a9d31b64` was proven on a disposable `postgres:16-alpine` on 06-08-26; only
     `c2f7a9d31b64` itself has down→up round-trip evidence, earlier revisions do not. `devjulley`'s
-    tail (`c7d3b8e1f624` onward through `f1a7c3e05b92`) is offline `--sql`-validated only — NOT
-    live-round-tripped (Docker unavailable in every session that has touched this chain). Note: an
+    tail (`c7d3b8e1f624` onward through `f1a7c3e05b92`) was offline `--sql`-validated only at the
+    time this paragraph was written — NOT live-round-tripped, then attributed to "Docker unavailable
+    in every session that has touched this chain". **That attribution was FALSE** (see the Docker
+    CLI note below); the two 07-08-26 updates that follow close it with real live round-trips. Note: an
     unscoped `alembic upgrade head --sql` fails mid-chain because `b7d3e9f1a4c2_add_ad_connections.py`
     calls `sa.inspect(bind)` (unsupported against alembic's offline `MockConnection`) — use an
     explicit `<from>:<to>` range instead; see `process/context/tests/all-tests.md` for the gotcha.
@@ -374,6 +397,13 @@ structurally separate from human Visitor/Event data, never as a targetable outre
     `ip_org_lookup_enabled` in any real environment.
 - Docker/live-integration known-gaps consolidated in
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`
+  — **but re-check their premise first: Docker IS available on this machine.** The CLI is simply off
+  `PATH` (`/Applications/Docker.app/Contents/Resources/bin/docker`), so `which docker` returns
+  nothing and agents have repeatedly concluded the runtime was absent. Detect via
+  `lsof -nP -iTCP -sTCP:LISTEN | grep -E '5433|6379'` instead. Every gate deferred as
+  "environment-blocked" / `needs-container` across `process/features/*/backlog/*deferred-gates*` and
+  `*docker-verification*` rests on a false premise and is re-classifiable as RUNNABLE. Full gotcha:
+  `process/context/tests/all-tests.md` §Debugging Quick Reference.
 
 ## AI-Referral Attribution (v1, shipped 23-07-26)
 
@@ -608,13 +638,15 @@ re-run `alembic heads` before chaining or applying; concurrent programs move it 
 
 ## Open Questions / Outstanding Work
 
-- **P0 — `GET /visitors` returns 500 (pre-existing, IN PROD: on `main` AND `devjulley`, fix
-  pending).** `routers/visitors.py:227` assigns `confidence_score` to `VisitorOut`; the field
-  only exists on `VisitorDetailOut` (`schemas/visitors.py:91`) → pydantic ValueError → 500.
-  Found by the 07-08-26 Docker gate run (10 integration failures). Second latent bug same
-  block: `visitors.py:200-208` canon_rows select omits `confidence_score` while line 215
-  reads it → AttributeError in the (unexercised) canonical-alias branch. See
-  `process/features/visitors-identity/backlog/docker-gate-run-findings_NOTE_07-08-26.md`.
+- **✅ RESOLVED — the P0 `GET /visitors` 500 is FIXED (`c92cc62`, ancestor of `devjulley` HEAD).**
+  Both halves closed and re-verified on disk 07-08-26: `confidence_score` now lives on the
+  **`VisitorOut` base** (`schemas/visitors.py:41`, so `VisitorDetailOut` inherits it), and the
+  `canon_rows` select in `routers/visitors.py` includes `IdentifiedVisitor.confidence_score`, so the
+  canonical-alias branch no longer raises `AttributeError`. Historical record: found by the
+  07-08-26 Docker gate run (10 integration failures) — see
+  `process/features/visitors-identity/backlog/docker-gate-run-findings_NOTE_07-08-26.md`. The
+  standing lesson survives the fix: **do not add fields to the wrong schema class** — new
+  detail-only fields go on `VisitorDetailOut`, never on `VisitorOut`.
 - **⚠️ SAFETY — bare `alembic upgrade` from repo root applies to Supabase PROD.** `.env`
   `DATABASE_URL` points at production (`aws-1-ap-southeast-1.pooler.supabase.com`) and
   `apps/api/migrations/env.py` has NO local-host guard — any unpinned alembic command (or DB
@@ -654,8 +686,13 @@ re-run `alembic heads` before chaining or applying; concurrent programs move it 
   `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`
   (RESOLVED), `process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`
   (RESOLVED), `process/features/visitors-identity/backlog/post-docker-gate-followups_NOTE_24-07-26.md`
-  (REBASED 07-08-26: measured full-lane set is 478 passed / 23 failed / 17 errors — the old
-  5-failure set did not reproduce; conftest Redis-isolation hardening now confirmed-twice),
+  (**SUPERSEDED 07-08-26 — the "478 passed / 23 failed / 17 errors" figure that note records is
+  STALE.** The integration lane is now **537 passed / 0 failed / 0 errors**, measured twice
+  independently on 07-08-26 (roster-precision PVL cycle 4 and the EVL confirmation run). Commits
+  `81eb4e6` (repaired never-executed fixtures) and `c92cc62` (the `GET /visitors` P0) closed that
+  failure set. Unit lane baseline for the same tree: **1280 passed / 2 skipped / 0 failed**, or
+  **1324** with roster-precision Part A's 44 new tests present. conftest Redis-isolation hardening
+  confirmed-twice),
   `process/features/pixel/backlog/ingest-abuse-hardening-deferred-gates_NOTE_25-07-26.md` (open:
   AC-4a mutation-kill re-verification; migration round-trip RESOLVED 07-08-26),
   `process/features/pixel/backlog/cadence-bot-flag-deferred-gates_NOTE_26-07-26.md` (open:
