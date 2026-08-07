@@ -21,13 +21,22 @@ type SafeAuth = {
   signOut: () => Promise<void>;
 };
 
+// Legacy mode has no session to resolve, so this shape never varies. It is a
+// module constant rather than a fresh object per call on purpose: callers put
+// getToken in useEffect dependency arrays, and a new function identity on every
+// render re-runs those effects every render. Paired with a setState that stores
+// a fresh object/array (billing status, API key list), that loops forever and
+// hammers the API. Clerk's own useAuth memoizes getToken with useCallback, so
+// keeping this stable makes both auth paths behave the same.
+const LEGACY_AUTH: SafeAuth = {
+  isLoaded: true,
+  isSignedIn: true,
+  getToken: async () => null,
+  signOut: async () => {},
+};
+
 function useLegacyAuth(): SafeAuth {
-  return {
-    isLoaded: true,
-    isSignedIn: true,
-    getToken: async () => null,
-    signOut: async () => {},
-  };
+  return LEGACY_AUTH;
 }
 
 export const useAuthSafe: () => SafeAuth = HAS_CLERK
