@@ -10,7 +10,7 @@ compatibility_date = "2024-11-01"
 # Must be the FULL API host. beam-dev.nhantown.com exposes only the three pixel
 # paths and would 404 the beacon endpoint.
 BEAM_API_BASE = "https://beam-api.nhantown.com"
-BEAM_SITE_ID = "site_16c46453546f"
+BEAM_SITE_ID = "site_92e8f1f8a71c"
 
 # Temporary full request/response capture, read via:
 #   npx wrangler pages deployment tail --project-name beam-lab
