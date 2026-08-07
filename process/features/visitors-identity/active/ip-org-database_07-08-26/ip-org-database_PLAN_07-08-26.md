@@ -7,6 +7,33 @@ feature: visitors-identity
 
 # Own IP-to-Company Database (Pillar 1) — CAIDA pfx2as + AS2Org pipeline
 
+## Status (closeout 07-08-26)
+
+- **Phase 1 — Schema + ingestion pipeline: ✅ COMPLETE.** Migration `a3e8d5c71f02`
+  (chains off identity-coop's `f2c81a6b4d09`, landed same commit batch), model
+  `ip_org_prefix.py`, `ip_org_ingest.py`, config (4 settings, flag OFF), scheduler wiring,
+  CLI `scripts/refresh_ip_org.py` (+ fail-closed local-host guard, 15 tests). Evidence:
+  `ip-org-database-evl-iteration-001_REPORT_07-08-26.md` (EVL 6/6 green after 1 fix cycle —
+  camelCase `organizationId` defect, fixtures regenerated from real CAIDA records).
+- **Phase 2 — Lookup integration: ✅ COMPLETE.** `ip_org_lookup.py` + resolver-ladder insert
+  in `company_resolver.py` (write-through `company_graph` `source="rir_asn"` conf 0.45).
+  Evidence: same EVL report + its **Addendum** — live dev-DB proof: full-chain apply from
+  EMPTY DB (8s), live down/up round-trip `a3e8d5c71f02`↔`f2c81a6b4d09`, `--apply` loaded
+  967,079 rows twice (341s/158s, swap + index-rename proven, crash-safety accidentally
+  proven), GiST index scan warm 2-6ms / cold 26-385ms, longest-prefix at volume verified,
+  org_kind: org 63.8% / eyeball 26.9% / datacenter 7.9% / cdn 1.4%.
+- **Phase 3 — Domain mapping + quality: OPEN (next).** Not started. Until it ships,
+  `resolve_company_cached` still returns None from the ip_org path for domain consumers;
+  today's value is persisted `company_graph.company_name`.
+- **Commits (devjulley, NOT pushed):** `3215fb0` (ip-org Phases 1-2) after `d78b4f1`
+  (identity-coop phase 1, concurrent program — its `f2c81a6b4d09` is our migration parent).
+- **Prod enable (operator gate, pending):** push → Railway auto-applies migrations → one real
+  `--apply` ingest on prod → flip `ip_org_lookup_enabled`.
+- **Follow-ups / known-gaps:** `../../backlog/ip-org-followups_NOTE_07-08-26.md` (single-
+  transaction load optimization, skip-ratio alerting, alembic env.py guard gap, G6
+  distribution audit, conftest enum-teardown race, 2 identity-coop-owned broken unit tests).
+- Task folder stays in `active/` (Phase 3 open + operator gate pending).
+
 ## Context
 
 Beam currently resolves company-from-IP via free rDNS (`socket.getfqdn`) then paid providers (PDL + IPinfo, ~$0.01/hit, budget-capped 50/day/site). Quality is inconsistent and every paid hit is rented data. Goal: own the IP→Company core by building a self-hosted reverse-IP database from public BGP/WHOIS-derived snapshots (CAIDA RouteViews `pfx2as` for prefix→ASN, CAIDA AS2Org for ASN→organization), joined, normalized, and served from Postgres with a `cidr` GiST index for <5ms lookups. Covers ~30-40% of B2B traffic (orgs with own IP allocations) with zero per-lookup cost.
