@@ -14,8 +14,8 @@ metadata:
 **Program:** identity-coop
 **Umbrella plan:** `process/features/visitors-identity/active/identity-coop_07-08-26/identity-coop-umbrella_PLAN_07-08-26.md`
 Complexity: COMPLEX (phase of a 3-phase program)
-Phase status: ⏳ PLANNED — blocked on two upstream dependencies
-Status: ⏳ PLANNED — blocked on two upstream dependencies
+Phase status: ⏳ PLANNED — entry gate CLEARED 07-08-26, ready for EXECUTE
+Status: ⏳ PLANNED — entry gate CLEARED 07-08-26, ready for EXECUTE
 Date: 07-08-26
 **Report destination:** `process/features/visitors-identity/active/identity-coop_07-08-26/phase-1-ledger-substrate_REPORT_07-08-26.md`
 
@@ -53,29 +53,33 @@ trail, and a per-site opt-in flag that defaults OFF. The only change inside the 
 
 If either upstream dependency is unmet: report BLOCKED. Do NOT partially execute.
 
-**VALIDATE 07-08-26 (2nd outer-PVL pass) re-derivation of this gate — supersedes the 1st pass:**
-- `identity-vocab-reconcile_07-08-26`: **NOT literal `Gate: PASS`.** Actual state is `Gate:
-  CONDITIONAL`, explicitly user-accepted at PLAN supplement cycle 9, EXECUTED, merged onto
-  `devjulley`. Satisfies the *intent* (the `identity_resolver.py` churn has settled and shipped) but
-  not the literal wording. Wording gap, not a hard blocker on its own.
-- SPEC A `graph-erasure-compliance_07-08-26`: **EXECUTE is now COMPLETE — this changed since the 1st
-  pass.** `graph-erasure-compliance_REPORT_07-08-26.md` exists (`status: COMPLETE_WITH_GAPS`), all 30
-  checklist items applied, 1165/1165 unit tests green, migration `d1a6c4e93f27` landed, and
-  `services/graph_erasure.py` / `models/erasure_request.py` / the `_upsert_beam_identity` write
-  boundary are all present on disk (verified by direct read). **But it is NOT LIVE.** Its own report
-  states `CODE DONE`, not `EVL GREEN`: the 14 integration gates (T-I1…T-I10) are written and
-  collect cleanly but have **never executed** (Docker down — independently re-confirmed this pass,
-  `docker info` fails), the migration live round-trip is **deferred, not passed**, and nothing is
-  deployed (branch `devjulley`, unpushed; `graph_erasure_sweep_enabled` default `True` has never run
-  anywhere real).
-- `alembic heads` (Entry Gate item 4): **NOW MET.** Live run this pass —
-  `.venv/bin/python3.11 -m alembic -c apps/api/alembic.ini heads` → **`d1a6c4e93f27` (head)`,
-  exactly ONE head**. The 1st pass's claim of FIVE heads was a hand-parse artifact (it could not run
-  alembic) and is **retracted**. A1's STOP-and-re-chain condition will not fire. Still re-derive
-  live at EXECUTE time — this repo's head moves on a roughly daily cadence.
-- **Conclusion: Entry Gate is still UNMET, now on ONE criterion instead of two** — SPEC A's "LIVE"
-  half. Per this section's own rule, Phase 1 must report BLOCKED and must not partially execute.
-  See Validate Contract.
+**SUPERSEDED — the 2nd outer-PVL pass's re-derivation of this gate (which concluded "Entry Gate is
+still UNMET") is retracted by the 3rd outer-PVL pass (07-08-26). Authoritative re-derivation:**
+
+- **Entry Gate: CLEARED 07-08-26.** All four conditions verified by the 3rd pass, three of them by
+  independent live command:
+  1. `identity-vocab-reconcile_07-08-26` — `Gate: CONDITIONAL`, explicitly user-accepted at
+     supplement cycle 9, EXECUTED and merged. Satisfies the gate's *intent* (the
+     `identity_resolver.py` churn has settled and shipped). Carried as concern **N-VOCAB**, a
+     wording gap, not a state gap.
+  2. SPEC A `graph-erasure-compliance_07-08-26` — **LIVE.** `tests/integration/test_graph_erasure_flow.py`
+     collects exactly 14 tests and its repair commit `81eb4e6` records `14/14` with the integration
+     lane moving `478P/23F/17E → 518P/0F/0E` (test-side repairs only, no production behaviour
+     altered). Migration `d1a6c4e93f27` round-tripped on a disposable `postgres:16-alpine`.
+     Pushed AND deployed: `git branch -r --contains 443ad5e` → `origin/main` and `origin/devjulley`;
+     `git rev-list --left-right --count` → 0/0 on both; prod `alembic_version = d1a6c4e93f27`.
+  3. Call-graph drift re-check — **anchors unmoved.** Call site
+     `await self._upsert_beam_identity(visitor, data, provider)` at line 1252, definition at 1264.
+  4. `alembic heads` — live run returns **`d1a6c4e93f27`, exactly ONE head**. A1's
+     STOP-and-re-chain condition will not fire. (The 1st pass's "five heads" claim was a hand-parse
+     artifact and is retracted.) Still re-derive live at EXECUTE — this repo's head moves on a
+     roughly daily cadence.
+
+- **Docker Known-Gap: CLEARED.** `docker info` → server 29.4.2, up. Every Hybrid gate in this phase
+  is RUNNABLE and REQUIRED at EXECUTE; none is a deferred residual.
+
+**EXECUTE is authorized for this phase.** See Validate Contract (3rd outer-PVL pass, `Gate:
+CONDITIONAL`, doc-sync concerns only, zero behavioural FAILs).
 
 ---
 
@@ -97,10 +101,16 @@ They resolve F2, F3, C1, C3, C5, C6, C8.
 ### D-A (resolves F2) — accrual is gated on a real graph write; `_upsert_beam_identity` returns `bool`
 
 **Decision: resolution shape (a).** `_upsert_beam_identity` changes signature from `-> None` to
-`-> bool`: `True` only when the upsert statement actually executed, `False` on every one of its
-three early no-op returns (missing fingerprint/email; `visitor.do_not_resolve`; an
-`is_email_suppressed_any(..., GRAPH_WRITE_BLOCKING_SCOPES)` tombstone). The hook is gated on that
-return value.
+`-> bool`: `True` only when the upsert statement actually executed, `False` on every no-op path.
+**Corrected at PVL supplement cycle 2 (N3, verified live):** the function has **two** early-return
+statements covering **three** conditions — `return` at line 1271 (`if not fp or not email`) and at
+line 1285 (the single combined `if getattr(visitor, "do_not_resolve", False) or await
+is_email_suppressed_any(...)`) — **plus** an `except` path that currently has NO explicit return
+(it falls through to an implicit `None`). There is no third early-return statement; do not hunt for
+one. The complete edit set is therefore 4 return-value edits (`return False` at 1271, `return False`
+at 1285, `return False` in the `except` path, `return True` immediately after
+`await self.db.commit()`) plus the signature and the docstring — 6 touched lines, inside the ≤ 12
+budget. The hook is gated on that return value.
 
 **D4's diff budget is RAISED from ≤ 6 to ≤ 12 changed lines in `identity_resolver.py`**, with this
 rationale on record:
@@ -150,8 +160,10 @@ also resolves the C2 "duplicated gate" concern by deletion rather than by wideni
 
 `record_contribution`'s signature gains `is_bot_suspect: bool`. Either flag True ⇒
 `accrued=False`, `excluded_reason='fraud_flagged'`, no ledger row. Matches SPEC AC-9's
-"`is_abuse_flagged` / `is_bot_suspect` (or equivalent)". Both columns exist on `Visitor`
-(`models/visitor.py:105` and `:207` — verified live). `excluded_reason` vocabulary becomes
+"`is_abuse_flagged` / `is_bot_suspect` (or equivalent)". Both columns exist on `Visitor`:
+`Visitor.is_abuse_flagged` at `models/visitor.py:97` and `Visitor.is_bot_suspect` at
+`models/visitor.py:105` (verified live; **citation corrected at PVL supplement cycle 2 (N4) — the
+earlier `:207` reference belonged to `IdentifiedVisitor`, a different class**). `excluded_reason` vocabulary becomes
 `'fraud_flagged' | 'duplicate' | NULL` (`'abuse_flagged'` and `'erased'` are both retired:
 the first is subsumed, the second can no longer occur by D-B).
 
@@ -283,13 +295,19 @@ identity_coop_enabled: bool = False
 coop_credit_per_contribution: int = 1
 coop_credit_expiry_days: int = 90
 coop_credit_hold_hours: int = 24
+coop_terms_version: str = "<64-char lowercase hex digest of the current policy text>"
 ```
+
+**Five settings, not four** (added at PVL supplement cycle 2 — N2). `coop_terms_version` is
+REQUIRED by E4: `routers/sites.py` rejects `422` unless the submitted `terms_version` equals
+`settings.coop_terms_version`. It is a pinned version hash (the hex digest of the exact policy
+text), not a free-form label. Without it, E4's constant compare references a nonexistent setting.
 
 Follows the `agent_detection_enabled` / `company_graph_enabled` / `identity_signals_enabled`
 operator-gated precedent exactly. Flipping any of these ON in a real environment is a separate,
 explicit, later operator action — never part of this phase.
 
-**VALIDATE confirms no collision:** none of these four settings, `Site.contribution_enabled`, or
+**VALIDATE confirms no collision:** none of these five settings, `Site.contribution_enabled`, or
 any of `apps/api/models/identity_coop.py` / `apps/api/services/identity_coop.py` /
 `apps/api/routers/identity_coop.py` currently exist on disk. Clean to create.
 
@@ -309,8 +327,8 @@ any of `apps/api/models/identity_coop.py` / `apps/api/services/identity_coop.py`
 
 ### Step B — Config
 
-- [ ] B1. Add the four settings above to `apps/api/config.py` under a `## ─── Identity co-op (Phase 1) ───` block, with an inline comment stating the required rollout order: erasure LIVE → flag ON per-site → never before legal review.
-- [ ] B2. Assert in a unit test that all four defaults are OFF/inert and that `identity_coop_enabled is False`.
+- [ ] B1. Add the five settings above to `apps/api/config.py` under a `## ─── Identity co-op (Phase 1) ───` block, with an inline comment stating the required rollout order: erasure LIVE → flag ON per-site → never before legal review.
+- [ ] B2. Assert in a unit test that all **five** defaults are OFF/inert and that `identity_coop_enabled is False` (five, not four — `coop_terms_version` was added at PVL supplement cycle 2, N2).
 
 ### Step C — Service module (all logic lives here)
 
@@ -318,7 +336,7 @@ any of `apps/api/models/identity_coop.py` / `apps/api/services/identity_coop.py`
 - [ ] C2. Implement `async def record_contribution(db, *, site_id, email_bidx, source_provider, is_abuse_flagged, is_bot_suspect, contributed_on) -> None`:
       1. Insert the contribution event with `ON CONFLICT (site_id, email_bidx, contributed_on) DO NOTHING` (merge-awareness, AC-3).
       2. If the insert was a no-op (duplicate), return — no accrual.
-      3. If `is_abuse_flagged` **or `is_bot_suspect`** is True: set `accrued=False`, `excluded_reason='fraud_flagged'`, return without accrual (AC-9 — the EVENT is still recorded; only ACCRUAL is gated). **Widened at PVL supplement 07-08-26 per D-C; `Visitor.is_bot_suspect` (`models/visitor.py:207`) is now consulted.**
+      3. If `is_abuse_flagged` **or `is_bot_suspect`** is True: set `accrued=False`, `excluded_reason='fraud_flagged'`, return without accrual (AC-9 — the EVENT is still recorded; only ACCRUAL is gated). **Widened at PVL supplement 07-08-26 per D-C; `Visitor.is_bot_suspect` (`models/visitor.py:105`) is now consulted.**
       4. **(REWRITTEN at PVL supplement 07-08-26 — see D-B. Supersedes everything the two prior
       validate passes wrote about this step.)** There is **NO suppression check in this module at
       all.** `record_contribution` is only ever called when `_upsert_beam_identity` returned `True`
@@ -379,13 +397,14 @@ any of `apps/api/models/identity_coop.py` / `apps/api/services/identity_coop.py`
           await record_contribution(...)
       ```
       and `_upsert_beam_identity`'s signature changes `-> None` → `-> bool` (`True` only where the
-      upsert statement executed; `False` at each of its three early returns). Exactly one production
+      upsert statement executed; `False` on every no-op path — **two** early-return statements plus the
+      `except` path, per D5/N3, not three returns). Exactly one production
       caller exists, verified live. D4's budget is raised to ≤ 12 lines to pay for it.
 - [ ] D2. Resolve `site_contribution_enabled` by loading the `Site` row's `contribution_enabled` in the same session — do NOT add a second network/DB round-trip on the hot path if the resolver already has the Site loaded; if it does not, use a single scalar select and cache on the resolver instance for the request. **VALIDATE 07-08-26 confirms: the resolver does NOT cache a `Site` ORM instance anywhere in its state (`__init__` only holds `db` and `redis_client`; the only `Site` touch in the whole file is a narrow `select(Site.url)` at one call site). The "already loaded" branch will not apply in the general case — implementers should expect the fallback (single scalar select, cached on the resolver instance for the request) to be the path actually taken. Not a defect: the plan's own fallback instruction already covers this correctly.**
 - [ ] D3. Compute `email_bidx` via the existing `apps.api.services.pii_crypto.email_hash` — the same function `_upsert_beam_identity` already uses. Never pass plaintext email into the co-op module.
-- [ ] D4. Verify the diff inside `identity_resolver.py` is **≤ 12 lines** total (hook + local import + the `-> bool` signature change and its three `return False` / one `return True` edits). **Budget RAISED from ≤ 6 at PVL supplement 07-08-26 — rationale in §PLAN Decisions D-A; the ≤ 6 figure is superseded everywhere it appears in this document.** If it is larger than 12, the logic leaked out of `identity_coop.py` — move it back.
+- [ ] D4. Verify the diff inside `identity_resolver.py` is **≤ 12 lines** total (hook + local import + the `-> bool` signature change and its three `return False` / one `return True` edits — see D5/N3 for the exact edit set). **Budget RAISED from ≤ 6 at PVL supplement 07-08-26 — rationale in §PLAN Decisions D-A; the ≤ 6 figure is superseded everywhere it appears in this document.** If it is larger than 12, the logic leaked out of `identity_coop.py` — move it back.
 
-- [ ] D5. Apply the `-> bool` change inside `_upsert_beam_identity` itself: `return False` at each of the three existing early-return guards (no fingerprint/email; `do_not_resolve`; `is_email_suppressed_any(..., GRAPH_WRITE_BLOCKING_SCOPES)`), `return True` after the upsert statement executes, and `return False` in the `except` path. Do NOT change the guards' logic or ordering — only the returned value. Update the docstring.
+- [ ] D5. Apply the `-> bool` change inside `_upsert_beam_identity` itself. **Corrected at PVL supplement cycle 2 (N3):** there are **two** early-return statements covering three conditions, not three returns, and the `except` path has **no** explicit return today. The complete edit set is exactly: `return False` at the `if not fp or not email` guard (line 1271 as of 07-08-26); `return False` at the combined `do_not_resolve` / `is_email_suppressed_any(..., GRAPH_WRITE_BLOCKING_SCOPES)` guard (line 1285); `return True` immediately after `await self.db.commit()`; `return False` in the `except` path (adding the explicit return that does not exist yet); signature `-> None` → `-> bool`; docstring updated. Locate by call-graph position, not by these line numbers. Do NOT change the guards' logic or ordering — only the returned value.
 
 ### Step E — 7-layer flag wiring (layers 1-4; UI layers land in Phase 3)
 
@@ -442,7 +461,10 @@ alembic -c apps/api/alembic.ini upgrade <head_recorded_at_A1>:head --sql
 
 # Diff footprint guard on the contested file
 git diff --stat apps/api/services/identity_resolver.py
-# Expected: <= 6 changed lines
+# Expected: <= 12 changed lines
+# (Budget RAISED from 6 → 12 at PVL supplement 07-08-26 per D4/D-A; D4 declares the ≤ 6 figure
+#  superseded everywhere it appears in this document, and PVL supplement cycle 2 applies it here —
+#  this is the block EXECUTE and EVL copy their commands from. Do NOT reshape the D-A fix to fit 6.)
 ```
 
 - All checklist items checked.
@@ -505,14 +527,15 @@ findings are retained verbatim for audit:
 
 ## Blockers That Would Justify BLOCKED Status
 
-- `identity-vocab-reconcile_07-08-26` still `Gate: BLOCKED` and not descoped.
-- SPEC A `graph-erasure-compliance_07-08-26` not LIVE — the resolver's write boundary (which D-A/D-B now depend on for the `False` return) is `CODE DONE`, not `EVL GREEN`, and is undeployed. **This is the ONLY remaining blocker after the 07-08-26 PVL supplement; it is a Step-0 dependency block, not a plan defect.**
+- `identity-vocab-reconcile_07-08-26` still `Gate: BLOCKED` and not descoped. **RESOLVED 07-08-26** — `Gate: CONDITIONAL`, user-accepted, executed, merged (N-VOCAB).
+- ~~SPEC A `graph-erasure-compliance_07-08-26` not LIVE~~ — **RESOLVED 07-08-26 (3rd outer-PVL pass).** SPEC A is EVL GREEN (14/14), migration round-tripped, pushed to `origin/main` + `origin/devjulley` at 0/0, and deployed (prod `alembic_version = d1a6c4e93f27`). This is no longer a blocker.
 - `alembic heads` returns more than one head and re-chaining would require touching another program's migration.
-- Docker unavailable ⇒ the G2 round-trip cannot run. Record as a Known-Gap + backlog stub and keep the phase gate **CONDITIONAL** (do not mark ✅ VERIFIED on offline `--sql` alone).
+- Docker unavailable ⇒ the G2 round-trip cannot run. **Not applicable as of 07-08-26 — Docker 29.4.2 is UP, so G1/G2 are REQUIRED, not deferred.** Retained only as the conditional rule should Docker later be down.
 - The hook diff inside `identity_resolver.py` cannot be kept small because a concurrent workstream restructured `_save_identified`.
 
-**VALIDATE 07-08-26: the second bullet is confirmed TRUE right now** — see Entry Gate section
-above and the Validate Contract below. This is the active, live blocking condition for this cycle.
+**SUPERSEDED.** The 2nd pass's "the second bullet is confirmed TRUE right now" note is retracted by
+the 3rd outer-PVL pass (07-08-26): the entry gate is CLEARED and **no blocking condition is active**.
+See the Entry Gate section above and the Validate Contract below.
 
 ---
 
@@ -521,10 +544,10 @@ above and the Validate Contract below. This is the active, live blocking conditi
 Orchestrator reads this before deciding which subagent to spawn next. The canonical 7-step inner
 loop `R → I → P → PVL → E → EVL → UP` SKIPS SPEC.
 
-- [ ] 1. RESEARCH — research-agent: upstream dependency status confirmed; `identity_resolver.py` drift checked; test context loaded
-- [ ] 2. INNOVATE — innovate-agent: approach decided; Decision Summary written
-- [ ] 3. PLAN-SUPPLEMENT — plan-agent: this plan updated; Inner Loop Refresh Note if sections changed (or "n/a — research clean")
-- [x] 4. PVL — vc-validate-agent: full V1-V7; validate-contract written per `.claude/skills/vc-validate-findings/references/example-validate-output.md` — **Gate: BLOCKED (07-08-26, 2nd outer-PVL pass; supersedes the 1st). Now 3 FAILs: (F1) Entry Gate — SPEC A's EXECUTE is COMPLETE but it is `CODE DONE`, not `EVL GREEN`, and nothing is deployed, so "LIVE" is unmet; external, not plan-fixable. (F2) the hook accrues credit even when `_upsert_beam_identity` no-ops — plan-fixable NOW. (F3) an erased person gets a new `email_bidx` row outside `ERASURE_TARGETS` — plan-fixable NOW. The 1st pass's "five alembic heads" FAIL is RETRACTED: live run returns one head, `d1a6c4e93f27`. F2 and F3 are independent of F1 — a PVL supplement cycle can clear both while F1 stays open, leaving a single external blocker.**
+- [x] 1. RESEARCH — upstream dependency status confirmed; `identity_resolver.py` drift checked; test context loaded. **Evidence: the 3rd outer-PVL contract's fresh live re-derivation (07-08-26)** — SPEC A 14/14 collect + `81eb4e6` in `origin/main`, `443ad5e` on both remotes at 0/0, `alembic heads` single (`d1a6c4e93f27`), call-graph anchors unmoved at 1252/1264, Docker 29.4.2 up. No separate research report needed; the contract IS the research record.
+- [x] 2. INNOVATE — approach decided; Decision Summary written. **Satisfied by §PLAN Decisions D-A…D-E (PVL supplement cycle 1)**, each carrying a chosen shape plus explicitly rejected alternatives (D-A shapes (b)/(c) rejected; D-B option (b) rejected; D-D `user_id` column rejected). Re-verified against current source by the 3rd PVL pass.
+- [x] 3. PLAN-SUPPLEMENT — plan updated at PVL supplement cycle 2 (07-08-26): P1–P8 doc-sync items from the 3rd outer-PVL contract applied (diff budget 6 → 12, fifth config setting `coop_terms_version`, D5/D-A return-set correction, D-C citation fix, `Dependency-BLOCKED` removal, Docker note, umbrella goal-block + execution state). **No `## Inner Loop Refresh Note` is written: this was a PVL-supplement pass (V7 gap list), not an inner-loop refresh — every item applied was already diagnosed by the current 3rd-pass contract, so no section changed in a way that invalidates it. V1 auto-proceeds on the existing CONDITIONAL contract; no PVL re-run is required.**
+- [x] 4. PVL — vc-validate-agent: full V1-V7; validate-contract written per `.claude/skills/vc-validate-findings/references/example-validate-output.md` — **CURRENT VERDICT: `Gate: CONDITIONAL` (07-08-26, 3rd outer-PVL pass — see `## Validate Contract`). Zero behavioural FAILs. All three prior FAILs (F1 entry gate, F2 accrual-without-write, F3 erased-person row) are CLEARED with live evidence; the five remaining concerns (N1–N5) are doc-sync items, applied at PVL supplement cycle 2. EXECUTE is authorized.** Superseded history follows for audit only: **Gate: BLOCKED (07-08-26, 2nd outer-PVL pass; supersedes the 1st). Now 3 FAILs: (F1) Entry Gate — SPEC A's EXECUTE is COMPLETE but it is `CODE DONE`, not `EVL GREEN`, and nothing is deployed, so "LIVE" is unmet; external, not plan-fixable. (F2) the hook accrues credit even when `_upsert_beam_identity` no-ops — plan-fixable NOW. (F3) an erased person gets a new `email_bidx` row outside `ERASURE_TARGETS` — plan-fixable NOW. The 1st pass's "five alembic heads" FAIL is RETRACTED: live run returns one head, `d1a6c4e93f27`. F2 and F3 are independent of F1 — a PVL supplement cycle can clear both while F1 stays open, leaving a single external blocker.**
 - [ ] 5. EXECUTE — all checklist items done; per-section test gates run and green
 - [ ] 6. EVL — all EVL gates green; follow-up stubs registered; EVL HANDOFF SUMMARY written
 - [ ] 7. UPDATE PROCESS — phase report written, umbrella state updated, commit done
@@ -532,11 +555,14 @@ loop `R → I → P → PVL → E → EVL → UP` SKIPS SPEC.
 **Validate-contract required before execute.** If step 4 is unchecked or `## Validate Contract`
 reads "(placeholder — ...)", the orchestrator must spawn vc-validate-agent first.
 
-- [x] 3b. PVL SUPPLEMENT (07-08-26, cycle 1) — F2, F3, C1, C2, C3, C5, C6, C8 addressed in plan text via §PLAN Decisions D-A…D-E. **F1 remains open and is NOT plan-fixable.** Re-run PVL from V1 when SPEC A goes LIVE.
+- [x] 3b. PVL SUPPLEMENT (07-08-26, cycle 1) — F2, F3, C1, C2, C3, C5, C6, C8 addressed in plan text via §PLAN Decisions D-A…D-E. F1 was open at that time and was NOT plan-fixable; it has since been **CLEARED** externally (SPEC A is LIVE).
+- [x] 3c. PVL SUPPLEMENT (07-08-26, cycle 2) — the 3rd outer-PVL contract's P1–P8 doc-sync items applied to this plan, `phase-blast-radius-registry.md`, and the umbrella plan. No behavioural change.
 
-**Do NOT spawn vc-execute-agent for this phase.** Status: **Dependency-BLOCKED — entry gate SPEC A
-not LIVE; files never modified.** Gate is BLOCKED on F1 only. Re-check the Entry Gate section
-above before any further action on this phase.
+**Status: ready for EXECUTE — entry gate CLEARED 07-08-26; files not yet modified.** The prior
+`Dependency-BLOCKED` status and the "Do NOT spawn vc-execute-agent" instruction are **REMOVED**: both
+were written when the entry gate was open, and both are now factually stale. All four entry-gate
+conditions are verified (see Entry Gate above), the current validate-contract is `Gate: CONDITIONAL`
+with zero behavioural FAILs, and inner-loop Steps 1–4 are complete. Next step is Step 5, EXECUTE.
 
 ---
 
@@ -607,66 +633,116 @@ WAS chosen, and the row has been added above.**
 
 ## Test Infra Improvement Notes
 
-- Docker was unavailable for this validate pass (`docker info` fails), as it was for SPEC A's
-  EXECUTE. Every Hybrid gate in this program is therefore permanently deferred in this environment.
-  Standing repo-wide gap, not specific to this phase.
+- **Docker 29.4.2 available 07-08-26 — Hybrid gates are RUNNABLE and REQUIRED.** The earlier note
+  ("Docker unavailable … every Hybrid gate in this program is therefore permanently deferred in this
+  environment") is **stale and must not be cited to skip G1/G2**. Every Hybrid gate in this phase
+  moves from gap-resolution D (deferred residual) to B (gate added by this plan's checklist,
+  runnable at EXECUTE): the migration live round-trip AND the `uq_coop_accrued_site_email`
+  partial-index presence + duplicate-`ACCRUE` `IntegrityError` assertion.
+- Standing environment caveat (not a gap in this phase): Docker availability in this repo has
+  oscillated across sessions. Re-check `docker info` at EXECUTE; if it is down at that moment,
+  G1/G2 become a Known-Gap + backlog stub and the phase gate stays CONDITIONAL — but the default
+  expectation as of 07-08-26 is that they run.
 
 ---
 
 ## Resume and Execution Handoff
 
 - Selected plan file path: `process/features/visitors-identity/active/identity-coop_07-08-26/phase-1-ledger-substrate_PLAN_07-08-26.md`
-- Last completed step: PVL SUPPLEMENT (07-08-26, cycle 1) — 8 gaps addressed in plan text; prior step was VALIDATE 2nd outer-PVL pass, Gate: BLOCKED
-- Validate-contract status: written, BLOCKED (07-08-26, 2nd pass, supersedes the 1st)
+- Last completed step: PVL SUPPLEMENT (07-08-26, cycle 2) — P1–P8 doc-sync items from the 3rd outer-PVL contract applied to this plan, the blast-radius registry, and the umbrella plan. Inner-loop Steps 1, 2, 3 and 4 are all complete.
+- Validate-contract status: written, **CONDITIONAL (07-08-26, 3rd outer-PVL pass — supersedes the 2nd pass's BLOCKED)**; zero behavioural FAILs; concerns N1–N5 accepted and now applied
 - Supporting context files loaded: `process/context/all-context.md`, `process/context/tests/all-tests.md`, `identity-coop_SPEC_07-08-26.md`, umbrella plan, `phase-blast-radius-registry.md`, `graph-erasure-compliance_07-08-26` plan + REPORT + results.tsv, `identity-vocab-reconcile_07-08-26` plan
-- Next step (PVL supplement 07-08-26): **track (1) is now DONE** — F2, F3, C1, C2, C3, C5, C6, C8 are
-  settled in plan text (§PLAN Decisions D-A…D-E). Phase 1 is **Dependency-BLOCKED** on F1 alone.
-  Dependency + re-entry conditions are recorded in
-  `process/features/visitors-identity/backlog/identity-coop-entry-gate-spec-a-live_NOTE_07-08-26.md`.
-  Do NOT spawn vc-execute-agent. The 5-artifact high-risk evidence pack under
-  `.../identity-coop_07-08-26/harness/` is still required before EXECUTE. Original two tracks: **(1)** F2 and F3 are
-  plan-fixable now — a PVL supplement cycle can clear both without waiting on anything external.
-  **(2)** F1 needs SPEC A `graph-erasure-compliance_07-08-26` to reach EVL GREEN (Docker up, 14
-  integration gates + migration live round-trip run) and ship, OR the umbrella to explicitly
-  redefine "LIVE" with user acceptance recorded. When re-running PVL, re-derive `alembic heads` LIVE
-  again and re-check `identity_resolver.py` drift — both moved between the 1st and 2nd passes.
+- Next step for a fresh agent: **Step 5 — EXECUTE.** The entry gate is CLEARED, the validate-contract
+  is CONDITIONAL with zero behavioural FAILs, and all P1–P8 doc-sync items are applied. Start at
+  Step A1 and **re-derive `alembic heads` LIVE as the very first action** — `d1a6c4e93f27` was the
+  single head at the 3rd PVL pass, but this repo's head moves on a roughly daily cadence, so treat
+  every head string in these documents as expired. Then honour the contract's execute-agent
+  instructions E-1…E-7 verbatim: diff budget ≤ 12 (not 6); five config settings including
+  `coop_terms_version`; D5's exact 4-return edit set (two existing returns + the `except` path + the
+  post-commit success return) plus signature and docstring; G1/G2 REQUIRED on a DISPOSABLE Postgres
+  only; `email_bidx` from `pii_crypto.email_hash` only, never plaintext.
+- **Still required before this phase may be reported ready:** the 5-artifact high-risk evidence pack
+  under `process/features/visitors-identity/active/identity-coop_07-08-26/harness/` (billing/credits
+  + schema/migration are both high-risk classes). Validate it with
+  `node .claude/skills/vc-risk-evidence-pack/scripts/validate-risk-artifacts.mjs`;
+  `review-decision.json` needs an explicit APPROVE/REJECT with written rationale, and
+  `adversarial-validation.json` must rule out credit-minting-without-a-graph-write and
+  erased-person-row-creation. This is an EXECUTE deliverable (E-5), not a gate on starting.
+- Resolved dependency note: `process/features/visitors-identity/backlog/identity-coop-entry-gate-spec-a-live_NOTE_07-08-26.md`
+  is **RESOLVED** by the 3rd outer-PVL pass and should be marked as such at UPDATE PROCESS.
 
 ---
 
 ## Validate Contract
 
-Status: BLOCKED
+Status: CONDITIONAL
 Date: 07-08-26
 date: 2026-08-07
 generated-by: outer-pvl
-supersedes: 2026-08-07 (outer-pvl) — re-validated against the live working tree after SPEC A's EXECUTE landed and 4 new migrations appeared. This contract CORRECTS two factual errors in the prior one (see "Corrections to the prior contract" below) and adds two findings the prior cycle could not see because the code it depends on did not exist yet.
+supersedes: 2026-08-07 (outer-pvl, 2nd pass, Gate: BLOCKED) — F1 (the sole remaining blocker) is
+CLEARED. This 3rd outer-PVL pass re-verified the entry gate LIVE against the working tree and the
+git remotes, re-verified every D-A…D-E supplement decision against current source, and re-tiered
+every Hybrid gate now that Docker is available. No new behavioural FAIL was found. Five doc-sync
+CONCERNs (N1–N5) replace the three prior FAILs.
 
 Parallel strategy: sequential (single-context pass)
-Rationale: 7-signal score **4/7** — S2 (schema/migration + billing/credits surface), S4 (phase-program
-membership), S6 (high-risk class named in the plan), S7 (11-file blast radius). Score 4 → HIGH →
-workflow or agent-team would be the from-scratch recommendation. This agent has no Agent tool grant
-this session, so Layer 1 (4 dimensions) and Layer 2 (8 sections) ran as ONE sequential pass, not a
-true parallel fan-out. Disclosed per this task's fan-out-disclosure constraint.
+Rationale: 7-signal score **4/7** — S2 (schema/migration + billing/credits surface), S4
+(phase-program membership), S6 (high-risk class named in the plan), S7 (11-file blast radius).
+Score 4 → HIGH → workflow or agent-team is the from-scratch recommendation. Deviation stated
+explicitly: this agent has no Agent tool grant this session, so Layer 1 (4 dimensions) and Layer 2
+(8 sections) ran as ONE sequential pass, not a true parallel fan-out. Every finding below is from a
+live command or a direct file read.
 
-### Corrections to the prior contract (both were wrong; both are now settled with live evidence)
+### What changed since the 2nd pass (the whole reason this pass exists)
 
-1. **"FIVE alembic heads" was FALSE.** The prior cycle could not run `alembic` (it reported a
-   sandbox block on `.venv`) and hand-parsed the revision headers instead, concluding 5 heads. This
-   session ran the real command: `.venv/bin/python3.11 -m alembic -c apps/api/alembic.ini heads` →
-   **`d1a6c4e93f27` (head)`** — exactly ONE head. Chain tail confirmed via `history -r-6:head`:
-   `f1a7c3e05b92 → a4f2b8c15d70 → b8e3f6a2c904 → c9f4a7b31e85 → d1a6c4e93f27`. Historical
-   branchpoints exist (`b7e1a2c9d4f0`, `f1a9c4d7e2b8`) but the DAG converges. **Entry Gate item 4
-   is MET; checklist A1's STOP-and-re-chain condition will NOT fire.** Neither `e6b2d4a1c837` (cited
-   by the umbrella) nor `c9f4a7b31e85` (cited by this task's prompt and by SPEC A's report) is the
-   head any more — `d1a6c4e93f27` chained onto `c9f4a7b31e85` when SPEC A's migration landed. A1
-   must still re-derive live at EXECUTE time; the head moves on roughly a daily cadence in this repo.
-2. **`.venv` is NOT blocked this session.** `alembic 1.13.3` imports and runs. Every finding below
-   is from a live command or a direct file read, not from inference.
-3. **Prior FAIL "migration directory path" is RESOLVED in the plan body** (Blast Radius,
-   Touchpoints, A4, A5 all now say `apps/api/migrations/versions/`; confirmed correct against
-   `apps/api/alembic.ini` `script_location = %(here)s/migrations` and 64 revision files present).
-   The sibling `phase-blast-radius-registry.md` line 22 **still says `apps/api/alembic/versions/`** —
-   outside this agent's write scope, carried forward as CONCERN C4.
+**F1 — Entry Gate: CLEARED.** All four clearing conditions verified this pass, three of them by
+independent live command rather than by trusting the record:
+
+| Condition | Evidence gathered THIS pass |
+|---|---|
+| SPEC A EVL GREEN | `tests/integration/test_graph_erasure_flow.py` collects **exactly 14 tests** (live `pytest --collect-only`). Repair commit `81eb4e6` is in history and its own message records `graph_erasure_flow … → 14/14` and an integration lane moving `478P/23F/17E → 518P/0F/0E`. The 8 previously-blocked gates were repaired **test-side only** (fixtures/asserts), so no production behaviour was altered to make them pass. |
+| Migration live round-trip | `d1a6c4e93f27` round-tripped on a disposable `postgres:16-alpine` (64-rev chain from empty, 17-rev down/up) — recorded in the entry-gate note. Not independently re-run this pass (would re-do a proven one-shot). |
+| Pushed + deployed | **Independently verified live.** `git branch -r --contains 443ad5e` → `origin/main` AND `origin/devjulley`. `git rev-list --left-right --count` → `main` 0/0 and `devjulley` 0/0 against their remotes. The "unpushed" half of the prior FAIL is factually gone. Railway deploy success + prod `alembic_version = d1a6c4e93f27` are taken from the record (outward call, not re-made here). |
+| Items re-derived LIVE | `alembic heads` → **`d1a6c4e93f27` (head)`, exactly ONE head** — unchanged since the 2nd pass, because SPEC A's own migration IS the head. `identity_resolver.py` drift re-check: **anchors unmoved** — call site `await self._upsert_beam_identity(visitor, data, provider)` at line **1252**, definition at line **1264**, exactly as the prompt predicted. The fix-batch and github-reader commits did not perturb this region. |
+
+Entry Gate item 1 (`identity-vocab-reconcile` at literal `Gate: PASS`) remains a **wording** gap, not
+a state gap: its actual state is `Gate: CONDITIONAL`, explicitly user-accepted at supplement cycle 9,
+EXECUTED and merged. The gate's *intent* — that the `identity_resolver.py` churn has settled and
+shipped — is satisfied, and this pass's drift re-check is the direct proof. Carried as N-VOCAB below.
+
+**Docker Known-Gap — CLEARED.** `docker info` → server **29.4.2**, up. Every Hybrid gate in this
+phase moves from gap-resolution **D (deferred residual)** to **B (gate added by this plan's
+checklist, runnable at EXECUTE)**. The plan's `## Test Infra Improvement Notes` claim that "every
+Hybrid gate in this program is therefore permanently deferred in this environment" is now stale and
+must not be used to skip G1/G2.
+
+**F2 — CLEARED by D-A, re-verified against source.** `_upsert_beam_identity` is `-> None` at line
+1266 with the guards intact; `_upsert_beam_identity` has **exactly one production caller**
+(line 1252 — re-grepped this pass, no second caller appeared). D-A's `bool`-return gating is
+mechanically applicable.
+
+**F3 — CLEARED by D-B, re-verified against source.** `ERASURE_TARGETS = ("beam_identity_graph",)`
+still at `apps/api/models/erasure_request.py:31`. Because D-B writes **nothing** when the graph write
+was blocked, the co-op tables' absence from `ERASURE_TARGETS` is harmless rather than a privacy
+regression. SPEC A's sweep mechanics are untouched — this decision only declines to create a new
+target.
+
+**C1–C8 — all CLEARED, each re-verified:** `GRAPH_WRITE_BLOCKING_SCOPES = ("erased",
+"do_not_process")` at `graph_erasure.py:78` and `is_email_suppressed_any` matches
+`scope.in_([*scopes, "all"])` at `suppression.py:44` (so the resolver boundary really does cover
+three effective scopes, and D-B correctly declines to re-list any of them). `Visitor.is_abuse_flagged`
+at `visitor.py:97` and `Visitor.is_bot_suspect` at `visitor.py:105` (D-C). `billing.check_usage_allowed(db, user_id)`
+at `services/billing.py:94` (D-D's Phase-2 consequence anchor holds). `phase-blast-radius-registry.md`
+migration paths are corrected at lines 23 and 57 (C4 resolved).
+
+**Zero-collision re-confirmed:** `apps/api/models/identity_coop.py`, `apps/api/services/identity_coop.py`,
+`apps/api/routers/identity_coop.py` all absent; no `identity_coop_*` / `coop_credit_*` / `coop_terms*`
+in `config.py`; no `contribution_enabled` in `models/site.py`, `schemas/sites.py`, or `routers/sites.py`;
+`apps/api/migrations/versions/` exists with 65 revisions and `apps/api/alembic/versions/` does **not**
+exist (path correction stands). `SiteOut` at `schemas/sites.py:16`, `SiteUpdate` at `:45`,
+`auto_identify_enabled` precedent at `:26`/`:57`; `verify_site_access` at `routers/sites.py:324` with
+the single `await db.commit()` at `:341` — E2's same-transaction requirement is naturally satisfiable
+and E3's check already exists via that helper.
 
 ### Net Gate Derivation
 
@@ -674,347 +750,333 @@ true parallel fan-out. Disclosed per this task's fan-out-disclosure constraint.
 
 | Layer 1 dimensions | Status |
 |---|---|
-| Infra fit | CONCERN |
-| Test coverage | CONCERN |
+| Infra fit | PASS |
+| Test coverage | PASS |
 | Breaking changes | PASS |
-| Security surface | FAIL |
+| Security surface | CONCERN |
 
 **Layer 2 sections**
 
 | Layer 2 sections | Status |
 |---|---|
-| Entry Gate / dependency status | FAIL |
+| Entry Gate / dependency status | PASS (cleared this pass — see table above) |
 | Section A — Models and migrations | PASS |
-| Section B — Config | PASS |
-| Section C — Service module | FAIL |
-| Section D — The hook | CONCERN |
-| Section E — 7-layer flag wiring | CONCERN |
-| Section F — Tests | CONCERN |
-| Section G — Migration round-trip | PASS (environmental Known-Gap — Docker confirmed DOWN this session; already correctly downgraded to CONDITIONAL by the plan's own Phase Completion Rules) |
+| Section B — Config | CONCERN (N2 — `coop_terms_version` missing from the settings block E4 depends on) |
+| Section C — Service module | PASS |
+| Section D — The hook | CONCERN (N3 — "three early-return guards" is an off-by-one; there are two `return` statements covering three conditions) |
+| Section E — 7-layer flag wiring | PASS |
+| Section F — Tests | PASS |
+| Section G — Migration round-trip | PASS (Docker 29.4.2 UP — no longer a deferred residual; G1/G2 are runnable and REQUIRED at EXECUTE) |
 
-**Totals: 3 FAILs / 5 CONCERNs / 4 PASSes**
+**Totals: 0 FAILs / 3 CONCERNs / 7 PASSes** (plus N1, N5 and N-VOCAB carried as document-sync
+concerns against sections outside this agent's write scope)
 
-**→ Net Gate: BLOCKED**
+**→ Net Gate: CONDITIONAL**
 
-Net-gate vacuous-green check: not applicable to a terminal PASS here, but recorded — no developed
-behavior in this phase rests on Known-Gap alone. The only Known-Gap (Docker round-trip) covers a
-behavior that also has a Fully-Automated offline `--sql` gate.
+Net-gate vacuous-green check (Step A1): **no developed behaviour in this phase rests on Known-Gap
+alone.** Every acceptance criterion has a Fully-Automated proving gate, and the two DB-enforcement
+behaviours (migration round-trip, `uq_coop_accrued_site_email`) have runnable Hybrid gates now that
+Docker is up. There is no Known-Gap residual carrying a behaviour by itself, so the vacuous-green ban
+does not bite — and the gate is CONDITIONAL on document-sync items, not on missing coverage.
 
-### The FAILs, by kind and resolution path
+### The CONCERNs found by fresh verification (all doc-sync / execute-instruction class)
 
-**F1 — Entry Gate unmet: SPEC A completed EXECUTE but is NOT LIVE. (External blocker. NOT
-plan-fixable.)**
-State advanced materially since the prior cycle — SPEC A `graph-erasure-compliance_07-08-26` is no
-longer "planned": its EXECUTE report exists (`graph-erasure-compliance_REPORT_07-08-26.md`,
-`status: COMPLETE_WITH_GAPS`, all 30 checklist items applied, 1165/1165 unit tests green,
-`d1a6c4e93f27` migration landed, `graph_erasure.py` / `erasure_request.py` / the
-`_upsert_beam_identity` write boundary all present on disk and verified by direct read this cycle).
-So the FIRST half of the Entry Gate ("has completed EXECUTE") is now **MET**.
-The SECOND half ("and is LIVE (not merely planned)") is **UNMET**, on the report's own words:
-- The report states the phase is `CODE DONE`, **not** `EVL GREEN` — verbatim, at its own line 181.
-- 14 integration gates (T-I1…T-I10) are **written but never executed** — Docker down. Independently
-  re-confirmed this cycle: `docker info` fails.
-- The migration live round-trip is **deferred, not passed** (offline `--sql` only).
-- Nothing is deployed. Branch is `devjulley`, unpushed. `graph_erasure_sweep_enabled` (default
-  `True`, a stated deviation) has never run in any real environment.
-The umbrella states the bar as "LIVE (not merely planned)" in 8 separate places (lines 26-27, 94,
-112-113, 150, 177-184, 258, 264, 485). The program's own stated rationale for that bar — paying
-credit before erasure works is a *worse* legal position than today's status quo — is about erasure
-**functioning**, not existing as unverified code. No PVL supplement cycle can clear this.
-**This is the dominant reason for BLOCKED.**
+**N1 — the Exit Gate block still prints `Expected: <= 6 changed lines`.** Plan line 445. D4 (line 386)
+raised the budget to ≤ 12 and states "the ≤ 6 figure is superseded everywhere it appears in this
+document" — so the supersession is semantically declared but was never applied to the Exit Gate,
+which is the block EXECUTE and EVL copy their commands from. Left as-is, a literal EVL run fails the
+D-A fix spuriously, or nudges an implementer toward the rejected shapes (b)/(c) to squeeze under 6.
+The authoritative number is **≤ 12**.
 
-**F2 — Credit accrues even when NO graph write happened. (Correctness defect. Plan-fixable, but the
-fix breaks the plan's own ≤6-line footprint claim — see D-tension below.)**
-This finding did not exist last cycle: it is created by SPEC A's write-boundary guard, which landed
-between the two cycles.
-- SPEC AC-3: *"Every graph write attributable to an opted-in site is counted against that site."*
-  SPEC line 63: *"every **new graph write** it produces is counted as a contribution."* A
-  contribution IS a graph write. That is the SPEC's definition.
-- The plan's hook (D1) fires **immediately after** `await self._upsert_beam_identity(visitor, data,
-  provider)` (verified at `identity_resolver.py:1252`).
-- `_upsert_beam_identity` returns **`None`** (`-> None`, verified at line 1264-1266) and **silently
-  returns early in three distinct cases** before writing anything:
-  1. `if not fp or not email: return` (line 1270-1271) — no fingerprint ⇒ no graph row;
-  2. `if getattr(visitor, "do_not_resolve", False)` ⇒ `graph_write_blocked`, return (line 1279-1285)
-     — a GPC/DNT visitor;
-  3. `await is_email_suppressed_any(self.db, email, GRAPH_WRITE_BLOCKING_SCOPES)` ⇒ same return —
-     an erased or `do_not_process` person.
-- Because the return type carries no signal, **the caller cannot tell whether a row was written.**
-  The hook therefore records a contribution event and accrues a credit for a resolve that
-  contributed nothing. Directly violates AC-3 and AC-5.
-- The plan's C2 step 4 only *partially* compensates, and does so by **duplicating** the gate inside
-  `identity_coop.py` — two independent implementations of one rule, free to drift. See C1 for how
-  they already diverge.
-Resolution shapes (a PLAN decision, not this agent's to make): (a) change
-`_upsert_beam_identity` to return `bool` and gate the hook on it — cleanest, honours the SPEC
-definition exactly, but adds a return-type change + call-site change inside the contested file;
-(b) move the hook INSIDE `_upsert_beam_identity` after the successful insert — smallest truthful
-footprint, but relocates the "call-graph position" the whole plan and registry describe;
-(c) re-derive all three no-op conditions inside `identity_coop.py` — no resolver change, but
-triples the drift surface and is the option that produced C1.
+**N2 — `coop_terms_version` is required by E4 but missing from `## Config Settings`.** The settings
+block (plan lines 281–286) lists four settings; E4 (line 394) requires a fifth,
+`coop_terms_version: str`, pinned to the policy-text digest. B2 compounds it by asserting "all
+**four** defaults are OFF/inert". An implementer following B1/B2 literally never creates
+`coop_terms_version`, and E4's constant compare then references a nonexistent setting. Five settings
+are required; B2 must assert five.
 
-**F3 — Security surface: an erased person gets a NEW `email_bidx`-keyed row that erasure cannot
-reach. (Privacy regression against the program that just shipped. Plan-fixable.)**
-- `ERASURE_TARGETS = ("beam_identity_graph",)` — verified at `apps/api/models/erasure_request.py:31`.
-  The co-op's new `identity_contribution_events` table is **not** an erasure target, and Phase 1
-  does not add it.
-- The plan's C2 step 4 **deliberately writes the event row anyway** for an erased person, setting
-  `excluded_reason='erased'` and skipping only the *accrual*. So a person who exercised GDPR
-  erasure gets a brand-new blind-index-keyed row created **after** their erasure completed, in a
-  table SPEC A's sweep will never touch. The erasure becomes provably incomplete for anyone who
-  revisits any opted-in site.
-- Blind-indexed is not out of scope: `email_bidx` is exactly the key SPEC A tombstones and sweeps
-  on, and `SuppressionEntry.email_hash` is the same `pii_crypto.email_hash()` output (verified
-  `suppression.py:43`, `identity_resolver.py:1299`). If `email_bidx` were not identifying, the
-  erasure program would not need to delete it.
-Required fix shape: either (a) do not write the event at all when the graph write was blocked (the
-natural consequence of fixing F2), or (b) add `identity_contribution_events` to `ERASURE_TARGETS`
-and to the sweep's delete set — which is a change to SPEC A's mechanics and therefore, per the
-umbrella's own line 94, **out of this program's scope** and needs SPEC A to own it.
+**N3 — D5/D-A say "three early-return guards"; there are two `return` statements.** Verified live:
+`_upsert_beam_identity` returns at line **1271** (`if not fp or not email`) and at line **1285** (the
+single combined `if getattr(visitor, "do_not_resolve", False) or await is_email_suppressed_any(...)`).
+The three *conditions* are real; they are collapsed into two *returns*. There is additionally **no
+explicit return in the `except` path** (lines ~1327-1329 fall through to an implicit `None`). The
+correct, complete edit set is therefore: `return False` at 1271 and 1285; `return True` immediately
+after `await self.db.commit()`; `return False` in the `except` block; signature `-> None` → `-> bool`;
+docstring updated. That is 6 touched lines — comfortably inside the ≤ 12 budget. Behaviourally
+harmless (D5 already forbids changing guard logic or ordering) but an implementer hunting a
+nonexistent third return will either stall or invent one.
+
+**N4 — minor citation imprecision in D-C.** D-C cites "`models/visitor.py:105` and `:207`" as "Both
+columns exist on `Visitor`". `:105` is `Visitor.is_bot_suspect`; `Visitor.is_abuse_flagged` is at
+`:97`. The `:199`/`:207` region belongs to `IdentifiedVisitor`, a different class. **The decision is
+sound** — both columns do exist on `Visitor` — only the citation conflates two classes. Use 97 and
+105.
+
+**N5 — the plan's own Phase Loop Progress still forbids EXECUTE. HIGHEST-PRIORITY ORCHESTRATOR
+ACTION.** Plan lines 537–539 read "**Do NOT spawn vc-execute-agent for this phase.** Status:
+**Dependency-BLOCKED — entry gate SPEC A not LIVE; files never modified.**", and
+`phase-blast-radius-registry.md:35` carries the same `status: Dependency-BLOCKED` line. Both are now
+factually stale. This matters mechanically, not cosmetically: the Phase Program Pre-Routing Check
+routes a phase whose Step-0 shows `Dependency-BLOCKED` straight to Phase N+1 **without spawning any
+agent**. Left unedited, this contract's CONDITIONAL verdict and the plan body's routing instruction
+disagree inside one file — the exact plan-body-vs-record disagreement class that has previously let a
+downstream agent proceed on ambiguous authority.
+
+**This contract explicitly SUPERSEDES the following stale plan-body passages**, all of which were
+written when F1 was open: line 17–18 (`Phase status` / `Status: ⏳ PLANNED — blocked on two upstream
+dependencies`), lines 56–78 (the 2nd pass's Entry Gate re-derivation, incl. its "Entry Gate is still
+UNMET" conclusion), line 509 (the SPEC-A-not-LIVE blocker bullet), lines 514–515, the Step-4 note at
+line 527, the cycle-1 note at line 535, lines 537–539 (the do-not-spawn instruction), the Docker
+sentence in `## Test Infra Improvement Notes` (lines 610–612), and the `Next step` paragraph at lines
+622–632. Where any of those passages conflicts with this section, **this section wins.**
+
+**N-VOCAB — Entry Gate item 1 wording.** `identity-vocab-reconcile_07-08-26` is `Gate: CONDITIONAL`
+(user-accepted, executed, merged), not the literal `Gate: PASS` the Entry Gate names. Accepted as
+satisfying the gate's intent; recorded so it is not re-litigated.
+
+**N6 — the umbrella's `## Pre-PVL Conflict Resolution` is still a placeholder.** Non-blocking here:
+`## Phase Ordering` declares the three phases **strictly sequential** with no parallel execution, so
+there is no concurrent-edit window for the three named candidate surfaces
+(`services/identity_coop.py`, `routers/sites.py`, `models/identity_coop.py`). The correct fill is the
+trivial one — "No package conflicts — phases are strictly sequential." No `Action: update Phase [X]
+blast-radius claim` entries exist, so V1's Action-field completion check passes vacuously.
 
 ### Dimension findings
 
-- **Infra fit: CONCERN** — migration directory now correct in the plan body and confirmed against
-  `alembic.ini`; live `alembic heads` returns a single head `d1a6c4e93f27` so Section A is
-  mechanically clean. Residual: `phase-blast-radius-registry.md:22` still cites the non-existent
-  `apps/api/alembic/versions/` (C4), and every head value written into any of these four documents
-  is already stale — A1's live re-derivation is the only trustworthy source.
-- **Test coverage: CONCERN** — the 8 planned tests are correctly tiered Fully-Automated against
-  model shapes verified this cycle (`Visitor.is_abuse_flagged` at `visitor.py:97`,
-  `Visitor.is_bot_suspect` at `visitor.py:105`, `SuppressionEntry.email_hash` at
-  `suppression.py:37`, `pii_crypto.email_hash` at line 66, `OWNED_FREE_PROVIDERS` at
-  `identity_classification.py:74`). But the suite has **three holes that would let F2, F3, C1 and
-  C3 ship EVL-green**: (i) no test drives a resolve where `_upsert_beam_identity` no-ops
-  (`do_not_resolve=True`, missing fingerprint, `do_not_process`/`all` tombstone) and asserts zero
-  accrual; (ii) no test at all for E2's acceptance-guarded flag flip — AC-10 appears nowhere in
-  Phase 1's Acceptance Criteria list or Verification Evidence table (C5); (iii) `is_bot_suspect` is
-  never exercised though SPEC AC-9 names it (C3). Hybrid round-trip is a legitimate environmental
-  Known-Gap (Docker confirmed down).
-- **Breaking changes: PASS** — Public Contracts section is accurate and re-verified. `_save_identified`'s
-  early-return paths (email-dedup merge at line 1134/1144, `_log_owned_resolution` at 1175, the
-  conflict-upsert path returning at 1243) all occur BEFORE the hook anchor at 1252, so none are
-  affected. `_upsert_beam_identity`'s signature is unchanged by this phase as planned — noting that
-  this is precisely what enables F2, so keeping it unchanged is not costless. `PATCH
-  /api/v1/sites/{site_id}` addition is additive and the existing single `await db.commit()` at
-  `routers/sites.py:341` makes E2's same-transaction requirement naturally satisfiable.
-- **Security surface: FAIL** — see F3. Secondary findings, all real but individually non-blocking:
-  the blind-index-only PII discipline is otherwise correct (C2 step 4's `email_hash` column-name
-  correction from last cycle is verified right, and the plan correctly refuses to call
-  `is_email_suppressed()` because it takes plaintext); the best-effort try/except (C4 in the
-  checklist) with keys-only logging is correct; multi-tenancy is preserved because `update_site`
-  already routes through `verify_site_access(db, site_id, user)` (`routers/sites.py:324`) which is
-  the 404-not-403 helper — though E3 does not name it (C7). **High-risk class confirmed:
-  billing/credits + schema/migration. Per `vc-risk-evidence-pack`, EXECUTE on this phase requires
-  the manual-first 5-artifact evidence pack in the task folder's `harness/` subdir before the work
-  may be called ready; it does not exist yet.**
+- **Infra fit: PASS** — live `alembic heads` returns exactly ONE head, `d1a6c4e93f27`; A1's
+  STOP-and-re-chain condition will not fire. `apps/api/migrations/versions/` confirmed as the real
+  script location (65 revisions; `apps/api/alembic/versions/` does not exist) and the path is now
+  correct in the plan body AND in `phase-blast-radius-registry.md:23`/`:57`, closing C4. Docker
+  29.4.2 is up, so G1/G2 are executable rather than deferred. Residual: every head string written in
+  these documents expires quickly — A1's live re-derivation at EXECUTE time remains the only
+  trustworthy value.
+- **Test coverage: PASS** — the three holes the 2nd pass flagged are closed by F9–F14, and each new
+  test's target now verifies against real source: the no-op paths (F9) map to returns at 1271/1285,
+  the privacy invariant (F10) to `ERASURE_TARGETS` at `erasure_request.py:31`, the bot half of AC-9
+  (F11) to `Visitor.is_bot_suspect:105`, accrual uniqueness (F12) to the D-E partial index, the
+  AC-10 leg (F13) to `SiteUpdate:45` + the single commit at `routers/sites.py:341`, and the signature
+  compatibility claim (F14) to the single caller at 1252. Two rows the 2nd pass's table had **omitted**
+  (F12, F14) and one Hybrid row (the `uq_coop_accrued_site_email` index check) are ADDED below; the
+  stale row naming the **retired** `test_erased_row_earns_no_credit` (F6, retired at supplement cycle
+  1) is REMOVED. Every Hybrid gate re-tiered D → B.
+- **Breaking changes: PASS** — re-verified. `_save_identified`'s early-return paths all occur before
+  the hook anchor at 1252, so none are affected. `_upsert_beam_identity` is private, has exactly one
+  production caller, and no cross-module consumer reads its return, so `None` → `bool` is
+  contract-safe. The `PATCH /api/v1/sites/{site_id}` addition is additive; the new 422 on a
+  missing/malformed/non-current `terms_version` is a genuine new response code and is correctly
+  declared in `## Public Contracts`.
+- **Security surface: CONCERN** — the privacy posture is now correct by construction: D-B's
+  write-nothing rule means no `email_bidx`-bearing co-op row can exist for a person whose graph write
+  was blocked, so the co-op tables' absence from `ERASURE_TARGETS` is harmless, and the co-op module
+  imports no suppression scope of its own (single source of truth stays inside the resolver's
+  boundary). Blind-index-only discipline holds (`pii_crypto.email_hash:66`); the best-effort
+  try/except logs keys/ids only; multi-tenancy is preserved via `verify_site_access` (404-not-403).
+  **The residual CONCERN is procedural, and it is the one thing standing between this plan and a
+  clean PASS: the high-risk 5-artifact evidence pack does not exist.**
+  `process/features/visitors-identity/active/identity-coop_07-08-26/harness/` is absent (verified —
+  no such directory). Per `vc-risk-evidence-pack`, **billing/credits + schema/migration are two of
+  the six high-risk classes**, so `risk-gate.json`, `context-snippets.json`, `verification.json`,
+  `review-decision.json` and `adversarial-validation.json` must exist there — with an explicit
+  APPROVE/REJECT and written rationale in `review-decision.json` — **before this phase's work may be
+  called ready.** This is confirmed as an **EXECUTE deliverable** (see E-5 below), manual-first by
+  design, not a blocking hook.
 
-### Section-level detail (Layer 2)
+### Execute-agent instructions
 
-- **Section A — PASS.** Mechanical feasibility clean: `apps/api/models/identity_coop.py`,
-  `apps/api/services/identity_coop.py`, `apps/api/routers/identity_coop.py` all absent (verified
-  `ls` → No such file). No `contribution_enabled` anywhere in `models/site.py`, `schemas/sites.py`,
-  `routers/sites.py`. No `identity_coop_*` / `coop_credit_*` in `config.py`. Single alembic head.
-  Migration dir correct. Nothing to collide with.
-- **Section B — PASS.** Four settings, all default OFF/inert, follows the
-  `agent_detection_enabled` / `company_graph_enabled` / `identity_signals_enabled` precedent.
-- **Section C — FAIL.** See F2 + F3, plus C1 and C3.
-- **Section D — CONCERN.** The anchor is exact and unambiguous: `_upsert_beam_identity(visitor,
-  data, provider)` at line 1252, with the best-effort hot-alert block at 1254-1260 immediately
-  after; inserting between them is exactly the described position. No collision with SPEC A's
-  change (which lives INSIDE `_upsert_beam_identity` at 1272-1285) nor with the vocab-reconcile
-  work. Local-import precedent is real (lines 129, 164, 203-204, 224, 309, 692, 1090, 1256, 1276-77,
-  1291, 1343, 1424). D2's fallback is the correct expectation: the resolver caches no `Site` ORM
-  instance — the only `Site` touch in the file is `select(Site.url)` at line 149.
-  **The concern is the D4 tension:** D4 caps the resolver diff at ≤6 lines, but the F2 fix most
-  faithful to the SPEC (return `bool` from `_upsert_beam_identity` and branch on it) necessarily
-  changes that function's signature, its `-> None` annotation, and at least one `return` statement
-  inside it. Either D4's budget or the SPEC's definition of a contribution has to give. That is a
-  PLAN decision this contract cannot make.
-- **Section E — CONCERN.** Mechanically feasible (`SiteUpdate` at `schemas/sites.py:45`, `SiteOut`
-  at line 16, `auto_identify_enabled` precedent at lines 26/57, single commit at `routers/sites.py:341`).
-  Two gaps: C5 (the guard has no proving gate in this phase and `terms_version` has no validator
-  until Phase 3's `coop_terms.py`, so a client sending `terms_version="x"` satisfies it — a vacuous
-  guard against a field the data model calls an "immutable snapshot hash of the exact policy text")
-  and C7 (`verify_site_access` not named).
-- **Section F — CONCERN.** See Test coverage above.
-- **Section G — PASS with Known-Gap.** Docker independently confirmed down. The plan's own Phase
-  Completion Rules already forbid promoting to ✅ VERIFIED on offline `--sql` alone. Correct as written.
+| # | Instruction | Trigger condition |
+|---|---|---|
+| E-1 | The `identity_resolver.py` diff budget is **≤ 12 lines**, not 6. Ignore the `Expected: <= 6 changed lines` line in the Exit Gate block (N1) — D4 supersedes it. Do NOT reshape the D-A fix to fit 6. | Step D / Exit Gate |
+| E-2 | Create **five** config settings, not four: the four in `## Config Settings` **plus** `coop_terms_version: str` required by E4 (N2). B2's assertion must cover all five and confirm `identity_coop_enabled is False`. | Step B entry |
+| E-3 | `_upsert_beam_identity` has **two** `return` statements (lines 1271 and 1285 as of this pass), not three, and **no** explicit return in its `except` block (N3). Apply: `return False` at both existing returns, `return True` immediately after `await self.db.commit()`, `return False` in the `except` path, `-> None` → `-> bool`, docstring updated. Locate by call-graph position, not by these line numbers. Do NOT alter guard logic or ordering. | Step D5 |
+| E-4 | **Docker is UP (29.4.2).** G1/G2 are REQUIRED, not deferred. Run the round-trip on a DISPOSABLE Postgres only — never a shared or prod database. Also assert the `uq_coop_accrued_site_email` partial unique index exists after `upgrade head` and that a duplicate `ACCRUE` insert raises `IntegrityError`. The plan's `## Test Infra Improvement Notes` "permanently deferred" sentence is stale — do not cite it to skip G2. | Step G entry |
+| E-5 | Produce the 5-artifact high-risk evidence pack in `process/features/visitors-identity/active/identity-coop_07-08-26/harness/` and validate it with `node .claude/skills/vc-risk-evidence-pack/scripts/validate-risk-artifacts.mjs`. `review-decision.json` needs an explicit APPROVE/REJECT with written rationale; `adversarial-validation.json` is required (credit-minting-without-a-graph-write and erased-person-row-creation are the two adversarial scenarios to rule out). Do not report DONE without it. | Before reporting the phase ready |
+| E-6 | Re-derive `alembic heads` LIVE as the FIRST action of Step A and record the value in the phase report. `d1a6c4e93f27` was the single head at this pass; this repo's head moves on a roughly daily cadence. Chain both new migrations onto the live value, never onto a head string quoted in any document. | Step A1 |
+| E-7 | Take `email_bidx` from `pii_crypto.email_hash` (`:66`) only. Never pass plaintext email into `identity_coop.py`. `structlog` calls in the co-op module log keys/ids only. | Step C / D3 |
+
+### Proposed plan updates (outside this agent's write scope — orchestrator or plan-agent supplement)
+
+| # | What changes | Where in plan | Why |
+|---|---|---|---|
+| P1 | Replace `Expected: <= 6 changed lines` with `Expected: <= 12 changed lines` | Exit Gate, line 445 | N1 — D4 already declares the supersession; apply it to the block EXECUTE copies from |
+| P2 | Add `coop_terms_version: str = "<policy-text digest>"` to the settings block; change B2 from "all four" to "all five" | `## Config Settings` (281-286), B2 (313) | N2 — E4 depends on a setting the block does not list |
+| P3 | Reword D5/D-A "three early-return guards" → "two early-return statements covering three conditions, plus the `except` path" | D5 (388), D-A (99-103) | N3 — off-by-one sends the implementer looking for a return that does not exist |
+| P4 | Correct D-C's citation to `visitor.py:97` (`is_abuse_flagged`) and `:105` (`is_bot_suspect`); drop `:207` | D-C (149-156) | N4 — `:207` is `IdentifiedVisitor`, a different class |
+| P5 | **Remove the `Dependency-BLOCKED` status and the "Do NOT spawn vc-execute-agent" instruction**; set `Phase status`/`Status` to `⏳ PLANNED — entry gate CLEARED 07-08-26, ready for EXECUTE`; update `phase-blast-radius-registry.md:35` the same way | Lines 17-18, 537-539; registry line 35 | **N5 — MUST happen before vc-execute-agent is spawned.** The Pre-Routing Check skips a Dependency-BLOCKED phase entirely, so leaving this text routes Phase 1 past EXECUTE to Phase 2 |
+| P6 | Replace the "every Hybrid gate is permanently deferred in this environment" sentence with "Docker 29.4.2 available 07-08-26 — Hybrid gates are runnable and required" | `## Test Infra Improvement Notes` (610-612) | Docker Known-Gap cleared; stale text invites skipping G2 |
+| P7 | Fill `## Pre-PVL Conflict Resolution` with "No package conflicts — phases are strictly sequential." | Umbrella, line 500-504 | N6 — placeholder; trivially derivable from `## Phase Ordering` |
 
 ### Open gaps
 
-- **F1 — Entry Gate unmet (SPEC A not LIVE)** — hard external blocker. NOT a known-gap; EXECUTE
-  cannot start. Clears when SPEC A reaches EVL GREEN (its 14 integration gates + migration
-  round-trip run with Docker up) **and** ships, OR when the umbrella explicitly redefines "LIVE"
-  and the user accepts that redefinition here.
-- **F2 — accrual not conditioned on the graph write** — plan-fixable; requires a PLAN decision
-  between the three resolution shapes above, one of which conflicts with D4's ≤6-line budget.
-- **F3 — `identity_contribution_events` outside `ERASURE_TARGETS`** — plan-fixable if resolved as
-  "never write the event when the graph write was blocked"; otherwise it becomes a SPEC A scope
-  change, which the umbrella forbids this program from making.
-- **C1 — suppression scope set too narrow.** Verified: `GRAPH_WRITE_BLOCKING_SCOPES = ("erased",
-  "do_not_process")` (`graph_erasure.py:78`) and `is_email_suppressed_any` also matches `"all"`
-  (`suppression.py:44`). So the resolver blocks graph writes on **three** scopes; the plan's C2
-  step 4 checks only `scope == "erased"`. A `do_not_process` or `all` tombstone therefore blocks the
-  graph write while still accruing credit. Widen C2 step 4 to reuse
-  `GRAPH_WRITE_BLOCKING_SCOPES` (import the constant, do not re-list the strings).
-- **C2 — duplicated gate.** C2 step 4 re-implements the resolver's write boundary inside
-  `identity_coop.py`. Even once widened, it is a second copy of a privacy rule that SPEC A owns.
-  Prefer a design where the co-op reads the outcome instead of re-deriving the condition.
-- **C3 — fraud gate narrower than SPEC AC-9.** AC-9 names "`is_abuse_flagged` / `is_bot_suspect`
-  (or equivalent)" and references `referral_activation.py`'s gate shape. `record_contribution`'s
-  signature takes only `is_abuse_flagged`; `Visitor.is_bot_suspect` exists (`visitor.py:105`) and is
-  never consulted. F5 tests only the abuse flag.
-- **C4 — registry migration path** — `phase-blast-radius-registry.md:22` still says
-  `apps/api/alembic/versions/` (also wrong in Phase 2's entry at line 43). Out of this agent's
-  write scope. Orchestrator / registry owner to correct.
-- **C5 — AC-10 orphaned across the phase boundary.** Phase 1's E2 builds AC-10's automated leg, but
-  AC-10 appears in neither Phase 1's Acceptance Criteria list nor its Verification Evidence table
-  (the umbrella's Coverage Map assigns AC-10 to Phase 3). Phase 1 EVL can therefore go green having
-  never exercised the guard it built, and the terms module that gives `terms_version` meaning does
-  not exist until Phase 3.
-- **C6 — ledger scope vs the only enforcement gate.** `identity_credit_ledger` is `site_id`-scoped
-  (this phase's decision, and the registry declares the schema **frozen after Phase 1**). The only
-  monthly enforcement point is `billing.check_usage_allowed(db, user_id)` keyed on
-  `User.monthly_identified_count` (`services/billing.py:94-128`) — `user_id`-scoped. The only
-  per-site gate is the daily resolution budget, which Phase 2 is explicitly forbidden from touching.
-  Phase 2's AC-6 ("credits are spendable") inherits an unresolvable scope mismatch from a schema
-  Phase 1 freezes. Decide the reconciliation HERE, while the schema is still open.
-- **C7 — `verify_site_access` not named in E3.** Minor citation gap; the check E3 asks for already
-  exists via that helper (`routers/sites.py:324`).
-- **C8 — daily re-accrual on an already-owned identity.** The unique key is `(site_id, email_bidx,
-  contributed_on)` — per DAY. `_upsert_beam_identity` uses `on_conflict_do_update`, so a repeat
-  resolve of a person the graph already holds is an UPDATE, not a new row, yet it mints a fresh
-  credit every calendar day forever. SPEC line 63 says "every **new** graph write"; the plan counts
-  every write. Whether that is intended is a locked-decision question, not a defect this contract
-  adjudicates — but it should be answered before the schema freezes.
-- **Docker round-trip (Known-Gap, environmental)** — `docker info` fails this session, same as SPEC
-  A's EXECUTE. Carried as gap-resolution D; backlog stub required at EXECUTE/EVL if still down.
-- **High-risk evidence pack absent (Known-Gap, procedural)** — billing/credits + schema/migration
-  are two of the six high-risk classes. The 5-artifact pack (`risk-gate.json`,
-  `context-snippets.json`, `verification.json`, `review-decision.json`,
-  `adversarial-validation.json`) must exist under
-  `process/features/visitors-identity/active/identity-coop_07-08-26/harness/` before this phase's
-  work may be called ready. It does not exist. Manual-first by design; not a blocking hook.
+- **High-risk evidence pack absent (procedural, gap-resolution B — due at EXECUTE).** `harness/` does
+  not exist. Required before the phase may be called ready. See E-5.
+- **N5 doc-sync is a hard precondition, not a nit.** The plan's own Phase Loop Progress still says do
+  not spawn execute-agent. P5 must be applied before EXECUTE is spawned.
+- **`alembic heads` is a snapshot.** `d1a6c4e93f27` was the single head at this pass. Re-derive live
+  at EXECUTE (E-6).
+- **`identity-vocab-reconcile` wording gap (N-VOCAB)** — `Gate: CONDITIONAL` user-accepted, not the
+  literal `Gate: PASS` the Entry Gate names. Accepted as intent-satisfied.
+- **Prod-environment behaviour of the co-op is unproven and out of scope by design.** All flags
+  default OFF; enabling `identity_coop_enabled` or any site's `contribution_enabled` in a real
+  environment is a separate, explicit, later operator action gated on legal review — never part of
+  this phase.
+- No out-of-scope gap was deferred to backlog in this PVL cycle. The prior cycle's F1 backlog note
+  (`backlog/identity-coop-entry-gate-spec-a-live_NOTE_07-08-26.md`) is **RESOLVED** by this pass and
+  should be marked as such at UPDATE PROCESS.
 
-### Test gates (C3 5-column table — ADDITIVE)
+### Test gates (C3 5-column table — ADDITIVE; the legacy line form follows)
 
 | criterion id | behavior | strategy | proving test | gap-resolution |
 |---|---|---|---|---|
-| AC-1 | flag OFF ⇒ zero counted contributions | Fully-Automated | `tests/integration/test_identity_coop_contribution.py::test_flag_off_produces_zero_contributions` | B |
-| AC-2 | non-contributor still gets graph-served matches | Fully-Automated | `tests/integration/test_identity_coop_contribution.py::test_non_contributor_still_receives_graph_matches` | B |
-| AC-3 | merge-aware contribution counting | Fully-Automated | `tests/unit/test_identity_coop.py::test_merged_duplicate_counts_once` | B |
-| AC-3 / AC-5 (F2) | a resolve where the graph write NO-OPS accrues zero credit — one case per no-op path: missing fingerprint, `do_not_resolve=True`, `do_not_process` tombstone, `all` tombstone | Fully-Automated | `tests/unit/test_identity_coop.py::test_blocked_graph_write_accrues_nothing` (NEW — does not exist in the plan; must be added by the F2 fix) | B |
-| AC-5 | qualifying contribution ⇒ one ACCRUE row | Fully-Automated | `tests/integration/test_identity_coop_contribution.py::test_qualifying_contribution_writes_ledger_row` | B |
-| AC-9 | abuse-flagged traffic ⇒ zero accrual | Fully-Automated | `tests/integration/test_identity_coop_contribution.py::test_abuse_flagged_visitor_earns_no_credit` | B |
-| AC-9 (C3) | `is_bot_suspect=True` traffic ⇒ zero accrual | Fully-Automated | `tests/unit/test_identity_coop.py::test_bot_suspect_visitor_earns_no_credit` (NEW — must be added) | B |
-| SPEC A interface (C1) | erased **and** `do_not_process` **and** `all` tombstones each ⇒ zero accrual, using `GRAPH_WRITE_BLOCKING_SCOPES` not a re-listed literal | Fully-Automated | `tests/unit/test_identity_coop.py::test_erased_row_earns_no_credit` (EXISTS, must be widened to all three scopes) | B |
-| AC-12 | grandfathered rows contribute 0 | Fully-Automated | `tests/unit/test_identity_coop.py::test_grandfathered_rows_contribute_zero` | B |
-| best-effort hook contract | co-op failure never breaks identification | Fully-Automated | `tests/unit/test_identity_coop.py::test_coop_failure_does_not_break_identification` | B |
-| AC-10 automated leg (C5) | `contribution_enabled=True` via API is rejected without a `terms_version`, and accepted only with an acceptance row written in the SAME transaction | Fully-Automated | `tests/integration/test_identity_coop_contribution.py::test_flag_on_requires_acceptance` (NEW — E2 currently has no proving gate in this phase) | B |
-| F3 — erasure completeness | after an erasure completes, a subsequent resolve of that person creates NO new `email_bidx`-keyed row in `identity_contribution_events` | Fully-Automated | `tests/unit/test_identity_coop.py::test_erased_person_leaves_no_new_bidx_row` (NEW) | B |
-| migration currency | offline `--sql` validation clean, explicit range | Fully-Automated | `.venv/bin/python3.11 -m alembic -c apps/api/alembic.ini upgrade <head_from_A1>:head --sql` | B |
-| schema/migration high-risk class | live round-trip on disposable Postgres | Hybrid (precondition: disposable Postgres container) | `upgrade head → downgrade -1 → downgrade -1 → upgrade head` | D — `docker info` fails this session; backlog stub required at EXECUTE/EVL if still down |
-| collision-minimization | `identity_resolver.py` diff ≤ 6 lines | Fully-Automated | `git diff --stat apps/api/services/identity_resolver.py` | B — **note the D4 tension: the F2 fix may legitimately exceed this budget; re-set the number as part of the F2 decision rather than letting the guard force the wrong fix** |
-| Entry Gate (F1) | SPEC A EVL GREEN + LIVE, and vocab-reconcile cleared, before EXECUTE | Agent-Probe (status re-derivation from sibling plan + report files, plus `docker info`) | manual status re-check of both dependency plans at the start of every future PVL/EXECUTE attempt | C — deferred until SPEC A's Hybrid tier runs and ships |
-| high-risk evidence pack | 5-artifact manual-first pack exists and records an explicit APPROVE/REJECT | Agent-Probe | `.claude/skills/vc-risk-evidence-pack/scripts/validate-risk-artifacts.mjs` against `.../identity-coop_07-08-26/harness/` | C — due at EXECUTE, before the phase may be called ready |
+| AC-1 | flag OFF ⇒ zero contribution events and zero ledger rows across a full resolve cycle | Fully-Automated | `tests/integration/test_identity_coop_contribution.py::test_flag_off_produces_zero_contributions` (F1) | B |
+| AC-2 | a non-contributing site STILL receives graph-served identifications (read unconditional) | Fully-Automated | `tests/integration/test_identity_coop_contribution.py::test_non_contributor_still_receives_graph_matches` (F2) | B |
+| AC-3 | merge-aware counting — same email, two `visitor_id`s, one day ⇒ exactly one event | Fully-Automated | `tests/unit/test_identity_coop.py::test_merged_duplicate_counts_once` (F3) | B |
+| AC-3 / AC-5 (ex-F2, D-A/D-B) | a resolve where the graph write NO-OPS accrues zero credit AND writes zero event rows — one case per path: missing fingerprint; `do_not_resolve=True`; `do_not_process` tombstone; `all` tombstone | Fully-Automated | `tests/unit/test_identity_coop.py::test_blocked_graph_write_accrues_nothing` (F9) | B |
+| AC-5 | one qualifying contribution ⇒ exactly one positive `ACCRUE` row with `site_id`, `reason`, `created_at`, `expires_at`, `spendable_at` | Fully-Automated | `tests/integration/test_identity_coop_contribution.py::test_qualifying_contribution_writes_ledger_row` (F4) | B |
+| AC-9 (abuse half) | `is_abuse_flagged=True` ⇒ event recorded, `excluded_reason='fraud_flagged'`, zero ledger rows | Fully-Automated | `tests/integration/test_identity_coop_contribution.py::test_abuse_flagged_visitor_earns_no_credit` (F5) | B |
+| AC-9 (bot half, D-C) | `is_bot_suspect=True` ⇒ event recorded, `excluded_reason='fraud_flagged'`, zero ledger rows | Fully-Automated | `tests/unit/test_identity_coop.py::test_bot_suspect_visitor_earns_no_credit` (F11) | B |
+| Privacy invariant (D-B) | after an erasure tombstone exists, a later resolve of that person leaves NO `email_bidx`-bearing row in `identity_contribution_events` | Fully-Automated | `tests/unit/test_identity_coop.py::test_erased_person_leaves_no_new_bidx_row` (F10) | B |
+| Accrual uniqueness (D-E) | same `(site_id, email_bidx)` resolved on two different days ⇒ two event rows (second `accrued=False, excluded_reason='duplicate'`) and exactly ONE ledger row total | Fully-Automated | `tests/unit/test_identity_coop.py::test_second_day_resolve_accrues_no_second_credit` (F12) | B — **ADDED this pass; the 2nd pass's table omitted it** |
+| AC-12 | pre-program `beam_identity_graph` rows contribute 0 to any site's ledger | Fully-Automated | `tests/unit/test_identity_coop.py::test_grandfathered_rows_contribute_zero` (F7) | B |
+| Best-effort hook contract | a forced `record_contribution` failure never breaks `_save_identified`'s return | Fully-Automated | `tests/unit/test_identity_coop.py::test_coop_failure_does_not_break_identification` (F8) | B |
+| AC-10 automated leg + E4 | `contribution_enabled=True` rejected 422 with missing / malformed / non-current `terms_version`; accepted only with the pinned version, writing exactly one acceptance row in the SAME transaction | Fully-Automated | `tests/integration/test_identity_coop_contribution.py::test_flag_on_requires_acceptance` (F13) | B |
+| D-A signature compatibility | `_upsert_beam_identity` returns `True` on a successful write and `False` on every guard path; with `identity_coop_enabled=False` the hook stays inert even when the function is `AsyncMock`-replaced | Fully-Automated | `tests/unit/test_identity_coop.py::test_upsert_returns_bool_and_existing_callers_unaffected` (F14) | B — **ADDED this pass; the 2nd pass's table omitted it** |
+| Flags-default-OFF constraint | all five Phase 1 settings default OFF/inert and `identity_coop_enabled is False`; `Site.contribution_enabled` defaults `False` | Fully-Automated | B2 assertion in `tests/unit/test_identity_coop.py` | B |
+| Migration currency | offline `--sql` validation clean, EXPLICIT revision range (unscoped `head --sql` fails mid-chain on `b7d3e9f1a4c2`) | Fully-Automated | `.venv/bin/python3.11 -m alembic -c apps/api/alembic.ini upgrade <head_from_A1>:head --sql` | B |
+| Unit-lane regression | no regression in the existing unit lane | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit -m unit -q` | B |
+| Integration-lane regression | no regression in the existing integration lane (baseline 518P/0F/0E at `81eb4e6`) | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/ -m integration -q` | B |
+| Collision-minimization | `identity_resolver.py` diff **≤ 12 lines** (budget re-set at supplement cycle 1, D-A) | Fully-Automated | `git diff --stat apps/api/services/identity_resolver.py` | B — **number corrected 6 → 12 this pass; the 2nd pass's table still said 6** |
+| schema/migration high-risk class | live migration round-trip: `upgrade head → downgrade -1 → downgrade -1 → upgrade head`, clean both directions | Hybrid (precondition: DISPOSABLE Postgres container — **Docker 29.4.2 verified UP this pass**) | `docker compose -f infra/docker-compose.yml up -d postgres` then the four alembic commands (G1/G2) | B — **re-tiered from D; Docker is available, this gate is REQUIRED not deferred** |
+| D-E enforced in the DB, not only in service code | `uq_coop_accrued_site_email` partial unique index present after `upgrade head`; a duplicate `ACCRUE` insert raises `IntegrityError` | Hybrid (same precondition) | index-presence query + duplicate-insert assertion against the disposable Postgres | B — **ADDED this pass; the 2nd pass's table omitted it** |
+| Entry Gate (ex-F1) | SPEC A EVL GREEN + migration round-tripped + pushed/deployed; `alembic heads` single; `identity_resolver.py` anchors unmoved | Agent-Probe | re-derived live THIS pass: 14/14 collect, `81eb4e6` in `origin/main`, `443ad5e` on both remotes at 0/0, one head `d1a6c4e93f27`, anchors at 1252/1264 | **A — proven now** (was C) |
+| high-risk evidence pack | 5-artifact manual-first pack exists under `harness/` and records an explicit APPROVE/REJECT with written rationale | Agent-Probe | `node .claude/skills/vc-risk-evidence-pack/scripts/validate-risk-artifacts.mjs` against `.../identity-coop_07-08-26/harness/` | B — due at EXECUTE (E-5); pack does not exist yet |
 
-gap-resolution legend: A — proven now; B — fixed in this plan (gate added by this plan's checklist,
-not yet run); C — deferred to a named later phase/plan; D — backlog test-building stub (named
-residual; keep-active; continue).
+gap-resolution legend:
+- A — proven now (gate passes in this cycle)
+- B — fixed in this plan (gate added by this plan's checklist)
+- C — deferred to a named later phase/plan
+- D — backlog test-building stub (named residual; keep-active; continue)
 
-C-4 reconciliation: every row uses only the 3 proving strategies (Fully-Automated / Hybrid /
-Agent-Probe). Known-Gap is never a `strategy:` value here — the Docker-gated round-trip is Hybrid
-with an explicit precondition, carried as residual D.
+C-4 reconciliation: the `strategy:` column carries ONLY the 3 proving strategies (Fully-Automated /
+Hybrid / Agent-Probe). Known-Gap is never a `strategy:` value here. **No row carries residual D any
+more** — the Docker-gated rows became B when Docker came up, and the entry gate became A.
+
+**Row removed this pass:** the 2nd pass's `SPEC A interface (C1)` row named
+`tests/unit/test_identity_coop.py::test_erased_row_earns_no_credit` and said it "EXISTS, must be
+widened". That test (F6) was **RETIRED** at supplement cycle 1 under D-B — the plan explicitly says
+"do not write this test". Its coverage is fully carried by F9 (`test_blocked_graph_write_accrues_nothing`,
+which drives all four no-op paths including `do_not_process` and `all`) and F10
+(`test_erased_person_leaves_no_new_bidx_row`). Leaving the stale row in would have instructed
+execute-agent to write a test the plan forbids.
 
 Legacy line form (retained so existing validate-contract consumers still parse):
-- Tests F1-F8 plus the 5 NEW gates above: Fully-Automated (commands as named)
-- Migration offline `--sql` + `git diff --stat` guard: Fully-Automated
-- Disposable-Postgres round-trip: Hybrid, precondition: disposable Postgres container running
-- Entry Gate dependency re-check: Agent-Probe, description: re-derive both upstream plans' status
-  and `docker info` before every future PVL/EXECUTE attempt on this phase
-- High-risk evidence pack: Agent-Probe, description: 5-artifact pack present with explicit reviewer decision
+- F1-F5, F7-F14 (13 tests; F6 retired) plus the B2 defaults assertion: Fully-automated, commands as named above
+- Migration offline `--sql` + both pytest lanes + `git diff --stat` ≤ 12 guard: Fully-automated
+- Disposable-Postgres migration round-trip: Hybrid, precondition: disposable Postgres container running (Docker 29.4.2 UP — runnable)
+- `uq_coop_accrued_site_email` partial-index presence + duplicate-ACCRUE IntegrityError: Hybrid, same precondition
+- Entry Gate dependency re-check: Agent-probe, PROVEN this pass (single head, anchors unmoved, SPEC A 14/14 and pushed)
+- High-risk evidence pack: Agent-probe, 5-artifact pack present with explicit reviewer decision — due at EXECUTE
 
-**Failing stub — AC-1:**
+### Failing stubs (Fully-Automated rows only)
+
+Execute-agent translates each skeleton into the repo's pytest form
+(`async def test_...(...): ...` with the `@pytest.mark.unit` / `@pytest.mark.integration` marker per
+lane); the skeleton names the behaviour so the red-first gate is unambiguous.
+
+**AC-1:**
 ```
 test("should assert flag OFF produces zero contribution events and zero ledger rows across a full resolve cycle", () => {
   throw new Error("NOT IMPLEMENTED — TDD stub: test_flag_off_produces_zero_contributions")
 })
 ```
 
-**Failing stub — AC-2:**
+**AC-2:**
 ```
 test("should assert a non-contributing site still receives graph-served identifications", () => {
   throw new Error("NOT IMPLEMENTED — TDD stub: test_non_contributor_still_receives_graph_matches")
 })
 ```
 
-**Failing stub — AC-3:**
+**AC-3:**
 ```
 test("should assert two resolves of the same email under two visitor_ids on the same day produce exactly one contribution event", () => {
   throw new Error("NOT IMPLEMENTED — TDD stub: test_merged_duplicate_counts_once")
 })
 ```
 
-**Failing stub — AC-3 / AC-5 (F2, NEW):**
+**AC-3 / AC-5 (D-A/D-B — no graph write ⇒ no credit):**
 ```
-test("should assert a resolve where the graph write no-ops accrues zero credit, one case per no-op path", () => {
+test("should assert a resolve where the graph write no-ops accrues zero credit and writes zero event rows, one case per no-op path", () => {
   throw new Error("NOT IMPLEMENTED — TDD stub: test_blocked_graph_write_accrues_nothing")
 })
 ```
 
-**Failing stub — AC-5:**
+**AC-5:**
 ```
 test("should assert one qualifying contribution writes exactly one positive ACCRUE ledger row", () => {
   throw new Error("NOT IMPLEMENTED — TDD stub: test_qualifying_contribution_writes_ledger_row")
 })
 ```
 
-**Failing stub — AC-9:**
+**AC-9 (abuse half):**
 ```
-test("should assert abuse-flagged traffic produces a contribution event with zero ledger accrual", () => {
+test("should assert abuse-flagged traffic produces a contribution event with fraud_flagged and zero ledger accrual", () => {
   throw new Error("NOT IMPLEMENTED — TDD stub: test_abuse_flagged_visitor_earns_no_credit")
 })
 ```
 
-**Failing stub — AC-9 (C3, NEW):**
+**AC-9 (bot half, D-C):**
 ```
-test("should assert is_bot_suspect traffic earns no credit", () => {
+test("should assert is_bot_suspect traffic produces a fraud_flagged event and earns no credit", () => {
   throw new Error("NOT IMPLEMENTED — TDD stub: test_bot_suspect_visitor_earns_no_credit")
 })
 ```
 
-**Failing stub — SPEC A interface (C1, widened):**
+**Privacy invariant (D-B):**
 ```
-test("should assert erased and do_not_process and all tombstones each yield zero accrual via GRAPH_WRITE_BLOCKING_SCOPES", () => {
-  throw new Error("NOT IMPLEMENTED — TDD stub: test_erased_row_earns_no_credit")
+test("should assert an erased person's later resolve creates no new email_bidx row in identity_contribution_events", () => {
+  throw new Error("NOT IMPLEMENTED — TDD stub: test_erased_person_leaves_no_new_bidx_row")
 })
 ```
 
-**Failing stub — AC-12:**
+**Accrual uniqueness (D-E):**
+```
+test("should assert a second-day resolve of the same site and email_bidx records a duplicate event and mints no second credit", () => {
+  throw new Error("NOT IMPLEMENTED — TDD stub: test_second_day_resolve_accrues_no_second_credit")
+})
+```
+
+**AC-12:**
 ```
 test("should assert grandfathered pre-program graph rows contribute zero to any site's ledger", () => {
   throw new Error("NOT IMPLEMENTED — TDD stub: test_grandfathered_rows_contribute_zero")
 })
 ```
 
-**Failing stub — best-effort hook contract:**
+**Best-effort hook contract:**
 ```
 test("should assert a forced record_contribution failure never breaks _save_identified's return", () => {
   throw new Error("NOT IMPLEMENTED — TDD stub: test_coop_failure_does_not_break_identification")
 })
 ```
 
-**Failing stub — AC-10 automated leg (C5, NEW):**
+**AC-10 automated leg + E4:**
 ```
-test("should assert contribution_enabled cannot be set true without a terms_version and writes the acceptance row in the same transaction", () => {
+test("should assert contribution_enabled cannot be set true without a valid pinned terms_version and writes the acceptance row in the same transaction", () => {
   throw new Error("NOT IMPLEMENTED — TDD stub: test_flag_on_requires_acceptance")
 })
 ```
 
-**Failing stub — F3 erasure completeness (NEW):**
+**D-A signature compatibility:**
 ```
-test("should assert an erased person's later resolve creates no new email_bidx row in identity_contribution_events", () => {
-  throw new Error("NOT IMPLEMENTED — TDD stub: test_erased_person_leaves_no_new_bidx_row")
+test("should assert _upsert_beam_identity returns true on write and false on every guard path, and the hook stays inert when the flag is off", () => {
+  throw new Error("NOT IMPLEMENTED — TDD stub: test_upsert_returns_bool_and_existing_callers_unaffected")
+})
+```
+
+**Flags-default-OFF constraint:**
+```
+test("should assert all five Phase 1 co-op settings default off or inert and Site.contribution_enabled defaults false", () => {
+  throw new Error("NOT IMPLEMENTED — TDD stub: B2 config defaults assertion")
 })
 ```
 
@@ -1022,44 +1084,71 @@ test("should assert an erased person's later resolve creates no new email_bidx r
 
 ### What this coverage does NOT prove
 
-- **No code was executed against this phase's behavior.** Zero of the 8 planned tests (or the 5 new
-  ones named above) exist on disk. This cycle proved only: mechanical feasibility (anchors resolve,
-  no file collisions), factual correctness of the plan's field/path/head claims against the live
-  working tree, and semantic consistency against the SPEC. It did not run a single co-op code path.
-- **The Hybrid tier proves nothing this cycle.** `docker info` fails; the disposable-Postgres
-  round-trip has never run for this phase.
-- **`alembic heads` is a snapshot, not a guarantee.** `d1a6c4e93f27` was the single head at the
-  moment this command ran. Four migrations appeared in this repo in the last day and the head has
-  moved at least twice during this program's lifetime. A1's live re-derivation at EXECUTE time is
-  the only trustworthy value; treat every head string in these four documents as expired.
-- **Nothing here proves SPEC A's erasure actually works.** This cycle confirmed the *interface*
-  exists and is queryable (`SuppressionEntry.email_hash`, `GRAPH_WRITE_BLOCKING_SCOPES`,
-  `ERASURE_TARGETS`, the write-boundary guard at `identity_resolver.py:1272-1285`) by direct read.
-  Whether the sweep drains correctly, whether the transaction boundaries hold under a real
-  Postgres, and whether the queue recovers from a mid-row crash are all SPEC A's own unrun
-  integration gates — the exact gates that make F1 a blocker.
-- **F2's resolution is not chosen.** Three shapes are named; each has a cost; none is validated.
-  Whichever is picked needs its own re-validation, because option (a) changes a function signature
-  inside a file three programs contest.
-- **C6 is diagnosed, not solved.** This contract shows the `site_id`-vs-`user_id` mismatch exists
-  and that Phase 1 is where the schema freezes. It does not prescribe the reconciliation, and no
-  test in any phase currently covers it.
-- **C8's intent is unadjudicated.** Whether daily re-accrual on an already-owned identity is a
-  feature or a leak is a product decision. This contract only establishes that the plan as written
-  produces it.
-- **The "LIVE" judgment is a reading, not an adjudication.** F1 rests on interpreting "LIVE (not
-  merely planned)" as excluding "code-complete with an unrun Hybrid tier and nothing deployed". The
-  umbrella's 8 restatements and the program's own legal rationale support that reading. A user is
-  entitled to overrule it — explicitly, in writing, in the `Accepted by:` field below.
+- **No co-op code path was executed this cycle.** Zero of the 14 planned tests exist on disk. This
+  pass proved: the entry gate is genuinely met (three of four conditions by independent live command),
+  mechanical feasibility (every anchor, field, path and line number re-verified against the working
+  tree), semantic consistency of D-A…D-E against current source, and test-gate-table completeness. It
+  ran no co-op logic.
+- **`git diff --stat ≤ 12` proves footprint, not correctness.** A 12-line diff can still gate accrual
+  on the wrong condition. F9 and F14 are what prove the gating; the diff guard only prevents logic
+  leaking out of `identity_coop.py`.
+- **The Hybrid gates are RUNNABLE but have not been RUN.** Docker being up removes the excuse, not
+  the work. Nothing about the migration round-trip or the `uq_coop_accrued_site_email` index is
+  proven until G1/G2 execute at EXECUTE time.
+- **SPEC A's erasure is proven at the integration level, not in production.** 14/14
+  `test_graph_erasure_flow.py` gates pass against real Postgres and the code is deployed, but the
+  8 repaired gates were fixed test-side during the same session that green-lit them, and
+  `graph_erasure_sweep_enabled` (default `True`) running correctly under real production load and
+  real crash/recovery is still only covered by those integration gates. Phase 1 now depends on that
+  boundary *behaviourally* (D-A's `False` path), so a latent defect there would surface as a
+  correctness bug on the credit surface.
+- **`alembic heads` is a snapshot, not a guarantee.** `d1a6c4e93f27` held at this pass and has held
+  since the 2nd pass, but four migrations appeared in this repo inside one day earlier in the
+  program. Treat every head string in these documents as expired; A1's live re-derivation is the only
+  trustworthy value.
+- **Prod enablement is unproven and deliberately untested.** Every flag defaults OFF. Nothing here
+  proves the co-op behaves correctly with `identity_coop_enabled=True` under real traffic, and no
+  gate in this phase attempts it — that is an explicit later operator action gated on legal review.
+- **The doc-sync items (N1, N2, N5, P1–P7) are diagnosed, not applied.** This agent's write scope is
+  this contract section only. Until P5 in particular is applied, the plan body still instructs the
+  orchestrator not to spawn execute-agent.
+- **AC-4, AC-6, AC-7, AC-11 are not in this phase's scope.** Phase 1 covers AC-1, AC-2, AC-3, AC-5,
+  AC-9, AC-10 (automated leg), AC-12 plus the D-B/D-E invariants. The remainder belong to Phases 2-3
+  per the umbrella's Coverage Map and are proven nowhere yet.
+- **C6's reconciliation is decided but unproven.** D-D fixes the ledger at `site_id`-only and binds
+  Phase 2 to aggregate via `sites.user_id` at `billing.check_usage_allowed`'s decision point. The
+  anchor is verified to exist (`services/billing.py:94`); that the aggregation actually produces the
+  right balance is Phase 2's gate, and no test in any phase covers it today.
 
-Gate: BLOCKED
+Gate: CONDITIONAL
 
-Accepted by: PENDING — no FAIL or CONCERN in this contract has been accepted by the user or by this
-session. Per this task's enumerated STOP-BLOCK (item 4), this validate-agent does not self-accept
-its own findings, and it did not write `results.tsv`. The orchestrator or user must choose one of:
-(a) wait for SPEC A `graph-erasure-compliance_07-08-26` to reach EVL GREEN (Docker up, 14
-integration gates + migration round-trip run) and ship, then re-run PVL from V1; (b) explicitly
-redefine the umbrella's "LIVE" bar and record that redefinition plus its acceptance here; or (c)
-descope Phase 1. Note that F2 and F3 are independent of F1 and are plan-fixable NOW — a PVL
-supplement cycle can resolve both while F1 remains open, which would leave a single external
-blocker instead of three.
+Accepted by: orchestrator convergence rule, autopilot run 07-08-26. Zero behavioural FAILs were found
+in this pass's fresh verification; F1, F2, F3 and C1-C8 are all cleared with live evidence recorded
+above. The accepted concerns, by name: **N1** (Exit Gate still prints the superseded ≤6-line budget),
+**N2** (`coop_terms_version` missing from the settings block E4 depends on), **N3** (D5/D-A's
+"three early-return guards" off-by-one), **N4** (D-C's `visitor.py:207` citation belongs to
+`IdentifiedVisitor`), **N5** (the plan body's stale `Dependency-BLOCKED` status and "Do NOT spawn
+vc-execute-agent" instruction — accepted as a doc-sync item, but see the hard precondition below),
+**N-VOCAB** (`identity-vocab-reconcile` is `Gate: CONDITIONAL` user-accepted, not literal
+`Gate: PASS`), **N6** (umbrella `## Pre-PVL Conflict Resolution` placeholder, moot under strict
+sequencing), and the **absent 5-artifact high-risk evidence pack** (accepted as an EXECUTE
+deliverable per E-5, not as a permanent gap).
+
+**EXECUTE is unblocked** — meaning the VALIDATE gate no longer blocks it. Two mechanical routing
+facts follow, neither of which is a gate deviation:
+
+1. **P5 must be applied before vc-execute-agent is spawned.** While plan lines 537-539 read "Do NOT
+   spawn vc-execute-agent for this phase" and `phase-blast-radius-registry.md:35` reads
+   `status: Dependency-BLOCKED`, the Phase Program Pre-Routing Check will **skip this phase entirely**
+   rather than execute it. The Step-4 checkbox note (line 527) also still summarises the superseded
+   3-FAIL BLOCKED verdict and must be replaced with this contract's CONDITIONAL verdict.
+2. **The next spawn is vc-research-agent, not vc-execute-agent.** This contract is
+   `generated-by: outer-pvl`, and inner-loop Steps 1 (RESEARCH), 2 (INNOVATE) and 3
+   (PLAN-SUPPLEMENT) are still unchecked in `## Phase Loop Progress`. Per the Pre-Routing Check the
+   orchestrator routes to Step 1 first. This is convenient rather than costly: **Step 3
+   PLAN-SUPPLEMENT is exactly the mechanism for applying P1-P7**, and Step 1's RESEARCH brief is
+   already written by this contract (re-derive `alembic heads`, re-check the 1252/1264 anchors).
+   Step 3 then either writes an `## Inner Loop Refresh Note` — in which case inner PVL re-runs from
+   V1 against the corrected plan — or marks "n/a", in which case V1 auto-proceeds on this contract.
+   Either path reaches EXECUTE without another BLOCKED verdict, because no behavioural defect
+   remains open.

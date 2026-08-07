@@ -30,9 +30,18 @@ Cross-program overlap (outside this registry's scope, recorded):
   ~2 lines, described by call-graph position, never line number. Both upstream workstreams must
   clear before this phase's EXECUTE.
 
-Depends on: vocab-reconcile PASS/descoped + SPEC A LIVE.
+Depends on: vocab-reconcile PASS/descoped + SPEC A LIVE. **Both CLEARED 07-08-26** — vocab-reconcile
+is `Gate: CONDITIONAL` user-accepted/executed/merged (intent satisfied, wording gap only), and SPEC A
+is LIVE: EVL GREEN 14/14, migration `d1a6c4e93f27` round-tripped on a disposable Postgres, pushed to
+`origin/main` + `origin/devjulley` at 0/0, deployed (prod `alembic_version = d1a6c4e93f27`).
 
-status: Dependency-BLOCKED — entry gate SPEC A not LIVE; files never modified
+status: DONE-entry-gate-cleared 07-08-26 — F1 conditions 1-4 verified; EXECUTE authorized
+
+(Supersedes the prior `status: Dependency-BLOCKED — entry gate SPEC A not LIVE; files never
+modified`, written when the entry gate was open and now factually stale. Files are still unmodified —
+this status records routing authorization, not completed work. The Phase Program Pre-Routing Check
+routes a `Dependency-BLOCKED` phase straight past EXECUTE to Phase N+1, which is why the stale line
+had to be replaced before vc-execute-agent could be spawned.)
 
 PVL supplement 07-08-26 (cycle 1): plan-fixable FAILs F2/F3 and CONCERNs C1/C2/C3/C5/C6/C8 are
 settled in the phase plan (§PLAN Decisions D-A…D-E). Two of those decisions change this phase's

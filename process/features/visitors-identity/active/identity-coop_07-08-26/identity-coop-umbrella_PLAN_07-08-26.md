@@ -147,11 +147,13 @@ PER-PHASE LOOP (7-step inner loop R → I → P → PVL → E → EVL → UP; ne
 Report via phase reports. No approval between phases unless a hard stop is hit.
 
 HARD STOPS (pause, wait for user):
-- identity-vocab-reconcile_07-08-26 not PASS/descoped, OR SPEC A graph-erasure-compliance not LIVE
 - Any migration apply against a non-disposable database
 - Any request to flip a program flag ON
 - Net gate = BLOCKED with no backlog resolution path
 - Validate-contract is placeholder and vc-validate-agent cannot run
+- alembic heads returns >1 head (STOP and re-chain; never force-merge)
+- Any outward-facing/irreversible/billed action not named in a validate-contract
+(Upstream entry-gate stop CLEARED 07-08-26: vocab-reconcile accepted+merged; SPEC A LIVE.)
 
 SAFETY (never override):
 - Flags default OFF; no production enablement is part of any phase
@@ -169,7 +171,8 @@ TEST GATES (every phase exit):
 
 VALIDATE CONTRACT: Per-phase contracts written by vc-validate-agent into each phase plan before EXECUTE.
 
-START: Phase 1, loop step RESEARCH (pending) — BLOCKED until both upstream dependencies clear.
+START: Phase 1, loop step EXECUTE — authorized 07-08-26. Entry gate CLEARED; inner Steps 1-4 done;
+validate-contract CONDITIONAL (zero behavioural FAILs). First action: re-derive alembic heads LIVE.
 ```
 
 ---
@@ -477,15 +480,28 @@ classes requiring at minimum a Hybrid test gate per phase.
 
 ## Current Execution State
 
-Last updated: 07-08-26
+Last updated: 07-08-26 (PVL supplement cycle 2)
 Completed phases: Phase 0 (Planning)
-Current phase: Phase 1 — Ledger + contribution substrate
-Current phase status: ⏳ PLANNED — **BLOCKED on two upstream dependencies**
-  1. `identity-vocab-reconcile_07-08-26` — PVL cycle 2, `Gate: BLOCKED`; must reach PASS or be descoped
-  2. SPEC A `graph-erasure-compliance_07-08-26` — must complete EXECUTE and be LIVE, not merely planned
-Current loop step: RESEARCH (pending, gated)
-Validate-contract status: pending — none written for any phase
+Current phase: Phase 1 of 3 — Ledger + contribution substrate
+Current phase status: ⏳ PLANNED — **entry gate CLEARED 07-08-26; EXECUTE authorized**
+  1. `identity-vocab-reconcile_07-08-26` — CLEARED: `Gate: CONDITIONAL`, user-accepted at supplement
+     cycle 9, EXECUTED and merged. Intent satisfied (resolver churn settled and shipped); the literal
+     `Gate: PASS` wording gap is recorded as concern N-VOCAB, not a blocker.
+  2. SPEC A `graph-erasure-compliance_07-08-26` — CLEARED: LIVE. EVL GREEN 14/14, migration
+     `d1a6c4e93f27` round-tripped on a disposable Postgres, pushed to `origin/main` +
+     `origin/devjulley` at 0/0, deployed (prod `alembic_version = d1a6c4e93f27`).
+  3. Docker Known-Gap — CLEARED: Docker 29.4.2 up, so every Phase 1 Hybrid gate (G1/G2) is runnable
+     and REQUIRED rather than deferred.
+Current loop step: Step 5 EXECUTE (next). Inner-loop Steps 1 (RESEARCH), 2 (INNOVATE),
+  3 (PLAN-SUPPLEMENT) and 4 (PVL) are all complete for Phase 1.
+Phase 1 EVL: not yet run
+Phase 1 report: not yet written (destination
+  `process/features/visitors-identity/active/identity-coop_07-08-26/phase-1-ledger-substrate_REPORT_07-08-26.md`)
+Validate-contract status: **written 2026-08-07 for Phase 1 — `Gate: CONDITIONAL`, accepted**
+  (3rd outer-PVL pass; supersedes the 2nd pass's BLOCKED). Zero behavioural FAILs; the five
+  remaining concerns N1-N5 were doc-sync items and are now applied. Phases 2 and 3: none written.
 Program Net Gate: PENDING
+Next phase: Phase 2 — Consumption + spend (blocked until Phase 1 reaches EVL green)
 Latest validator run: 07-08-26 — see Phase 0 report
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
@@ -499,9 +515,11 @@ update-process-agent rewrites it after every phase closeout (overwrite, not appe
 
 ## Pre-PVL Conflict Resolution
 
-(placeholder — the orchestrator fills this before outer PVL begins. Must classify each shared
-package as `parallel-safe` or `reassign` with the winning phase named, or state explicitly:
-"No package conflicts — all phases are parallel-safe.")
+**No package conflicts — phases are strictly sequential.** Filled 07-08-26 (PVL supplement cycle 2,
+contract item P7); no longer a placeholder. `## Phase Ordering` declares Phases 1→2→3 strictly
+sequential with no parallel execution, so there is no concurrent-edit window on any shared surface
+and every phase is trivially `parallel-safe`. No `Action: update Phase [X] blast-radius claim`
+entries are required.
 
 Candidate conflict surfaces already known at plan time:
 - `apps/api/services/identity_coop.py` — written in Phase 1, extended in Phase 2
