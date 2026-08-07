@@ -91,12 +91,15 @@ async def seeded(test_db):
     await test_db.flush()
 
     site = Site(site_id=SITE_ID, user_id=user.id, name="JobChange Co", url="https://x.test")
+    _now = datetime.now(timezone.utc).replace(tzinfo=None)
     visitor = Visitor(
         site_id=SITE_ID,
         visitor_id=VISITOR_ID,
         ip_address="203.0.113.7",
         identity_status="identified",
         do_not_resolve=False,
+        first_seen=_now,
+        last_seen=_now,
     )
     identified = IdentifiedVisitor(
         site_id=SITE_ID, visitor_id=VISITOR_ID, email=EMAIL, full_name="Pat Person"
@@ -254,7 +257,17 @@ async def test_sweep_selects_bounded_subset(seeded):
         ("v_anon", "anonymous", False, stale),
         ("v_stale_2", "identified", False, stale),
     ]:
-        db.add(Visitor(site_id=SITE_ID, visitor_id=vid, identity_status=status, do_not_resolve=dnr))
+        _n = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.add(
+            Visitor(
+                site_id=SITE_ID,
+                visitor_id=vid,
+                identity_status=status,
+                do_not_resolve=dnr,
+                first_seen=_n,
+                last_seen=_n,
+            )
+        )
         db.add(
             EnrichmentProfile(
                 site_id=SITE_ID, visitor_id=vid, company_name="Acme", enriched_at=enriched

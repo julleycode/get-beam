@@ -129,7 +129,7 @@ class TestSweepSkipsOptout:
 
         resolved_with: list[str] = []
 
-        async def fake_resolve(self, visitor):
+        async def fake_resolve(self, visitor, **kwargs):
             resolved_with.append(visitor.visitor_id)
             return None  # no identification → no enrich/increment
 

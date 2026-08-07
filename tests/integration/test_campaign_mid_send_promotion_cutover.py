@@ -127,6 +127,10 @@ async def test_promotion_midbatch_cuts_over_to_personalized(
     async def _no_gmail(db, site_id):
         return None
 
+    # The D5/D10 confirm-gate (candidate_outreach_enabled, default OFF) holds
+    # back UNCONFIRMED graph candidates entirely. This test is about the
+    # personalization cutover, not the confirm-gate, so opt in explicitly.
+    monkeypatch.setattr(campaign_sender.settings, "candidate_outreach_enabled", True)
     monkeypatch.setattr(campaign_sender.EmailSender, "send", _fake_send)
     monkeypatch.setattr(campaign_sender, "resolve_sender_for_site", _no_gmail)
 

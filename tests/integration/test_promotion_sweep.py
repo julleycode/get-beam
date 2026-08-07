@@ -22,6 +22,11 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
+# httpx's default UA is bot-classified by is_bot(); /ingest silently 204-drops it.
+_BROWSER_UA = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+)
+
 pytestmark = pytest.mark.integration
 
 SLA = timedelta(minutes=5)
@@ -78,6 +83,8 @@ async def _seed_click(test_db, site_id: str, visitor_id: str, email: str) -> dat
             visitor_id=visitor_id,
             site_id=site_id,
             identity_status="anonymous",
+            first_seen=datetime.now(timezone.utc).replace(tzinfo=None),
+            last_seen=datetime.now(timezone.utc).replace(tzinfo=None),
         )
     )
     test_db.add(
@@ -104,6 +111,8 @@ async def _seed_phantom_contact(test_db, site_id: str, email: str) -> str:
             site_id=site_id,
             identity_status="identified",
             is_imported_contact=True,
+            first_seen=datetime.now(timezone.utc).replace(tzinfo=None),
+            last_seen=datetime.now(timezone.utc).replace(tzinfo=None),
         )
     )
     test_db.add(
@@ -229,6 +238,22 @@ class TestIngestStaysNonBlocking:
         bid = generate_bid(email)
         assert bid, "tokenized-link _bid generation requires an encryption key"
 
+        # /ingest never creates the visitors row — the aggregator does (see
+        # routers/events.py: "visitor rows are built by the aggregator"). Seed
+        # it so this test can assert on identity_status without running the
+        # aggregator, which is not what is under test here.
+        _seed_now = datetime.now(timezone.utc).replace(tzinfo=None)
+        test_db.add(
+            Visitor(
+                site_id=sweep_site,
+                visitor_id=visitor_id,
+                identity_status="anonymous",
+                first_seen=_seed_now,
+                last_seen=_seed_now,
+            )
+        )
+        await test_db.commit()
+
         payload = {
             "site_id": sweep_site,
             "visitor_id": visitor_id,
@@ -245,7 +270,7 @@ class TestIngestStaysNonBlocking:
         resp = await test_client.post(
             "/api/v1/events/ingest",
             content=json.dumps(payload),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA},
         )
         assert resp.status_code == 204
 
@@ -317,3 +342,4 @@ class TestIdempotency:
         assert second["promoted"] == 0
         assert second["merged"] == 0
         assert second["unexpected_paid"] == 0
+

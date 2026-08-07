@@ -313,6 +313,9 @@ class TestVisitorStatCountsHelper:
             "could_enrich_more": 0,
             "enriched_unsegmented": 0,
             "eligible_for_resolution": 0,
+            # identity-vocab-reconcile rename: company-guess rows are now
+            # counted as "candidates" (was "could_enrich").
+            "candidates": 0,
         }
 
     @pytest.mark.asyncio

@@ -58,7 +58,7 @@ async def sessions(test_engine, monkeypatch):
 async def _seed_visitor(
     s: AsyncSession, site_id: str, visitor_id: str, fingerprint: str, email: str | None
 ) -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     s.add(
         Visitor(
             site_id=site_id,
@@ -75,8 +75,6 @@ async def _seed_visitor(
                 site_id=site_id,
                 visitor_id=visitor_id,
                 email=email,
-                first_seen=now,
-                last_seen=now,
             )
         )
 
@@ -208,8 +206,8 @@ async def test_t_i6_erased_person_is_not_re_added_on_a_later_visit(sessions):
             site_id=SITE_B,
             visitor_id="v-returning",
             fingerprint=FP,
-            first_seen=datetime.now(timezone.utc),
-            last_seen=datetime.now(timezone.utc),
+            first_seen=datetime.now(timezone.utc).replace(tzinfo=None),
+            last_seen=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         resolver = IdentityResolver(s, redis_client=None)
         await resolver._upsert_beam_identity(visitor, {"email": EMAIL}, "pdl")
@@ -263,7 +261,14 @@ async def test_t_i10_throttle_flagged_row_is_processed_identically(sessions):
 async def user_client(test_client, test_engine, sessions):
     user_id = uuid.uuid4()
     async with sessions() as s:
-        s.add(Site(site_id=SITE_A, user_id=user_id, domain="a.example.com"))
+        s.add(
+            Site(
+                site_id=SITE_A,
+                user_id=user_id,
+                name="Site A",
+                url="https://a.example.com",
+            )
+        )
         await _seed_visitor(s, SITE_A, "v-with-graph", FP, EMAIL)
         await _seed_visitor(s, SITE_A, "v-without-graph", "fp_no_graph", None)
         s.add(_graph_node(FP, EMAIL, SITE_A))

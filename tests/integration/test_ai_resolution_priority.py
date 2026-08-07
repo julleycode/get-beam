@@ -134,7 +134,7 @@ class TestRunnerPriority:
 
         processed: list[str] = []
 
-        async def fake_resolve(_self, visitor):
+        async def fake_resolve(_self, visitor, **kwargs):
             processed.append(visitor.visitor_id)
             return None
 
