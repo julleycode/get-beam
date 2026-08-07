@@ -336,7 +336,14 @@ class TestBeamIdentityNetwork:
     @pytest.mark.asyncio
     async def test_upsert_executes_on_valid_data(self):
         db = AsyncMock()
-        db.execute = AsyncMock()
+        # The erasure guard runs a suppression SELECT before the upsert and
+        # reads `scalar_one_or_none() is not None`. A bare AsyncMock returns a
+        # truthy child mock there, which reads as "this person asked to be
+        # forgotten" and short-circuits the write — so the lookup has to answer
+        # None explicitly for the guard to fall through.
+        no_suppression = MagicMock()
+        no_suppression.scalar_one_or_none.return_value = None
+        db.execute = AsyncMock(return_value=no_suppression)
         db.commit = AsyncMock()
         resolver = _make_resolver(db=db)
 
@@ -347,13 +354,18 @@ class TestBeamIdentityNetwork:
             "capturify",
         )
 
-        db.execute.assert_called_once()
+        # Two round-trips: the erasure-guard suppression lookup, then the upsert.
+        assert db.execute.call_count == 2
         db.commit.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_upsert_handles_db_error_gracefully(self):
         db = AsyncMock()
-        db.execute = AsyncMock(side_effect=Exception("DB error"))
+        # Guard lookup succeeds so the failure under test is the upsert itself,
+        # not the suppression SELECT that now runs ahead of it.
+        no_suppression = MagicMock()
+        no_suppression.scalar_one_or_none.return_value = None
+        db.execute = AsyncMock(side_effect=[no_suppression, Exception("DB error")])
         db.rollback = AsyncMock()
         resolver = _make_resolver(db=db)
 
@@ -366,6 +378,32 @@ class TestBeamIdentityNetwork:
         )
 
         db.rollback.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_upsert_survives_erasure_guard_db_error(self):
+        """A failing suppression lookup must not crash resolve, and must not write.
+
+        By this point the IdentifiedVisitor row is already committed, so letting
+        the guard's exception escape would fail a resolve() that had actually
+        succeeded. Failing closed keeps the erasure promise: no proof the person
+        is un-erased means no graph write.
+        """
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=Exception("DB error"))
+        db.rollback = AsyncMock()
+        resolver = _make_resolver(db=db)
+
+        wrote = await resolver._upsert_beam_identity(
+            _make_visitor(),
+            {"email": "user@test.com", "confidence_score": 0.8},
+            "rb2b",
+        )
+
+        assert wrote is False
+        # Only the guard round-trip ran — the upsert was never attempted.
+        assert db.execute.call_count == 1
+        db.rollback.assert_called_once()
+        db.commit.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_check_network_returns_none_without_fingerprint(self):
