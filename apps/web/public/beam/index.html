@@ -89,7 +89,9 @@
       <div class="nav-pills">
         <a href="#how">how it works</a>
         <a href="#stack">integrations</a>
+        <a href="/pricing">pricing</a>
         <a href="#faq">faq</a>
+        <a href="/blog">blog</a>
         <div class="wn-wrap" hidden>
           <button class="nav-whatsnew" id="whatsnew-btn" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="wn-popover">
             what's new <span class="wn-dot" id="wn-dot" hidden></span>
@@ -811,6 +813,11 @@
   <footer class="legal">
     <div>getbeam.fyi · made for indie founders</div>
     <div class="legal-links">
+      <!-- keep these: .nav-pills links are hidden below 880px (styles.css:431) and Google
+           indexes mobile-first, so these footer links are the reliable crawl path to
+           /blog and /pricing. do not "tidy" them away. -->
+      <a href="/pricing">pricing</a>
+      <a href="/blog">blog</a>
       <a href="/beam/privacy.html">privacy</a>
       <a href="/beam/terms.html">terms</a>
     </div>
