@@ -567,6 +567,8 @@ async def resolve_company_cached(
         if graph_on and domain:
             await _write_through_company_graph(db, ip, domain, None, "rdns", 0.5)
 
+        if domain is None:
+            return await _resolve_via_local_ip_org(db, ip)
         return domain
 
     except Exception:
@@ -574,4 +576,43 @@ async def resolve_company_cached(
         domain = await resolve_company_from_ip(ip)
         if graph_on and domain:
             await _write_through_company_graph(db, ip, domain, None, "rdns", 0.5)
+        if domain is None:
+            return await _resolve_via_local_ip_org(db, ip)
         return domain
+
+
+async def _resolve_via_local_ip_org(
+    db: AsyncSession | None, ip: str
+) -> str | None:
+    """Last free rung of the ladder: the self-hosted ip_org_prefixes table.
+
+    Runs only AFTER rDNS has missed. rDNS deliberately stays first because a
+    resolving PTR is the more specific signal — it yields an actual domain,
+    whereas a prefix match yields an organization NAME and (until Phase 3) no
+    domain at all.
+
+    On a hit the result is persisted to company_graph as ``source="rir_asn"``
+    with ``confidence=0.45`` — below rDNS (0.5) and the paid path (0.7), because
+    a whole-prefix attribution is coarser than either. The graph read orders by
+    ``confidence.desc()``, so a later rDNS or paid resolution naturally shadows
+    this row rather than being blocked by it. This is also the first source ever
+    to populate ``company_graph.company_name``: the column has existed unwritten
+    since the table was created, and an org name with no domain is exactly what
+    it is for.
+
+    Returns the row's domain, which today is ``None`` — the VALUE of the hit is
+    the persisted company_name, and the caller's contract (a domain or None) is
+    unchanged. Fail-open: any error yields None.
+    """
+    if db is None or not settings.ip_org_lookup_enabled:
+        return None
+    from apps.api.services.ip_org_lookup import lookup_ip_org
+
+    match = await lookup_ip_org(db, ip)
+    if match is None:
+        return None
+    if settings.company_graph_enabled:
+        await _write_through_company_graph(
+            db, ip, match["domain"], match["org_name"], "rir_asn", 0.45
+        )
+    return match["domain"]

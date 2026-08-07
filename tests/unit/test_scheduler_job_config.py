@@ -173,9 +173,12 @@ class TestAC13IntervalJobHardening:
         assert [c for c in cron if "jitter" in _kwargs(c)] == []
 
     def test_the_asserted_set_is_derived_not_hardcoded(self):
-        """E20 arithmetic: 19 total / 17 interval / 2 cron — all AST-derived.
+        """E20 arithmetic: 20 total / 18 interval / 2 cron — all AST-derived.
 
-        Was 18/16/2; +1 interval job for graph_erasure_sweep (cross-tenant
+        Was 19/17/2; +1 interval job for ip_org_refresh (rebuilds the
+        self-hosted IP→org table from public CAIDA snapshots; flag-gated OFF on
+        ip_org_lookup_enabled, fail-open, advisory-locked).
+        Before that 18/16/2; +1 interval job for graph_erasure_sweep (cross-tenant
         identity-graph erasure queue drain — the only destructive actor in that
         feature, and the one job here that ships flag-ON by default, because it
         gates the REMOVAL of data Beam promised to delete).
@@ -197,8 +200,8 @@ class TestAC13IntervalJobHardening:
         """
         calls = _add_job_calls()
         interval = [c for c in calls if _is_interval(c)]
-        assert len(calls) == 19, f"expected 19 add_job calls, found {len(calls)}"
-        assert len(interval) == 17, (
-            f"expected 17 interval calls, found {len(interval)}; if a job was "
+        assert len(calls) == 20, f"expected 20 add_job calls, found {len(calls)}"
+        assert len(interval) == 18, (
+            f"expected 18 interval calls, found {len(interval)}; if a job was "
             "added or removed, update E20's arithmetic — do not relax this gate"
         )

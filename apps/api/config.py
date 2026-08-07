@@ -719,6 +719,30 @@ class Settings(BaseSettings):
     # re-validation at read time (no cron; read-time only).
     company_graph_staleness_days: int = 75
 
+    # ─── Self-hosted IP→org database (Pillar 1: own the IP→company core) ───
+    # When true, a local ``ip_org_prefixes`` longest-prefix lookup runs as the
+    # LAST free rung of the company-resolution ladder (after rDNS, before the
+    # paid PDL/IPinfo path in identity_resolver), and a hit is written through to
+    # company_graph as source="rir_asn". Defaults OFF until the
+    # ip_org_prefixes migration is live-applied AND a dataset has been ingested
+    # — with the flag off the ladder is byte-identical to today (same
+    # operator-gated posture as agent_detection_enabled / company_graph_enabled).
+    # An empty table with the flag ON is still safe: the lookup just misses.
+    ip_org_lookup_enabled: bool = False
+    # CAIDA dataset roots. Directory URLs, not file URLs — the exact daily
+    # snapshot filename changes, so the ingest job discovers the newest file from
+    # each directory rather than pinning a name that goes 404 within a day.
+    ip_org_dataset_pfx2as_url: str = (
+        "https://publicdata.caida.org/datasets/routing/routeviews-prefix2as/"
+    )
+    ip_org_dataset_as2org_url: str = (
+        "https://publicdata.caida.org/datasets/as-organizations/"
+    )
+    # Snapshots are published daily; refreshing more often than that only burns
+    # bandwidth. The job is advisory-locked, so a short interval is safe but
+    # pointless.
+    ip_org_refresh_interval_hours: int = 24
+
     # How long after a site is deleted its site_id stays eligible for reuse when
     # the SAME owner re-creates a site for the SAME normalized url. This bounds
     # REUSE ELIGIBILITY only — site_tombstones rows are never deleted (they are

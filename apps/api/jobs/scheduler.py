@@ -356,6 +356,22 @@ async def _graph_erasure_sweep_job() -> None:
         logger.exception("graph_erasure_sweep_crashed")
 
 
+async def _ip_org_refresh_job() -> None:
+    """Periodic job: rebuild the self-hosted IP→org table from public snapshots.
+
+    refresh_ip_org_dataset holds its own advisory lock, fetches fail-open (a bad
+    download leaves the existing table serving), and swaps the new snapshot in
+    inside one transaction. ``dry_run=False`` because a scheduled refresh that
+    writes nothing would be pure bandwidth.
+    """
+    try:
+        from apps.api.services.ip_org_ingest import refresh_ip_org_dataset
+
+        await refresh_ip_org_dataset(dry_run=False)
+    except Exception:
+        logger.exception("ip_org_refresh_crashed")
+
+
 async def _sweep_one_site(
     site_id: str,
     allow_defer: bool,
@@ -683,6 +699,18 @@ def start_scheduler() -> None:
             # deploy restart never silently skips a pass on a legal clock.
             jitter=30,
             misfire_grace_time=300,
+        )
+    if settings.ip_org_lookup_enabled:
+        scheduler.add_job(
+            _ip_org_refresh_job,
+            "interval",
+            hours=settings.ip_org_refresh_interval_hours,
+            id="ip_org_refresh",
+            replace_existing=True,
+            # Daily snapshots, so a wide jitter is free: it only matters that the
+            # fleet does not all pull a multi-MB dataset at the same instant.
+            jitter=1800,
+            misfire_grace_time=3600,
         )
     if settings.changelog_sync_enabled:
         scheduler.add_job(
