@@ -8,7 +8,7 @@ feature: visitors-identity
 # IP-Org Phase 3 — Evidence Graph v2 (scope redefined from "domain mapping only")
 
 **Date**: 07-08-26
-**Status**: PLANNED — needs PVL (validate) before EXECUTE
+**Status**: EXECUTED + EVL GREEN + DEPLOYED TO PROD (07-08-26) — kept `active`: domain-leg split-out phase + 3 operator enable steps pending
 **Complexity**: COMPLEX (4 workstreams, 1 migration, 2 new tables, 3 new services, changes a live resolver seam)
 **Feature**: visitors-identity
 **Parent plan**: `ip-org-database_PLAN_07-08-26.md` (Phases 1–2 ✅ COMPLETE)
@@ -941,8 +941,21 @@ Note on `.venv/bin/pytest`: the shebang is broken in this repo — always invoke
       (`rpki_roas.asn` → BigInteger, fixed) and two wrong hand-derived fixtures (fixed). One new
       finding recorded not fixed: post-swap planner statistics. All four flags OFF.
       Report: `ip-org-phase3-execute_REPORT_07-08-26.md`.
-- [ ] Step 6 — EVL
-- [ ] Step 7 — UPDATE PROCESS
+- [x] Step 6 — EVL — **GREEN (07-08-26).** All 18 in-scope gates confirmed by independent tester.
+      Latency: warm median 2.97ms / p95 9.64ms (budget 15ms; tail observed 14.85ms — thin margin,
+      recorded in backlog). Anti-fabrication 8/8 None non-vacuous. Two CONTRACT defects found
+      (not execute defects) — see `## Contract Errata (post-EVL)` below. Local dev DB proof:
+      967,261 CAIDA + 262,238 RIR rows in `ip_org_prefixes`, 755,538 `rpki_roas`.
+- [x] Step 7 — UPDATE PROCESS — closeout 07-08-26: contract errata appended, context reconciled,
+      backlog notes + prod-enable runbook written; committed. **PROD DEPLOYED 2026-08-07**: commits
+      `51b12e1` (source) + `808ae19` (process) + `ce3a4e5` merged fast-forward to `main` and pushed
+      by user; Railway auto-deploy from `ce3a4e5` applied exactly `b6f4a2d90c13 → c4a8f13e07b6`
+      clean on boot (prod was already at `b6f4a2d90c13`). Prod alembic head is now `c4a8f13e07b6`;
+      `ip_org_prefixes` + `rpki_roas` exist on prod but are EMPTY (ingest not run); all 3 evidence
+      columns + nullable `asn` + 4th index confirmed on prod; `/health` + `/health/ready` 200. All
+      4 ip-org flags OFF — zero runtime behavior change. Plan stays **active**: domain-leg split-out
+      phase (G18–G20 + `resolve_org_domain`, pending G19 yield measurement) and 3 operator steps
+      remain — see `ip-org-prod-enable_RUNBOOK_07-08-26.md` in this task folder.
 
 ## Phase Completion Rules
 
@@ -1360,6 +1373,40 @@ empty sample.
 
 Scope note: cycle 4, like cycles 1–3, stayed inside the plan file. No source file, no test file, and no
 other process artifact was modified. Blast radius NARROWED by one code path (C-b).
+
+### Contract Errata (post-EVL)
+
+*(Appended at UPDATE PROCESS 07-08-26. The `## Validate Contract` section above is preserved
+verbatim per protocol — it is NOT rewritten. These 2 defects were found by the independent EVL
+tester run and are defects of the CONTRACT text, not of execution.)*
+
+**Erratum 1 — G3's literal command references a file E14 deliberately never created.**
+G3 as written runs:
+
+```
+.venv/bin/python3.11 -m pytest tests/unit/test_ip_org_ingest.py tests/unit/test_ip_org_lookup.py tests/unit/test_company_resolver.py tests/unit/test_ip_org_domain_map.py -q
+```
+
+`tests/unit/test_ip_org_domain_map.py` does not exist — the domain leg (WS4 item 18, gates
+G18–G20, `resolve_org_domain`) was SKIPPED per E14 / accepted Decision 2 Option B, so its test
+file was never written. Run verbatim, the G3 command errors out at collection. **Corrected G3
+command** (the 3 real files):
+
+```
+.venv/bin/python3.11 -m pytest tests/unit/test_ip_org_ingest.py tests/unit/test_ip_org_lookup.py tests/unit/test_company_resolver.py -q
+```
+
+The same stale filename also appears in the Touchpoints NEW-files row, the AC1.4 gate-map row,
+and the Resume Handoff command block above — all read with this erratum applied. The file
+becomes real only when the split-out domain-leg phase executes.
+
+**Erratum 2 — G10 and G8 are silently vacuous unless `ip_org_lookup_enabled=True` in-process.**
+`lookup_ip_org_v2` returns `None` at flag-off, so G10's 20-hypothesis spot-review and G8's full
+v2 round-trip latency measurement produce trivially empty/fast results if run in a process where
+the flag is OFF — green while proving nothing. The contract text lacks this precondition.
+**Correction:** both gates carry the precondition **"`ip_org_lookup_enabled=True` must be set
+in-process (env or monkeypatch) for the measured/reviewed calls"**; a G8/G10 run without it is
+INVALID, not a pass. (EVL's actual run satisfied this — the results recorded are valid.)
 
 ## Autonomous Goal Block
 

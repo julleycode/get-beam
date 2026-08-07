@@ -134,13 +134,32 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
     accidentally proven (container killed mid-load → 0 rows leaked); GiST scan warm 2-6ms,
     cold 26-385ms. org_kind: org 63.8% / eyeball 26.9% / datacenter 7.9% / cdn 1.4%. EVL fix
     cycle: live as2org is camelCase `organizationId`; fixtures had invented snake_case, masking
-    a 100%-skip bug — fixtures regenerated from real records. Committed `3215fb0` (unpushed);
-    flag `ip_org_lookup_enabled` default OFF (prod enable = push→Railway auto-apply → one real
-    `--apply` on prod → flag flip, operator actions). **Phase 3 (domain mapping) OPEN** —
-    company_name only today, no domain, so the ip_org path still returns None to
-    `resolve_company_cached`'s domain consumers; today's value is persisted
-    `company_graph.company_name`. Known-gaps + follow-ups:
-    `backlog/ip-org-followups_NOTE_07-08-26.md`.
+    a 100%-skip bug — fixtures regenerated from real records.
+    **Phase 3 (evidence graph v2): EXECUTED + EVL green + DEPLOYED TO PROD 07-08-26.** Scope was
+    user-redefined from "domain mapping" to multi-source evidence graph: WS1 schema
+    (`relationship_type`/`valid_from`/`valid_to`, asn nullable, union-aware swap, shared
+    `IP_ORG_WRITE_LOCK_KEY`), WS2 RIR delegated-extended ingest
+    (`services/ip_org_rir_ingest.py`, 262,238 allocations, 0% skip), WS3 RPKI ROAs
+    (`rpki_roas` table, `services/rpki_ingest.py`+`rpki_validate.py`, 755,538 IPv4 ROAs,
+    BigInteger asn — 4-byte ASN overflow found+fixed by live gate), WS4 fusion-only
+    (`services/ip_org_fusion.py`, D12 classification table, confidence clamp 0.05–0.65,
+    lookup v2 `org_kind='org'`, corpus-EXISTS TTL cache). **Domain leg SPLIT OUT** per accepted
+    Decision 2 Option B — G18–G20 + `resolve_org_domain` NOT built; its own future phase gated on
+    a G19 yield measurement. PVL: 5 validate + 4 supplement cycles, 37/37 gaps, converged
+    CONDITIONAL accepted (A1–A8 + Option B); decisions D10–D14 locked. EVL: 18/18 in-scope gates
+    by independent tester; latency warm median 2.97ms p95 9.64ms (budget 15ms, tail 14.85ms thin);
+    anti-fabrication 8/8 None non-vacuous. Local dev DB: 967,261 CAIDA + 262,238 RIR rows in
+    `ip_org_prefixes`, 755,538 `rpki_roas`. Commits `51b12e1`+`808ae19`+`ce3a4e5` merged
+    fast-forward to `main` and PUSHED; Railway deployed from `ce3a4e5` — **prod alembic head is
+    now `c4a8f13e07b6`**, `ip_org_prefixes`+`rpki_roas` exist on prod but are EMPTY (ingest not
+    run), all evidence columns confirmed, `/health` 200, all 4 ip-org flags OFF (zero runtime
+    behavior change). 2 contract defects recorded in the plan's `### Contract Errata (post-EVL)`
+    (G3's nonexistent `test_ip_org_domain_map.py`; G8/G10 flag-off vacuity precondition).
+    Remaining = 3 operator steps (prod ingest `--apply --allow-remote`, flag flips, source-mix
+    monitoring): `active/ip-org-database_07-08-26/ip-org-prod-enable_RUNBOOK_07-08-26.md`.
+    Known-gaps + follow-ups: `backlog/ip-org-followups_NOTE_07-08-26.md` (extended 07-08-26:
+    post-swap ANALYZE, G8 tail margin, eyeball token gaps); new source idea:
+    `backlog/rb2b-ip-to-company-eyeball-source_NOTE_07-08-26.md`.
   - `identity-vocab-reconcile_07-08-26` — **EXECUTED and user-accepted, unpushed.** Reconciles
     `devjulley` onto `main`'s `identified`/`candidate` vocabulary; PVL closed `HALTED_ACCEPTED` at
     supplement cycle 9 of 10 (`Gate: CONDITIONAL`, accepted). `devjulley` is rebased onto `main` at
@@ -339,10 +358,13 @@ structurally separate from human Visitor/Event data, never as a targetable outre
 - `apps/api/services/agent_aggregator.py` — read-only vendor/page/verification-method analytics,
   `GET /api/v1/agents/{site_id}/analytics`
 - Feature flag: `agent_detection_enabled` in `apps/api/config.py` — **defaults OFF**
-- **Migration head status, consolidated 07-08-26 (identity-vocab-reconcile UPDATE PROCESS —
-  supersedes the two stacked corrections this replaced).** Beam currently has two live branches
-  with two different, independently-verified Alembic heads — always re-derive with
-  `alembic -c apps/api/alembic.ini heads` per branch rather than trusting any hash recorded here:
+- **Migration head status, consolidated 07-08-26 (last reconciled at ip-org Phase 3 closeout —
+  supersedes the identity-vocab-reconcile consolidation and its two-branch framing).**
+  `main`, `devjulley`, and **prod** are now ALL on one unified chain with head **`c4a8f13e07b6`**
+  (`add_ip_org_evidence_graph`), and prod has it applied live (Railway deploy 2026-08-07, see
+  Live-apply status below). Always re-derive with `alembic -c apps/api/alembic.ini heads` per
+  branch rather than trusting any hash recorded here — heads move as concurrent programs land
+  migrations. Historical per-branch detail (kept for chain archaeology):
   - **`main` head: `c2f7a9d31b64`** (`add_resolution_deferral_watermark`), 56 revisions from the
     `cd811a8b1f32` baseline, single head, no branching (re-verified live 07-08-26 by walking every
     `revision`/`down_revision` header on disk). The pending-live-apply chain starting from the old
@@ -361,10 +383,15 @@ structurally separate from human Visitor/Event data, never as a targetable outre
     `f1a7c3e05b92` → `a4f2b8c15d70` (add_job_change_events) → `b8e3f6a2c904`
     (add_events_agent_sig) → `c9f4a7b31e85` (add_ws2_agent_operated_flag) → `d1a6c4e93f27`
     (add_erasure_requests) → `e7b3d5f19c46` (add_identity_coop_tables) → `f2c81a6b4d09`
-    (add_site_contribution_enabled) → `a3e8d5c71f02` (**devjulley head**). `a3e8d5c71f02`
+    (add_site_contribution_enabled) → `a3e8d5c71f02` (add_ip_org_prefixes). `a3e8d5c71f02`
     chains off identity-coop's `f2c81a6b4d09` — both landed in the same commit batch
     (`d78b4f1` + `3215fb0`), so the "don't chain off uncommitted coop migrations" constraint
-    was satisfied at commit time.
+    was satisfied at commit time. **Superseded 07-08-26 (ip-org Phase 3):** the head has since
+    moved past `a3e8d5c71f02` through `b6f4a2d90c13` to **`c4a8f13e07b6`**
+    (`add_ip_org_evidence_graph`), which chained off the then-live head `b6f4a2d90c13` — NOT
+    off `a3e8d5c71f02` directly, because the head had moved between plan-write and EXECUTE
+    (E1 deviation, recorded in the Phase 3 plan). Derive the intermediate revisions from
+    `alembic history` — do not trust a written-down chain tail here.
   - **Re-chain: APPLIED on disk (07-08-26).** The ONE-EDIT re-chain described by
     identity-vocab-reconcile (`b1c9e7f24d83.down_revision` retargeted to `main`'s head
     `c2f7a9d31b64`) is now live on `devjulley` — verified 07-08-26 by walking the on-disk
@@ -390,11 +417,22 @@ structurally separate from human Visitor/Event data, never as a targetable outre
     **Update 07-08-26 (ip-org closeout):** full chain live-applied again from an EMPTY local
     dev DB (`localhost:5433`) all the way to the new head `a3e8d5c71f02` in 8s, plus live
     down/up round-trip `a3e8d5c71f02`↔`f2c81a6b4d09` (GiST `inet_ops` restored clean).
-  - **None of this is a production live-apply**, which remains a separate explicit operator
-    action. Apply the full re-chained sequence in order before enabling `agent_detection_enabled`,
-    `company_graph_enabled`, `identity_signals_enabled`, `site_ingest_limit_enabled`,
-    `ingest_velocity_enabled`, `cadence_bot_flag_enabled`, `candidate_outreach_enabled`, or
-    `ip_org_lookup_enabled` in any real environment.
+  - **PRODUCTION LIVE-APPLY: DONE through `c4a8f13e07b6` (2026-08-07).** The earlier "none of
+    this is a production live-apply" statement is superseded: the user merged
+    `51b12e1`+`808ae19`+`ce3a4e5` fast-forward to `main` and pushed; Railway auto-deploy from
+    `ce3a4e5` booted and applied exactly `b6f4a2d90c13 → c4a8f13e07b6` clean — prod was ALREADY
+    at `b6f4a2d90c13`, meaning the earlier chain (including the re-chained devjulley tail) had
+    reached prod in prior deploys. Prod alembic head is now `c4a8f13e07b6`; `ip_org_prefixes` +
+    `rpki_roas` exist on prod but are EMPTY (ingest is a separate operator step); `/health` +
+    `/health/ready` 200. **Schema-applied ≠ feature-enabled:** every gated flag
+    (`agent_detection_enabled`, `company_graph_enabled`, `identity_signals_enabled`,
+    `site_ingest_limit_enabled`, `ingest_velocity_enabled`, `cadence_bot_flag_enabled`,
+    `candidate_outreach_enabled`, `ip_org_lookup_enabled` + the 3 Phase-3 ip-org flags) remains
+    OFF in prod — flipping any of them is still a separate explicit operator action. For the
+    ip-org set, follow
+    `process/features/visitors-identity/active/ip-org-database_07-08-26/ip-org-prod-enable_RUNBOOK_07-08-26.md`.
+    Before flipping any OTHER flag, verify its required revisions are ≤ `c4a8f13e07b6` in
+    `alembic history` (they are, as of this writing) and re-check the prod head first.
 - Docker/live-integration known-gaps consolidated in
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`
   — **but re-check their premise first: Docker IS available on this machine.** The CLI is simply off
@@ -595,10 +633,11 @@ Adds the two signals the v2 hash was missing, without disturbing v2:
   JS at all — it needs TCP-stack timing at the edge, not the pixel).
 
 **Alembic head note:** `f1a7c3e05b92` (`add_fingerprint_v3`) was the `devjulley` head when fp3
-shipped; the head has since moved to `a3e8d5c71f02` (`add_ip_org_prefixes`) — see
-the consolidated "Migration head status" note in the AI-Agent-Traffic Layer section above for both
-branches' true heads, the pending-chain list, and the ONE-EDIT re-chain that unifies them. Always
-re-run `alembic heads` before chaining or applying; concurrent programs move it repeatedly.
+shipped; the head has since moved through `a3e8d5c71f02` to `c4a8f13e07b6`
+(`add_ip_org_evidence_graph`, applied live on prod 2026-08-07) — see the consolidated
+"Migration head status" note in the AI-Agent-Traffic Layer section above for the unified chain
+and prod live-apply status. Always re-run `alembic heads` before chaining or applying;
+concurrent programs move it repeatedly.
 
 ## Key Patterns and Conventions
 
@@ -677,11 +716,11 @@ re-run `alembic heads` before chaining or applying; concurrent programs move it 
   `company_graph_enabled`, `identity_signals_enabled`, `site_ingest_limit_enabled`,
   `ingest_velocity_enabled`, `cadence_bot_flag_enabled`, `candidate_outreach_enabled`,
   `ip_org_lookup_enabled` all default
-  OFF. Do not quote a migration count here — `main` and `devjulley` currently have two different
-  heads (`c2f7a9d31b64` and `a3e8d5c71f02` respectively) and neither chain is applied to any real
-  environment. See the consolidated "Migration head status" note in the AI-Agent-Traffic Layer
-  section above for the true per-branch heads, the pending chain, and the now-applied re-chain that
-  unifies them — see
+  OFF. The migration chain is now unified across `main`/`devjulley`/prod with head
+  `c4a8f13e07b6` applied LIVE on prod (2026-08-07) — schema-applied ≠ feature-enabled; every
+  flag above remains OFF and flipping each is a separate operator action. See the consolidated
+  "Migration head status" note in the AI-Agent-Traffic Layer section above for the unified
+  chain and prod live-apply detail — see
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`,
   `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`
   (RESOLVED), `process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`

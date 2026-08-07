@@ -1,6 +1,6 @@
 ---
 name: report:ip-org-followups
-description: "Deferred follow-ups from ip-org-database Phases 1-2 closeout: load-transaction optimization, skip-ratio alerting, alembic local-host guard gap, G6 distribution audit, plus cross-program flags (identity-coop-owned broken unit tests, conftest enum-teardown race)"
+description: "Deferred follow-ups from ip-org-database Phases 1-3 closeouts: load-transaction optimization, skip-ratio alerting, alembic local-host guard gap, G6 distribution audit, post-swap ANALYZE, G8 latency tail margin, eyeball token gaps, plus cross-program flags (identity-coop-owned broken unit tests, conftest enum-teardown race)"
 date: 07-08-26
 metadata:
   node_type: memory
@@ -59,6 +59,34 @@ systematic audit of org_kind assignment or `normalize_org_name` truncation/colli
 the 102k-org population exists.
 Fix: sampled audit script (stratified by org_kind) + collision report on normalized names;
 fold into Phase 3 quality-metric work.
+
+## Phase 3 additions (07-08-26 closeout — evidence graph EVL findings, recorded not fixed)
+
+### 5. Post-swap planner statistics: ~15.7ms until autovacuum ANALYZE
+
+Priority: P2 (perf/ops).
+Problem: immediately after a staging→live swap, the planner has no statistics for the renamed
+table — lookup latency sits at ~15.7ms (over the 15ms warm budget) until autovacuum's ANALYZE
+lands. Candidate fix: one-line explicit `ANALYZE` on the live table as the final step inside
+the swap path in `services/ip_org_ingest.py`. Cheap, deterministic, closes the window.
+
+### 6. G8 latency tail 14.85ms vs 15ms budget — thin margin
+
+Priority: P3 (observability/perf).
+Problem: EVL measured warm median 2.97ms / p95 9.64ms, but the observed tail hit 14.85ms
+against a 15ms budget — 1% headroom. Any additional fusion work, corpus growth, or a cold
+statistics window (item 5) tips it over. Options: raise the budget honestly with evidence, or
+shave the tail (prepared-statement reuse, corpus-EXISTS cache TTL tuning). Re-measure after
+item 5 lands — the two are likely correlated.
+
+### 7. Phase-1 eyeball token gaps: bare `telekom` passes as org
+
+Priority: P3 (quality — feeds item 4's distribution audit).
+Problem: the Phase-1 org_kind token heuristics miss some eyeball-carrier name forms — e.g. a
+bare `telekom` org name classifies as `org` (emailable-path eligible) instead of `eyeball`.
+Fix: extend the eyeball token list with carrier stems (telekom, telecom variants, mobile
+carrier names) + add fixtures; fold into the item-4 stratified audit so the fix is measured,
+not guessed.
 
 ## Cross-program flags (NOT owned by ip-org — routed to owners)
 
