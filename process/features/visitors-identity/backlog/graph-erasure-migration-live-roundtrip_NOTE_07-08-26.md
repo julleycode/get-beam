@@ -1,6 +1,6 @@
 ---
 name: plan:graph-erasure-migration-live-roundtrip
-description: "Backlog: the erasure_requests migration d1a6c4e93f27 is offline-validated only — no live round-trip on a disposable Postgres (KG-5)"
+description: "RESOLVED 07-08-26: erasure_requests migration d1a6c4e93f27 live round-trip proven on disposable postgres:16-alpine (KG-5 closed — full 64-rev chain from empty + 17-rev down/up)"
 date: 07-08-26
 metadata:
   node_type: memory
@@ -8,7 +8,16 @@ metadata:
   feature: visitors-identity
 ---
 
-# erasure_requests Migration — Live Round-Trip Not Run (KG-5)
+# erasure_requests Migration — Live Round-Trip Not Run (KG-5) — ✅ RESOLVED 07-08-26
+
+**RESOLVED (07-08-26 Docker gate run, disposable postgres:16-alpine):** full 64-revision chain
+applied from an EMPTY database through head `d1a6c4e93f27` (this migration); downgraded 17
+revisions to `e6b2d4a1c837` (exercising this migration's downgrade leg — `erasure_requests`
+table + both indexes dropped clean); re-upgraded clean. KG-5 is closed. Production apply
+remains a separate explicit operator action (Railway auto-applies on push to main — see
+Deploy note below). Note: the graph-erasure INTEGRATION gates are a separate matter —
+7/14 pass, 8/14 blocked on test-fixture bugs; see
+`docker-gate-run-findings_NOTE_07-08-26.md`.
 
 **Source:** `graph-erasure-compliance_07-08-26`, Known Gap KG-5.
 

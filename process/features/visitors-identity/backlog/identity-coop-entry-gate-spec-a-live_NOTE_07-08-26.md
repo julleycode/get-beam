@@ -44,8 +44,13 @@ the billing/credits surface.
 ## Clearing conditions (all four)
 
 1. SPEC A reaches **EVL GREEN** — its 14 Docker integration gates run and pass.
-2. SPEC A's **migration live round-trip** runs clean on a disposable Postgres (`upgrade head` →
-   `downgrade` → `upgrade head`).
+   **Status 07-08-26: ATTEMPTED, NOT MET** — gates executed for the first time: 7/14 pass,
+   8/14 blocked on test-FIXTURE bugs (not source bugs): `IdentifiedVisitor` has no
+   `first_seen`/`last_seen` (those live on `Visitor`), `Site` has no `domain` col and
+   requires `name`+`url` NOT NULL. Entry gate for identity-coop remains UNMET. See
+   `docker-gate-run-findings_NOTE_07-08-26.md`.
+2. ~~SPEC A's **migration live round-trip**~~ — **MET 07-08-26:** `d1a6c4e93f27` round-tripped
+   clean on a disposable postgres:16-alpine (full 64-rev chain from empty; 17-rev down/up).
 3. SPEC A is **pushed and deployed** (its branch merged; the migration applied where the flag will run).
 4. Phase 1's other Entry Gate items are re-derived LIVE at that time — `alembic heads` (moves ~daily)
    and an `identity_resolver.py` drift re-check.

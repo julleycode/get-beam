@@ -15,7 +15,12 @@ environment — `docker`, `colima`, and `podman` are all `command not found`. Th
 lane's Postgres (localhost:5433) is therefore unreachable
 (`OSError: [Errno 61] Connect call failed ('127.0.0.1', 5433)`).
 
-## Open gate 1 — migration live round-trip
+## Open gate 1 — migration live round-trip — ✅ RESOLVED 07-08-26
+
+**RESOLVED (07-08-26 Docker gate run, disposable postgres:16-alpine):** full 64-revision chain
+(including `e9d2a4c71f68_add_site_tombstones.py`) applied from an EMPTY database through head
+`d1a6c4e93f27`; downgrade of 17 revisions to `e6b2d4a1c837` (covering this migration's
+downgrade leg) and re-upgrade clean. Gate 2 (integration lane) remains open.
 
 Migration: `apps/api/migrations/versions/e9d2a4c71f68_add_site_tombstones.py`
 (chained off live head `c2f8a5d31e97`, re-confirmed fresh at EXECUTE per E1).

@@ -1,6 +1,6 @@
 ---
 name: note:cadence-bot-flag-deferred-gates
-description: "4 known-gaps left open by cadence-bot-flag (pixel) EXECUTE+EVL closeout: migration live round-trip, AC-14 live-crawler validation, AC-8/AC-9 Agent-Probe manual render check, Playwright/Clerk auth-harness leg — plus the apps/web RTL/jsdom test-infra backlog candidate"
+description: "3 known-gaps left open by cadence-bot-flag (pixel) EXECUTE+EVL closeout: AC-14 live-crawler validation, AC-8/AC-9 Agent-Probe manual render check, Playwright/Clerk auth-harness leg — plus the apps/web RTL/jsdom test-infra backlog candidate. Migration live round-trip RESOLVED 07-08-26"
 date: 26-07-26
 feature: pixel
 ---
@@ -13,7 +13,17 @@ archived; see UPDATE PROCESS closeout). Code is EVL-PASS (25 unit + 7 integratio
 pre-accepted at VALIDATE (CONDITIONAL, execute-eligible) and re-confirmed unresolved at EVL —
 none are regressions, none silently dropped.
 
-## Gap 1 — Migration live round-trip not run
+## Gap 1 — Migration live round-trip not run — ✅ RESOLVED 07-08-26
+
+**RESOLVED (07-08-26 Docker gate run, disposable postgres:16-alpine):** the full 64-revision
+chain applied clean from an EMPTY database through head `d1a6c4e93f27`; downgrade of 17
+revisions to `e6b2d4a1c837` (this migration — it was the downgrade-window floor, so it
+remained applied while everything above it round-tripped) and re-upgrade clean. Upgrade leg
+proven from-empty; `visitors.is_bot_suspect` / `identified_visitors.is_bot_suspect` created
+correctly. Production apply remains a separate explicit operator action; Gaps 2–4 below
+still stand.
+
+<details><summary>Original gap text (historical)</summary>
 
 `e6b2d4a1c837_add_cadence_bot_flag.py` was never round-tripped (`upgrade head` →
 `downgrade -1` → `upgrade head`) on a disposable Postgres container.
@@ -37,6 +47,8 @@ none are regressions, none silently dropped.
 - **Do NOT enable `cadence_bot_flag_enabled` in any real environment** until this round-trip
   closes AND the migration is actually applied there — matches the `agent_detection_enabled` /
   `ingest_velocity_enabled` precedent (new flag defaults OFF).
+
+</details>
 
 ## Gap 2 — AC-14 live-crawler validation (SPEC-level, Agent-Probe by design)
 

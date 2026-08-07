@@ -89,6 +89,11 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   - `graph-erasure-compliance_07-08-26` — SPEC + COMPLEX PLAN, **planned, not yet VALIDATE'd**.
     Closes the gap where per-visitor GDPR erasure (`apps/api/routers/visitors.py:403-439`) never
     deletes cross-tenant `beam_identity_graph` rows, plus stale public legal copy.
+    **Integration gates attempted 07-08-26 (Docker gate run): 7/14 pass, 8/14 blocked on
+    test-FIXTURE bugs (NOT source bugs — `IdentifiedVisitor` has no `first_seen`/`last_seen`;
+    `Site` has no `domain` col, needs `name`+`url`). Entry-gate for identity-coop still UNMET.
+    Migration `d1a6c4e93f27` live round-trip IS closed (KG-5). See
+    `backlog/docker-gate-run-findings_NOTE_07-08-26.md`.**
   - `github-reader_07-08-26` — **EXECUTED + EVL green 8/8 (07-08-26).** New
     `apps/api/services/github_reader.py` (flag `enable_github_reader` default OFF,
     `github_osint_token`, 7d cache, fail-closed rate limit, single-host SSRF guard, `clean_text`
@@ -99,7 +104,9 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   - `social-context-merge_07-08-26` — **EXECUTED + EVL green (07-08-26).** `store_social_context`
     (`apps/api/services/social_intelligence.py`) now merge-preserving (the 1 overwrite writer of 9
     fixed; census of 9 writers verified), deep-research meter stamp removed. PVL converged after 3
-    passes; AC-7 Hybrid deferred pending Docker (accepted); 4 backlog notes written.
+    passes; 4 backlog notes written. **✅ VERIFIED 07-08-26** — AC-7 Hybrid gate ran in the
+    Docker gate run (`test_usage_limits.py` 3/3 vs real Postgres, both SQL residuals proven);
+    archival pending user.
   - `identity-coop_07-08-26` — Phase 1 **Dependency-BLOCKED** on graph-erasure reaching LIVE
     (entry gate); plan converged via supplement (bool-return accrual gating,
     write-nothing-when-blocked privacy invariant, site_id-only ledger, partial-unique dedup).
@@ -323,6 +330,12 @@ structurally separate from human Visitor/Event data, never as a targetable outre
     unscoped `alembic upgrade head --sql` fails mid-chain because `b7d3e9f1a4c2_add_ad_connections.py`
     calls `sa.inspect(bind)` (unsupported against alembic's offline `MockConnection`) — use an
     explicit `<from>:<to>` range instead; see `process/context/tests/all-tests.md` for the gotcha.
+    **Update 07-08-26 (Docker gate run):** full-chain live round-trip from an EMPTY disposable
+    `postgres:16-alpine` proven — all 64 revisions applied to head `d1a6c4e93f27`, then 17
+    revisions downgraded to `e6b2d4a1c837` and re-upgraded clean. This closes the
+    migration-round-trip known-gap items across ingest-abuse-hardening, cadence-bot-flag,
+    site-id-lifecycle, job-change-detection, graph-erasure (KG-5), and identity-coop
+    clearing condition 2.
   - **None of this is a production live-apply**, which remains a separate explicit operator
     action. Apply the full re-chained sequence in order before enabling `agent_detection_enabled`,
     `company_graph_enabled`, `identity_signals_enabled`, `site_ingest_limit_enabled`,
@@ -563,6 +576,13 @@ re-run `alembic heads` before chaining or applying; concurrent programs move it 
 
 ## Open Questions / Outstanding Work
 
+- **P0 — `GET /visitors` returns 500 (pre-existing, IN PROD: on `main` AND `devjulley`, fix
+  pending).** `routers/visitors.py:227` assigns `confidence_score` to `VisitorOut`; the field
+  only exists on `VisitorDetailOut` (`schemas/visitors.py:91`) → pydantic ValueError → 500.
+  Found by the 07-08-26 Docker gate run (10 integration failures). Second latent bug same
+  block: `visitors.py:200-208` canon_rows select omits `confidence_score` while line 215
+  reads it → AttributeError in the (unexercised) canonical-alias branch. See
+  `process/features/visitors-identity/backlog/docker-gate-run-findings_NOTE_07-08-26.md`.
 - **GDPR backfill exposure — RESOLVED 07-08-26.** The pii-at-rest re-validation found that
   `graph_erasure.py`'s erasure sweep matches on blind index, so pre-backfill NULL-bidx rows would
   be silently missed. Operator ran `apps.api.scripts.backfill_pii_ciphertext` against prod same
@@ -590,12 +610,16 @@ re-run `alembic heads` before chaining or applying; concurrent programs move it 
   `process/features/visitors-identity/backlog/owned-data-layer-docker-verification_NOTE_23-07-26.md`
   (RESOLVED), `process/features/visitors-identity/backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`
   (RESOLVED), `process/features/visitors-identity/backlog/post-docker-gate-followups_NOTE_24-07-26.md`
-  (open: 5 unrelated integration failures + conftest Redis-isolation hardening),
+  (REBASED 07-08-26: measured full-lane set is 478 passed / 23 failed / 17 errors — the old
+  5-failure set did not reproduce; conftest Redis-isolation hardening now confirmed-twice),
   `process/features/pixel/backlog/ingest-abuse-hardening-deferred-gates_NOTE_25-07-26.md` (open:
-  migration live round-trip; AC-4a mutation-kill re-verification), and
+  AC-4a mutation-kill re-verification; migration round-trip RESOLVED 07-08-26),
   `process/features/pixel/backlog/cadence-bot-flag-deferred-gates_NOTE_26-07-26.md` (open:
-  migration live round-trip; AC-14 live-crawler validation; AC-8/AC-9 Agent-Probe manual render
-  check; Playwright auth-harness leg)
+  AC-14 live-crawler validation; AC-8/AC-9 Agent-Probe manual render check; Playwright
+  auth-harness leg; migration round-trip RESOLVED 07-08-26), and
+  `process/features/visitors-identity/backlog/docker-gate-run-findings_NOTE_07-08-26.md`
+  (07-08-26 run: P0 `GET /visitors` 500 in prod, graph-erasure/job-change test-fixture bugs,
+  vocab-drift test, 7 untriaged failures, Redis-shadowing hazard round 2)
 - "Handoff Detection" (human-behind-the-agent correlation) is **built, not planned** — this entry
   previously said "not yet scaffolded on disk", which was stale. Shipped on disk with tests:
   `agent_handoff_correlation.py` (fetch↔click sweep), `agent_fetch_beacon.py` (edge beacon),

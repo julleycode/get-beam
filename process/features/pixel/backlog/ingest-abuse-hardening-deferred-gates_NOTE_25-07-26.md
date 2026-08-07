@@ -1,6 +1,6 @@
 ---
 name: note:ingest-abuse-hardening-deferred-gates
-description: "2 known-gaps left open by ingest-abuse-hardening (pixel) closeout: migration live round-trip, AC-4a mutation-kill re-verification"
+description: "1 known-gap left open by ingest-abuse-hardening (pixel) closeout: AC-4a mutation-kill re-verification. Migration live round-trip RESOLVED 07-08-26 (disposable-container full-chain evidence)"
 date: 25-07-26
 feature: pixel
 ---
@@ -14,7 +14,17 @@ Both gaps are Known-Gaps recorded at EVL closeout, not regressions — code is E
 do not re-file) and the outstanding `vc-risk-evidence-pack` (plan self-classified high-risk,
 never produced).
 
-## Gap 1 — Migration live round-trip not run
+## Gap 1 — Migration live round-trip not run — ✅ RESOLVED 07-08-26
+
+**RESOLVED (07-08-26 Docker gate run, disposable postgres:16-alpine):** the full 64-revision
+chain (including `c7d3b8e1f624`) applied clean from an EMPTY database through head
+`d1a6c4e93f27`; downgrade of 17 revisions to `e6b2d4a1c837` and re-upgrade also clean.
+Evidence shape: this migration's UPGRADE leg is proven from-empty; the downgrade window
+floor was `e6b2d4a1c837` (after this migration), so `c7d3b8e1f624`'s own downgrade leg was
+not individually exercised — accepted as closing this gap per the 07-08-26 run's scope.
+Production apply remains a separate explicit operator action.
+
+<details><summary>Original gap text (historical)</summary>
 
 `c7d3b8e1f624_add_ingest_abuse_flag.py` was never round-tripped
 (`upgrade head` → `downgrade -1` → `upgrade head`) on a disposable Postgres container.
@@ -39,6 +49,8 @@ never produced).
 - **Do NOT enable in any real environment** until this round-trip closes AND the
   migration is actually applied there — matches the `agent_detection_enabled` /
   `company_graph_enabled` precedent (all new flags below default OFF/permissive).
+
+</details>
 
 ## Gap 2 — AC-4a mutation-kill claim not empirically re-run at closeout
 

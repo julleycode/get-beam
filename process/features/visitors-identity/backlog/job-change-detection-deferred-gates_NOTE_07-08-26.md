@@ -31,9 +31,13 @@ docker compose -f infra/docker-compose.yml up -d postgres redis
 .venv/bin/python3.11 -m pytest tests/integration/test_job_change_detection.py -m integration -q
 ```
 
-Also still open from the plan's own Known-Gap #1: the migration **live round-trip** on a
-disposable Postgres (`upgrade head` → `downgrade -1` → `upgrade head`). Offline `--sql` was
-validated clean both directions for `a4f2b8c15d70`; that is not a live apply.
+~~Also still open from the plan's own Known-Gap #1: the migration **live round-trip**~~ —
+**RESOLVED 07-08-26:** full 64-revision chain (including `a4f2b8c15d70`) applied from an
+EMPTY disposable postgres:16-alpine through head `d1a6c4e93f27`; 17-revision downgrade to
+`e6b2d4a1c837` + re-upgrade clean. (The integration lane for THIS plan is a separate matter:
+`test_job_change_detection.py` ran 07-08-26 and produced 15/15 ERRORS on a fixture bug —
+`Visitor` inserted without NOT NULL `first_seen`/`last_seen`. See
+`docker-gate-run-findings_NOTE_07-08-26.md`.)
 
 Classification: `harness-drift` (environment), NOT product breakage.
 

@@ -10,7 +10,12 @@ feature: visitors-identity
 **TL;DR** — Two one-line-class bugs in `apps/api/services/social_intelligence.py::store_social_context`. Bug-1: it assigns `social_context` wholesale, destroying sibling keys written moments earlier by `enrich_tier1` in the same Celery loop iteration. Bug-2: it stamps `social_context_updated_at`, which `usage_limits.get_enrich_usage()` counts as a deep-research quota slot the user never used. Fix = read-modify-write merge (matching the 8 other merge writers) + delete the timestamp write. No migration, no schema change, no new dependency.
 
 **Date**: 07-08-26
-**Status**: ACTIVE — plan written, awaiting VALIDATE
+**Status**: ✅ VERIFIED (07-08-26) — all gates green. AC-7 Hybrid gate ran in the 07-08-26
+Docker gate run: `tests/integration/test_usage_limits.py` 3/3 passed against real Postgres,
+proving both recorded residuals (NULL-exclusion 3VL; naive `_today_start()` vs `timestamptz`).
+Was CODE-DONE-pending-AC-7 since EXECUTE. See
+`process/features/visitors-identity/backlog/social-context-ac7-deferred_NOTE_07-08-26.md`
+(RESOLVED). Archival deferred — no archival moves in this session per orchestrator directive.
 **Complexity**: SIMPLE
 **Feature**: visitors-identity
 
@@ -466,6 +471,7 @@ Hard stop conditions / safety constraints:
 - Put NO writer count in the new docstring (checklist step 4, E10).
 - Write ALL FOUR backlog notes (E11) — the plan's "three" at lines 40 and 145 is stale.
 - Do not mark the plan VERIFIED while AC-7 is deferred — CODE DONE is the ceiling until Docker is up.
+  **(Condition satisfied 07-08-26: AC-7 ran, 3/3 passed — plan promoted to VERIFIED; see Status header.)**
 - Any irreversible or outward-facing action not named in this contract: stop and ask.
 Next phase: EXECUTE — sequential, one vc-execute-agent (opus). Signal score 1/7 (S6 only). Gate CONDITIONAL with 2 recorded supplement cycles and all concerns accepted; EXECUTE is unblocked.
 Validate contract: inline in plan (## Validate Contract), generated-by outer-pvl, pass 3, 2 supplement cycles

@@ -1,11 +1,20 @@
 ---
 name: note:social-context-ac7-deferred
-description: "AC-7 Hybrid gate deferred (Docker down) — two named SQL-semantics residuals in get_enrich_usage remain unexecuted against real Postgres"
+description: "RESOLVED 07-08-26: AC-7 Hybrid gate ran — tests/integration/test_usage_limits.py 3/3 passed against real Postgres; both SQL-semantics residuals proven"
 date: 07-08-26
 feature: visitors-identity
 ---
 
-# AC-7 deferred — `get_enrich_usage()` real-Postgres gate not run
+# AC-7 deferred — `get_enrich_usage()` real-Postgres gate not run — ✅ RESOLVED 07-08-26
+
+**RESOLVED (07-08-26 Docker gate run):** `tests/integration/test_usage_limits.py` ran **3/3
+PASSED** against real Postgres. Both recorded residuals are now proven:
+- (a) NULL-exclusion under SQL three-valued logic — observed in Postgres, not just inferred.
+- (b) naive `_today_start()` vs `timestamptz` column — day-boundary probe
+  (`test_enrich_usage_excludes_yesterdays_stamp`) passed.
+
+Consequence: `social-context-merge_07-08-26` is promoted from CODE DONE to **VERIFIED**
+(all gates green). Original gate description preserved below for history.
 
 **TL;DR** — The Hybrid tier gate for `social-context-merge_07-08-26` could not run: the Docker
 daemon was down, so no PostgreSQL was available. The **test file exists and is runnable** —
