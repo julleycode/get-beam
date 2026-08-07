@@ -1291,9 +1291,24 @@ class IdentityResolver(
         from apps.api.services.graph_erasure import GRAPH_WRITE_BLOCKING_SCOPES
         from apps.api.services.suppression import is_email_suppressed_any
 
-        if getattr(visitor, "do_not_resolve", False) or await is_email_suppressed_any(
-            self.db, email, GRAPH_WRITE_BLOCKING_SCOPES
-        ):
+        # The suppression lookup is a DB round-trip, and the IdentifiedVisitor
+        # row is already committed by the time we get here, so an exception
+        # escaping this check would crash resolve() on work that already
+        # succeeded — the same failure the commit and hot-alert steps around it
+        # deliberately swallow. Fail CLOSED: when the guard cannot prove this
+        # person has NOT asked to be forgotten, skip the graph write rather than
+        # risk re-adding an erased identity.
+        try:
+            blocked = getattr(
+                visitor, "do_not_resolve", False
+            ) or await is_email_suppressed_any(
+                self.db, email, GRAPH_WRITE_BLOCKING_SCOPES
+            )
+        except Exception as exc:  # noqa: BLE001 — never crash resolve on this
+            await self.db.rollback()
+            logger.warning("graph_erasure_guard_failed", error=str(exc))
+            return False
+        if blocked:
             logger.info(
                 "graph_write_blocked", visitor_id=visitor.visitor_id[:8]
             )

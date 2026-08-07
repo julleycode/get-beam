@@ -382,6 +382,32 @@ class TestBeamIdentityNetwork:
         db.rollback.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_upsert_survives_erasure_guard_db_error(self):
+        """A failing suppression lookup must not crash resolve, and must not write.
+
+        By this point the IdentifiedVisitor row is already committed, so letting
+        the guard's exception escape would fail a resolve() that had actually
+        succeeded. Failing closed keeps the erasure promise: no proof the person
+        is un-erased means no graph write.
+        """
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=Exception("DB error"))
+        db.rollback = AsyncMock()
+        resolver = _make_resolver(db=db)
+
+        wrote = await resolver._upsert_beam_identity(
+            _make_visitor(),
+            {"email": "user@test.com", "confidence_score": 0.8},
+            "rb2b",
+        )
+
+        assert wrote is False
+        # Only the guard round-trip ran — the upsert was never attempted.
+        assert db.execute.call_count == 1
+        db.rollback.assert_called_once()
+        db.commit.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_check_network_returns_none_without_fingerprint(self):
         resolver = _make_resolver()
         visitor = _make_visitor(fingerprint=None)
