@@ -33,8 +33,21 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from apps.api.services.ip_org_ingest import refresh_ip_org_dataset  # noqa: E402
+from apps.api.services.ip_org_rir_ingest import (  # noqa: E402
+    refresh_rir_allocations,
+)
+from apps.api.services.rpki_ingest import refresh_rpki_roas  # noqa: E402
 
 logger = structlog.get_logger()
+
+#: ``--source`` values → the refresh they run. ``caida`` is the default so the
+#: command's existing behavior is unchanged for anyone (or any runbook) already
+#: calling it without the flag.
+SOURCES: dict[str, object] = {
+    "caida": refresh_ip_org_dataset,
+    "rir": refresh_rir_allocations,
+    "rpki": refresh_rpki_roas,
+}
 
 #: Hosts treated as a developer's own machine. Everything else — including any
 #: managed/pooler hostname — is remote.
@@ -58,10 +71,16 @@ def is_local_db_url(url: str) -> bool:
     return host.lower().strip("[]") in LOCAL_HOSTS
 
 
-async def _main(apply: bool) -> int:
-    status = await refresh_ip_org_dataset(dry_run=not apply)
-    print(json.dumps(status, indent=2, default=str))
-    return 0 if status.get("status") in ("ok", "dry_run", "locked") else 1
+async def _main(apply: bool, source: str) -> int:
+    names = list(SOURCES) if source == "all" else [source]
+    failed = False
+    for name in names:
+        status = await SOURCES[name](dry_run=not apply)  # type: ignore[operator]
+        print(f"--- {name} ---")
+        print(json.dumps(status, indent=2, default=str))
+        if status.get("status") not in ("ok", "dry_run", "locked"):
+            failed = True
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
@@ -70,6 +89,12 @@ if __name__ == "__main__":
         "--apply",
         action="store_true",
         help="actually load and swap the table (default is a dry run)",
+    )
+    parser.add_argument(
+        "--source",
+        choices=(*SOURCES, "all"),
+        default="caida",
+        help="which evidence source to refresh (default: caida, today's behavior)",
     )
     parser.add_argument(
         "--allow-remote",
@@ -94,4 +119,4 @@ if __name__ == "__main__":
             )
             raise SystemExit(1)
 
-    raise SystemExit(asyncio.run(_main(apply=args.apply)))
+    raise SystemExit(asyncio.run(_main(apply=args.apply, source=args.source)))

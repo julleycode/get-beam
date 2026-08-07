@@ -41,13 +41,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.models.database import async_session
-from apps.api.models.ip_org_prefix import IP_ORG_STAGING_TABLE, IP_ORG_TABLE
+from apps.api.models.ip_org_prefix import (
+    IP_ORG_STAGING_TABLE,
+    IP_ORG_TABLE,
+    IP_ORG_WRITE_LOCK_KEY,
+)
 from apps.api.services.company_resolver import classify_org_kind
 
 logger = structlog.get_logger()
-
-# Advisory-lock key keeping the refresh single-flight across replicas.
-_INGEST_LOCK_KEY = "beam_ip_org_ingest"
 
 _FETCH_TIMEOUT_SECONDS = 120.0  # multi-MB gzip files over a slow link
 _INSERT_CHUNK = 5_000
@@ -283,7 +284,7 @@ async def _try_acquire_lock(db: AsyncSession) -> bool | None:
     try:
         result = await db.execute(
             text("SELECT pg_try_advisory_lock(hashtext(:key))"),
-            {"key": _INGEST_LOCK_KEY},
+            {"key": IP_ORG_WRITE_LOCK_KEY},
         )
         return bool(result.scalar())
     except Exception as exc:
@@ -295,7 +296,7 @@ async def _release_lock(db: AsyncSession) -> None:
     try:
         await db.execute(
             text("SELECT pg_advisory_unlock(hashtext(:key))"),
-            {"key": _INGEST_LOCK_KEY},
+            {"key": IP_ORG_WRITE_LOCK_KEY},
         )
     except Exception:
         pass
@@ -311,6 +312,12 @@ _INDEX_TARGETS: tuple[tuple[str, str], ...] = (
     ("gist", "idx_ip_org_prefixes_prefix_gist"),
     ("(asn", "idx_ip_org_prefixes_asn"),
     ("(org_name", "idx_ip_org_prefixes_org_name"),
+    # Added with the Phase 3 evidence columns. This entry is NOT optional: the
+    # fallback below renames anything unmatched to ``ip_org_prefixes_pkey``, so
+    # without a marker here the relationship_type index AND the real primary-key
+    # index would both be renamed to the same name — ``relation already exists``,
+    # aborting the swap transaction on EVERY refresh from then on.
+    ("(relationship_type", "idx_ip_org_prefixes_relationship_type"),
 )
 
 
@@ -339,6 +346,7 @@ async def _load_staging_and_swap(
     rows: list[dict],
     source: str,
     dataset_date: date | None,
+    carry_over: bool = True,
 ) -> None:
     """Bulk-load ``rows`` into a staging twin, then swap it in atomically.
 
@@ -346,6 +354,18 @@ async def _load_staging_and_swap(
     dataset for minutes. Instead the new snapshot is built beside it and swapped
     in one transaction, so a reader sees either the whole old table or the whole
     new one.
+
+    ``carry_over`` is what makes this multi-source (D1). The swap replaces the
+    WHOLE table, so with three sources refreshing on independent cadences a naive
+    swap would delete the other two sources' rows. Before loading, every live row
+    belonging to a DIFFERENT source is copied server-side into staging, so the
+    refresh replaces only its own evidence. The DROP/RENAME sequence is
+    deliberately untouched: its crash-safety was proven the hard way when the
+    Postgres container was killed mid-load and zero rows leaked.
+
+    Callers MUST hold ``IP_ORG_WRITE_LOCK_KEY``. The carry-over reads a snapshot
+    of the live table; if another writer's swap commits in between, this RENAME
+    silently discards their freshly loaded rows.
     """
     await db.execute(text(f'DROP TABLE IF EXISTS "{IP_ORG_STAGING_TABLE}"'))
     await db.execute(
@@ -355,15 +375,30 @@ async def _load_staging_and_swap(
         )
     )
 
+    if carry_over:
+        # Server-side copy: never pulls the other sources' rows through Python.
+        await db.execute(
+            text(
+                f'INSERT INTO "{IP_ORG_STAGING_TABLE}" '
+                f'SELECT * FROM "{IP_ORG_TABLE}" WHERE source <> :source'
+            ),
+            {"source": source},
+        )
+
     insert_sql = text(
         f'INSERT INTO "{IP_ORG_STAGING_TABLE}" '
-        "(id, prefix, asn, org_name, org_name_raw, org_kind, source, dataset_date) "
+        "(id, prefix, asn, org_name, org_name_raw, org_kind, source, dataset_date, "
+        "relationship_type, valid_from, valid_to) "
         "VALUES (:id, CAST(:prefix AS cidr), :asn, :org_name, :org_name_raw, "
-        ":org_kind, :source, :dataset_date)"
+        ":org_kind, :source, :dataset_date, :relationship_type, :valid_from, "
+        ":valid_to)"
     )
     for start in range(0, len(rows), _INSERT_CHUNK):
         chunk = [
             {
+                "relationship_type": "route_origin",
+                "valid_from": dataset_date,
+                "valid_to": None,
                 **row,
                 "id": uuid.uuid4(),
                 "source": source,
@@ -380,7 +415,36 @@ async def _load_staging_and_swap(
         )
     )
     await _rename_indexes_to_canonical(db)
+
+    # Post-condition, logged rather than asserted: a carry-over regression that
+    # silently drops another source shows up here as a missing row instead of as
+    # nothing at all.
+    try:
+        counts = (
+            await db.execute(
+                text(
+                    f'SELECT source, count(*) FROM "{IP_ORG_TABLE}" GROUP BY source'
+                )
+            )
+        ).fetchall()
+        logger.info(
+            "ip_org_swap_source_counts",
+            counts={str(s): int(n) for s, n in counts},
+        )
+    except Exception as exc:  # observability must never fail a good swap
+        logger.warning("ip_org_swap_source_counts_failed", error=str(exc))
+
     await db.commit()
+
+    # The RIR corpus may have just appeared or vanished; drop the memoized
+    # EXISTS probe so this process does not keep answering from a stale value.
+    # Cross-process readers are bounded by the cache's TTL, not by this call.
+    try:
+        from apps.api.services.ip_org_fusion import invalidate_rir_corpus_cache
+
+        invalidate_rir_corpus_cache()
+    except Exception:  # pragma: no cover - defensive only
+        pass
 
 
 async def refresh_ip_org_dataset(dry_run: bool = True) -> dict:
@@ -434,6 +498,11 @@ async def refresh_ip_org_dataset(dry_run: bool = True) -> dict:
                 "org_name": normalized[:200],
                 "org_name_raw": (org_raw or "")[:200] or None,
                 "org_kind": classify_ip_org_kind(asn, org_raw),
+                # pfx2as IS BGP origin data — this is the relationship it
+                # asserts, not a default standing in for an unknown one.
+                "relationship_type": "route_origin",
+                "valid_from": dataset_date,
+                "valid_to": None,
             }
         )
 

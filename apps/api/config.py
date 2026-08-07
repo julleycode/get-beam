@@ -743,6 +743,51 @@ class Settings(BaseSettings):
     # pointless.
     ip_org_refresh_interval_hours: int = 24
 
+    # ─── IP-org evidence graph (Phase 3) ───
+    # Phase 3 stops treating ip_org_prefixes as one flat prefix→company table and
+    # starts recording WHICH relationship each row asserts, from three
+    # independent sources, fused into a scored hypothesis. Every flag here
+    # defaults OFF and each is an independent operator action AFTER the migration
+    # is live-applied — same posture as ip_org_lookup_enabled above.
+    #
+    # Ingest of the RIR delegated-extended files (registered_holder evidence).
+    # Rows land with org_kind='registry', which BOTH lookups filter out, so
+    # turning this on cannot change what the currently-enabled v1 path returns —
+    # it only makes the corroborating corpus available to fusion.
+    ip_org_rir_ingest_enabled: bool = False
+    ip_org_rir_delegated_urls: str = (
+        "https://ftp.arin.net/pub/stats/arin/delegated-arin-extended-latest,"
+        "https://ftp.ripe.net/pub/stats/ripencc/delegated-ripencc-extended-latest,"
+        "https://ftp.apnic.net/stats/apnic/delegated-apnic-extended-latest,"
+        "https://ftp.lacnic.net/pub/stats/lacnic/delegated-lacnic-extended-latest,"
+        "https://ftp.afrinic.net/pub/stats/afrinic/delegated-afrinic-extended-latest"
+    )
+    # Allocations change on the order of days, not hours. Weekly.
+    ip_org_rir_refresh_interval_hours: int = 168
+
+    # Ingest of validated RPKI ROAs (route-origin authorization cross-check).
+    ip_org_rpki_ingest_enabled: bool = False
+    ip_org_rpki_json_url: str = "https://rpki.cloudflare.com/rpki.json"
+    ip_org_rpki_refresh_interval_hours: int = 24
+    # Hard ceiling on the rpki.json body, enforced WHILE STREAMING. The file runs
+    # ~50-100 MB uncompressed (400k-700k ROAs) and json.loads roughly doubles
+    # peak RSS, so an unbounded read of an unexpectedly large or hostile response
+    # is a real memory-exhaustion path. Exceeding this aborts the fetch mid-flight
+    # and keeps the previously loaded ROAs — a normal fail-open outcome.
+    ip_org_rpki_max_bytes: int = 209_715_200  # 200 MB
+
+    # When true, the resolver's ip_org rung calls lookup_ip_org_v2 (fused,
+    # multi-source, scored) instead of v1, and writes the FUSED confidence to
+    # company_graph. With it off, v1 runs and the written row is byte-identical
+    # to Phase 2 (source="rir_asn", confidence=0.45).
+    #
+    # The fused score is clamped to <= 0.65 on purpose: it must never outrank the
+    # paid path (0.7), so a strongly-corroborated free hit cannot silently
+    # displace data we paid for. It CAN exceed rDNS (0.5) when three independent
+    # sources agree, which is the point of fusing them, and the reason this sits
+    # behind a flag rather than shipping on.
+    ip_org_fusion_enabled: bool = False
+
     # How long after a site is deleted its site_id stays eligible for reuse when
     # the SAME owner re-creates a site for the SAME normalized url. This bounds
     # REUSE ELIGIBILITY only — site_tombstones rows are never deleted (they are

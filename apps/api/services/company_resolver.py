@@ -606,6 +606,37 @@ async def _resolve_via_local_ip_org(
     """
     if db is None or not settings.ip_org_lookup_enabled:
         return None
+
+    if settings.ip_org_fusion_enabled:
+        from apps.api.services.ip_org_lookup import lookup_ip_org_v2
+
+        hypothesis = await lookup_ip_org_v2(db, ip)
+        if hypothesis is None:
+            return None
+        if settings.company_graph_enabled:
+            # ONE fused row, not one per source. company_graph's (ip, source)
+            # unique key plus its confidence.desc() read means several
+            # ip_org-derived rows would compete with EACH OTHER and the highest
+            # would win regardless of fusion — defeating the point. So the
+            # source string stays "rir_asn" (no consumer changes) and only the
+            # confidence becomes the fused, clamped score.
+            await _write_through_company_graph(
+                db,
+                ip,
+                hypothesis["domain"],
+                hypothesis["organization"],
+                "rir_asn",
+                hypothesis["confidence"],
+            )
+        logger.info(
+            "ip_org_fusion_scored",
+            classification=hypothesis["classification"],
+            confidence=hypothesis["confidence"],
+            evidence_count=len(hypothesis["evidence"]),
+            uncertainty_count=len(hypothesis["uncertainty"]),
+        )
+        return hypothesis["domain"]
+
     from apps.api.services.ip_org_lookup import lookup_ip_org
 
     match = await lookup_ip_org(db, ip)
