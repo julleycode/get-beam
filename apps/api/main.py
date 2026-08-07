@@ -39,6 +39,11 @@ from apps.api.models.agent_fetch_event import AgentFetchEvent  # noqa: F401 — 
 from apps.api.models.agent_handoff_link import AgentHandoffLink  # noqa: F401 — register for create_all
 from apps.api.models.company_graph import CompanyGraphNode  # noqa: F401 — register for create_all
 from apps.api.models.identity_signal import IdentitySignal  # noqa: F401 — register for create_all
+from apps.api.models.identity_coop import (  # noqa: F401 — register for create_all
+    ContributionEvent,
+    CreditLedgerEntry,
+    ContributionConsentAcceptance,
+)
 from apps.api.models.ad_connection import AdConnection  # noqa: F401 — register for create_all
 from apps.api.models.ad_audience_link import AdAudienceLink  # noqa: F401 — register for create_all
 from apps.api.models.agent_profile import AgentProfile  # noqa: F401 — register for create_all

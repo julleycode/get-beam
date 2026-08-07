@@ -30,10 +30,13 @@ class SiteOut(BaseModel):
     # flagged as unusually high-activity are excluded from this site's
     # cross-visitor aggregates and sorted last for identity resolution.
     internal_damping_enabled: bool = False
+    # Identity co-op opt-in (identity-coop Phase 1). Default OFF; graph READ
+    # access is never gated on it.
+    contribution_enabled: bool = False
     consent_mode: str
     created_at: datetime
 
-    @field_validator("internal_damping_enabled", mode="before")
+    @field_validator("internal_damping_enabled", "contribution_enabled", mode="before")
     @classmethod
     def _damping_defaults_off(cls, v):
         """None -> False. Fails SAFE for any Site object predating the column."""
@@ -59,6 +62,14 @@ class SiteUpdate(BaseModel):
     tracking_enabled: bool | None = None
     internal_damping_enabled: bool | None = None
     consent_mode: str | None = None
+    # Identity co-op opt-in. Setting this True REQUIRES ``terms_version`` to be the
+    # currently-pinned ``settings.coop_terms_version`` (E4); the router 422s
+    # otherwise and writes the AC-10 acceptance row in the same transaction.
+    # Setting it False needs no acceptance — opting out is always unconditional.
+    contribution_enabled: bool | None = None
+    # Accompanies contribution_enabled=True only. A 64-char lowercase hex digest
+    # of the exact accepted policy text — never a free-form label.
+    terms_version: str | None = None
 
     @field_validator("consent_mode")
     @classmethod

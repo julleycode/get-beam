@@ -1,0 +1,237 @@
+{
+  "task": "identity-coop Phase 1 — ledger + contribution substrate",
+  "planPath": "process/features/visitors-identity/active/identity-coop_07-08-26/phase-1-ledger-substrate_PLAN_07-08-26.md",
+  "result": "PASS — all 16 validate-contract gates green, including all three Hybrid gates (Docker 29.4.2 up). Zero behavioural regressions attributable to this phase, proven by clean-worktree bisection.",
+  "environment": {
+    "docker": "29.4.2",
+    "postgres": "postgres:16-alpine (ad-hoc disposable container `coop-rt` on port 55445 for the migration round-trip; infra-postgres-1 on 5433 for the integration lane)",
+    "python": ".venv/bin/python3.11 (never .venv/bin/pytest — its shebang points at a pre-move path and is broken)",
+    "alembicHeadAtStart": "d1a6c4e93f27 (re-derived LIVE as the first EXECUTE action per E-6)",
+    "alembicHeadAfterPhase": "f2c81a6b4d09 (this phase's second migration)",
+    "alembicHeadNow": "a3e8d5c71f02 (a CONCURRENT session's IP->org migration chained onto f2c81a6b4d09 during EXECUTE; single head, DAG not forked)",
+    "productionTouched": false
+  },
+  "commands": [
+    {
+      "gate": "E-6 / A1 — live alembic head re-derivation",
+      "command": ".venv/bin/python3.11 -m alembic -c apps/api/alembic.ini heads",
+      "result": "PASS",
+      "output": "d1a6c4e93f27 (head) — exactly ONE head; A1's STOP-and-re-chain condition did not fire. Both new revisions chained onto this live value, not onto any head string quoted in a document."
+    },
+    {
+      "gate": "A7 — offline SQL validation, EXPLICIT revision range",
+      "command": ".venv/bin/python3.11 -m alembic -c apps/api/alembic.ini upgrade d1a6c4e93f27:head --sql",
+      "result": "PASS",
+      "output": "exit 0. DDL emitted for all three tables, all indexes, the partial unique index, and the sites column. Explicit range used because unscoped `head --sql` fails mid-chain on b7d3e9f1a4c2's sa.inspect call."
+    },
+    {
+      "gate": "G1/G2 Hybrid — migration round-trip on a DISPOSABLE Postgres",
+      "command": "docker run -d --name coop-rt postgres:16-alpine ... ; alembic upgrade head; alembic downgrade -1; alembic downgrade -1; alembic upgrade head",
+      "result": "PASS",
+      "output": "Full 66-revision chain applied from an EMPTY database through f2c81a6b4d09. downgrade -1 (f2c81a6b4d09 -> e7b3d5f19c46) and downgrade -1 (e7b3d5f19c46 -> d1a6c4e93f27) both clean; upgrade head restored f2c81a6b4d09. `alembic current` = f2c81a6b4d09 (head). Never run against a shared or prod database."
+    },
+    {
+      "gate": "D-E Hybrid — partial unique index present after round-trip",
+      "command": "psql -tAc \"SELECT indexdef FROM pg_indexes WHERE indexname='uq_coop_accrued_site_email';\"",
+      "result": "PASS",
+      "output": "CREATE UNIQUE INDEX uq_coop_accrued_site_email ON public.identity_contribution_events USING btree (site_id, email_bidx) WHERE (accrued IS TRUE) — UNIQUE and PARTIAL, as required. A non-partial index would be the wrong constraint."
+    },
+    {
+      "gate": "D-E Hybrid — duplicate ACCRUE raises IntegrityError against real Postgres",
+      "command": "two raw INSERTs into identity_contribution_events with accrued=true, same (site_id,email_bidx), different contributed_on",
+      "result": "PASS",
+      "output": "First: INSERT 0 1. Second: 'ERROR: duplicate key value violates unique constraint \"uq_coop_accrued_site_email\" / DETAIL: Key (site_id, email_bidx)=(s, b) already exists.' Raw SQL, so ALL service code was bypassed — the DB is proven to be the enforcement point."
+    },
+    {
+      "gate": "Schema shape — sites.contribution_enabled after round-trip",
+      "command": "psql -tAc \"SELECT column_name,is_nullable,column_default FROM information_schema.columns WHERE table_name='sites' AND column_name='contribution_enabled';\"",
+      "result": "PASS",
+      "output": "contribution_enabled|NO|false — NOT NULL with server default false, so every pre-existing site row is backfilled OFF and no site is opted in by a migration."
+    },
+    {
+      "gate": "F9-F14 + B2 — new unit tests",
+      "command": ".venv/bin/python3.11 -m pytest tests/unit/test_identity_coop.py -m unit -q",
+      "result": "PASS",
+      "output": "21 passed. Covers B2 (all FIVE settings default OFF/inert), F3, F5, F7, F8, F9 (3 parametrized no-op paths), F10, F11, F12, F14, plus four structural tripwires (no suppression import via AST, append-only consent trail, no user_id on the ledger, blind-index-only columns)."
+    },
+    {
+      "gate": "F1/F2/F4/F5/F13 — new integration tests",
+      "command": ".venv/bin/python3.11 -m pytest tests/integration/test_identity_coop_contribution.py -m integration -q",
+      "result": "PASS",
+      "output": "10 passed. Covers AC-1 (flag OFF writes nothing), AC-2 (read path structurally ungated, AST-asserted), AC-5 (full ACCRUE lot in the DB), AC-9 (event kept, credit withheld), AC-3 against the real unique constraint, AC-8 (derived balance respects hold + expiry), AC-10 (5 legs incl. terms_version='x' and a wrong 64-hex value), the D-E partial-index Hybrid legs, and 404-not-403 for a foreign site."
+    },
+    {
+      "gate": "Unit-lane regression",
+      "command": ".venv/bin/python3.11 -m pytest tests/unit -m unit -q",
+      "result": "PASS",
+      "output": "1224 passed, 2 skipped, 0 failed (baseline 1203+). Identical result in the shared worktree and in an isolated clean worktree carrying only this phase's changes."
+    },
+    {
+      "gate": "Integration-lane regression",
+      "command": "DATABASE_URL=<dedicated disposable DB> REDIS_URL=redis://localhost:6379/9 .venv/bin/python3.11 -m pytest tests/ -m integration -q  (run in a clean worktree carrying ONLY this phase's changes)",
+      "result": "PASS",
+      "output": "**528 passed, 0 failed, 0 errors** in 19:24 — EXACTLY the 518-test baseline plus this phase's 10 new integration tests. This is the definitive regression evidence: with contention removed (dedicated database + dedicated Redis slot + no concurrent-session code) the lane is perfectly clean. For contrast, the SHARED worktree run gave 521 passed / 3 failed / 5 errors and a second shared-DB run gave 1 failed / 18 errors — three different failure sets from three runs, which is why the shared-worktree numbers were treated as environment noise rather than as a regression signal. See MC-1."
+    },
+    {
+      "gate": "D4 / E-1 — diff footprint on the contested file",
+      "command": "git diff --stat apps/api/services/identity_resolver.py",
+      "result": "PASS",
+      "output": "11 insertions(+), 5 deletions(-) => 11 changed/touched lines, within the <= 12 budget on the plan's own touched-line accounting (N3 calls the D5 return-set '6 touched lines'). The D-A fix was NOT reshaped to fit the superseded <= 6 figure, per E-1."
+    }
+  ],
+  "manualChecks": [
+    {
+      "id": "MC-1",
+      "check": "Attribute the integration-lane failures — are they caused by identity-coop Phase 1?",
+      "method": "Three-way bisection using clean `git worktree` checkouts, because a concurrent session was writing to the shared worktree during EXECUTE. (a) Pristine HEAD worktree, no working-tree changes at all. (b) Same worktree with ONLY this phase's files copied in, and the concurrent session's IP->org block surgically removed from the SHARED apps/api/config.py (verified: `grep -c ip_org` = 0, `grep -c coop_terms_version` = 2). (c) The shared worktree containing both sessions' work.",
+      "result": "NOT CAUSED BY THIS PHASE — PROVEN. Decisive run: the FULL integration lane in the clean worktree carrying only this phase's changes, pointed at a DEDICATED disposable database and a dedicated Redis slot, returned **528 passed, 0 failed, 0 errors** — exactly the 518 baseline plus this phase's 10 new tests. Supporting bisection: (a) pristine HEAD: 15/15 pass. (b) HEAD + only identity-coop: 15/15 pass. (c) shared worktree: 3 failed + 5 errors. The failures therefore require the concurrent session's changes to appear. Corroborating evidence: the failing test names are unstable across runs (test_stats_new_fields vs test_monthly_plan_limit_reached; errors surface as '401 User not found' and sqlalchemy IntegrityError), which matches the conftest DB/Redis isolation gap already tracked in backlog/post-docker-gate-followups_NOTE_24-07-26.md ('5 unrelated integration failures + conftest Redis-isolation hardening'). A repeat full-lane run in the isolated worktree produced a THIRD, larger, different failure set (1 failed + 18 errors) purely from shared-database contention — two worktrees plus the concurrent agent all pointing at the same retarget_agent_test DB on port 5433 — which independently confirms these failures track environment, not code."
+    },
+    {
+      "id": "MC-2",
+      "check": "Is the RuntimeWarning ('coroutine AsyncMockMixin._execute_mock_call was never awaited') in tests/unit/test_rb2b_scoring.py introduced by the `-> bool` signature change?",
+      "method": "Ran that single test file in a pristine HEAD worktree and counted the warning.",
+      "result": "PRE-EXISTING. Same single warning at HEAD. Independently: the warning is attributed to a line inside the pre-existing hot_alert block, and the new hook cannot create an un-awaited coroutine because `settings.identity_coop_enabled` is False, so the `and` short-circuits before maybe_record_contribution is ever called."
+    },
+    {
+      "id": "MC-3",
+      "check": "Did the concurrent session fork the Alembic DAG?",
+      "method": "Re-ran `alembic heads` after noticing an untracked migration a3e8d5c71f02_add_ip_org_prefixes.py appear mid-EXECUTE, and read its down_revision.",
+      "result": "NO FORK. down_revision = f2c81a6b4d09 — the concurrent session correctly chained onto THIS phase's head. `alembic heads` returns a single head, a3e8d5c71f02. No re-chain needed and no other program's migration was touched."
+    },
+    {
+      "id": "MC-4",
+      "check": "Non-vacuity of the two adversarial gates — would ADV-1 and ADV-2's proving tests actually fail against the pre-change code?",
+      "method": "Reasoned against the pre-change source, which is recorded verbatim in the plan (`-> None`, two bare `return` statements, and an except path with no explicit return).",
+      "result": "GENUINELY RED. The assertions are identity checks (`assert wrote is False`, `assert ... is True`) against a function that previously returned None on every no-op path and None implicitly on success, so both directions fail against the old code. The ADV-2 tests arm their mocks with side_effect=AssertionError, so removing the guard makes the mock fire and the test fail loudly rather than silently passing."
+    },
+    {
+      "id": "MC-5",
+      "check": "Is any co-op write reachable in a real environment as shipped?",
+      "method": "Read both halves of the gate and the migration state.",
+      "result": "NOT REACHABLE. settings.identity_coop_enabled defaults False (asserted by test); Site.contribution_enabled defaults False with server_default='false' (asserted against a real DB row, not just the ORM default); and neither migration has been applied to any real environment. Enabling requires an explicit operator action after legal review, per the rollout order documented inline in config.py."
+    },
+    {
+      "id": "MC-6",
+      "check": "Does the co-op create any new PII surface?",
+      "method": "Inspected the model columns and every structlog call in the new module.",
+      "result": "NO. identity_contribution_events carries email_bidx only — no email, no email_ciphertext, so there is no decrypt path out of the co-op tables at all (unlike beam_identity_graph). The resolver computes the blind index before crossing the module boundary. Log events carry site_id/reason/amount only; email_bidx is deliberately not logged either. Disclosed residual: email_bidx is a stable cross-site correlation key, which is inherent to the co-op's dedupe/attribution purpose and is what the opt-in flag and consent trail govern."
+    },
+    {
+      "id": "MC-7",
+      "check": "Was anything outside this phase's declared Touchpoints modified?",
+      "method": "git status / git diff --stat review against the plan's Touchpoints list and the blast-radius registry.",
+      "result": "NO. This phase touched exactly: models/identity_coop.py, services/identity_coop.py, models/site.py, config.py, services/identity_resolver.py, schemas/sites.py, routers/sites.py, main.py (mapper registration, an A6 requirement), two new migrations, two new test files. Unrelated changes present in the worktree (ip_org_*, company_resolver.py, jobs/scheduler.py, models/__init__.py, a blog/perf plan doc) belong to the concurrent session and were left untouched."
+    }
+  ],
+  "knownGaps": [
+    "Neither migration is applied to any real environment. Live apply is a separate explicit operator action, and `alembic heads` must be re-derived again at that time — this repo's head moved twice during this single EXECUTE session.",
+    "coop_terms_version is pinned to a PLACEHOLDER policy string, not legally reviewed text. Must be re-pinned to the reviewed digest before either flag is enabled.",
+    "Five plan-named unit tests (F3, F9-F12) are proven against a fake AsyncSession rather than a live DB, because the unit lane has no database by repo convention. The DB-enforcement half of each is covered by the Hybrid gates and by additional integration legs, so net coverage exceeds the plan's requirement — but the unit legs alone do not prove Postgres semantics.",
+    "The full integration lane cannot be observed cleanly in the SHARED worktree while a concurrent session is writing to it, because both sessions target one test database. This is an environment/harness gap, not a coverage gap for this phase: the lane was observed cleanly (528/528) on a dedicated database. Recommend hardening tests/conftest.py to per-worker database names."
+  ],
+  "date": "2026-08-07",
+  "evlConfirmationRun": {
+    "runBy": "vc-tester (EVL Step 3, independent confirmation run)",
+    "date": "2026-08-07",
+    "posture": "Execute-agent evidence treated as UNCONFIRMED hypothesis and re-run from scratch. No source edits, no git mutations, no prod access.",
+    "isolation": "Dedicated database evl_coop_p1 (created + dropped by this run) on infra-postgres-1:5433 via DATABASE_URL override, to exclude the concurrent session sharing this worktree. Separate disposable postgres:16-alpine container evl_coop_disposable on port 55444 for all Hybrid/migration gates.",
+    "result": "PASS — all 16 validate-contract gates independently re-confirmed green. One expected-fail (review-decision.json PENDING) is correct manual-first behaviour, not a defect.",
+    "gates": [
+      {
+        "gate": "coop unit suite",
+        "command": ".venv/bin/python3.11 -m pytest tests/unit/test_identity_coop.py -q",
+        "result": "PASS",
+        "output": "21 passed in 5.57s"
+      },
+      {
+        "gate": "full unit lane regression",
+        "command": ".venv/bin/python3.11 -m pytest tests/unit -m unit -q",
+        "result": "PASS",
+        "output": "1280 passed, 2 skipped, 877 deselected. Execute-agent claimed ~1224P; the +56 delta is the concurrent session added unit files (test_ip_org_ingest/lookup, test_refresh_ip_org_guard). Zero failures."
+      },
+      {
+        "gate": "coop integration suite (isolated DB)",
+        "command": "DATABASE_URL=...evl_coop_p1 .venv/bin/python3.11 -m pytest tests/integration/test_identity_coop_contribution.py -m integration -q",
+        "result": "PASS",
+        "output": "10 passed in 102.90s"
+      },
+      {
+        "gate": "full integration lane (isolated DB)",
+        "command": "DATABASE_URL=...evl_coop_p1 .venv/bin/python3.11 -m pytest tests/ -m integration -q",
+        "result": "PASS",
+        "output": "537 passed, 0 failed, 0 errors, 2229 deselected in 2354s (39m14s). Execute-agent claimed 528P; delta is EXACTLY +9 = the concurrent session tests/integration/test_ip_org_pipeline.py (verified by --collect-only). No failure attributable to this phase OR to the concurrent session."
+      },
+      {
+        "gate": "alembic single head",
+        "command": ".venv/bin/python3.11 -m alembic -c apps/api/alembic.ini heads",
+        "result": "PASS",
+        "output": "a3e8d5c71f02 (head) — exactly ONE head, no fork. Matches the snapshot after the concurrent session chained a3e8d5c71f02 on top of this phase e7b3d5f19c46 -> f2c81a6b4d09."
+      },
+      {
+        "gate": "migration currency (offline --sql, explicit range)",
+        "command": ".venv/bin/python3.11 -m alembic -c apps/api/alembic.ini upgrade d1a6c4e93f27:a3e8d5c71f02 --sql",
+        "result": "PASS",
+        "output": "exit 0, clean SQL emitted through a3e8d5c71f02."
+      },
+      {
+        "gate": "diff guard — identity_resolver.py",
+        "command": "git diff --stat apps/api/services/identity_resolver.py",
+        "result": "PASS (with a definition ambiguity, see evlConcerns)",
+        "output": "11 insertions(+), 5 deletions(-); histogram column reads 16. Diff contains EXACTLY and ONLY the D5/N3-enumerated authorized edit set (hook 3 lines + local import + signature -> bool + docstring + 3x return False + 1x return True). No logic leaked out of identity_coop.py."
+      },
+      {
+        "gate": "HYBRID — migration live round-trip vs real Postgres",
+        "command": "alembic upgrade head (from EMPTY db) then downgrade -1 x3 then upgrade head, on disposable postgres:16-alpine",
+        "result": "PASS",
+        "output": "Full chain applied from empty through a3e8d5c71f02. Three downgrades clean; positively verified teardown (0 of 3 coop tables present, 0 sites.contribution_enabled columns present). Re-upgrade clean and uq_coop_accrued_site_email restored. Stronger evidence than the execute-agent record: down-state was asserted, not assumed."
+      },
+      {
+        "gate": "HYBRID — uq_coop_accrued_site_email partial index presence",
+        "command": "SELECT indexdef FROM pg_indexes WHERE indexname='uq_coop_accrued_site_email'",
+        "result": "PASS",
+        "output": "CREATE UNIQUE INDEX uq_coop_accrued_site_email ON public.identity_contribution_events USING btree (site_id, email_bidx) WHERE (accrued IS TRUE) — exact match to the contract predicate."
+      },
+      {
+        "gate": "HYBRID — duplicate ACCRUE raises IntegrityError (raw SQL)",
+        "command": "two raw INSERTs with accrued=TRUE on the same (site_id,email_bidx) different days, plus an accrued=FALSE control",
+        "result": "PASS (non-vacuous)",
+        "output": "2nd accrued=TRUE insert: ERROR duplicate key value violates unique constraint uq_coop_accrued_site_email. CONTROL accrued=FALSE same pair different day: INSERT 0 1 succeeded — proving the index is genuinely PARTIAL and the test is not passing for the wrong reason."
+      },
+      {
+        "gate": "evidence pack presence (5 artifacts)",
+        "command": "node .claude/skills/vc-risk-evidence-pack/scripts/validate-risk-artifacts.mjs .../harness/",
+        "result": "EXPECTED-FAIL (correct)",
+        "output": "All 5 artifacts present and valid JSON. Sole validator failure: review-decision.json decision must be approved/approved-with-concerns/rejected — value is PENDING USER APPROVE/REJECT. This is REQUIRED manual-first behaviour per E-5 and is self-disclosed in decisionEnumNote. Reported as expected-fail, NOT a defect. adversarial-validation.json carries 8 scenarios; both contract-mandated ones present and ruled out (ADV-1 credit-minted-without-graph-write, ADV-2 erased-person-row-creation)."
+      },
+      {
+        "gate": "flags inert",
+        "command": "grep coop apps/api/config.py; inspect models/site.py",
+        "result": "PASS",
+        "output": "identity_coop_enabled=False; coop_credit_per_contribution=1; coop_credit_expiry_days=90; coop_credit_hold_hours=24; coop_terms_version=<64-hex placeholder digest>. Site.contribution_enabled default=False, server_default=false. All 5 settings present and inert behind the master flag; documented 5-step rollout order forbids flipping before legal re-pin."
+      }
+    ],
+    "evlConcerns": [
+      {
+        "id": "EVL-C1",
+        "severity": "CONCERN",
+        "finding": "Diff-guard gate definition is ambiguous. The contract says git diff --stat ... <= 12 lines but --stat emits three different numbers: 11 insertions, 5 deletions, 16 histogram-total. 11 <= 12 PASSES; 16 > 12 would FAIL. The plan own worked example (line 805) counts 6 touched lines, a fourth reading. The gate PASSES under the insertion and net-line readings and the diff matches the enumerated authorized edit set exactly, so the collision-minimization INTENT is satisfied — but the gate as written is not mechanically decidable. Recommend pinning the counting rule (suggest: insertions only) at UPDATE PROCESS."
+      },
+      {
+        "id": "EVL-C2",
+        "severity": "OBSERVATION",
+        "finding": "test_blocked_graph_write_accrues_nothing calls _upsert_beam_identity DIRECTLY, not _save_identified, so its monkeypatched record_contribution AssertionError tripwire can never fire on that path — the hook site if wrote_graph and settings.identity_coop_enabled is not exercised by this test. Coverage of the hook short-circuit is real but comes from F14 and the integration legs instead. Not a gate failure; the DB-truth half was independently confirmed by the Hybrid gates in this run."
+      },
+      {
+        "id": "EVL-C3",
+        "severity": "OBSERVATION",
+        "finding": "The integration lane leaks idle-in-transaction Postgres sessions (7 observed mid-run, oldest 12m43s, all waiting on ClientRead not on locks) and emits Event loop is closed / coroutine Connection._cancel was never awaited warnings. Pre-existing conftest hygiene, unrelated to this phase, same family as the known post-docker-gate-followups conftest isolation backlog item. Did not affect the result (0F/0E) but makes the lane slow (39m) and would mask a real lock bug."
+      },
+      {
+        "id": "EVL-C4",
+        "severity": "CONCERN",
+        "finding": "coop_terms_version is a placeholder digest of un-reviewed terms text. config.py rollout step 3 requires re-pinning to the digest of LEGALLY REVIEWED text before identity_coop_enabled or any per-site contribution_enabled may be flipped ON. Enforced only by comment, not by code. Carried forward as a hard precondition, already flagged by execute-agent."
+      }
+    ],
+    "teardown": "evl_coop_p1 database dropped; evl_coop_disposable container removed; infra compose postgres/redis left in the state found (already Running)."
+  }
+}

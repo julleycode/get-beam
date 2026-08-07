@@ -1,0 +1,103 @@
+{
+  "task": "identity-coop Phase 1 — ledger + contribution substrate",
+  "riskLevel": "high",
+  "scenarios": [
+    {
+      "id": "ADV-1",
+      "scenario": "CREDIT MINTED WITHOUT A GRAPH WRITE. An attacker (or ordinary traffic) drives a resolve that reaches the accrual hook while the cross-tenant graph write silently no-ops. The site is paid a credit for data it never contributed, inflating the money surface. Four distinct no-op paths exist: missing fingerprint, missing email, visitor.do_not_resolve set, and an email tombstoned under GRAPH_WRITE_BLOCKING_SCOPES ('erased', 'do_not_process') or 'all'. A fifth path is a write that raises and rolls back.",
+      "ruled_out": true,
+      "mechanism": "_upsert_beam_identity was changed from `-> None` to `-> bool` and returns True at exactly ONE place — immediately after `await self.db.commit()` succeeds (identity_resolver.py:1332). Every other exit returns False: the fingerprint/email guard (1275), the combined do_not_resolve/suppression erasure guard (1289), and the except path (1336, which previously fell through to an implicit None). The hook is `if wrote_graph and settings.identity_coop_enabled:` — a short-circuit on the return value, so no no-op path can reach record_contribution at all. This was FAIL F2 in the 2nd outer-PVL pass and is the single most important guard in the phase.",
+      "provingTests": [
+        "tests/unit/test_identity_coop.py::test_blocked_graph_write_accrues_nothing (3 parametrized paths: no_fingerprint, no_email, do_not_resolve)",
+        "tests/unit/test_identity_coop.py::test_upsert_returns_bool_and_existing_callers_unaffected (True only on committed write; False on a raising write)"
+      ],
+      "nonVacuity": "Against the pre-change code these tests are genuinely RED: `_upsert_beam_identity` returned None, so `assert wrote is False` fails (None is not False) and `assert ... is True` fails. The assertions are identity checks on the exact value, not truthiness, so they cannot pass against the old implementation.",
+      "residual": "A future editor could add a new early-return to _upsert_beam_identity and forget `False`. Mitigation: the function's docstring states the contract explicitly, and test_blocked_graph_write_accrues_nothing parametrizes per path so a new unguarded path is likely to surface. Not fully mechanical — accepted."
+    },
+    {
+      "id": "ADV-2",
+      "scenario": "ERASED-PERSON ROW CREATION. A person exercises GDPR erasure; SPEC A's sweep deletes their beam_identity_graph rows. They later visit any Beam site. The co-op writes a NEW identity_contribution_events row bearing their email_bidx. Because ERASURE_TARGETS = ('beam_identity_graph',) does not include the co-op tables, that row is unreachable by the sweep — a fresh record of a person created AFTER their erasure, permanently. This is a privacy defect, not a bookkeeping one.",
+      "ruled_out": true,
+      "mechanism": "Two independent layers. (1) The erasure guard inside _upsert_beam_identity returns False for anyone tombstoned under GRAPH_WRITE_BLOCKING_SCOPES or 'all', so the hook never fires — NOTHING is written, not even an excluded_reason='erased' audit row (decision D-B chose 'write nothing' over 'write an excluded row', precisely because an excluded row still carries the email_bidx). (2) identity_coop.py imports no suppression symbol and re-lists no scope literal, so there is no second, drifting copy of the scope list that could go narrower than the resolver's — the exact defect class (erased-only narrowness) found as C1. ERASURE_TARGETS and the sweep are untouched by this phase.",
+      "provingTests": [
+        "tests/unit/test_identity_coop.py::test_erased_person_leaves_no_new_bidx_row (asserts wrote is False AND no email_bidx-bearing write occurred)",
+        "tests/unit/test_identity_coop.py::test_coop_module_imports_no_suppression_scope (AST-based tripwire: no suppression import, no 'erased'/'do_not_process'/'all' string literal in executable code)"
+      ],
+      "nonVacuity": "test_erased_person_leaves_no_new_bidx_row patches is_email_suppressed_any to return True and asserts the record_contribution mock is NEVER awaited (it is armed with side_effect=AssertionError). If the guard were removed the mock fires and the test fails loudly. The tripwire test is AST-based rather than substring-based specifically so it cannot be satisfied vacuously by the module's own docstring naming the forbidden symbols.",
+      "residual": "The invariant depends on the resolver's erasure guard remaining upstream of the hook. If a future edit moved the hook above that guard, ADV-2 reopens. The hook's position immediately after the _upsert_beam_identity call (and its dependence on that call's return) makes this structurally hard but not impossible."
+    },
+    {
+      "id": "ADV-3",
+      "scenario": "DAILY CREDIT INFLATION. The same person is resolved by the same site on many days. The per-day audit key (site_id, email_bidx, contributed_on) permits one row per day, so a naive implementation mints a fresh credit every calendar day forever for one identity — unbounded credit inflation from a single contribution.",
+      "ruled_out": true,
+      "mechanism": "A PARTIAL unique index uq_coop_accrued_site_email on (site_id, email_bidx) WHERE accrued IS TRUE (decision D-E). At most one ACCRUED row per identity per site, ever. The service reaches accrual by attempting the accrued=True UPDATE inside a SAVEPOINT and catching IntegrityError — so the DB, not application code, is the enforcement point and a concurrent double-resolve cannot slip through. Repeat resolves still record an audit row with excluded_reason='duplicate'.",
+      "provingTests": [
+        "tests/integration/test_identity_coop_contribution.py::test_accrued_partial_unique_index_exists_and_blocks_second_credit (asserts the index exists WITH a WHERE predicate, then proves a raw SQL duplicate INSERT — bypassing ALL service code — is rejected by Postgres)",
+        "tests/integration/test_identity_coop_contribution.py::test_second_day_resolve_mints_no_second_credit_in_db (2 events, 1 ledger row, reasons {None, 'duplicate'})",
+        "tests/unit/test_identity_coop.py::test_second_day_resolve_accrues_no_second_credit"
+      ],
+      "nonVacuity": "The integration leg asserts the index definition contains 'WHERE' — a non-partial unique index would pass a mere existence check but is the WRONG constraint (it would reject the later-day audit row the design keeps deliberately). The duplicate-insert leg uses raw psql-equivalent SQL, so service-code correctness cannot mask a missing index. Verified live against a disposable postgres:16-alpine: 'ERROR: duplicate key value violates unique constraint uq_coop_accrued_site_email'.",
+      "residual": "None identified for this scenario."
+    },
+    {
+      "id": "ADV-4",
+      "scenario": "VACUOUS CONSENT. A client flips contribution_enabled=True while sending terms_version=\"x\" (or any junk), satisfying a presence-only guard. The site is enrolled in a cross-tenant data co-op with an audit trail that records acceptance of terms that never existed — the worst possible failure on a consent surface, because it looks compliant.",
+      "ruled_out": true,
+      "mechanism": "E4's validator: the router 422s unless terms_version is a 64-char lowercase hex string AND equals settings.coop_terms_version (the pinned sha256 of the exact policy text). record_consent_acceptance runs before the handler's single `await db.commit()`, so the acceptance row and the flag flip are one transaction — 'flag ON with no matching audit row' is not a reachable state. Opting OUT requires no acceptance, deliberately: gating withdrawal from a data co-op would itself be a consent defect.",
+      "provingTests": [
+        "tests/integration/test_identity_coop_contribution.py::test_flag_on_requires_acceptance (5 legs: missing; wrong FORMAT \"x\"; right format but wrong value 'a'*64; the pinned version ⇒ 200 + exactly one row; opt-out unconditional and does not rewind the trail)"
+      ],
+      "nonVacuity": "Leg 2 sends exactly the terms_version=\"x\" the plan named as the vacuous-guard case; leg 3 sends a well-formed 64-hex string that is NOT the pinned digest, so a format-only validator passes leg 2 but FAILS leg 3. Each rejection leg re-reads the flag from the DB and asserts it is still False, so a 422 that nevertheless persisted the flip would be caught.",
+      "residual": "This is a constant compare against a single pinned version. It cannot express multi-version history or migration between terms versions — Phase 3's coop_terms.py owns that and supersedes this check. Accepted and documented in the config comment."
+    },
+    {
+      "id": "ADV-5",
+      "scenario": "PII LEAK VIA THE CO-OP TABLES. The new tables or their logs expose plaintext email, or provide a decrypt path that turns the contribution log into a cross-tenant email directory.",
+      "ruled_out": true,
+      "mechanism": "identity_contribution_events stores email_bidx (an HMAC-SHA256 blind index from pii_crypto.email_hash) and has NO email and NO email_ciphertext column — so unlike beam_identity_graph there is no decrypt path out of these tables at all, by construction rather than by policy. The resolver computes the blind index before calling into the co-op module, so plaintext never crosses the boundary. structlog calls log site_id/reason/amount only; email_bidx is deliberately not logged either.",
+      "provingTests": [
+        "tests/unit/test_identity_coop.py::test_contribution_event_carries_blind_index_only (asserts email_bidx present and {email, email_ciphertext} absent from the table)",
+        "tests/integration/test_identity_coop_contribution.py::test_qualifying_contribution_writes_ledger_row (asserts the persisted event's email_bidx equals the expected hash and contains no '@')"
+      ],
+      "nonVacuity": "The column-absence assertion fails immediately if anyone adds an email or ciphertext column to the model.",
+      "residual": "email_bidx is a stable identity key: it cannot be reversed to an address, but it CAN correlate the same person across sites. That is inherent to the co-op's purpose (dedupe + attribution) and is what the opt-in flag and consent trail exist to govern. Not a defect; a disclosed property."
+    },
+    {
+      "id": "ADV-6",
+      "scenario": "CO-OP FAILURE BREAKS IDENTIFICATION. A bug or missing table in the co-op path raises and aborts _save_identified, so a paid, successful identification is lost — the co-op damaging the core product it is supposed to reward.",
+      "ruled_out": true,
+      "mechanism": "Two nested best-effort layers, matching the existing hot_alert precedent in the same function. record_contribution wraps its entire body in try/except with a rollback and a keys-only structlog.warning; maybe_record_contribution (the resolver-facing entrypoint) wraps its own site-lookup and translation in a second try/except. Neither can propagate.",
+      "provingTests": [
+        "tests/unit/test_identity_coop.py::test_coop_failure_does_not_break_identification (every execute raises; asserts no ledger row and that rollback ran)",
+        "tests/unit/test_identity_coop.py::test_maybe_record_contribution_is_best_effort"
+      ],
+      "nonVacuity": "The fake session raises RuntimeError on every execute; without the try/except the test errors out rather than passing.",
+      "residual": "A swallowed failure means a genuine contribution silently goes uncredited. Accepted tradeoff: under-crediting is strictly safer than breaking a resolve or over-crediting, and the warning is logged for operator visibility."
+    },
+    {
+      "id": "ADV-7",
+      "scenario": "READ ACCESS QUIETLY GATED ON CONTRIBUTION. The co-op turns into pay-to-play: a site with contribution_enabled=False stops receiving graph-served identifications, breaking the locked AC-2 constraint (read is unconditional, model (a)) for every existing customer the moment the flag ships.",
+      "ruled_out": true,
+      "mechanism": "No gate was added to any read path. Enforced structurally rather than behaviourally: an AST assertion walks _graph_node_by_email and _check_beam_identity_network and asserts neither body references contribution_enabled or identity_coop. The 11-line resolver diff is confined to the WRITE path and the hook that follows it.",
+      "provingTests": [
+        "tests/integration/test_identity_coop_contribution.py::test_non_contributor_still_receives_graph_matches"
+      ],
+      "nonVacuity": "The AST check asserts absence in named read functions, so adding any co-op reference to either read path fails the test. A purely behavioural test could pass by luck on an unrelated code path; this cannot.",
+      "residual": "Only the two named graph-read functions are asserted. A future third read path would not be covered automatically."
+    },
+    {
+      "id": "ADV-8",
+      "scenario": "MIGRATION DAMAGE. The two new revisions rewrite or lock the high-traffic sites table, silently opt existing sites in, chain onto a stale head and fork the DAG, or cannot be reverted.",
+      "ruled_out": true,
+      "mechanism": "Both revisions are additive-only: three CREATE TABLE plus one ALTER TABLE ADD COLUMN with server_default='false' (non-blocking on PG 11+, no table rewrite, every existing row backfilled OFF — no site is ever opted in by a migration). NOT NULL with a default rather than nullable, because 'unknown' must not be representable for a consent flag. The head was re-derived LIVE (`alembic heads` → d1a6c4e93f27, single head) immediately before writing, and both revisions chain onto it. Full round-trip proven on a disposable postgres:16-alpine.",
+      "provingTests": [
+        "G2 live round-trip: upgrade head (66 revisions from empty) → downgrade -1 → downgrade -1 → upgrade head, clean both directions, final `current` = f2c81a6b4d09 (head)",
+        "A7 offline: alembic upgrade d1a6c4e93f27:head --sql exits 0",
+        "psql verification of the partial index definition and sites.contribution_enabled (NOT NULL, default false) after the round-trip"
+      ],
+      "nonVacuity": "The round-trip ran against a real Postgres with a real 66-revision chain from an empty database, not an offline --sql dry run. The downgrade legs were verified to leave the head at d1a6c4e93f27 and the upgrade legs to restore the partial index.",
+      "residual": "NOT applied to any real environment. Live apply remains a separate explicit operator action, and the head must be re-derived again at that time — this repo's head moves on a roughly daily cadence."
+    }
+  ],
+  "date": "2026-08-07"
+}

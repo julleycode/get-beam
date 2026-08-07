@@ -1,0 +1,44 @@
+{
+  "task": "identity-coop Phase 1 — ledger + contribution substrate",
+  "planPath": "process/features/visitors-identity/active/identity-coop_07-08-26/phase-1-ledger-substrate_PLAN_07-08-26.md",
+  "decision": "PENDING USER APPROVE/REJECT",
+  "decisionEnumNote": "The vc-risk-evidence-pack validator expects `decision` to be one of approved / approved-with-concerns / rejected, and will report this file as a FAILURE. That failure is INTENTIONAL and disclosed. The EXECUTE instruction for this phase (E-5) requires the verdict field to read `PENDING USER APPROVE/REJECT` and explicitly forbids the implementing agent from self-approving. Self-approving to make the validator green would defeat the entire purpose of a manual-first high-risk gate on a billing/credits surface. A human reviewer should replace this value with one of the three enum values and fill `reviewer` + `reviewedAt`.",
+  "reviewer": null,
+  "reviewedAt": null,
+  "implementedBy": "vc-execute-agent (autopilot EXECUTE, 2026-08-07)",
+  "blockingFindings": [],
+  "nonBlockingFindings": [
+    {
+      "id": "NB-1",
+      "finding": "Diff-budget metric ambiguity on the contested file. `git diff --stat apps/api/services/identity_resolver.py` reports `11 insertions(+), 5 deletions(-)` — 11 changed/touched lines, but 16 if the two numbers are summed. The plan's own arithmetic is touched-line based (N3 calls the D5 return-set '6 touched lines'), and 11 <= 12 on that basis. Recorded rather than resolved by reshaping the code, because D4 explicitly forbids reshaping the D-A fix to fit a smaller number.",
+      "severity": "observation"
+    },
+    {
+      "id": "NB-2",
+      "finding": "Five of the plan's unit-lane test names (F3, F9-F12) are implemented against a fake AsyncSession rather than a real Postgres, because ON CONFLICT semantics and a partial unique index cannot be honestly simulated without a database and the unit lane has no DB by repo convention. The service-decision half is proven there; the DB-enforcement half is proven by the Hybrid gates and by additional integration legs added for the same criteria (test_accrued_partial_unique_index_exists_and_blocks_second_credit, test_second_day_resolve_mints_no_second_credit_in_db, test_same_day_duplicate_collapses_to_one_event). Net coverage is strictly greater than the plan required; the split is disclosed in both files' docstrings.",
+      "severity": "observation"
+    },
+    {
+      "id": "NB-3",
+      "finding": "A CONCURRENT session was actively writing to this worktree during EXECUTE (self-hosted IP->org program: models/ip_org_prefix.py, services/ip_org_ingest.py, services/ip_org_lookup.py, services/company_resolver.py, jobs/scheduler.py, models/__init__.py, migration a3e8d5c71f02, plus its own block in the SHARED apps/api/config.py). Their migration correctly chained onto this phase's head (down_revision = f2c81a6b4d09), so the Alembic DAG has a single head (a3e8d5c71f02) and is NOT forked. No file in this phase's Touchpoints was modified by that session.",
+      "severity": "observation"
+    },
+    {
+      "id": "NB-4",
+      "finding": "The full-worktree integration lane showed 3 failures + 5 errors in tests/integration/test_visitor_stats.py and tests/integration/test_widget_layout.py. These are NOT attributable to this phase, proven by bisection in a clean git worktree at HEAD: (a) pristine HEAD -> 15/15 pass; (b) HEAD + ONLY this phase's changes (with the concurrent session's config block surgically removed) -> 15/15 pass; (c) full shared worktree -> failures, and the failing test names SHIFT between runs (test_stats_new_fields vs test_monthly_plan_limit_reached, '401 User not found'), which matches the known conftest DB/Redis isolation gap already tracked in backlog/post-docker-gate-followups_NOTE_24-07-26.md. Ownership: the concurrent IP->org session and/or pre-existing test isolation, not identity-coop.",
+      "severity": "observation"
+    },
+    {
+      "id": "NB-5",
+      "finding": "A RuntimeWarning ('coroutine AsyncMockMixin._execute_mock_call was never awaited') appears in tests/unit/test_rb2b_scoring.py. Confirmed PRE-EXISTING by running that file in a pristine HEAD worktree (same single warning). Not introduced by the bool-return change.",
+      "severity": "observation"
+    },
+    {
+      "id": "NB-6",
+      "finding": "coop_terms_version is pinned to sha256('Beam Identity Co-op Contribution Terms v1 (2026-08-07)') = c655274f...d7eb. This is a PLACEHOLDER policy string, not legally reviewed text. The config comment states the rollout order requires legal review and a re-pin of this digest BEFORE either flag is enabled. A reviewer should confirm this is acceptable as a Phase 1 placeholder.",
+      "severity": "needs-reviewer-confirmation"
+    }
+  ],
+  "notes": "Recommendation to the human reviewer: the two adversarial scenarios named in E-5 are both ruled out with non-vacuous proving tests — credit-minting-without-a-graph-write (ADV-1, closed by the `-> bool` return gating; genuinely red against the prior code because the assertions are `is False` / `is True` identity checks against a function that used to return None) and erased-person-row-creation (ADV-2, closed by writing NOTHING when the graph write was blocked, plus an AST tripwire that the co-op module imports no suppression symbol). All 16 contract gates are green, including all three Hybrid gates now that Docker 29.4.2 is up: the migration round-trip ran on an ad-hoc disposable postgres:16-alpine (66 revisions from empty, down 2, up 2, clean both ways) and the D-E partial unique index was verified to reject a duplicate ACCRUE via raw SQL that bypasses all service code. Production exposure as shipped is NONE — both flags default OFF and neither migration is live-applied anywhere. The specific items warranting human judgment are NB-6 (placeholder terms text) and NB-1 (the diff-budget metric reading).",
+  "date": "2026-08-07"
+}

@@ -28,6 +28,16 @@ class Site(Base):
     auto_identify_enabled: Mapped[bool] = mapped_column(
         default=False, nullable=False, server_default="false"
     )
+    # Identity co-op opt-in (identity-coop Phase 1). When True AND
+    # settings.identity_coop_enabled is True, this site's successful graph writes
+    # are counted as contributions and accrue spendable credits. Default OFF: the
+    # cross-tenant graph is a data co-op only for sites that explicitly opted in,
+    # and the flag cannot flip ON via the API without a validated terms_version
+    # acceptance row (AC-10). READ access to the graph is UNCONDITIONAL and is NOT
+    # gated on this flag — a non-contributing site still receives graph matches.
+    contribution_enabled: Mapped[bool] = mapped_column(
+        default=False, nullable=False, server_default="false"
+    )
     # When True (default), email the owner the moment a high-intent US visitor is
     # identified — the "hot visitor" ping. Gated to US + intent >= 40 + once per
     # visitor; toggle off per site to silence.

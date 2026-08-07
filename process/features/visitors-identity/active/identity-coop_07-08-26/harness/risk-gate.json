@@ -1,0 +1,29 @@
+{
+  "task": "identity-coop Phase 1 — ledger + contribution substrate",
+  "planPath": "process/features/visitors-identity/active/identity-coop_07-08-26/phase-1-ledger-substrate_PLAN_07-08-26.md",
+  "riskLevel": "high",
+  "riskClasses": [
+    "billing or credits",
+    "schema/data migration or destructive data mutation"
+  ],
+  "mustStopBeforeFinalize": true,
+  "humanApprovalRequired": true,
+  "approver": "PENDING — not yet reviewed by a human",
+  "why": "Two of the six high-risk classes apply simultaneously. (1) billing/credits: this phase creates the credit ledger that Phase 2's spend gate will draw on, so a defect here mints money-equivalent value. The specific hazard identified and closed at PVL was accrual without a corresponding graph write — a credit for work never done. (2) schema/migration: two new Alembic revisions add three tables, a partial unique index, and one NOT NULL column on the existing high-traffic `sites` table. Both migrations are additive-only and were round-tripped on a disposable Postgres, but neither has been applied to any real environment.",
+  "blastRadius": [
+    "apps/api/models/identity_coop.py (NEW)",
+    "apps/api/services/identity_coop.py (NEW)",
+    "apps/api/models/site.py (one additive column)",
+    "apps/api/config.py (five settings, all default OFF/inert)",
+    "apps/api/services/identity_resolver.py (11 changed lines)",
+    "apps/api/schemas/sites.py (additive optional fields)",
+    "apps/api/routers/sites.py (acceptance-guarded flag flip)",
+    "apps/api/main.py (mapper registration import)",
+    "apps/api/migrations/versions/e7b3d5f19c46_add_identity_coop_tables.py (NEW)",
+    "apps/api/migrations/versions/f2c81a6b4d09_add_site_contribution_enabled.py (NEW)",
+    "tests/unit/test_identity_coop.py (NEW)",
+    "tests/integration/test_identity_coop_contribution.py (NEW)"
+  ],
+  "productionExposure": "NONE as shipped. `identity_coop_enabled` defaults False and `Site.contribution_enabled` defaults False with server_default='false', so the accrual hook is unreachable in every environment until BOTH are deliberately flipped. Neither migration has been live-applied. Enabling is an explicit operator action gated on legal review of the terms text (rollout order documented inline in config.py).",
+  "date": "2026-08-07"
+}

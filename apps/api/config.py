@@ -384,6 +384,37 @@ class Settings(BaseSettings):
     # same posture as agent_detection_enabled / company_graph_enabled.
     candidate_outreach_enabled: bool = False
 
+    # ─── Identity co-op (Phase 1) ───
+    # Turns the implicit cross-tenant identity graph into an opt-in data co-op:
+    # a site that contributes successful graph writes accrues spendable credits.
+    # Read access to the graph is UNCONDITIONAL and is never gated on any of these.
+    #
+    # REQUIRED ROLLOUT ORDER — do not reorder:
+    #   1. cross-tenant erasure LIVE (graph-erasure-compliance) — already shipped;
+    #      the co-op must never be able to create a new record of an erased person.
+    #   2. the two Phase 1 migrations live-applied in the target environment.
+    #   3. legal review of the contribution terms text, and coop_terms_version
+    #      re-pinned to the digest of the REVIEWED text.
+    #   4. identity_coop_enabled -> True.
+    #   5. per-site contribution_enabled -> True, only via the API's acceptance
+    #      guard (never by direct SQL — that would skip the AC-10 audit row).
+    # Never flip step 4 or 5 before step 3. Same operator-gated posture as
+    # agent_detection_enabled / company_graph_enabled / identity_signals_enabled.
+    identity_coop_enabled: bool = False
+    coop_credit_per_contribution: int = 1
+    coop_credit_expiry_days: int = 90
+    coop_credit_hold_hours: int = 24
+    # Immutable snapshot hash (64-char lowercase hex) of the exact contribution
+    # terms text, NOT a free-form label: routers/sites.py rejects 422 unless the
+    # submitted terms_version equals this value, so an acceptance row can only
+    # ever record terms that actually existed. Re-pin this whenever the policy
+    # text changes; Phase 3's coop_terms.py replaces this constant compare with a
+    # multi-version history and supersedes it.
+    # Current value = sha256("Beam Identity Co-op Contribution Terms v1 (2026-08-07)").
+    coop_terms_version: str = (
+        "c655274f585ef9b515688e9d4572f7cd64b8ed2fed8ebe6602e0040ecf73d7eb"
+    )
+
     # ─── Agent gateway (agent-gateway Phase 1+2) ───
     # When true, the public per-site agent-facing read surface is served:
     # GET /api/v1/agent/{site_id}/manifest.json | /offers.json | /llms.txt and

@@ -1,0 +1,72 @@
+{
+  "task": "identity-coop Phase 1 — ledger + contribution substrate",
+  "snippets": [
+    {
+      "file": "apps/api/services/identity_resolver.py",
+      "lines": "1252-1256",
+      "description": "The accrual hook. `wrote_graph` gates the call, so a credit is only ever minted for a graph write that actually executed and committed. This is the money-surface guard: the pre-fix design called record_contribution unconditionally after _upsert_beam_identity, which returned None and silently no-oped on three separate paths.",
+      "content": "wrote_graph = await self._upsert_beam_identity(visitor, data, provider)\n# ── Identity co-op: credit only a graph write that really happened ──\nif wrote_graph and settings.identity_coop_enabled:\n    from apps.api.services.identity_coop import maybe_record_contribution\n    await maybe_record_contribution(self.db, visitor, data, provider)"
+    },
+    {
+      "file": "apps/api/services/identity_resolver.py",
+      "lines": "1270, 1275, 1289, 1332, 1336",
+      "description": "The D-A signature change and its complete four-return edit set. `-> bool` at 1270; `return False` at the missing fingerprint/email guard (1275); `return False` at the combined do_not_resolve / GRAPH_WRITE_BLOCKING_SCOPES erasure guard (1289); `return True` immediately after the successful commit (1332); `return False` in the except path (1336, which previously fell through to an implicit None). Guard logic and ordering are UNCHANGED — only the returned value was added.",
+      "content": "async def _upsert_beam_identity(self, visitor, data, provider) -> bool:\n    ...\n    if not fp or not email:\n        return False        # 1275\n    ...\n    if getattr(visitor, \"do_not_resolve\", False) or await is_email_suppressed_any(\n        self.db, email, GRAPH_WRITE_BLOCKING_SCOPES):\n        logger.info(\"graph_write_blocked\", ...)\n        return False        # 1289\n    try:\n        ...\n        await self.db.commit()\n        return True         # 1332\n    except Exception as exc:\n        await self.db.rollback()\n        return False        # 1336"
+    },
+    {
+      "file": "apps/api/services/identity_coop.py",
+      "lines": "record_contribution gate order",
+      "description": "The three accrual gates. Gate 1 is merge-awareness (ON CONFLICT DO NOTHING on the per-day audit key). Gate 2 is the fraud gate covering BOTH is_abuse_flagged and is_bot_suspect. Gate 3 is the once-per-identity accrual rule, enforced by catching the partial unique index's IntegrityError rather than by a hand-rolled pre-check, so a concurrent race cannot double-credit.",
+      "content": "event_id = (await db.execute(stmt)).scalar_one_or_none()\nif event_id is None: return                       # same-day duplicate\nif is_abuse_flagged or is_bot_suspect:\n    await _mark_excluded(db, event_id, \"fraud_flagged\"); return\ntry:\n    async with db.begin_nested():\n        ... .values(accrued=True, excluded_reason=None)\nexcept IntegrityError:\n    await _mark_excluded(db, event_id, \"duplicate\"); return\n# only here is a ledger row written"
+    },
+    {
+      "file": "apps/api/services/identity_coop.py",
+      "lines": "module docstring + import block",
+      "description": "D-B enforcement by absence. This module imports NO suppression symbol and re-lists NO scope literal, so the single source of truth for who may be written to the graph stays inside the resolver's own write boundary. Consequence: a blocked graph write produces no co-op row at all, which is what makes the co-op tables' absence from ERASURE_TARGETS harmless instead of a privacy hole. Asserted by an AST-based tripwire test.",
+      "content": "from apps.api.models.identity_coop import (ContributionConsentAcceptance, ContributionEvent, CreditLedgerEntry)\n# NOTE: no `from apps.api.models.suppression import SuppressionEntry`\n# NOTE: no GRAPH_WRITE_BLOCKING_SCOPES import, no \"erased\" literal"
+    },
+    {
+      "file": "apps/api/models/erasure_request.py",
+      "lines": "31",
+      "description": "ERASURE_TARGETS is unchanged by this phase. The co-op tables are deliberately NOT added to it (umbrella line 94 forbids this program from changing SPEC A's mechanics); the privacy invariant is upheld by never creating a row instead.",
+      "content": "ERASURE_TARGETS = (\"beam_identity_graph\",)"
+    },
+    {
+      "file": "apps/api/routers/sites.py",
+      "lines": "347-368",
+      "description": "AC-10 acceptance guard. Turning contribution_enabled ON requires a 64-char lowercase hex terms_version equal to the pinned settings.coop_terms_version (422 otherwise), and record_consent_acceptance runs before the single `await db.commit()` at line 370 — so the acceptance row and the flag flip share ONE transaction and 'flag ON with no audit row' is unreachable. Turning it OFF is unconditional by design: opting out of a data co-op must never be gated.",
+      "content": "if body.contribution_enabled is not None:\n    if body.contribution_enabled:\n        tv = body.terms_version\n        if (not tv or len(tv) != 64 or not all(c in \"0123456789abcdef\" for c in tv)\n                or tv != settings.coop_terms_version):\n            raise HTTPException(status_code=422, detail=...)\n        await record_consent_acceptance(db, site_id=site.site_id, terms_version=tv, user_id=user.id)\n    site.contribution_enabled = body.contribution_enabled"
+    },
+    {
+      "file": "apps/api/routers/sites.py",
+      "lines": "324",
+      "description": "Multi-tenancy is inherited, not re-implemented: verify_site_access returns 404 (never 403) for a foreign or unknown site_id, so the new flag surface cannot be used as an existence oracle. Proven by test_foreign_site_is_404_not_403.",
+      "content": "site = await verify_site_access(db, site_id, user)"
+    },
+    {
+      "file": "apps/api/config.py",
+      "lines": "391-416",
+      "description": "Five settings, all default OFF/inert, with the required rollout order documented inline (erasure LIVE → migrations applied → legal review + re-pin digest → global flag → per-site flag via the API only). This is the production-exposure guard: as shipped, the accrual path is unreachable.",
+      "content": "identity_coop_enabled: bool = False\ncoop_credit_per_contribution: int = 1\ncoop_credit_expiry_days: int = 90\ncoop_credit_hold_hours: int = 24\ncoop_terms_version: str = \"c655274f585ef9b515688e9d4572f7cd64b8ed2fed8ebe6602e0040ecf73d7eb\""
+    },
+    {
+      "file": "apps/api/migrations/versions/e7b3d5f19c46_add_identity_coop_tables.py",
+      "lines": "upgrade()",
+      "description": "The two DISTINCT uniqueness rules. uq_coop_contrib_site_email_day is the per-day AUDIT key (AC-3 merge-awareness). uq_coop_accrued_site_email is a PARTIAL unique index — the ACCRUAL key (D-E). The partial predicate is load-bearing: a plain unique index would wrongly reject the later-day audit row the design deliberately keeps.",
+      "content": "sa.UniqueConstraint(\"site_id\", \"email_bidx\", \"contributed_on\", name=\"uq_coop_contrib_site_email_day\")\nop.create_index(\"uq_coop_accrued_site_email\", \"identity_contribution_events\",\n    [\"site_id\", \"email_bidx\"], unique=True, postgresql_where=sa.text(\"accrued IS TRUE\"))"
+    },
+    {
+      "file": "apps/api/models/identity_coop.py",
+      "lines": "ContributionEvent columns",
+      "description": "Blind-index-only discipline. The event table has email_bidx and NO email / email_ciphertext column, so there is no decrypt path out of the co-op tables by construction. Asserted by test_contribution_event_carries_blind_index_only.",
+      "content": "email_bidx: Mapped[str] = mapped_column(String(64), nullable=False)"
+    },
+    {
+      "file": "apps/api/models/identity_coop.py",
+      "lines": "CreditLedgerEntry columns",
+      "description": "D-D: site_id-scoped with NO user_id column. site_id is the attribution unit and matches beam_identity_graph.source_site_id; user_id is always derivable via Site.user_id, so storing it would be denormalized state that goes stale if a site is reassigned. Phase 2 must aggregate across a user's sites at gate time instead of adding a column to this frozen schema.",
+      "content": "site_id: Mapped[str] = mapped_column(String(50), nullable=False)\n# (no user_id column — asserted by test_ledger_has_no_user_id_column)"
+    }
+  ],
+  "date": "2026-08-07"
+}

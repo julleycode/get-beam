@@ -1249,7 +1249,11 @@ class IdentityResolver(
         )
 
         # ── Beam Identity Network: contribute to cross-customer graph ──
-        await self._upsert_beam_identity(visitor, data, provider)
+        wrote_graph = await self._upsert_beam_identity(visitor, data, provider)
+        # ── Identity co-op: credit only a graph write that really happened ──
+        if wrote_graph and settings.identity_coop_enabled:
+            from apps.api.services.identity_coop import maybe_record_contribution
+            await maybe_record_contribution(self.db, visitor, data, provider)
 
         # ── Hot-visitor ping: email the owner if US + high-intent (best-effort) ──
         try:
@@ -1263,12 +1267,12 @@ class IdentityResolver(
 
     async def _upsert_beam_identity(
         self, visitor: Visitor, data: dict, provider: str
-    ) -> None:
-        """Write (fingerprint, email) to cross-customer identity graph."""
+    ) -> bool:
+        """Write (fingerprint, email) to graph. True iff a row was really written."""
         fp = getattr(visitor, "fingerprint", None)
         email = data.get("email")
         if not fp or not email:
-            return
+            return False
         # Write-boundary erasure guard. Enforced HERE, not only upstream: this
         # is the sole write path into the cross-tenant graph, so a person who
         # asked to be forgotten can never be silently re-added on a later visit
@@ -1282,7 +1286,7 @@ class IdentityResolver(
             logger.info(
                 "graph_write_blocked", visitor_id=visitor.visitor_id[:8]
             )
-            return
+            return False
         try:
             from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -1325,9 +1329,11 @@ class IdentityResolver(
                 fingerprint=fp[:12],
                 email_domain=email.split("@")[-1],
             )
+            return True
         except Exception as exc:
             await self.db.rollback()
             logger.debug("beam_identity_upsert_failed", error=str(exc))
+            return False
 
     async def _graph_node_by_email(self, email: str) -> BeamIdentityNode | None:
         """Cross-customer graph lookup keyed on EMAIL (the email_bidx blind index).

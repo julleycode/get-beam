@@ -26,6 +26,7 @@ from apps.api.schemas.sites import (
     SiteUpdate,
 )
 from apps.api.services.billing import get_effective_plan, get_site_limit
+from apps.api.services.identity_coop import record_consent_acceptance
 from apps.api.services.identity_providers.base import _url_to_host
 from apps.api.services.leadpipe_pixels import ensure_pixel_for_domain
 from apps.api.services.platform_detector import detect_platform
@@ -337,6 +338,34 @@ async def update_site(
         site.internal_damping_enabled = body.internal_damping_enabled
     if body.consent_mode is not None:
         site.consent_mode = body.consent_mode
+
+    # Identity co-op opt-in (AC-10). Turning it ON requires accepting the exact
+    # currently-pinned terms, and the acceptance row is written in the SAME
+    # transaction as the flag flip below — so "flag ON" can never exist without a
+    # matching audit row. Turning it OFF is unconditional: opting out of a data
+    # co-op must never be gated on anything.
+    if body.contribution_enabled is not None:
+        if body.contribution_enabled:
+            tv = body.terms_version
+            # Constant-compare against the pinned digest (E4). Phase 3's
+            # coop_terms.py replaces this with real version history.
+            if (
+                not tv
+                or len(tv) != 64
+                or not all(c in "0123456789abcdef" for c in tv)
+                or tv != settings.coop_terms_version
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "contribution_enabled=true requires terms_version to equal "
+                        "the current co-op terms version"
+                    ),
+                )
+            await record_consent_acceptance(
+                db, site_id=site.site_id, terms_version=tv, user_id=user.id
+            )
+        site.contribution_enabled = body.contribution_enabled
 
     await db.commit()
     await db.refresh(site)
