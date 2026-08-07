@@ -112,15 +112,30 @@ Website Visitor Identification · Sales Intelligence · Lead Generation · B2B M
 
 ## Tracking (update every 2 weeks)
 
+**Status vocabulary** — `LIVE` = link confirmed (seen in Google Search Console); `ABSENT` = directly checked the platform's own database, listing does not exist; `UNVERIFIED` = could not be checked (site blocks automated access), so absence is unproven; `unknown` = no record either way.
+
 | Platform | Submitted | Live URL | Link type | Indexed | Notes |
 |---|---|---|---|---|---|
-| SaaSHub | | | dofollow | | |
-| Indie Hackers | | | dofollow | | |
-| Launching Next | | | dofollow | | |
-| Crunchbase | | | nofollow | | |
-| AlternativeTo | | | nofollow | | cooldown 1wk |
-| Trustpilot | | | nofollow | | |
-| G2 | | | disputed | | |
-| Capterra/GetApp | | | disputed | | |
+| SaaSHub | unknown | UNVERIFIED | dofollow | UNVERIFIED | HTTP 403 to automated request; check in a browser |
+| Indie Hackers | unknown | UNVERIFIED | dofollow | UNVERIFIED | search UI is JS-rendered; only hit is a 2023 post about getbeam.ai (different product) |
+| Launching Next | unknown | UNVERIFIED | dofollow | UNVERIFIED | HTTP 403 to automated request |
+| Crunchbase | unknown | UNVERIFIED — needs manual confirm | nofollow | LIVE | GSC lists crunchbase.com linking to getbeam.fyi homepage, anchor empty; GSC did not expose the linking page URL |
+| AlternativeTo | unknown | UNVERIFIED | nofollow | UNVERIFIED | HTTP 403 to automated request; cooldown 1wk |
+| Trustpilot | unknown | UNVERIFIED | nofollow | UNVERIFIED | HTTP 403 to automated request |
+| G2 | unknown | UNVERIFIED | disputed | UNVERIFIED | HTTP 403 to automated request |
+| Capterra/GetApp | unknown | UNVERIFIED | disputed | UNVERIFIED | HTTP 403 to automated request |
+| Product Hunt | unknown | UNVERIFIED | unknown | UNVERIFIED | Cloudflare bot challenge on 2 attempts; `site:producthunt.com getbeam` returns nothing |
+| Uneed | unknown | ABSENT | unknown | ABSENT | `uneed.best/tool/getbeam` returns 404. `uneed.best/tool/beam` is a different product ("Beam — Personal Life", links to getbeam.ai) |
+| BetaList | unknown | ABSENT | unknown | ABSENT | searched their startup DB for "beam" — 21 results, none is getbeam.fyi |
+| MicroLaunch | unknown | ABSENT | unknown | ABSENT | 126 products listed for Aug 2026, none is Beam; `/p/beam` returns HTTP 500 |
+| X (x.com) | unknown | UNVERIFIED — needs manual confirm | unknown | LIVE | GSC: links to getbeam.fyi homepage, anchor "project link" |
+| duma.so | unknown | UNVERIFIED — needs manual confirm | unknown | LIVE | GSC: links to getbeam.fyi homepage, anchor "getbeam fyi". **Off-plan** — not on the Backlink Checklist |
+| unikorn.vn | unknown | UNVERIFIED — needs manual confirm | unknown | LIVE | GSC: links to getbeam.fyi homepage, anchor "http www getbeam fyi". **Off-plan** — not on the Backlink Checklist |
+
+**Verified 2026-08-07** (GSC → Links → External links, data as of 2026-07-24 — GSC lags ~2 weeks):
+- Total external links: **4** — crunchbase.com, duma.so, unikorn.vn, x.com. All four point at `https://getbeam.fyi/` (homepage); **zero** point at any blog post.
+- GSC did not expose the exact linking page URL for any of the four — confirm those manually from the account.
+- Blocked to automated access, re-check in a real browser next cycle (don't waste time on curl): Product Hunt, Indie Hackers, SaaSHub, AlternativeTo, Trustpilot, G2, Capterra/GetApp, Launching Next.
+- **Naming hazard:** `getbeam.ai` is an unrelated product (a ChatGPT app for Mac) and dominates search for "getbeam"; "Beam" alone is extremely crowded on these directories. Future submissions should use a disambiguating title such as "Beam — website visitor identification" or include "getbeam.fyi", otherwise the listing is undiscoverable and unverifiable.
 
 Re-check DR + referring domains via Ahrefs MCP each cycle. Target: DR 10–20 by ~2026-10-15.
