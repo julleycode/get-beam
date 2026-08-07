@@ -77,6 +77,8 @@ def _work_session(delete_raises: bool = False) -> MagicMock:
             if delete_raises:
                 calls.append(label)
                 raise RuntimeError(f"boom for {EMAIL}")
+        elif "identity_signals" in text:
+            label = "identity_signals_delete"
         elif "erasure_requests" in text:
             label = "erasure_status_update"
         calls.append(label)
@@ -219,7 +221,7 @@ def test_t_u4_single_blind_index_implementation():
 
 def test_t_u5_status_and_target_constants():
     assert ERASURE_STATUSES == ("pending", "processing", "done", "failed")
-    assert ERASURE_TARGETS == ("beam_identity_graph",)
+    assert ERASURE_TARGETS == ("beam_identity_graph", "identity_signals")
 
 
 @pytest.mark.asyncio
@@ -370,9 +372,12 @@ async def test_t_u8_boundary2_single_transaction_tombstone_first_happy_path():
     assert aexit.await_args.args[0] is None, "the happy path exited with an exception"
 
     inside = db.recorded[: db.recorded.index("erasure_status_update")]
-    assert inside == ["tombstone_insert", "graph_delete"], (
+    assert inside == ["tombstone_insert", "graph_delete", "identity_signals_delete"], (
         f"wrong Boundary-2 statement order / extra statement between: {inside}"
     )
+    # H6 positive assertion: the identity_signals DELETE for the erased bidx was
+    # issued inside the same Boundary-2 transaction (tombstone-first preserved).
+    assert "identity_signals_delete" in inside
 
 
 @pytest.mark.asyncio

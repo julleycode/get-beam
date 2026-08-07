@@ -334,12 +334,19 @@ class TestBeamIdentityNetwork:
         resolver.db.execute.assert_not_called()
 
     @pytest.mark.asyncio
+    @patch(
+        "apps.api.services.suppression.is_email_suppressed_any",
+        AsyncMock(return_value=False),
+    )
     async def test_upsert_executes_on_valid_data(self):
         db = AsyncMock()
         db.execute = AsyncMock()
         db.commit = AsyncMock()
         resolver = _make_resolver(db=db)
 
+        # visitor has no do_not_resolve flag and suppression is stubbed
+        # not-suppressed, so the write-boundary guard passes and the real
+        # graph upsert (execute + commit) executes.
         visitor = _make_visitor(fingerprint="fp2_test123")
         await resolver._upsert_beam_identity(
             visitor,
@@ -351,8 +358,15 @@ class TestBeamIdentityNetwork:
         db.commit.assert_called_once()
 
     @pytest.mark.asyncio
+    @patch(
+        "apps.api.services.suppression.is_email_suppressed_any",
+        AsyncMock(return_value=False),
+    )
     async def test_upsert_handles_db_error_gracefully(self):
         db = AsyncMock()
+        # Suppression passes (not-suppressed), so the injected error lands on
+        # the WRITE call inside the try/except — verifying graceful rollback of
+        # a write failure, not a suppression-lookup failure outside the guard.
         db.execute = AsyncMock(side_effect=Exception("DB error"))
         db.rollback = AsyncMock()
         resolver = _make_resolver(db=db)
@@ -411,6 +425,7 @@ class TestBeamIdentityNetwork:
 
         resolver = _make_resolver(db=db)
         resolver._upsert_beam_identity = AsyncMock()
+        resolver._email_suppressed = AsyncMock(return_value=False)
 
         mock_identified = SimpleNamespace(
             visitor_id="v-matched",

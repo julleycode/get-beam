@@ -31,8 +31,20 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
+from apps.api.services.suppression import is_email_suppressed_any
 
 logger = structlog.get_logger()
+
+# Storage column widths (IdentifiedVisitor.email String(320), full_name
+# String(200)). An oversized cell would raise StringDataRightTruncation at
+# commit and 500 the whole upload, so cap per-row and reject cleanly instead.
+MAX_EMAIL_LEN = 320
+MAX_NAME_LEN = 200
+
+# Scopes that make an address off-limits for a fresh contactable identity: an
+# erased / do-not-process / do-not-email / do-not-sell person must NOT become
+# emailable again just because their address was re-uploaded via CSV.
+SUPPRESSED_SCOPES = ("erased", "do_not_process", "do_not_email", "do_not_sell")
 
 # Business cap: a site may hold at most this many imported contacts. An upload
 # that would cross it is REJECTED WHOLE — never truncated to a partial import.
@@ -117,6 +129,16 @@ def parse_contacts_csv(raw: bytes) -> tuple[list[dict], list[dict]]:
             # with no email-shaped cell, and is reported rather than imported.
             rejected.append({"line": line_no, "reason": "no valid email in row"})
             continue
+        if len(email) > MAX_EMAIL_LEN:
+            rejected.append(
+                {"line": line_no, "reason": f"email too long (max {MAX_EMAIL_LEN})"}
+            )
+            continue
+        if name and len(name) > MAX_NAME_LEN:
+            rejected.append(
+                {"line": line_no, "reason": f"name too long (max {MAX_NAME_LEN})"}
+            )
+            continue
         if email in seen:
             rejected.append({"line": line_no, "reason": "duplicate email in file"})
             continue
@@ -166,7 +188,12 @@ async def import_contacts(db: AsyncSession, site_id: str, raw: bytes) -> dict:
             await db.execute(
                 select(func.lower(IdentifiedVisitor.email)).where(
                     IdentifiedVisitor.site_id == site_id,
-                    IdentifiedVisitor.email.in_([c["email"] for c in valid]),
+                    # Filter case-insensitively: `valid` emails are lowercased,
+                    # but stored addresses may be mixed-case, so a case-sensitive
+                    # IN would miss them and create a duplicate contactable row.
+                    func.lower(IdentifiedVisitor.email).in_(
+                        [c["email"] for c in valid]
+                    ),
                 )
             )
         ).scalars().all()
@@ -177,6 +204,12 @@ async def import_contacts(db: AsyncSession, site_id: str, raw: bytes) -> dict:
     for contact in valid:
         if contact["email"] in already:
             rejected.append({"line": None, "reason": "already imported"})
+            continue
+        # Suppression gate: every other identity-creating path checks this, so a
+        # CSV re-upload must NOT resurrect an erased / opted-out person as an
+        # emailable contact. Suppressed rows are reported, never silently dropped.
+        if await is_email_suppressed_any(db, contact["email"], SUPPRESSED_SCOPES):
+            rejected.append({"line": None, "reason": "email is suppressed (opted out)"})
             continue
         contact_id = uuid.uuid4()  # minted BEFORE the row — visitor_id embeds it
         visitor_id = f"import:{contact_id}"

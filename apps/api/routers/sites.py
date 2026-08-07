@@ -273,6 +273,18 @@ async def delete_site(
             "crm_connections",
             "engagement_attributions",
             "api_usage_logs",
+            # Added to close the site_id-reuse data-resurrection gap: these
+            # site-scoped tables hold PII (identity_signals, job_change_events)
+            # or secrets (ad_connections OAuth tokens) and were previously left
+            # behind on delete, so a re-created site reusing the same site_id
+            # inherited the old site's rows.
+            "identity_signals",
+            "job_change_events",
+            "agent_visits",
+            "agent_fetch_events",
+            "agent_handoff_links",
+            "request_logs",
+            "ad_connections",
         ):
             r = await db.execute(
                 sql_text(f"DELETE FROM {table} WHERE site_id = :sid"),

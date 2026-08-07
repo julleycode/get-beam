@@ -58,6 +58,7 @@ from apps.api.config import settings
 from apps.api.models.beam_identity import BeamIdentityNode
 from apps.api.models.database import async_session
 from apps.api.models.erasure_request import ERASURE_TARGETS, ErasureRequest
+from apps.api.models.identity_signal import IdentitySignal
 from apps.api.models.suppression import SuppressionEntry
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.models.visitor_email import VisitorEmail
@@ -341,6 +342,20 @@ def _graph_delete_stmt(bidx_list: list[str], fingerprints: list[str]):
     )
 
 
+def _identity_signals_delete_stmt(bidx_list: list[str]):
+    """Delete corroborating signal rows for every erased blind index (H6).
+
+    Matches on ``email_bidx`` only — ``identity_signals`` has no fingerprint
+    column, and the blind index is the same HMAC the queue already carries.
+    Mirrors ``_graph_delete_stmt``'s bound parametrized-array style; caller must
+    guard against an empty ``bidx_list`` (an empty ``= ANY('{}')`` matches
+    nothing, but skipping avoids a pointless statement)."""
+    b = cast(bidx_list, ARRAY(String))
+    return IdentitySignal.__table__.delete().where(
+        IdentitySignal.email_bidx == func.any(b)
+    )
+
+
 async def _process_claimed(db: AsyncSession, claimed: dict) -> bool:
     """Run one claimed row's destructive work. Never raises."""
     bidx = claimed["email_bidx_list"]
@@ -354,10 +369,15 @@ async def _process_claimed(db: AsyncSession, claimed: dict) -> bool:
                 if bidx:
                     await db.execute(_tombstone_stmt(bidx))
                 for target in claimed["targets"]:
-                    if target != "beam_identity_graph":
+                    if target == "beam_identity_graph":
+                        await db.execute(_graph_delete_stmt(bidx, fps))
+                    elif target == "identity_signals":
+                        # H6: matches on blind index only; skip when we have no
+                        # bidx (fingerprint-only requests can't touch this table).
+                        if bidx:
+                            await db.execute(_identity_signals_delete_stmt(bidx))
+                    else:
                         logger.warning("erasure_unknown_target", target=target)
-                        continue
-                    await db.execute(_graph_delete_stmt(bidx, fps))
 
         await db.execute(
             update(ErasureRequest)

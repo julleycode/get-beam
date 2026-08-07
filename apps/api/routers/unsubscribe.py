@@ -14,6 +14,7 @@ from apps.api.models.database import get_db
 from apps.api.models.visitor import IdentifiedVisitor
 from apps.api.models.visitor_email import VisitorEmail
 from apps.api.services.link_decorator import decode_unsubscribe_token
+from apps.api.services.suppression import add_suppression
 
 logger = structlog.get_logger()
 
@@ -73,6 +74,14 @@ async def unsubscribe(
     email_lower = email.strip().lower()
 
     try:
+        # Write a durable do_not_email suppression row so the opt-out survives a
+        # later re-resolution (the identity resolver clears the transient
+        # do_not_email flag on a fresh match — a suppression row is what its
+        # send-time / re-resolution re-check consults). Belt-and-braces alongside
+        # the direct do_not_email flag set below. add_suppression also cascades
+        # do_not_email to matching IdentifiedVisitor rows and commits.
+        await add_suppression(db, email_lower, scope="do_not_email", reason="unsubscribe_link")
+
         # 1. Check identified_visitors table (email is a direct column).
         # Case-insensitive: stored emails may be mixed case (provider-supplied),
         # so a plain equality against the lowercased input would miss them.

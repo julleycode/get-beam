@@ -82,6 +82,39 @@ async def test_repeated_records_accumulate(fake_redis):
     assert fake_redis.store[f"beam:orphan_ingest:{b}:site_aaaaaaaaaaaa"] == 3
 
 
+async def test_nonconforming_site_id_counts_globally_but_mints_no_per_id_key(fake_redis):
+    # Attacker-controlled junk id off the unauthenticated /ingest path: the
+    # global bucket still increments (aggregate signal preserved) but NO per-id
+    # key is minted, so a rotating-id flood cannot balloon the Redis keyspace.
+    await oim.record_orphan_ingest("../../etc/passwd")
+
+    b = _bucket()
+    assert fake_redis.store[f"beam:orphan_ingest:{b}"] == 1
+    # Only the single global key exists — no per-id key for the junk id.
+    assert list(fake_redis.store) == [f"beam:orphan_ingest:{b}"]
+    assert f"beam:orphan_ingest:{b}:../../etc/passwd" not in fake_redis.store
+
+
+async def test_nonconforming_shapes_never_mint_per_id_keys(fake_redis):
+    # Wrong prefix, wrong length, uppercase/non-hex, and a colon-bearing id are
+    # all rejected from the per-id keyspace; each still counts globally.
+    junk_ids = [
+        "site_" + "f" * 11,        # too short
+        "site_" + "a" * 13,        # too long
+        "site_ABCDEF012345",       # uppercase (non-hex)
+        "site_gggggggggggg",       # non-hex chars
+        "evil_deadbeef1234",       # wrong prefix
+        "site_dead:beef1234",      # contains a colon
+    ]
+    for jid in junk_ids:
+        await oim.record_orphan_ingest(jid)
+
+    b = _bucket()
+    # Global bucket counted every call; the keyspace holds ONLY the global key.
+    assert fake_redis.store[f"beam:orphan_ingest:{b}"] == len(junk_ids)
+    assert list(fake_redis.store) == [f"beam:orphan_ingest:{b}"]
+
+
 async def test_summary_sums_window_and_buckets_by_site_id(fake_redis):
     await oim.record_orphan_ingest("site_aaaaaaaaaaaa")
     await oim.record_orphan_ingest("site_aaaaaaaaaaaa")
