@@ -202,6 +202,7 @@ async def list_visitors(
                     IdentifiedVisitor.email,
                     IdentifiedVisitor.full_name,
                     IdentifiedVisitor.resolution_provider,
+                    IdentifiedVisitor.confidence_score,
                 ).where(
                     IdentifiedVisitor.site_id == site_id,
                     IdentifiedVisitor.visitor_id.in_(set(canon_of.values())),

@@ -36,6 +36,9 @@ class VisitorOut(BaseModel):
     # 'company' = an arbitrary employee guessed from the visitor's IP→company
     # domain (Hunter/Apollo) — NOT the real person. None = no identity yet.
     identity_level: str | None = None
+    # Resolution confidence from the identity table (1:1), surfaced on the list
+    # row alongside email/full_name. VisitorDetailOut inherits it.
+    confidence_score: float | None = None
     # True when this visitor's email matches the site owner's uploaded
     # known-contacts list (existing customer / prior lead). Matched by hash.
     is_known: bool = False
@@ -88,7 +91,6 @@ class VisitorDetailOut(VisitorOut):
     avatar_url: str | None = None
     enrichment_completeness: float | None = None
     resolution_provider: str | None = None
-    confidence_score: float | None = None
     social_context: dict | None = None
     auto_draft_count: int | None = None
     # Resolution observability — why is this visitor still anonymous?
