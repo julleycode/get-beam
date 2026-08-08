@@ -268,3 +268,63 @@ class TestIpinfoFabricationGuard:
     def test_real_corporate_office_still_resolves(self):
         # A genuine (non-datacenter, non-cdn) corporate org still yields a domain.
         assert self._mixin()._org_to_domain("AS400618 Prime Security Corp.") == "primesecurity.com"
+
+
+class TestExtractDomainNewlyRejected:
+    """WS-D group iii / G21 (AC-D3): hosts that resolve to a domain TODAY but
+    return None after the PSL change. Both NARROWS subclasses (P2-12), asserted
+    at the RESOLVER layer. Each comment names the OLD return value.
+
+    Per R12 the ICANN/amazonaws proof lives in test_public_suffix.py, NOT here —
+    test_returns_none_for_cloud_hostname above already asserts None for that host
+    and the two must not contradict.
+    """
+
+    # Subclass (i): domain-filter-caught ISP hosts (known ISP brands).
+    def test_talktalk_two_part_tld_isp_host_now_rejected(self):
+        # OLD: 'talktalk.co.uk' (early return bypassed both filters).
+        # NOW: registrable talktalk.co.uk → _build_domain_filter_regex fires
+        # ('talktalk' is a _DOMAIN_PATTERNS entry) → None.
+        assert _extract_domain("dsl-pool.host.talktalk.co.uk") is None
+
+    def test_virgin_two_part_tld_isp_host_now_rejected(self):
+        # OLD: 'virgin.co.uk'. NOW: domain filter ('virgin') → None.
+        assert _extract_domain("c-1-2-3.hsd1.virgin.co.uk") is None
+
+    # Subclass (ii): hostname-filter-only — the lost value is a REAL corporate
+    # domain, not an ISP. This is the higher-impact half (P2-12).
+    def test_hostname_filter_only_on_a_real_corporate_domain_now_rejected(self):
+        # OLD: 'acme.co.uk' — a REAL corporate domain, NOT an ISP. 'acme' is not
+        # in _DOMAIN_PATTERNS so the domain filter passes; _build_hostname_filter
+        # fires on the 'dhcp' token → None. The evidence (a DHCP-pool hostname)
+        # is too weak to assert employment, so the narrowing is correct.
+        assert _extract_domain("dhcp-1-2-3.acme.co.uk") is None
+
+    # Corrected cases: hosts that returned a bare public suffix TODAY.
+    def test_corrected_gov_br(self):
+        # OLD: 'gov.br' (a public suffix returned as a company domain).
+        assert _extract_domain("foo.bar.gov.br") == "bar.gov.br"
+
+    def test_corrected_co_za(self):
+        # OLD: 'co.za' (public suffix). NOW suffix + one label (D2 spec).
+        assert _extract_domain("x.co.za") == "x.co.za"
+
+
+class TestExtractDomainNewlyWidened:
+    """WS-D group iv / G22 (AC-D4): the highest-volume half — 3-label hosts under
+    the eight old hardcoded suffixes returned None today (bare `return None` at
+    the old :110) and now return their own registrable domain. A regression-only
+    gate cannot see this class. Each comment names the OLD None.
+    """
+
+    def test_google_co_uk_now_resolves(self):
+        assert _extract_domain("google.co.uk") == "google.co.uk"  # OLD: None
+
+    def test_bbc_co_uk_now_resolves(self):
+        assert _extract_domain("bbc.co.uk") == "bbc.co.uk"  # OLD: None
+
+    def test_acme_com_au_now_resolves(self):
+        assert _extract_domain("acme.com.au") == "acme.com.au"  # OLD: None
+
+    def test_x_co_uk_now_resolves(self):
+        assert _extract_domain("x.co.uk") == "x.co.uk"  # OLD: None

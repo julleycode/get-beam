@@ -46,6 +46,7 @@ from apps.api.models.ip_org_prefix import (
     IP_ORG_TABLE,
     IP_ORG_WRITE_LOCK_KEY,
 )
+from apps.api.services.apnic_eyeball_refresh import load_eyeball_asns
 from apps.api.services.company_resolver import classify_org_kind
 
 logger = structlog.get_logger()
@@ -78,6 +79,11 @@ _PUNCT_RE = re.compile(r"[^a-z0-9]+")
 # about who the visitor works for, and treating it as a company is exactly the
 # fabrication bug the CDN bucket exists to prevent.
 _EYEBALL_ORG_TOKENS: tuple[str, ...] = (
+    # WS-E / follow-ups item 7: bare "telekom" slipped through as org — no
+    # existing token substring-matches it ("telkom"/"telecom"/"deutsche telekom"
+    # all differ). Added. Everything else in item 7's ambit is already present
+    # (telecom, telkom, telefon, mobile, wireless, cellular, deutsche telekom).
+    "telekom",
     "telecom", "telecommunication", "telefon", "telkom", "telenor", "telia",
     "broadband", "cable", "cablevision", "wireless", "mobile", "cellular",
     "internet service", "isp", "communications", "comunicaciones",
@@ -120,10 +126,62 @@ def classify_ip_org_kind(asn: int, org_raw: str | None) -> str:
     kind = classify_org_kind(f"AS{asn} {org_raw or ''}".strip())
     if kind in ("datacenter", "cdn"):
         return kind
+    # APNIC numeric pre-check (WS-E / Q8): a large estimated user population is a
+    # data-driven eyeball signal. Direction guard — this can only produce
+    # 'eyeball', never move a prefix TO 'org' (infra 'datacenter'/'cdn' already
+    # returned above). Absent from the set → fall through to the token path.
+    if asn and asn in load_eyeball_asns():
+        return "eyeball"
     low = (org_raw or "").lower()
     if any(tok in low for tok in _EYEBALL_ORG_TOKENS):
         return "eyeball"
     return "org"
+
+
+# Family-fold precedence (WS-C / Q6): any non-``org`` member makes the family
+# non-``org``; when two different non-``org`` kinds appear the leftmost here wins.
+# CDN has the strongest keep-but-never-resolve semantics, so it leads.
+_FAMILY_KIND_PRECEDENCE: tuple[str, ...] = ("cdn", "datacenter", "eyeball", "org")
+
+
+def build_org_family_kinds(
+    asn_orgs: dict[int, tuple[str, str]],
+) -> dict[str, str]:
+    """Fold each as2org organization family to a single kind (WS-C / Q6).
+
+    For every ``organizationId`` group the family kind is the highest-precedence
+    per-ASN kind among its members (``cdn > datacenter > eyeball > org``). Used to
+    let a sibling ASN's non-``org`` classification propagate to an ``org`` sibling
+    — one-directional only; the caller applies the ``own == 'org'`` guard so a
+    non-``org`` classification is NEVER overwritten (no lateral moves, R9; never
+    promoted TO ``org``, Q6).
+    """
+    family: dict[str, str] = {}
+    for asn, (org_raw, org_id) in asn_orgs.items():
+        own = classify_ip_org_kind(asn, org_raw)
+        current = family.get(org_id)
+        if current is None:
+            family[org_id] = own
+            continue
+        # Keep whichever has the stronger (lower-index) precedence.
+        if _FAMILY_KIND_PRECEDENCE.index(own) < _FAMILY_KIND_PRECEDENCE.index(
+            current
+        ):
+            family[org_id] = own
+    return family
+
+
+def resolve_row_kind(own_kind: str, family_kind: str | None) -> str:
+    """Apply org-family inheritance to a single row's kind (WS-C / Q6 / R9).
+
+    Inherits the family kind ONLY when the row's OWN kind is ``org`` and the
+    family is non-``org`` — one-directional. A row already classified non-``org``
+    is never changed (no lateral move, R9), and nothing is ever promoted TO
+    ``org`` (Q6).
+    """
+    if own_kind == "org" and family_kind is not None and family_kind != "org":
+        return family_kind
+    return own_kind
 
 
 def parse_pfx2as(payload: bytes) -> list[tuple[str, int]]:
@@ -159,8 +217,12 @@ def parse_pfx2as(payload: bytes) -> list[tuple[str, int]]:
     return out
 
 
-def parse_as2org(payload: bytes) -> dict[int, str]:
-    """Parse a decompressed as2org JSONL body into ``{asn: org_name_raw}``.
+def parse_as2org(payload: bytes) -> dict[int, tuple[str, str]]:
+    """Parse a decompressed as2org JSONL body into ``{asn: (org_name_raw, org_id)}``.
+
+    WS-C: the opaque CAIDA ``organizationId`` (e.g. ``LPL-141-ARIN``) used to be
+    discarded in the final comprehension; it is now returned alongside the name so
+    the caller can group ASNs by family and persist the handle.
 
     The file interleaves TWO record shapes, discriminated by an explicit
     ``type`` field:
@@ -224,7 +286,7 @@ def parse_as2org(payload: bytes) -> dict[int, str]:
             org_id_to_name[str(org_id)] = str(name)
 
     return {
-        asn: org_id_to_name[oid]
+        asn: (org_id_to_name[oid], oid)
         for asn, oid in asn_to_org_id.items()
         if oid in org_id_to_name
     }
@@ -388,10 +450,10 @@ async def _load_staging_and_swap(
     insert_sql = text(
         f'INSERT INTO "{IP_ORG_STAGING_TABLE}" '
         "(id, prefix, asn, org_name, org_name_raw, org_kind, source, dataset_date, "
-        "relationship_type, valid_from, valid_to) "
+        "relationship_type, valid_from, valid_to, as2org_org_id) "
         "VALUES (:id, CAST(:prefix AS cidr), :asn, :org_name, :org_name_raw, "
         ":org_kind, :source, :dataset_date, :relationship_type, :valid_from, "
-        ":valid_to)"
+        ":valid_to, :as2org_org_id)"
     )
     for start in range(0, len(rows), _INSERT_CHUNK):
         chunk = [
@@ -399,6 +461,11 @@ async def _load_staging_and_swap(
                 "relationship_type": "route_origin",
                 "valid_from": dataset_date,
                 "valid_to": None,
+                # Default BEFORE the **row splat (C4a/E2): this function is SHARED
+                # with refresh_rir_allocations, whose rows never carry the key, so
+                # without this default the RIR job breaks on a missing bind param.
+                # CAIDA rows override it via **row.
+                "as2org_org_id": None,
                 **row,
                 "id": uuid.uuid4(),
                 "source": source,
@@ -435,6 +502,19 @@ async def _load_staging_and_swap(
         logger.warning("ip_org_swap_source_counts_failed", error=str(exc))
 
     await db.commit()
+
+    # Refresh planner statistics on the freshly swapped-in table, in its OWN
+    # transaction AFTER the swap commit (Q1/E1). Stats written inside the swap
+    # transaction are invisible to other backends; the point is that the NEXT
+    # lookup from a different connection has fresh stats and does not eat the
+    # ~15.7 ms cold-planner window. A failed ANALYZE must never turn a good swap
+    # into an error, so it is logged and swallowed.
+    try:
+        await db.execute(text(f'ANALYZE "{IP_ORG_TABLE}"'))
+        await db.commit()
+        logger.info("ip_org_post_swap_analyze_ok")
+    except Exception as exc:
+        logger.warning("ip_org_post_swap_analyze_failed", error=str(exc))
 
     # The RIR corpus may have just appeared or vanished; drop the memoized
     # EXISTS probe so this process does not keep answering from a stale value.
@@ -483,21 +563,40 @@ async def refresh_ip_org_dataset(dry_run: bool = True) -> dict:
         return {"status": "error", "error": str(exc)}
 
     dataset_date = _dataset_date_from_name(pfx_url)
+
+    # Org-family classification pass (WS-C / Q6): fold ASNs sharing an
+    # organizationId to one kind, so a carrier's second ASN slipping through as
+    # 'org' inherits its family's 'eyeball'/'datacenter'/'cdn'. In-memory over the
+    # parsed maps, before row-building — no extra DB pass.
+    family_kinds = build_org_family_kinds(asn_orgs)
+    family_sizes: dict[str, int] = {}
+    for _asn, (_raw, _oid) in asn_orgs.items():
+        family_sizes[_oid] = family_sizes.get(_oid, 0) + 1
+
     rows: list[dict] = []
     skipped = 0
+    family_reclassified = 0
     for cidr, asn in prefixes:
-        org_raw = asn_orgs.get(asn)
+        org_pair = asn_orgs.get(asn)
+        org_raw = org_pair[0] if org_pair else None
+        org_id = org_pair[1] if org_pair else None
         normalized = normalize_org_name(org_raw)
         if not normalized:
             skipped += 1  # ASN with no org record — nothing to resolve to
             continue
+        own_kind = classify_ip_org_kind(asn, org_raw)
+        family_kind = family_kinds.get(org_id) if org_id else None
+        org_kind = resolve_row_kind(own_kind, family_kind)
+        if org_kind != own_kind:
+            family_reclassified += 1
         rows.append(
             {
                 "prefix": cidr,
                 "asn": asn,
                 "org_name": normalized[:200],
                 "org_name_raw": (org_raw or "")[:200] or None,
-                "org_kind": classify_ip_org_kind(asn, org_raw),
+                "org_kind": org_kind,
+                "as2org_org_id": org_id,
                 # pfx2as IS BGP origin data — this is the relationship it
                 # asserts, not a default standing in for an unknown one.
                 "relationship_type": "route_origin",
@@ -506,26 +605,67 @@ async def refresh_ip_org_dataset(dry_run: bool = True) -> dict:
             }
         )
 
+    # Multi-ASN family sizing (WS-C / C5): the follow-ups item-4 question.
+    multi_asn_families = sum(1 for n in family_sizes.values() if n >= 2)
+    total_asns = sum(family_sizes.values())
+    multi_asn_family_fraction = (
+        round(
+            sum(n for n in family_sizes.values() if n >= 2) / total_asns, 4
+        )
+        if total_asns
+        else 0.0
+    )
+
+    # skip_ratio = share of source-offered prefixes that produced no row (WS-A).
+    # Denominator is len(prefixes) — rows the source OFFERED — not len(rows), the
+    # survivors: a survivor-count denominator is undefined at total collapse, which
+    # is exactly the case the guard exists for. No prefixes at all => ratio 1.0.
+    skip_ratio = round(skipped / len(prefixes), 4) if prefixes else 1.0
+
     logger.info(
         "ip_org_ingest_parsed",
         prefixes=len(prefixes),
         orgs=len(asn_orgs),
         rows=len(rows),
         skipped=skipped,
+        skip_ratio=skip_ratio,
+        multi_asn_families=multi_asn_families,
+        multi_asn_family_fraction=multi_asn_family_fraction,
+        family_reclassified=family_reclassified,
     )
+
+    if skip_ratio > settings.ip_org_skip_warn_ratio:
+        logger.warning("ip_org_ingest_skip_ratio_high", skip_ratio=skip_ratio)
 
     summary = {
         "prefixes": len(prefixes),
         "orgs": len(asn_orgs),
         "rows": len(rows),
         "skipped": skipped,
+        "skip_ratio": skip_ratio,
+        "multi_asn_families": multi_asn_families,
+        "multi_asn_family_fraction": multi_asn_family_fraction,
+        "family_reclassified": family_reclassified,
         "dataset_date": dataset_date.isoformat() if dataset_date else None,
         "pfx2as_url": pfx_url,
         "as2org_url": as2org_url,
     }
 
     if dry_run:
+        # A dry run still REPORTS the ratio (that is how an operator diagnoses a
+        # snapshot mismatch) but never aborts — it writes nothing anyway.
         return {"status": "dry_run", **summary}
+
+    if skip_ratio > settings.ip_org_skip_abort_ratio:
+        # A silent join collapse (the camelCase defect class). Abort BEFORE the
+        # advisory lock so a bad snapshot never blocks a good concurrent refresh,
+        # and never reaches _load_staging_and_swap so the existing data stands.
+        logger.warning("ip_org_ingest_skip_ratio_abort", skip_ratio=skip_ratio)
+        return {
+            "status": "error",
+            "error": f"skip ratio {skip_ratio:.3f} exceeds abort threshold",
+            **summary,
+        }
 
     if not rows:
         # An empty join would swap a populated table for an empty one — exactly

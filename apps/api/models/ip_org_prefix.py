@@ -124,3 +124,11 @@ class IpOrgPrefix(Base):
     # another migration of this hot table.
     valid_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     valid_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # CAIDA's opaque AS2Org organization handle, e.g. "LPL-141-ARIN" (WS-C).
+    # Retained so a family of ASNs sharing one org can be grouped for sizing and
+    # for org-family classification consistency. Populated ONLY for
+    # source="caida_pfx2as" rows and NULL for every other evidence class by
+    # construction (RIR/RPKI rows carry no as2org handle). Nullable, unindexed —
+    # no query filters on it yet, and an index on a 1M-row table for zero readers
+    # is pure write cost.
+    as2org_org_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

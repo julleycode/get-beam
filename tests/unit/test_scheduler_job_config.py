@@ -173,8 +173,12 @@ class TestAC13IntervalJobHardening:
         assert [c for c in cron if "jitter" in _kwargs(c)] == []
 
     def test_the_asserted_set_is_derived_not_hardcoded(self):
-        """E20 arithmetic: 22 total / 20 interval / 2 cron — all AST-derived.
+        """E20 arithmetic: 23 total / 21 interval / 2 cron — all AST-derived.
 
+        Was 22/20/2; +1 interval job for ip_org_apnic_refresh (WS-E — APNIC
+        per-AS user-population dataset feeding classify_ip_org_kind's numeric
+        eyeball pre-check; weekly, flag-gated OFF on ip_org_apnic_refresh_enabled,
+        fail-open).
         Was 20/18/2; +2 interval jobs for the IP-org evidence graph (Phase 3):
         ip_org_rir_refresh (RIR delegated-extended allocations — registered_holder
         evidence, weekly, flag-gated OFF, shares ONE advisory lock with
@@ -206,8 +210,8 @@ class TestAC13IntervalJobHardening:
         """
         calls = _add_job_calls()
         interval = [c for c in calls if _is_interval(c)]
-        assert len(calls) == 22, f"expected 22 add_job calls, found {len(calls)}"
-        assert len(interval) == 20, (
-            f"expected 20 interval calls, found {len(interval)}; if a job was "
+        assert len(calls) == 23, f"expected 23 add_job calls, found {len(calls)}"
+        assert len(interval) == 21, (
+            f"expected 21 interval calls, found {len(interval)}; if a job was "
             "added or removed, update E20's arithmetic — do not relax this gate"
         )

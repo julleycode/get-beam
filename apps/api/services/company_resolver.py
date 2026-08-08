@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.models.company_graph import CompanyGraphNode
+from apps.api.services.public_suffix import registrable_domain
 
 logger = structlog.get_logger()
 
@@ -91,25 +92,21 @@ def _extract_domain(hostname: str) -> str | None:
         'mail.google.com' -> 'google.com'
         'vpn-us.apple.com' -> 'apple.com'
         '12-34-56-78.res.spectrum.net' -> None (filtered as ISP)
+
+    WS-D: the registrable domain now comes from the vendored Public Suffix List
+    (``public_suffix.registrable_domain``) instead of a hardcoded 8-entry
+    two-part-TLD table. The old two-part branch returned EARLY, bypassing both
+    the domain and hostname filters; that early return is DELETED so EVERY result
+    — including two-part-TLD hosts — flows through both filters (Q11). This is a
+    THREE-directional behavior change (NARROWS / CORRECTS / WIDENS) gated by
+    G14/G21/G22.
     """
     if not hostname or hostname.replace(".", "").isdigit():
         return None  # IP address, not a hostname
 
-    # Extract last 2 parts (or 3 for country-code TLDs like .co.uk, .com.au)
-    parts = hostname.rstrip(".").split(".")
-    if len(parts) < 2:
+    domain = registrable_domain(hostname)
+    if not domain:
         return None
-
-    # Handle two-part TLDs: .co.uk, .com.au, .co.jp, .com.br, etc.
-    two_part_tlds = {"co.uk", "com.au", "co.jp", "com.br", "co.in", "com.sg", "co.kr", "com.vn"}
-    if len(parts) >= 3:
-        tld_candidate = f"{parts[-2]}.{parts[-1]}"
-        if tld_candidate in two_part_tlds:
-            if len(parts) >= 4:
-                return f"{parts[-3]}.{parts[-2]}.{parts[-1]}"
-            return None
-
-    domain = f"{parts[-2]}.{parts[-1]}"
 
     # Check domain against ISP/VPN/cloud patterns
     if _build_domain_filter_regex().search(domain):
