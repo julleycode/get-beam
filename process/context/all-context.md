@@ -1,6 +1,6 @@
 # Beam - All Context
 
-Last updated: 2026-08-07
+Last updated: 2026-08-09
 
 This file is the root context entrypoint for the repo.
 
@@ -71,6 +71,7 @@ For most substantial tasks:
 | debugging backend/tests | `all-context.md`, `tests/all-tests.md` | the failing service/router source |
 | AI / agent-layer work | `all-context.md` (AI Layer section below) | `apps/api/services/gemini_client.py`, `apps/api/agents/` |
 | Beam Lab / edge AI detection | `docs/beam-lab-resume.md` | `docs/beam-lab-team-brief.md` (team talk), `docs/agent-detection-architecture.md` §5d, `docs/journals/260801-0051-beam-lab-soft-serve-bfm.md`, `infra/cloudflare/beam-lab/` |
+| Agent fetch beacon Worker (splittrip) | `infra/cloudflare/agent-beacon-worker/README.md` | Cloudflare account Worker **`beam-agent-beacon-splittrip`** (id `9e74d042…`); source `infra/cloudflare/agent-beacon-worker/`; deploy `npx wrangler deploy --env splittrip`. MCP get/build/push MUST use this Worker — not `quota-tracker`. |
 | visitor identity / enrichment | `all-context.md` | `process/features/visitors-identity/_GUIDE.md` |
 | segments / campaigns / outreach | `all-context.md` | `process/features/campaigns-outreach/_GUIDE.md` |
 | billing / quotas | `all-context.md` | `process/features/billing/_GUIDE.md` |
@@ -325,6 +326,7 @@ getbeam/
 - **Identity/enrichment providers:** RB2B, Leadpipe, Capturify, People Data Labs, ipinfo, Hunter, Apollo, Proxycurl, TwitterAPI.io — all waterfall-gated, budget-capped, toggleable via env
 - **Billing:** Gumroad (active MoR, URL-token webhook), Stripe + Lemon Squeezy legacy
 - **Hosting:** Railway (api), pixel via CDN; browser automation via Playwright (scraping + e2e)
+- **Cloudflare Worker (agent fetch beacon, pinned 09-08-26):** live script name **`beam-agent-beacon-splittrip`** (id `9e74d04215224c4ab2cecc3e65939d21`), source `infra/cloudflare/agent-beacon-worker/`, wrangler env `splittrip`, route `splittrip.nhantown.com/*`. Use this name for MCP Workers get/list/builds and for `wrangler deploy --env splittrip`. Do not target `quota-tracker`. Details: `infra/cloudflare/agent-beacon-worker/README.md`.
 
 ## AI Layer (agentic-lite, shipped 20-07-26)
 
@@ -344,6 +346,10 @@ Consumers: `agents/segmenter.py` + `agents/campaign_planner.py` (JSON repair), `
 Detects AI-agent visits (GPTBot, PerplexityBot, ClaudeBot, etc.) at ingest and keeps them
 structurally separate from human Visitor/Event data, never as a targetable outreach contact:
 
+- **Edge beacon Worker (customer-site path):** Cloudflare Worker **`beam-agent-beacon-splittrip`** —
+  source `infra/cloudflare/agent-beacon-worker/` (`wrangler.toml` base name `beam-agent-beacon` +
+  `--env splittrip`). This is the account script to get/build/push for fetch-beacon data on
+  `splittrip.nhantown.com`. Separate from Beam Lab Pages (`infra/cloudflare/beam-lab/`).
 - `apps/api/services/agent_classifier.py` — UA-pattern classifier, drop-vs-classify token split
 - `apps/api/models/agent_visit.py` — dedicated `agent_visits` rollup table (one row per
   site/vendor/token tuple), never joined with `Visitor`/`Event`

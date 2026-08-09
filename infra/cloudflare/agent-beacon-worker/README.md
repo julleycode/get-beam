@@ -2,6 +2,21 @@
 
 Makes an AI that does **not** run JavaScript visible on Beam's Agents tab.
 
+## Canonical Cloudflare target (pinned 09-08-26)
+
+| Field | Value |
+|---|---|
+| **Account Worker name** | `beam-agent-beacon-splittrip` |
+| Worker id (tag) | `9e74d04215224c4ab2cecc3e65939d21` |
+| Source | `infra/cloudflare/agent-beacon-worker/` |
+| Wrangler base `name` | `beam-agent-beacon` |
+| Deploy env | `splittrip` → Cloudflare names the script `{name}-{env}` |
+| Route | `splittrip.nhantown.com/*` (zone `nhantown.com`) |
+
+**Rule for agents / MCP / deploy:** when listing Workers, fetching Worker details, reading builds, or pushing a deploy for this beacon path, always target **`beam-agent-beacon-splittrip`**. Do **not** use `quota-tracker` (unrelated account Worker) or the bare base name `beam-agent-beacon` without `--env splittrip`.
+
+Deploy / secret commands must use `--env splittrip` (see below). Cloudflare MCP `workers_get_worker` / builds tools: pass name or id of `beam-agent-beacon-splittrip`.
+
 ## Why the pixel is not enough
 
 `ChatGPT-User`, `Claude-User` and `Perplexity-User` fetch a page's HTML when a
@@ -20,6 +35,7 @@ essentially invisible.
 cd infra/cloudflare/agent-beacon-worker
 npx wrangler secret put BEAM_FETCH_BEACON_SECRET --env splittrip   # paste the API's value
 npx wrangler deploy --env splittrip
+# Resulting Cloudflare script name: beam-agent-beacon-splittrip
 ```
 
 The API side must already have:
