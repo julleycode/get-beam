@@ -75,3 +75,6 @@ apps/api/data/agent_ip_ranges/runtime/
 # Playwright run artifacts (traces, error-context dumps) — regenerated per run
 **/test-results/
 **/playwright-report/
+
+# ip-org-quality-pack WS-B: PII-adjacent derived-label corpus, never committed (Q4)
+process/features/visitors-identity/active/ip-org-quality-pack_08-08-26/benchmark-corpus.tsv

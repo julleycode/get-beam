@@ -402,6 +402,22 @@ async def _rpki_roas_refresh_job() -> None:
         logger.exception("rpki_roas_refresh_crashed")
 
 
+async def _apnic_eyeball_refresh_job() -> None:
+    """Periodic job: re-fetch the APNIC per-AS user-population dataset (WS-E).
+
+    Feeds ``classify_ip_org_kind``'s numeric eyeball pre-check. Fail-open — a
+    failed fetch/parse leaves the vendored (or last runtime) file in place.
+    """
+    try:
+        from apps.api.services.apnic_eyeball_refresh import (
+            refresh_apnic_eyeball_asns,
+        )
+
+        await refresh_apnic_eyeball_asns()
+    except Exception:
+        logger.exception("apnic_eyeball_refresh_crashed")
+
+
 async def _sweep_one_site(
     site_id: str,
     allow_defer: bool,
@@ -761,6 +777,18 @@ def start_scheduler() -> None:
             hours=settings.ip_org_rpki_refresh_interval_hours,
             id="ip_org_rpki_refresh",
             replace_existing=True,
+            jitter=1800,
+            misfire_grace_time=3600,
+        )
+    if settings.ip_org_apnic_refresh_enabled:
+        scheduler.add_job(
+            _apnic_eyeball_refresh_job,
+            "interval",
+            hours=settings.ip_org_apnic_refresh_interval_hours,
+            id="ip_org_apnic_refresh",
+            replace_existing=True,
+            # Weekly, single ~few-MB file: wide jitter so the fleet does not all
+            # pull it at the same instant.
             jitter=1800,
             misfire_grace_time=3600,
         )

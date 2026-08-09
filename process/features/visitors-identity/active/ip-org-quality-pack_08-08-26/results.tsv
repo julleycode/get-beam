@@ -1,0 +1,10 @@
+iteration	date	loop	gates_total	gates_failed	gap_count	fix_scope	loop_status
+0	2026-08-08	pvl-baseline	20	2	13	-	BASELINE
+1	2026-08-08	pvl	20	-	13	supplement cycle 1: FAIL-1 bidirectional+G21, FAIL-2 flag override, C3-13 fixes, KG-5	CYCLE_COMPLETE
+2	2026-08-08	pvl	20	2	19	validate cycle 2 (2F+6C) + adversarial refuter (8 P1 + 4 P2): merged gap set	CYCLE_COMPLETE
+3	2026-08-08	pvl	22	-	20	supplement cycle 2: Q14 reframe, WIDENS+G22, R1-R13 applied, KG-6/7/8	CYCLE_COMPLETE
+4	2026-08-08	pvl	22	0	18	validate cycle 3 (0F+8C CONDITIONAL) + refuter r2 (6 P1+6 P2): merged, all mechanical	CYCLE_COMPLETE
+5	2026-08-08	pvl	22	-	18	supplement cycle 3: 7-value calibration, label_root helper, precision/coverage defs, B2b CTE barrier, KG-9	CYCLE_COMPLETE
+6	2026-08-08	pvl	22	0	7	validate cycle 4: 18/18 landed, converged CONDITIONAL, 7 mechanical (C-33 email-leak, C-34 unclassified)	CYCLE_COMPLETE
+7	2026-08-08	pvl	22	0	0	supplement cycle 4: 7 CONCERNs + C-35 closed; USER ACCEPTED (A1); EXECUTE authorized order A-C-D-E-B	HALTED_ACCEPTED
+8	2026-08-08	evl-qp	22	0	0	EVL confirm: 0 fail (2543 unit+140+21 integ); C-33 privacy landed; WS-B needs-operator; G3 latency=Phase3-prior-evidence	HALTED_SUCCESS

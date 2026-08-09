@@ -742,6 +742,17 @@ class Settings(BaseSettings):
     # bandwidth. The job is advisory-locked, so a short interval is safe but
     # pointless.
     ip_org_refresh_interval_hours: int = 24
+    # Skip-ratio guard for the CAIDA join (WS-A). skip_ratio = skipped / prefixes
+    # offered by the source. The measured HEALTHY baseline is ~12.7 % (the as2org
+    # snapshot lags pfx2as, so some ASNs legitimately carry no org record), so the
+    # 0.25 warn threshold leaves ~2x headroom before noise. The guard exists to
+    # catch a silent join collapse — e.g. the camelCase `organizationId` defect
+    # that skipped 100 % of rows and still swapped — which trips the 0.40 abort
+    # ceiling by a wide margin. Both are settings so an operator can raise them for
+    # a known snapshot-age mismatch without a deploy. RIR leg is NOT covered (KG-5:
+    # refresh_rir_allocations has no offered-row denominator).
+    ip_org_skip_warn_ratio: float = 0.25
+    ip_org_skip_abort_ratio: float = 0.40
 
     # ─── IP-org evidence graph (Phase 3) ───
     # Phase 3 stops treating ip_org_prefixes as one flat prefix→company table and
@@ -787,6 +798,33 @@ class Settings(BaseSettings):
     # sources agree, which is the point of fusing them, and the reason this sits
     # behind a flag rather than shipping on.
     ip_org_fusion_enabled: bool = False
+
+    # ─── APNIC eyeball ASN list (WS-E) ───
+    # A numeric, data-driven pre-check in front of the org-name token heuristic:
+    # an ASN whose APNIC-estimated user population is large is a consumer ISP
+    # ("eyeball"), never an employer. classify_ip_org_kind consults this set FIRST
+    # and can only move a prefix org→eyeball (never the reverse). The token list
+    # is NEVER deleted — it covers CAIDA ASNs absent from the APNIC dataset.
+    #
+    # 50k threshold: APNIC's per-AS estimates are advertisement-sampled and noisy
+    # at the tail (IMC 2024 "unboxing" critique); 50k sits above the noise floor
+    # while still catching every consumer ISP that matters for false-positive
+    # suppression. Conservative is the correct error direction here — a missed
+    # eyeball AS costs one wasted classification; a wrongly-demoted org AS
+    # silently removes real companies from the emailable path. Threshold tuning is
+    # a known-gap (KG-2).
+    ip_org_eyeball_min_users: int = 50_000
+    ip_org_apnic_refresh_enabled: bool = False
+    # Machine-readable per-AS population endpoint (shape observed at EXECUTE time,
+    # G18): top-level object with a "Data" list; each record carries "AS" (int)
+    # and "Users" (int).
+    ip_org_apnic_url: str = "https://stats.labs.apnic.net/cgi-bin/aspop?f=j"
+    ip_org_apnic_refresh_interval_hours: int = 168
+    # Streamed hard ceiling on the aspop body (CONCERN-9), mirroring
+    # ip_org_rpki_max_bytes. The dataset is ~100k records — orders of magnitude
+    # under 32 MB — so the cap only fires on a hostile or corrupt response, which
+    # is a fail-open outcome (log, keep the existing file, return).
+    ip_org_apnic_max_bytes: int = 33_554_432  # 32 MB
 
     # How long after a site is deleted its site_id stays eligible for reuse when
     # the SAME owner re-creates a site for the SAME normalized url. This bounds
