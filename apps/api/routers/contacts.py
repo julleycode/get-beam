@@ -23,6 +23,7 @@ from apps.api.models.database import get_db
 from apps.api.models.user import User
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.services.contact_importer import (
+    MAX_FILE_BYTES,
     MAX_IMPORTED_CONTACTS_PER_SITE,
     ContactImportError,
     count_imported_contacts,
@@ -91,7 +92,15 @@ async def import_contacts_csv(
     with a clear error — never a partial import.
     """
     await verify_site_access(db, site_id, user)
-    raw = await file.read()
+    # Bounded read: never buffer more than the cap + 1 byte, so a giant upload
+    # cannot exhaust memory before the size check runs. No middleware body cap
+    # applies to this route (IngestBodySizeLimitMiddleware guards only /ingest).
+    raw = await file.read(MAX_FILE_BYTES + 1)
+    if len(raw) > MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large (max {MAX_FILE_BYTES // (1024 * 1024)} MB)",
+        )
     try:
         result = await import_contacts(db, site_id, raw)
     except ContactImportError as exc:

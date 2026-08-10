@@ -112,15 +112,31 @@ Website Visitor Identification · Sales Intelligence · Lead Generation · B2B M
 
 ## Tracking (update every 2 weeks)
 
+**Status vocabulary** — `LIVE` = link confirmed (seen in Google Search Console); `ABSENT` = directly checked the platform's own database, listing does not exist; `UNVERIFIED` = could not be checked (site blocks automated access), so absence is unproven; `unknown` = no record either way.
+
 | Platform | Submitted | Live URL | Link type | Indexed | Notes |
 |---|---|---|---|---|---|
-| SaaSHub | | | dofollow | | |
-| Indie Hackers | | | dofollow | | |
-| Launching Next | | | dofollow | | |
-| Crunchbase | | | nofollow | | |
-| AlternativeTo | | | nofollow | | cooldown 1wk |
-| Trustpilot | | | nofollow | | |
-| G2 | | | disputed | | |
-| Capterra/GetApp | | | disputed | | |
+| SaaSHub | unknown | ABSENT | dofollow | ABSENT | browser 2026-08-08: search "beam" returned no product matching Beam; separate search "visitor identification" returned top 20 of 1,000+ (ShieldLabs, Captiwate, TRACIO, LeadJaw, LeadBoxer, Webhawk.ai, DataShopper…) with no Beam |
+| Indie Hackers | unknown | ABSENT | dofollow | ABSENT | browser 2026-08-08: slug taken — `indiehackers.com/product/beam` is a different Beam ("Anonymous, offline file sharing without detection", QR-code file transfer by Andy Le at get-beam.vercel.app, posted July 2025). Their `?q=` param is ignored (returns the generic Products DB), so URL-param search does not work |
+| Launching Next | unknown | UNVERIFIED | dofollow | UNVERIFIED | no working search: `?s=beam` and `/search/?q=beam` both return the generic "Newest Startups" listing across 45,669 entries. Absence unproven; only evidence is Search Console reporting no link from the domain |
+| Crunchbase | unknown | UNVERIFIED — needs manual confirm | nofollow | LIVE | GSC lists crunchbase.com linking to getbeam.fyi homepage, anchor empty; GSC did not expose the linking page URL |
+| AlternativeTo | unknown | ABSENT | nofollow | ABSENT | browser 2026-08-08: search "beam" returns BEAMSTART, beam (email client), Beam Analytics, LaTeX Beamer, Beamium, BeamNG.drive and similar — none is getbeam.fyi |
+| Trustpilot | unknown | ABSENT | nofollow | ABSENT | browser 2026-08-08: `trustpilot.com/review/getbeam.fyi` returns a 404 page, so no profile exists to claim |
+| G2 | unknown | ABSENT | disputed | ABSENT | browser 2026-08-08: search "beam visitor identification" returns exactly one result, 2DataFish (a Sydney consultancy) |
+| Capterra/GetApp | unknown | ABSENT | disputed | ABSENT | browser 2026-08-08: search "beam visitor identification" returns 20 visitor-management and identity-verification products, none named Beam |
+| Product Hunt | unknown | ABSENT | unknown | ABSENT | browser 2026-08-08 (Cloudflare cleared after ~30s): `?q=beam` returns one "Beam", but it is an "AI co-pilot for CX agents with built-in QA/fraud/compliance" — a different product; `?q=getbeam` returns only "geteam" (fuzzy match, talent management) |
+| Uneed | unknown | ABSENT | unknown | ABSENT | `uneed.best/tool/getbeam` returns 404. `uneed.best/tool/beam` is a different product ("Beam — Personal Life", links to getbeam.ai) |
+| BetaList | unknown | ABSENT | unknown | ABSENT | searched their startup DB for "beam" — 21 results, none is getbeam.fyi |
+| MicroLaunch | unknown | ABSENT | unknown | ABSENT | 126 products listed for Aug 2026, none is Beam; `/p/beam` returns HTTP 500 |
+| X (x.com) | unknown | UNVERIFIED — needs manual confirm | unknown | LIVE | GSC: links to getbeam.fyi homepage, anchor "project link" |
+| duma.so | unknown | UNVERIFIED — needs manual confirm | unknown | LIVE | GSC: links to getbeam.fyi homepage, anchor "getbeam fyi". **Off-plan** — not on the Backlink Checklist |
+| unikorn.vn | unknown | UNVERIFIED — needs manual confirm | unknown | LIVE | GSC: links to getbeam.fyi homepage, anchor "http www getbeam fyi". **Off-plan** — not on the Backlink Checklist |
+
+**Verified 2026-08-07 (GSC pass) and 2026-08-08 (real-browser pass)** (GSC → Links → External links, data as of 2026-07-24 — GSC lags ~2 weeks):
+- Total external links: **4** — crunchbase.com, duma.so, unikorn.vn, x.com. All four point at `https://getbeam.fyi/` (homepage); **zero** point at any blog post. (2026-08-07 pass, unchanged.)
+- GSC did not expose the exact linking page URL for any of the four — confirm those manually from the account.
+- **2026-08-08:** the eight platforms previously blocked to curl were re-checked in a real logged-in Chrome browser. Seven are now confirmed ABSENT (Product Hunt, Indie Hackers, SaaSHub, AlternativeTo, Trustpilot, G2, Capterra/GetApp). Cloudflare clears after roughly 25–30 seconds of waiting — that wait is why the earlier automated attempts failed, so don't re-run curl and don't give up early in the browser.
+- Blocked, re-check next cycle: **Launching Next** only — and it is blocked by having no working search function, not by bot protection.
+- **Naming hazard:** `getbeam.ai` is an unrelated product (a ChatGPT app for Mac) and dominates search for "getbeam". Worse than a crowded search: the name **Beam is already occupied by other products on most of these platforms** — Indie Hackers (slug `beam` taken outright by a file-sharing app), Product Hunt (a CX co-pilot), Uneed (`/tool/beam` is a product linking to getbeam.ai), BetaList (21 "beam" results), AlternativeTo (BEAMSTART, BeamNG.drive, Beam Analytics and others). Practical consequence: on several platforms a bare "Beam" submission cannot claim the obvious slug and will be indistinguishable from the incumbents. Every listing should use a disambiguating title such as "Beam — website visitor identification" and put `getbeam.fyi` in the listing itself, otherwise it is undiscoverable and unverifiable.
 
 Re-check DR + referring domains via Ahrefs MCP each cycle. Target: DR 10–20 by ~2026-10-15.

@@ -28,7 +28,11 @@ from apps.api.models.database import Base
 
 # Extensible fan-out target list. Adding "company_graph" later once the legal
 # read lands (KG-3) is a one-constant change with no schema migration.
-ERASURE_TARGETS: tuple[str, ...] = ("beam_identity_graph",)
+# "identity_signals" (H6): the corroborating-signal table holds decryptable
+# email_ciphertext keyed by the same blind index this queue already carries, so
+# it must be erased in the same sweep — otherwise decryptable PII for an erased
+# person survives the erasure.
+ERASURE_TARGETS: tuple[str, ...] = ("beam_identity_graph", "identity_signals")
 
 ERASURE_STATUSES: tuple[str, ...] = ("pending", "processing", "done", "failed")
 

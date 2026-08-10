@@ -1,6 +1,6 @@
 # Lớp phát hiện AI-agent — kiến trúc & đánh giá
 
-Cập nhật: 2026-08-01 · Phạm vi: tab **Agents** + **Visitors** + Beam Lab (edge)
+Cập nhật: 2026-08-09 · Phạm vi: tab **Agents** + **Visitors** + Beam Lab (edge) + splittrip beacon Worker
 Nguồn: đọc trực tiếp source + kiểm chứng live local (17/17 probe) + ChatGPT-User thật trên beamlab.nhantown.com (29-07 → 01-08)
 
 Mục đích: trả lời ba câu hỏi sản phẩm — (1) phân biệt đâu là AI, (2) ai là người đứng sau AI,
@@ -38,9 +38,12 @@ không bao giờ chạm `is_emailable_identity`.
 |---|---|---|---|
 | Pixel ingest (`routers/events.py`) | JS trên site khách | Có | **Crawler không chạy JS** → đường này gần như không bao giờ thấy crawler |
 | Beacon edge (`agent_fetch_beacon.py`) | Middleware getbeam.fyi, auth shared-secret | Có (từ 28-07) | Đường **duy nhất** quan sát được crawler |
+| Beacon Worker (splittrip lab site) | Cloudflare Worker **`beam-agent-beacon-splittrip`** → POST API fetch-beacon | On-demand tokens | Source `infra/cloudflare/agent-beacon-worker/`; deploy `--env splittrip`. Pin này khi MCP get/build/push — không dùng `quota-tracker`. |
 
 Hệ quả quan trọng: với site khách dùng pixel, **crawler index-tier về cơ bản vô hình**. Beacon chỉ
-chạy trên chính getbeam.fyi. Đây là giới hạn cấu trúc, không phải bug.
+quan sát được khi có lớp edge (Worker/middleware) phía trước origin. Đây là giới hạn cấu trúc, không
+phải bug. Canonical Worker trên account Cloudflare cho đường splittrip: **`beam-agent-beacon-splittrip`**
+(xem `infra/cloudflare/agent-beacon-worker/README.md`).
 
 ---
 

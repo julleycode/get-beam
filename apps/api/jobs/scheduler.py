@@ -372,6 +372,52 @@ async def _ip_org_refresh_job() -> None:
         logger.exception("ip_org_refresh_crashed")
 
 
+async def _rir_allocations_refresh_job() -> None:
+    """Periodic job: reload RIR delegated-extended allocations as evidence rows.
+
+    Shares ONE advisory lock with the CAIDA refresh above, because both end in
+    DROP + RENAME of ``ip_org_prefixes`` and each carries the other's rows over
+    into staging first. Whichever loses the race returns ``locked`` and no-ops.
+    """
+    try:
+        from apps.api.services.ip_org_rir_ingest import refresh_rir_allocations
+
+        await refresh_rir_allocations(dry_run=False)
+    except Exception:
+        logger.exception("rir_allocations_refresh_crashed")
+
+
+async def _rpki_roas_refresh_job() -> None:
+    """Periodic job: reload validated RPKI ROAs for origin cross-checking.
+
+    Writes its OWN table with its OWN lock — it never touches
+    ``ip_org_prefixes``, so serializing it against the two ingest jobs above
+    would cost throughput for no safety gain.
+    """
+    try:
+        from apps.api.services.rpki_ingest import refresh_rpki_roas
+
+        await refresh_rpki_roas(dry_run=False)
+    except Exception:
+        logger.exception("rpki_roas_refresh_crashed")
+
+
+async def _apnic_eyeball_refresh_job() -> None:
+    """Periodic job: re-fetch the APNIC per-AS user-population dataset (WS-E).
+
+    Feeds ``classify_ip_org_kind``'s numeric eyeball pre-check. Fail-open — a
+    failed fetch/parse leaves the vendored (or last runtime) file in place.
+    """
+    try:
+        from apps.api.services.apnic_eyeball_refresh import (
+            refresh_apnic_eyeball_asns,
+        )
+
+        await refresh_apnic_eyeball_asns()
+    except Exception:
+        logger.exception("apnic_eyeball_refresh_crashed")
+
+
 async def _sweep_one_site(
     site_id: str,
     allow_defer: bool,
@@ -709,6 +755,40 @@ def start_scheduler() -> None:
             replace_existing=True,
             # Daily snapshots, so a wide jitter is free: it only matters that the
             # fleet does not all pull a multi-MB dataset at the same instant.
+            jitter=1800,
+            misfire_grace_time=3600,
+        )
+    if settings.ip_org_rir_ingest_enabled:
+        scheduler.add_job(
+            _rir_allocations_refresh_job,
+            "interval",
+            hours=settings.ip_org_rir_refresh_interval_hours,
+            id="ip_org_rir_refresh",
+            replace_existing=True,
+            # Weekly data, five multi-MB files: jitter widely so the fleet does
+            # not hammer all five RIR mirrors simultaneously.
+            jitter=3600,
+            misfire_grace_time=3600,
+        )
+    if settings.ip_org_rpki_ingest_enabled:
+        scheduler.add_job(
+            _rpki_roas_refresh_job,
+            "interval",
+            hours=settings.ip_org_rpki_refresh_interval_hours,
+            id="ip_org_rpki_refresh",
+            replace_existing=True,
+            jitter=1800,
+            misfire_grace_time=3600,
+        )
+    if settings.ip_org_apnic_refresh_enabled:
+        scheduler.add_job(
+            _apnic_eyeball_refresh_job,
+            "interval",
+            hours=settings.ip_org_apnic_refresh_interval_hours,
+            id="ip_org_apnic_refresh",
+            replace_existing=True,
+            # Weekly, single ~few-MB file: wide jitter so the fleet does not all
+            # pull it at the same instant.
             jitter=1800,
             misfire_grace_time=3600,
         )

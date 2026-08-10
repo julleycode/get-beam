@@ -32,6 +32,7 @@ OPERATOR QUERY RECIPE
     re-created the site (which now reclaims the id automatically).
 """
 
+import re
 from datetime import datetime, timedelta, timezone
 
 import structlog
@@ -43,21 +44,35 @@ logger = structlog.get_logger()
 _KEY_PREFIX = "beam:orphan_ingest"
 _TTL_SECONDS = 7 * 24 * 3600
 
+# The exact shape minted by ``sites._generate_site_id`` (``site_`` + 12 hex).
+# ``site_id`` off the unauthenticated /ingest path is attacker-controlled
+# (EventBatch validates only length 1-50, no charset), so ONLY a conforming id
+# is allowed to mint its own 7-day-TTL per-id Redis key. This caps the keyspace:
+# a rotating-junk-id flood can no longer balloon Redis with unbounded keys.
+_CONFORMING_SITE_ID = re.compile(r"^site_[0-9a-f]{12}$")
+
 
 def _bucket(dt: datetime) -> str:
     return dt.strftime("%Y%m%d%H")
 
 
 async def record_orphan_ingest(site_id: str) -> None:
-    """Count one unknown-site ingest rejection. Never raises."""
+    """Count one unknown-site ingest rejection. Never raises.
+
+    The global hourly bucket is ALWAYS incremented, so the aggregate orphan
+    signal is never lost regardless of the id shape. The per-id bucket is only
+    written for a *conforming* ``site_id`` (see ``_CONFORMING_SITE_ID``) — a
+    junk/rotating id off the unauthenticated /ingest path never gets its own
+    key, which bounds the Redis keyspace against a key-cardinality flood.
+    """
     try:
         now = datetime.now(timezone.utc)
         bucket = _bucket(now)
         redis = get_redis()
-        for key in (
-            f"{_KEY_PREFIX}:{bucket}",
-            f"{_KEY_PREFIX}:{bucket}:{site_id}",
-        ):
+        keys = [f"{_KEY_PREFIX}:{bucket}"]
+        if _CONFORMING_SITE_ID.match(site_id):
+            keys.append(f"{_KEY_PREFIX}:{bucket}:{site_id}")
+        for key in keys:
             await redis.incr(key)
             await redis.expire(key, _TTL_SECONDS)
     except Exception as exc:  # fail-open: telemetry must never break ingest

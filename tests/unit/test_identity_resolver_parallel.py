@@ -334,19 +334,19 @@ class TestBeamIdentityNetwork:
         resolver.db.execute.assert_not_called()
 
     @pytest.mark.asyncio
+    @patch(
+        "apps.api.services.suppression.is_email_suppressed_any",
+        AsyncMock(return_value=False),
+    )
     async def test_upsert_executes_on_valid_data(self):
         db = AsyncMock()
-        # The erasure guard runs a suppression SELECT before the upsert and
-        # reads `scalar_one_or_none() is not None`. A bare AsyncMock returns a
-        # truthy child mock there, which reads as "this person asked to be
-        # forgotten" and short-circuits the write — so the lookup has to answer
-        # None explicitly for the guard to fall through.
-        no_suppression = MagicMock()
-        no_suppression.scalar_one_or_none.return_value = None
-        db.execute = AsyncMock(return_value=no_suppression)
+        db.execute = AsyncMock()
         db.commit = AsyncMock()
         resolver = _make_resolver(db=db)
 
+        # visitor has no do_not_resolve flag and suppression is stubbed
+        # not-suppressed, so the write-boundary guard passes and the real
+        # graph upsert (execute + commit) executes.
         visitor = _make_visitor(fingerprint="fp2_test123")
         await resolver._upsert_beam_identity(
             visitor,
@@ -354,18 +354,20 @@ class TestBeamIdentityNetwork:
             "capturify",
         )
 
-        # Two round-trips: the erasure-guard suppression lookup, then the upsert.
-        assert db.execute.call_count == 2
+        db.execute.assert_called_once()
         db.commit.assert_called_once()
 
     @pytest.mark.asyncio
+    @patch(
+        "apps.api.services.suppression.is_email_suppressed_any",
+        AsyncMock(return_value=False),
+    )
     async def test_upsert_handles_db_error_gracefully(self):
         db = AsyncMock()
-        # Guard lookup succeeds so the failure under test is the upsert itself,
-        # not the suppression SELECT that now runs ahead of it.
-        no_suppression = MagicMock()
-        no_suppression.scalar_one_or_none.return_value = None
-        db.execute = AsyncMock(side_effect=[no_suppression, Exception("DB error")])
+        # Suppression passes (not-suppressed), so the injected error lands on
+        # the WRITE call inside the try/except — verifying graceful rollback of
+        # a write failure, not a suppression-lookup failure outside the guard.
+        db.execute = AsyncMock(side_effect=Exception("DB error"))
         db.rollback = AsyncMock()
         resolver = _make_resolver(db=db)
 
@@ -449,6 +451,7 @@ class TestBeamIdentityNetwork:
 
         resolver = _make_resolver(db=db)
         resolver._upsert_beam_identity = AsyncMock()
+        resolver._email_suppressed = AsyncMock(return_value=False)
 
         mock_identified = SimpleNamespace(
             visitor_id="v-matched",

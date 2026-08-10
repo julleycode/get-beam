@@ -1230,8 +1230,19 @@ class IdentityResolver(
             row.country = data.get("country")
             row.resolution_provider = provider
             row.confidence_score = data.get("confidence_score")
-            # A fresh, successful re-resolution supersedes an earlier rejection.
-            row.do_not_email = False
+            # A fresh, successful re-resolution supersedes an earlier rejection —
+            # BUT never re-enable an address that actively unsubscribed. The
+            # unsubscribe endpoint writes a durable do_not_email suppression row;
+            # only clear the transient flag when no such row exists. A genuinely
+            # rejected candidate (no suppression row) still gets re-enabled.
+            from apps.api.services.suppression import is_email_suppressed
+
+            reset_email = data.get("email")
+            if not (
+                reset_email
+                and await is_email_suppressed(self.db, reset_email, "do_not_email")
+            ):
+                row.do_not_email = False
             visitor.identity_status = (
                 "candidate" if is_graph_candidate_provider(provider) else "identified"
             )
@@ -1413,6 +1424,16 @@ class IdentityResolver(
                 node = result.scalar_one_or_none()
                 if node:
                     break
+            if node and node.email and await self._email_suppressed(node.email):
+                # Same do_not_process guard as the svid_reconcile and per-site
+                # fingerprint paths: the graph node's person may have opted out
+                # after being identified elsewhere. Skip the copy and fall through
+                # to the anonymous/no-match result.
+                logger.info(
+                    "beam_identity_network_skipped_suppressed",
+                    visitor_id=visitor.visitor_id[:8],
+                )
+                node = None
             if node:
                 logger.info(
                     "beam_identity_network_match",

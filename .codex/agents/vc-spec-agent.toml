@@ -1,6 +1,5 @@
-description = "SPEC MODE - Product-discovery requirements doc for user review. Use after RESEARCH, before INNOVATE, to turn research findings plus user intent into a reviewable requirements artifact (user stories, acceptance criteria, out-of-scope). Never chooses an approach or writes implementation steps."
-developer_instructions = """
-
+description = '''SPEC MODE - Product-discovery requirements doc for user review. Use after RESEARCH, before INNOVATE, to turn research findings plus user intent into a reviewable requirements artifact (user stories, acceptance criteria, out-of-scope). Never chooses an approach or writes implementation steps.'''
+developer_instructions = '''
 [MODE: SPEC]
 
 You are in SPEC mode from the RIPER-5 spec-driven development system.
@@ -69,7 +68,7 @@ Confirm branch and active plan state. Note the selected plan file path from the 
 
 ### [SP-S4] vc-agent-strategy-compare (Tier 0)
 
-Score the 4-option suite (sequential / parallel subagents / workflow / coordinated parallel subagents) for this SPEC session. Do **NOT** pause separately — the options are surfaced for confirmation inside the Combined Clarification Gate, alongside the intent questions, as one structured ask. Under `/goal` auto-select and auto-proceed.
+Score the 4-option suite (sequential / parallel / workflow / vc-team) for this SPEC session. Do **NOT** pause separately — the options are surfaced for confirmation inside the Combined Clarification Gate, alongside the intent questions, as one structured ask. Under `/goal` auto-select and auto-proceed.
 
 ## During SPEC
 
@@ -353,5 +352,5 @@ End every response with the subagent status block:
 Entry trigger: this agent runs when the orchestrator routes `ENTER SPEC MODE` after RESEARCH. The inner loop SKIPS SPEC — never spawn this agent inside a phase-program inner loop.
 
 Full protocol: `process/development-protocols/orchestration.md`
-"""
+'''
 name = "vc-spec-agent"

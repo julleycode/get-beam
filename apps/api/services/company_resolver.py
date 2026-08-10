@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.models.company_graph import CompanyGraphNode
+from apps.api.services.public_suffix import registrable_domain
 
 logger = structlog.get_logger()
 
@@ -91,25 +92,21 @@ def _extract_domain(hostname: str) -> str | None:
         'mail.google.com' -> 'google.com'
         'vpn-us.apple.com' -> 'apple.com'
         '12-34-56-78.res.spectrum.net' -> None (filtered as ISP)
+
+    WS-D: the registrable domain now comes from the vendored Public Suffix List
+    (``public_suffix.registrable_domain``) instead of a hardcoded 8-entry
+    two-part-TLD table. The old two-part branch returned EARLY, bypassing both
+    the domain and hostname filters; that early return is DELETED so EVERY result
+    — including two-part-TLD hosts — flows through both filters (Q11). This is a
+    THREE-directional behavior change (NARROWS / CORRECTS / WIDENS) gated by
+    G14/G21/G22.
     """
     if not hostname or hostname.replace(".", "").isdigit():
         return None  # IP address, not a hostname
 
-    # Extract last 2 parts (or 3 for country-code TLDs like .co.uk, .com.au)
-    parts = hostname.rstrip(".").split(".")
-    if len(parts) < 2:
+    domain = registrable_domain(hostname)
+    if not domain:
         return None
-
-    # Handle two-part TLDs: .co.uk, .com.au, .co.jp, .com.br, etc.
-    two_part_tlds = {"co.uk", "com.au", "co.jp", "com.br", "co.in", "com.sg", "co.kr", "com.vn"}
-    if len(parts) >= 3:
-        tld_candidate = f"{parts[-2]}.{parts[-1]}"
-        if tld_candidate in two_part_tlds:
-            if len(parts) >= 4:
-                return f"{parts[-3]}.{parts[-2]}.{parts[-1]}"
-            return None
-
-    domain = f"{parts[-2]}.{parts[-1]}"
 
     # Check domain against ISP/VPN/cloud patterns
     if _build_domain_filter_regex().search(domain):
@@ -606,6 +603,37 @@ async def _resolve_via_local_ip_org(
     """
     if db is None or not settings.ip_org_lookup_enabled:
         return None
+
+    if settings.ip_org_fusion_enabled:
+        from apps.api.services.ip_org_lookup import lookup_ip_org_v2
+
+        hypothesis = await lookup_ip_org_v2(db, ip)
+        if hypothesis is None:
+            return None
+        if settings.company_graph_enabled:
+            # ONE fused row, not one per source. company_graph's (ip, source)
+            # unique key plus its confidence.desc() read means several
+            # ip_org-derived rows would compete with EACH OTHER and the highest
+            # would win regardless of fusion — defeating the point. So the
+            # source string stays "rir_asn" (no consumer changes) and only the
+            # confidence becomes the fused, clamped score.
+            await _write_through_company_graph(
+                db,
+                ip,
+                hypothesis["domain"],
+                hypothesis["organization"],
+                "rir_asn",
+                hypothesis["confidence"],
+            )
+        logger.info(
+            "ip_org_fusion_scored",
+            classification=hypothesis["classification"],
+            confidence=hypothesis["confidence"],
+            evidence_count=len(hypothesis["evidence"]),
+            uncertainty_count=len(hypothesis["uncertainty"]),
+        )
+        return hypothesis["domain"]
+
     from apps.api.services.ip_org_lookup import lookup_ip_org
 
     match = await lookup_ip_org(db, ip)

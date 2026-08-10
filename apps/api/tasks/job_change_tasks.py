@@ -120,10 +120,13 @@ async def _sweep(limit: int | None = None) -> dict:
                 if await run_recheck(db, visitor, site):
                     detected += 1
             except Exception as exc:
+                # run_recheck can propagate a provider HTTPStatusError whose URL
+                # carries the visitor email — log the exception class only.
                 logger.warning(
                     "job_change_sweep_visitor_failed",
                     visitor_id=visitor_row.visitor_id[:8],
-                    error=str(exc),
+                    error_type=type(exc).__name__,
+                    status=getattr(getattr(exc, "response", None), "status_code", None),
                 )
 
     logger.info("job_change_sweep_complete", checked=checked, detected=detected)

@@ -1,3 +1,14 @@
 iteration	date	loop	gates_total	gates_failed	gap_count	fix_scope	loop_status
 0	2026-08-07	evl-baseline	6	1	1	-	BASELINE
 1	2026-08-07	evl	6	0	0	parse_as2org organizationId key + fixture regen	HALTED_SUCCESS
+0	2026-08-07	pvl-baseline	7	4	17	-	BASELINE
+1	2026-08-07	pvl	7	-	17	17-gap supplement: D10-D13, Hunter leg dropped, 8 new gates	CYCLE_COMPLETE
+2	2026-08-07	pvl	7	0	8	validate cycle 2: 4F cleared, 8 new CONCERNs in supplement material	CYCLE_COMPLETE
+3	2026-08-07	pvl	7	-	8	supplement cycle 2: D14 slug+corroboration, G19-G21, AC fixes	CYCLE_COMPLETE
+4	2026-08-07	pvl	7	0	6	validate cycle 3: 8/8 landed, 6 new (P1 C-b dead code)	CYCLE_COMPLETE
+5	2026-08-07	pvl	7	-	6	supplement cycle 3: C-b inert+KG-4, DNS hermetic, inet guard, G20 floor	CYCLE_COMPLETE
+6	2026-08-07	pvl	7	0	3	validate cycle 4: 10/10 landed, 3 new (Q1 empty-surface gate)	CYCLE_COMPLETE
+7	2026-08-07	pvl	7	-	3	supplement cycle 4: G19 seeding precondition, C-b deleted, table fix	CYCLE_COMPLETE
+8	2026-08-07	pvl	7	0	0	validate cycle 5: converged, 0 defects, A1-A8 menu + Decision 2 to user	HALTED_CONDITIONAL_AWAITING_USER
+9	2026-08-07	pvl	7	0	0	USER ACCEPTED A1-A8 + Decision 2 Option B (split domain leg); EXECUTE authorized	HALTED_ACCEPTED
+10	2026-08-07	evl-p3	18	0	0	EVL confirm: all in-scope gates green; 2 contract defects found (G3 stale path, G10/G8 flag-off vacuous)	HALTED_SUCCESS

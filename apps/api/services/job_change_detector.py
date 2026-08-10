@@ -315,13 +315,26 @@ async def _fetch_fresh_profile(
         if data:
             return (data, "pdl")
     except Exception as exc:
-        logger.debug("job_change_pdl_failed", error=str(exc))
+        # Never log str(exc): the PDL/Apollo enrich calls put the email in the
+        # request URL, so an httpx.HTTPStatusError message embeds ?email=... —
+        # log only the exception class + HTTP status (no PII).
+        logger.debug(
+            "job_change_pdl_failed",
+            error_type=type(exc).__name__,
+            status=getattr(getattr(exc, "response", None), "status_code", None),
+        )
     try:
         data = await enricher._enrich_apollo(email, visitor=visitor)
         if data:
             return (data, "apollo")
     except Exception as exc:
-        logger.debug("job_change_apollo_failed", error=str(exc))
+        # Same PII hazard as job_change_pdl_failed above — email rides in the
+        # provider request URL, so only the exception class + status are logged.
+        logger.debug(
+            "job_change_apollo_failed",
+            error_type=type(exc).__name__,
+            status=getattr(getattr(exc, "response", None), "status_code", None),
+        )
     return (None, "domain_fallback")
 
 
@@ -399,10 +412,13 @@ async def run_recheck(
             signal=signal,
         )
     except Exception as exc:
+        # str(exc) can surface a provider HTTPStatusError whose URL carries the
+        # visitor email — log the exception class only, not its text.
         logger.warning(
             "job_change_recheck_failed",
             visitor_id=visitor.visitor_id[:8],
-            error=str(exc),
+            error_type=type(exc).__name__,
+            status=getattr(getattr(exc, "response", None), "status_code", None),
         )
         return None
 

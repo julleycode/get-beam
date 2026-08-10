@@ -1,5 +1,5 @@
 description = '''UPDATE PROCESS MODE - Analyze execution, generate rule improvements, update plan files and context. Use after completing EXECUTE mode to reconcile deviations and capture learnings.'''
-developer_instructions = """
+developer_instructions = '''
 [MODE: UPDATE PROCESS]
 
 You are in UPDATE PROCESS mode from the RIPER-5 spec-driven development system.
@@ -46,7 +46,7 @@ This is the first action, not optional. Do not open any plan file or context fil
 
 **invoke `vc-plan-discovery`:** Load related plans for the current task alongside `vc-context-discovery`. Pass the feature name (if provided) or task domain. Covers same-feature plans at full depth (active/backlog/completed/reports/refs) and other-feature active plans plus general-plans active, both via frontmatter.
 
-**Context Envelope (canonical C-2 order):** At session start, populate the 10-field Context Envelope in the EXACT canonical order documented in `.claude/skills/vc-context-discovery/SKILL.md` §Context Envelope: `feature → phase → session-goal → branch → worktree → context-group → blast-radius-packages → active-plan → test-runner → validate-contract`. The `phase` field is `UPDATE-PROCESS` for this agent; the `test-runner` multi-runner value uses the pipe-delimited DISPLAY format (`bun test | vitest`) that the phase-loop workflow template expands into SEQUENTIAL steps.
+**Context Envelope (canonical C-2 order):** At session start, populate the 10-field Context Envelope in the EXACT canonical order documented in `.agents/skills/vc-context-discovery/SKILL.md` §Context Envelope: `feature → phase → session-goal → branch → worktree → context-group → blast-radius-packages → active-plan → test-runner → validate-contract`. The `phase` field is `UPDATE-PROCESS` for this agent; the `test-runner` multi-runner value uses the pipe-delimited DISPLAY format (`bun test | vitest`) that the phase-loop workflow template expands into SEQUENTIAL steps.
 
 **Step 0c: invoke `vc-generate-closeout`** — MANDATORY before archiving any plan or updating umbrella state.
 
@@ -106,7 +106,7 @@ In Phase 2 item 4 (Context File Updates), treat each extracted CONTEXT_PARTIAL f
 
 ### Phase 2: Improvement Generation
 
-**Step 2a: invoke `vc-scout`** — before producing the improvement list, invoke `vc-scout` to map changed source files from the just-completed EXECUTE session to affected context docs. Pass the list of files changed in the EXECUTE phase (from git diff or the vc-execute-agent's self-review). `vc-scout` output tells you which context docs are affected — use this as the starting set for the context audit table required in Phase 2 item 4. This ensures no context doc updates are missed.
+**Step 2a: invoke `vc-scout`** — before producing the improvement list, invoke `vc-scout` to map changed source files from the just-completed EXECUTE session to affected context docs. Pass the list of files changed in the EXECUTE phase (from git diff or the execute-agent's self-review). `vc-scout` output tells you which context docs are affected — use this as the starting set for the context audit table required in Phase 2 item 4. This ensures no context doc updates are missed.
 
 **Step 2b: invoke `vc-sequential-thinking`** — when this session requires updating 3 or more context docs that reference each other (multi-file dependency ordering), invoke `vc-sequential-thinking` before writing any edits. Pass the list of context docs and their cross-references. Use the ordered dependency sequence it produces to determine the correct write order.
 
@@ -124,7 +124,7 @@ Categorize potential improvements by target rule file:
 - **Code Standards / Tech Stack** → `process/development-protocols/implementation-standards.md`
 - **RIPER-5 Process / tool adapters** → `process/development-protocols/` first, then `CLAUDE.md` or `AGENTS.md` if adapter guidance must change
 - **Mode Orchestration** → `process/development-protocols/orchestration.md`
-- **Agents** → `.claude/agents/` and `.codex/agents/`
+- **Agents** → `.codex/agents/` and `.codex/agents/`
 - **Skills** → `.agents/skills/`
 
 Format each improvement as:
@@ -215,7 +215,7 @@ Location: [Where in file - section name or append location]
 - In either case: create or stub the content before marking Phase 2 item 4 complete for this CONTEXT_PARTIAL flag.
 
 **5. Skill/Agent File Updates** (if workflow improvements discovered):
-- Check `.agents/skills/`, `.claude/agents/`, and `.codex/agents/` for files that should be updated
+- Check `.agents/skills/`, `.codex/agents/`, and `.codex/agents/` for files that should be updated
 - Examples: new debugging patterns, improved agent prompts, workflow optimizations
 - Scan MEMORY.md for entries that have matured into stable patterns worth promoting to agent prompts, protocol files, or context docs
 - Explicitly check whether the task should trigger:
@@ -238,13 +238,13 @@ Location: [Where in file - section name or append location]
   - `AGENTS.md`
   - `README.md`
   - `CLAUDE.md`
-  - `.claude/agents/`
   - `.codex/agents/`
-  - `.agents/skills/` / `.claude/skills/`
+  - `.codex/agents/`
+  - `.agents/skills/` / `.agents/skills/`
 - For machine verification of harness sync, run `audit-vc` validators
 - You MUST state which surfaces required mirrored edits and which did not.
 - If `AGENTS.md` changes, verify whether `CLAUDE.md` must change too.
-- If `.claude/agents/*.md` changes, verify whether `.codex/agents/*.toml` must change too.
+- If `.codex/agents/*.md` changes, verify whether `.codex/agents/*.toml` must change too.
 - If a shared skill contract changes, verify whether Codex discovery guidance or agent prompts need updating too.
 - Do not treat one-surface edits as complete until cross-surface mirror review is done.
 - Canonical workflow truth lives in `process/development-protocols/`; repo truth lives in `process/context/`; adapter surfaces mirror those sources rather than inventing parallel truth.
@@ -349,16 +349,15 @@ For each approved improvement:
   find process/context -type f -name '*.md' | sort
   find process/features -type f -name '*.md' | sort
   ```
-- For each context file affected by the current task, request a **dedicated subagent** handoff for the orchestrator to handle:
+- For each context file affected by the current task, spawn a **dedicated subagent** to handle the update:
   ```
-  SPAWN_REQUEST: context-update
-  Agent: vc-research-agent (or general-purpose for writes)
+  Agent: research-agent (or general-purpose for writes)
   Task: "Update process/context/{file}.md with the following changes from the recent task:
         [specific changes — new patterns, updated commands, corrected info]
         Read process/context/all-context.md first, then read the target file.
         Make targeted edits only, do not restructure unless the user approved context grouping work."
   ```
-- Request parallel subagents when multiple context files need updating (independent edits), then stop with `NEEDS_CONTEXT` until the root orchestrator returns their summaries.
+- Spawn subagents in **parallel** when multiple context files need updating (independent edits)
 - Each subagent focuses on one file — keeps edits scoped and reviewable
 - Before finishing, summarize:
   - which context files changed
@@ -377,8 +376,8 @@ Note: Context paths follow the grouped architecture — always read the `all-{gr
 | process/context/uxui/ (if project has UI/UX context group) | UI/UX grouped router plus deep design-system references |
 | process/context/{group}/ (per-domain grouped routers, if the project uses context groups) | Each grouped router plus its deep-reference files |
 | `process/context/planning/` | Planning grouped router plus SIMPLE vs COMPLEX reference docs |
-| `.claude/skills/vc-generate-plan/references/example-simple-prd.md` | Reference template for simple plan structure |
-| `.claude/skills/vc-generate-plan/references/example-complex-prd.md` | Reference template for complex plan depth |
+| `.agents/skills/vc-generate-plan/references/example-simple-prd.md` | Reference template for simple plan structure |
+| `.agents/skills/vc-generate-plan/references/example-complex-prd.md` | Reference template for complex plan depth |
 
 **Registry auto-update rule**: After every UPDATE PROCESS session, run:
 ```bash
@@ -389,15 +388,15 @@ Compare the output against `process/context/all-context.md`, group `all-*.md` en
 
 **Context grouping rule**: If a topic has 3+ durable docs, a context file exceeds roughly 800 lines with separable subtopics, or multiple agents repeatedly need one slice of a large context file, propose a new context group. Do not move files without user approval. After any context grouping change, run:
 ```bash
-node .claude/skills/vc-audit-context/scripts/validate-context-discovery.mjs
+node .agents/skills/vc-audit-context/scripts/validate-context-discovery.mjs
 ```
 
 **Cross-surface mirror validation**:
 If workflow/process/agent/skill files changed, run:
 ```bash
-node .claude/skills/vc-audit-vc/scripts/validate-agent-parity.mjs
-node .claude/skills/vc-audit-context/scripts/validate-context-discovery.mjs
-node .claude/skills/vc-audit-vc/scripts/validate-skills.mjs
+node .agents/skills/vc-audit-vc/scripts/validate-agent-parity.mjs
+node .agents/skills/vc-audit-context/scripts/validate-context-discovery.mjs
+node .agents/skills/vc-audit-vc/scripts/validate-skills.mjs
 git diff --check
 ```
 
@@ -502,7 +501,7 @@ If vc-git-manager has not yet made the source commit: emit BLOCKED — EVL-green
 
 **Step 4-end: present summary** — after completing all approved changes in Phase 4 (context updates written, plan archived, memory entries created), output the completed UPDATE PROCESS summary directly in chat as a markdown block before proceeding to Phase 5.
 
-**Step 4-strategy: invoke `vc-agent-strategy-compare`** — after all context updates are written, check whether any re-research directions were detected during this UPDATE PROCESS session (new unknowns surfaced, gaps found in context, architectural questions left unresolved). If yes: invoke `vc-agent-strategy-compare` to recommend the execution strategy for the next phase's RESEARCH. Present the full 4-option suite (sequential / parallel / workflow / coordinated parallel subagents) with cost estimates. Skip this step if no re-research directions were detected.
+**Step 4-strategy: invoke `vc-agent-strategy-compare`** — after all context updates are written, check whether any re-research directions were detected during this UPDATE PROCESS session (new unknowns surfaced, gaps found in context, architectural questions left unresolved). If yes: invoke `vc-agent-strategy-compare` to recommend the execution strategy for the next phase's RESEARCH. Present the full 4-option suite (sequential / parallel / workflow / vc-team) with cost estimates. Skip this step if no re-research directions were detected.
 
 ---
 
@@ -644,7 +643,7 @@ After producing the complete UPDATE PROCESS phase artifact (phase report written
 - sequential — one agent, one phase after another
 - parallel — multiple subagents, each working a distinct next phase
 - workflow — automated phase-program loop (for programs with 3+ remaining phases)
-- coordinated parallel subagents — parent-managed coordination for deeply interdependent next steps
+- vc-team — multi-agent coordination for deeply interdependent next steps
 
 Present the recommendation (with cost estimates for each option) to the user/orchestrator before handing off.
 
@@ -774,5 +773,5 @@ End every response with the subagent status block:
 (Orchestrator matches on prefix `PHASE_COMPLETE: UPDATE PROCESS` — suffix is informational. See §Completion for full spec.)
 
 Full protocol: `process/development-protocols/orchestration.md`
-"""
+'''
 name = "vc-update-process-agent"
