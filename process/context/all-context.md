@@ -188,6 +188,22 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
     adversarial verifier — that second leg found the top defect in all four prior cycles and
     overturned an orchestrator decision twice. `roster_precision_enabled` default OFF; nothing
     becomes emailable (`is_emailable_identity("hunter")` stays `False`, regression-gated).
+- `onboarding-canary` — conversational onboarding rebuild in React + a canarytokens-style
+  location reveal (Leaflet pin on the user's city, their network, and the pages they just read on
+  getbeam.fyi). 4-phase plan; **Phase 1 (backend, flag OFF) EXECUTED 10-08-26.** Widened
+  `services/geoip.py` (`resolve_geoip_full` + `GeoResult`; `resolve_geoip` is now a thin wrapper
+  with a frozen 2-tuple signature so `routers/events.py` needed zero edits; NEW `geoip2:` JSON
+  Redis prefix kept separate from the legacy pipe-joined `geoip:` key; added the missing
+  `mock_external_apis` branch and 429/`X-Ttl` backoff), new
+  `services/onboarding_canary.py` (journey query extracted from `demo_journey` and shared — the
+  new path adds the `site_id == settings.beam_self_site_id` predicate that `/demo/journey` still
+  lacks; ISP-vs-company ladder; Null-Island guard), new authed `routers/onboarding.py`
+  (`POST /api/v1/onboarding/canary` 30/min + `/identity-feedback`; flag-off => 404; IP never in
+  the response body), config `beam_self_site_id` + `location_reveal_enabled` (default OFF),
+  migration `a1c7f4e082d5` (`idx_visitors_fingerprint` + `identity_feedback` table) —
+  live up/down/up round-tripped on a disposable DB. Phases 2-4 (React chat shell, Leaflet canary,
+  follow-ups) not started. Plan:
+  `process/features/onboarding-canary/active/canary-onboarding_10-08-26/canary-onboarding_PLAN_10-08-26.md`
 - `campaigns-outreach` — AI segmentation, campaign planning, email + social outreach, drafts
 - `billing` — Gumroad MoR billing, plans/quotas, BYOK keys
 - `marketing-site` — public site: landing, blog, changelog, SEO (content sources in `marketing/`)

@@ -16,6 +16,10 @@ class Visitor(Base):
         Index("idx_visitors_site_enrichment", "site_id", "enrichment_status"),
         Index("idx_visitors_site_ai_source", "site_id", "ai_source"),
         Index("uq_visitors_site_visitor", "site_id", "visitor_id", unique=True),
+        # Fingerprint-only lookup (onboarding canary poll, /demo/identify,
+        # /demo/journey). Every other index here leads with site_id, so a
+        # fingerprint match was a sequential scan before this existed.
+        Index("idx_visitors_fingerprint", "fingerprint"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

@@ -852,6 +852,32 @@ class Settings(BaseSettings):
     maxmind_asn_db_path: str = ""
     maxmind_license_key: str = ""
 
+    # MaxMind GeoLite2-City: the geo sibling of the ASN DB above, same free key.
+    # When maxmind_city_db_path points at a GeoLite2-City.mmdb, resolve_geoip_full
+    # reads city / region / lat / lon / accuracy_radius from it locally and only
+    # falls back to ip-api.com when the DB is absent or the IP isn't in it. That
+    # removes ip-api's 45-req/minute ceiling, its plaintext HTTP, and its
+    # non-commercial terms from a now user-facing path (the onboarding location
+    # reveal), and adds a real per-IP accuracy radius that ip-api does not return.
+    #
+    # Empty by default so the feature is fully DORMANT: with no path set, every
+    # lookup short-circuits and geo resolution is byte-identical to today.
+    #
+    # To populate: get a free key at https://www.maxmind.com/en/geolite2/signup,
+    # set MAXMIND_LICENSE_KEY, then run BOTH downloaders and set BOTH paths:
+    #   python -m scripts.download_geolite2_city  -> MAXMIND_CITY_DB_PATH
+    #   python -m scripts.download_geolite2_asn   -> MAXMIND_ASN_DB_PATH
+    #
+    # KNOWN LIMITATIONS:
+    #   - Install City WITHOUT ASN and the network label DEGRADES. The ASN rung is
+    #     dead in every environment today (maxmind_asn_db_path is "" and no .mmdb
+    #     ships), so org/isp come solely from ip-api — and a City hit skips the
+    #     ip-api call entirely. One key fixes both; download both.
+    #   - GeoLite2 is city-level at best and is refreshed weekly; re-run the
+    #     downloaders on deploy or from a weekly cron or the data goes stale.
+    #   - The City DB carries no isp/org/as fields at all — that is the ASN DB's job.
+    maxmind_city_db_path: str = ""
+
     # ─── Waterfall enrichment providers ───
     ipinfo_token: str = ""          # IP → company/geolocation (50K free/month)
     hunter_api_key: str = ""        # Domain → employee emails (25 free/month)
@@ -1207,6 +1233,45 @@ class Settings(BaseSettings):
     # the official X API v2 call errors / returns non-200 / no bearer token.
     # Gated: empty key = fallback disabled. See enricher._enrich_twitter.
     twitterapi_io_api_key: str = ""
+
+    # ─── Onboarding canary / location reveal ───
+    # Beam's OWN marketing site id. The pixel on getbeam.fyi reports under this
+    # id (hardcoded today in 6 static HTML files); the onboarding canary joins a
+    # caller's browser fingerprint to visitor rows SCOPED TO THIS SITE ONLY.
+    # That scoping predicate is the anti-regression for the cross-tenant leak
+    # closed in 7e798ab — /demo/journey still matches fingerprints with no site
+    # scope, so a collision there can surface another tenant's pages.
+    beam_self_site_id: str = "site_90a488f43eac"
+    # Gates POST /api/v1/onboarding/canary and /identity-feedback. When false
+    # BOTH answer 404 — dormant, not revealed (the agent_fetch_beacon_enabled
+    # posture): a 403/501 would confirm the endpoint exists.
+    #
+    # WHY OFF: the reveal shows a user their own city on a map. Geo comes from
+    # the CALLER's IP (never from a matched Visitor row), so a fingerprint
+    # collision cannot disclose someone else's location — but that property is
+    # only as good as `resolve_client_ip` behaving in the deployed topology. A
+    # CF-edge IP would pin every user in a datacenter.
+    #
+    # ROLLOUT ORDER (do not reorder):
+    #   1. Ship the widened ip-api field mask + the new `geoip2:` Redis key with
+    #      this flag OFF. Soak a full 24h cache cycle and confirm /ingest still
+    #      writes identical country_code/region. The mask is deliberately NOT
+    #      flagged — same request, same host, only more of the reply parsed.
+    #   2. Enable in staging. Eyeball the pin on residential, corporate, and
+    #      mobile/CGNAT networks; confirm the returned city matches a known
+    #      network (this is the resolve_client_ip check).
+    #   3. Prod.
+    #
+    # KNOWN LIMITATIONS:
+    #   - IP geo is city-level at best; mobile CGNAT can land a different city.
+    #     The UI must keep the accuracy circle and the honesty caption.
+    #   - `maxmind_asn_db_path` and `ipinfo_token` both default to "". With the
+    #     ASN rung dead the network label falls entirely to ip-api org/isp.
+    #     Verify the deployed env before promising a network line.
+    #   - ip-api's free tier is plaintext HTTP with non-commercial terms. It is
+    #     already in the ingest path; this promotes it to a user-facing moment.
+    #     Migrating to a local GeoLite2-City DB removes both concerns.
+    location_reveal_enabled: bool = False
 
     # ─── Rate limits ───
     default_daily_resolution_budget: int = 50   # Free tier: 50 visitor identifications/day per site (BYOK = unlimited)

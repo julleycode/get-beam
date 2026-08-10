@@ -1,3 +1,4 @@
+import type { CanaryResponse } from "@/lib/canary-format";
 import type {
   KnownUploadResult,
   ImportContactsResult,
@@ -827,6 +828,41 @@ class ApiClient {
     }>("/api/v1/sites/detect-platform", {
       method: "POST",
       body: JSON.stringify({ url }),
+    });
+  }
+
+  // Onboarding canary — the "we caught you" location reveal.
+  //
+  // The response NEVER contains the caller's IP (deliberate divergence from
+  // /demo/identify). Geo comes from the caller's own IP; `pages` comes from a
+  // fingerprint join scoped server-side to Beam's own site, so a fingerprint
+  // collision cannot disclose another tenant's pages.
+  //
+  // 404 when `location_reveal_enabled` is off — the endpoint is dormant, not
+  // merely disabled, so treat a 404 as "no canary" rather than an error.
+  //
+  // `signal` is forwarded to fetch (request() spreads options), which is what
+  // lets TanStack abort an in-flight poll on unmount.
+  async onboardingCanary(fingerprint: string, signal?: AbortSignal) {
+    return this.request<CanaryResponse>("/api/v1/onboarding/canary", {
+      method: "POST",
+      body: JSON.stringify({ fingerprint }),
+      signal,
+    });
+  }
+
+  // "not quite" feedback. 204 — the caller fires this optimistically and
+  // swallows failures; onboarding must never block on a feedback write.
+  async submitIdentityFeedback(body: {
+    reasons: string[];
+    note?: string | null;
+    shown?: Record<string, unknown>;
+    site_id?: string | null;
+    fingerprint?: string | null;
+  }) {
+    return this.request<void>("/api/v1/onboarding/identity-feedback", {
+      method: "POST",
+      body: JSON.stringify(body),
     });
   }
 
