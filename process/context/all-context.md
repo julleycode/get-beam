@@ -167,6 +167,9 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
     (G3's nonexistent `test_ip_org_domain_map.py`; G8/G10 flag-off vacuity precondition).
     Remaining = 3 operator steps (prod ingest `--apply --allow-remote`, flag flips, source-mix
     monitoring): `active/ip-org-database_07-08-26/ip-org-prod-enable_RUNBOOK_07-08-26.md`.
+    **Local dev enable (10-08-26):** 6 flags flipped in `.env`, CAIDA/RIR/RPKI/APNIC ingested on
+    `localhost:5433`, probe PASS — step-by-step in `docs/ip-org-local-enable.md` +
+    `active/ip-org-database_07-08-26/LOCAL_ENABLE_NOTES_vi.md`.
     Known-gaps + follow-ups: `backlog/ip-org-followups_NOTE_07-08-26.md` (extended 07-08-26:
     post-swap ANALYZE, G8 tail margin, eyeball token gaps); new source idea:
     `backlog/rb2b-ip-to-company-eyeball-source_NOTE_07-08-26.md`.
