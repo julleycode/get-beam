@@ -172,13 +172,21 @@ class ApiClient {
       // Don't clear Clerk token — Clerk handles re-auth via middleware
       if (!this.clerkToken) {
         this.clearToken();
-        if (typeof window !== "undefined") {
+        // Wrong email/password on the login/signup forms must surface as an
+        // error on the page — not a hard redirect that clears the message.
+        const isAuthForm =
+          path === "/api/v1/auth/login" || path === "/api/v1/auth/signup";
+        if (typeof window !== "undefined" && !isAuthForm) {
           // No Clerk key → local JWT login at /login; otherwise Clerk /sign-in.
           const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
           window.location.href = hasClerk ? "/sign-in" : "/login";
         }
       }
-      throw new Error("Unauthorized");
+      throw new Error(
+        path === "/api/v1/auth/login" || path === "/api/v1/auth/signup"
+          ? "Invalid email or password"
+          : "Unauthorized",
+      );
     }
 
     if (!res.ok) {
