@@ -1,0 +1,3 @@
+iteration	date	loop	gates_total	gates_failed	gap_count	fix_scope	loop_status
+0	2026-08-10	pvl-baseline	25	-	13	-	BASELINE
+1	2026-08-10	pvl	28	-	14	supplement cycle 1: G1 override_ip param (6 files); G2a defer_count=0 in WHERE + G2b budget/do_not_resolve/suppression pre-checks; G3 real AC-8 tripwire _AC2_FILES; G4 70% per-site budget reserve (placeholder); G5 skip_count<8 + ORDER BY re-keyed; G6 rollback dependency on G1; G7 vpn_filtered manual retry; G8 asn-None short-circuit to unknown; G9 per-site opt-out column; G10-G14; 6 citation fixes	CYCLE_COMPLETE

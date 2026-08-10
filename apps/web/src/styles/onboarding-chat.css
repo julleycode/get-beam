@@ -1,9 +1,32 @@
 /* ════════════════════════════════════════════════════════════════
-   beam — onboarding flow styles
-   Conversational, mascot-driven. Cream + soft pink, matching brand.
+   beam — onboarding chat styles (React / dashboard)
+
+   Copied from public/beam/onboarding.css, with four deliberate changes so
+   this can be a plain CSS import instead of a runtime <link> injection:
+
+   1. The global block (`:root`, `* { box-sizing }`, `html, body`, `body`)
+      is GONE. Those four rules are the entire reason the old
+      onboarding-welcome-chat.tsx injected the stylesheet at runtime and
+      removed it on unmount — importing them would restyle the whole
+      dashboard. Every custom property is now scoped under `.ob-root`.
+   2. Fonts come from the root layout's next/font/google variables
+      (`--font-serif` = Fraunces, `--font-mono` = DM Mono, declared in
+      src/app/layout.tsx) instead of a runtime Google Fonts <link>.
+   3. `.ob-root` no longer claims the viewport. The chat renders inside the
+      dashboard layout's <main>, so the layout's single "Exit to dashboard"
+      control stays visible instead of being covered by a fixed overlay.
+   4. Selectors for the dropped legacy steps are removed: .ob-plan*,
+      .ob-toggle, .ob-auth-*, .ob-draftcard, .ob-dash*, .ob-checklist and
+      their children. .ob-map* is added for the Phase-3 location reveal.
+
+   The static funnel keeps its own copy at public/beam/onboarding.css —
+   these two are intentionally independent. Shared visual language, separate
+   lifecycles.
    ════════════════════════════════════════════════════════════════ */
 
-:root {
+/* ── root + soft backdrop ─────────────────────────────────────── */
+.ob-root {
+  /* Scoped custom properties — NOT :root. */
   --cream:        #FAF6F0;
   --cream-warm:   #F2EBDD;
   --cloud:        #FBF6EE;
@@ -20,37 +43,37 @@
   --card-shadow:  0 1px 0 rgba(43,37,48,0.04),
                   0 2px 6px rgba(43,37,48,0.06),
                   0 24px 60px -24px rgba(43,37,48,0.18);
-}
 
-* { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; height: 100%; }
-body {
-  font-family: 'DM Mono', ui-monospace, monospace;
+  /* Replaces the deleted `body` rule, scoped to the chat only. */
+  font-family: var(--font-mono), 'DM Mono', ui-monospace, monospace;
   color: var(--ink);
-  background: var(--cream);
   line-height: 1.55;
   font-size: 15px;
   -webkit-font-smoothing: antialiased;
+
+  position: relative;
+  border-radius: 18px;
+  overflow: hidden;
+  /* Fills the dashboard <main> without covering its chrome. */
+  min-height: min(760px, calc(100vh - 140px));
+  display: flex;
+  flex-direction: column;
 }
-.h-serif {
-  font-family: 'Fraunces', Georgia, serif;
+.ob-root *,
+.ob-root *::before,
+.ob-root *::after { box-sizing: border-box; }
+
+.ob-root .h-serif {
+  font-family: var(--font-serif), 'Fraunces', Georgia, serif;
   font-weight: 500;
   font-feature-settings: "ss01" 1;
   letter-spacing: -0.022em;
   line-height: 1.04;
 }
 
-/* ── root + soft backdrop ─────────────────────────────────────── */
-.ob-root {
-  position: relative;
-  height: 100vh;
-  height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
+/* absolute, not fixed — the chat is a panel now, not an overlay */
 .ob-bg {
-  position: fixed; inset: 0;
+  position: absolute; inset: 0;
   background:
     radial-gradient(120% 90% at 50% -10%, #FFFFFF 0%, var(--cream) 46%, #F4ECE0 100%);
   z-index: 0;
@@ -74,7 +97,7 @@ body {
 }
 .ob-logo {
   display: inline-flex; align-items: center; gap: 9px;
-  font-family: 'Fraunces', serif;
+  font-family: var(--font-serif), 'Fraunces', serif;
   font-weight: 600; font-size: 21px;
   letter-spacing: -0.02em;
   color: var(--ink); text-decoration: none;
@@ -82,7 +105,7 @@ body {
 .ob-logo svg { height: 16px; width: auto; display: block;
   filter: drop-shadow(0 2px 5px rgba(255,51,102,0.32)); }
 
-/* progress dots */
+/* progress dots — 8 now, not 13 and not 2 */
 .ob-progress { display: flex; align-items: center; gap: 6px; }
 .ob-dot {
   width: 7px; height: 7px; border-radius: 50%;
@@ -377,10 +400,12 @@ body {
   100% { transform: scale(1); opacity: 0; }
 }
 
-/* ── location reveal (canary) ────────────────────────────────── */
-/* Mirrors the same block in src/styles/onboarding-chat.css. Leaflet's own
-   stylesheet is injected at runtime by onboarding-steps.js (no build step
-   here); these rules only cover the container and the pin. */
+/* ── skeleton ────────────────────────────────────────────────── */
+.ob-skel { background: linear-gradient(100deg, #EEE6DA 30%, #F7F1E7 50%, #EEE6DA 70%);
+  background-size: 200% 100%; animation: obShimmer 1.3s linear infinite; border-radius: 7px; }
+@keyframes obShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ── location reveal (Phase 3) ───────────────────────────────── */
 .ob-map {
   height: 220px; width: 100%;
   border-radius: 13px; overflow: hidden;
@@ -401,36 +426,19 @@ body {
 .ob-map-pin::after { animation-delay: 1.1s; }
 .ob-map-note { font-size: 12px; color: var(--ink-3); margin-top: 8px; }
 
-/* ── skeleton ────────────────────────────────────────────────── */
-.ob-skel { background: linear-gradient(100deg, #EEE6DA 30%, #F7F1E7 50%, #EEE6DA 70%);
-  background-size: 200% 100%; animation: obShimmer 1.3s linear infinite; border-radius: 7px; }
-@keyframes obShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
-
-/* ── profile / WOW card ──────────────────────────────────────── */
-.ob-profile {
-  display: flex; gap: 16px; align-items: flex-start;
-}
-.ob-avatar {
-  width: 60px; height: 60px; border-radius: 16px; flex: none;
-  display: grid; place-items: center;
-  font-family: 'Fraunces', serif; font-weight: 600; font-size: 24px;
-  color: #2B2530; background: linear-gradient(150deg, #C7E1F3, #A9C7E8);
-}
-.ob-profile .who { flex: 1; min-width: 0; }
-.ob-profile .name { font-family: 'Fraunces', serif; font-weight: 600; font-size: 21px; letter-spacing: -0.01em; }
-.ob-profile .role { color: var(--ink-2); font-size: 13.5px; margin-top: 1px; }
-.ob-meta { display: flex; flex-direction: column; gap: 7px; margin-top: 14px; }
-.ob-meta .mrow { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink-2); }
-.ob-meta .mrow .ic { width: 15px; text-align: center; color: var(--ink-3); flex: none; }
-.ob-meta .mrow a { color: var(--pink); text-decoration: none; }
-.ob-meta .mrow a:hover { text-decoration: underline; }
+/* ── journey / place rows ────────────────────────────────────── */
 .ob-path { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 .ob-path code {
   background: var(--cloud); border: 1px solid var(--line-2);
   border-radius: 6px; padding: 1px 6px; font-size: 12px; color: var(--ink);
 }
 .ob-path .arr { color: var(--ink-3); }
-.ob-confirm-q { font-family: 'Fraunces', serif; font-style: italic; font-size: 16px; margin: 4px 0 0; }
+.ob-meta { display: flex; flex-direction: column; gap: 7px; margin-top: 14px; }
+.ob-meta .mrow { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink-2); }
+.ob-meta .mrow .ic { width: 15px; text-align: center; color: var(--ink-3); flex: none; }
+.ob-meta .mrow a { color: var(--pink); text-decoration: none; }
+.ob-meta .mrow a:hover { text-decoration: underline; }
+.ob-confirm-q { font-family: var(--font-serif), 'Fraunces', serif; font-style: italic; font-size: 16px; margin: 4px 0 0; }
 
 .ob-checks { display: flex; flex-direction: column; gap: 8px; }
 .ob-check {
@@ -458,125 +466,20 @@ body {
 }
 .ob-speed b { color: var(--pink); font-weight: 500; }
 
-/* ── walkthrough visual mini-cards ───────────────────────────── */
-.ob-mini {
-  background: var(--cloud); border: 1px solid var(--line-2);
-  border-radius: 12px; padding: 12px 14px;
-  display: flex; flex-direction: column; gap: 9px;
-}
-.ob-mini .mini-row { display: flex; align-items: center; gap: 10px; font-size: 13px; }
-.ob-mini .mini-av { width: 30px; height: 30px; border-radius: 9px; flex: none; display: grid; place-items: center; font-size: 12px; font-weight: 600; }
-.ob-mini .mini-tag { font-size: 11px; color: var(--ink-3); }
-.ob-mini .mini-line { font-size: 12.5px; color: var(--ink-2); }
-.ob-draftcard {
-  background: #fff; border: 1px solid var(--line); border-radius: 12px;
-  padding: 13px 15px; font-size: 13.5px; line-height: 1.55; color: var(--ink);
-}
-.ob-draftcard .dmeta { font-size: 11px; color: var(--ink-3); display: flex; gap: 7px; align-items: center; margin-bottom: 9px; }
-.ob-hl { background: var(--pink-wash); padding: 0 4px; border-radius: 4px; }
-
-/* ── paywall ─────────────────────────────────────────────────── */
-.ob-toggle {
-  display: inline-flex; align-self: center; gap: 4px;
-  background: rgba(43,37,48,0.05); border-radius: 999px; padding: 4px;
-  margin: 2px auto 6px;
-}
-.ob-toggle button {
-  font-family: inherit; font-size: 13px; border: none; background: transparent;
-  border-radius: 999px; padding: 8px 16px; cursor: pointer; color: var(--ink-2);
-  transition: background 0.14s ease, color 0.14s ease;
-}
-.ob-toggle button.on { background: #fff; color: var(--ink); font-weight: 500; box-shadow: 0 1px 4px rgba(43,37,48,0.1); }
-.ob-toggle .save { color: var(--pink); font-size: 11px; }
-
-.ob-plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-.ob-plan {
-  background: #fff; border: 1.5px solid var(--line); border-radius: 18px;
-  padding: 22px 20px; display: flex; flex-direction: column; gap: 14px;
-  position: relative; transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
-}
-.ob-plan.feature { border-color: color-mix(in oklab, var(--pink) 55%, var(--line)); box-shadow: 0 20px 44px -22px rgba(255,51,102,0.4); }
-.ob-plan.free { background: var(--cloud); }
-.ob-plan .rec {
-  position: absolute; top: -11px; left: 50%; transform: translateX(-50%);
-  background: var(--pink); color: var(--cream); font-size: 10.5px; font-weight: 500;
-  letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 12px; border-radius: 999px;
-  white-space: nowrap;
-}
-.ob-plan .pname { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-3); }
-.ob-plan .price { font-family: 'Fraunces', serif; font-weight: 600; font-size: 34px; letter-spacing: -0.02em; line-height: 1; }
-.ob-plan .price small { font-size: 13px; font-family: 'DM Mono', monospace; font-weight: 400; color: var(--ink-3); letter-spacing: 0; }
-.ob-plan ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; flex: 1; }
-.ob-plan li { font-size: 13px; color: var(--ink-2); display: flex; gap: 9px; align-items: flex-start; line-height: 1.4; }
-.ob-plan li .ck { color: var(--green); flex: none; }
-.ob-plan .ob-btn { width: 100%; }
-.ob-plan .subnote { font-size: 11.5px; color: var(--ink-3); text-align: center; }
-
-/* ── dashboard ───────────────────────────────────────────────── */
-.ob-dash { display: grid; grid-template-columns: 1.25fr 1fr; gap: 12px; }
-.ob-subcard {
-  background: var(--cloud); border: 1px solid var(--line-2);
-  border-radius: 13px; padding: 14px 15px;
-}
-.ob-dash-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 13.5px; }
-.ob-checklist { display: flex; flex-direction: column; gap: 10px; }
-.ob-cl-item { display: flex; align-items: center; gap: 11px; font-size: 13.5px; }
-.ob-cl-box {
-  width: 20px; height: 20px; border-radius: 6px; flex: none;
-  border: 1.5px solid var(--line); display: grid; place-items: center;
-  font-size: 12px; color: transparent;
-}
-.ob-cl-item.done .ob-cl-box { background: var(--green); border-color: var(--green); color: #06301f; }
-.ob-cl-item.done .lbl { color: var(--ink-3); text-decoration: line-through; }
-.ob-visitor {
-  display: flex; align-items: center; gap: 12px;
-  padding: 11px; background: #fff; border: 1px solid var(--line-2); border-radius: 11px;
-}
-.ob-empty-note { font-size: 12.5px; color: var(--ink-3); margin-top: 12px; text-align: center; }
-
-/* ── modal ───────────────────────────────────────────────────── */
-.ob-modal-back {
-  position: fixed; inset: 0; z-index: 50;
-  background: color-mix(in oklab, var(--ink) 36%, transparent);
-  backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px);
-  display: grid; place-items: center; padding: 24px;
-  animation: obFade 0.2s ease both;
-}
-.ob-modal {
-  background: var(--cloud); border: 1px solid var(--line); border-radius: 20px;
-  padding: 26px; max-width: 420px; width: 100%;
-  box-shadow: var(--card-shadow);
-  animation: obIn 0.3s cubic-bezier(0.22,1,0.36,1) both;
-}
-.ob-modal h3 { font-family: 'Fraunces', serif; font-weight: 600; font-size: 20px; margin: 0 0 6px; }
-.ob-modal p { font-size: 13.5px; color: var(--ink-2); margin: 0 0 16px; }
-
-/* ── confetti / celebrate dot ─────────────────────────────────── */
-.ob-celebrate { position: fixed; inset: 0; pointer-events: none; z-index: 40; overflow: hidden; }
-.ob-confetti { position: absolute; width: 8px; height: 8px; border-radius: 1px; opacity: 0; }
-
 /* ── responsive ──────────────────────────────────────────────── */
-@media (max-width: 760px) {
-  .ob-plans { grid-template-columns: 1fr; }
-  .ob-dash { grid-template-columns: 1fr; }
-  .ob-h1 { font-size: 36px; }
-  .ob-screen.wide { max-width: 600px; }
-}
 @media (max-width: 540px) {
-  .ob-convo { flex-direction: column; }
   .ob-bubble { border-top-left-radius: 16px; max-width: 100%; }
   .ob-top { padding: 16px; }
-  .ob-h1 { font-size: 30px; }
+  .ob-chat { padding: 10px 14px 32px; }
 }
 
-/* typing cursor for AI draft */
-.ob-typing-cursor::after {
-  content: '▊';
-  animation: blink-cursor 0.8s step-end infinite;
-  color: var(--pink, #FF3366);
-  font-weight: 400;
-}
-@keyframes blink-cursor {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+/* ── reduced motion: no typing bounce, no pulses ─────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .ob-root *,
+  .ob-root *::before,
+  .ob-root *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
 }

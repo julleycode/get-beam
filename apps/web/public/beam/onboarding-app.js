@@ -6,12 +6,12 @@
    onboarding-steps.js (window.OB_STEPS) as async sequences.
    ════════════════════════════════════════════════════════════════ */
 (function () {
-  const STEP_ORDER = [
-    'welcome', 'url', 'verify', 'install', 'detect', 'wait',
-    'identify', 'wow', 'walk', 'sample', 'paywall', 'account', 'dash',
-  ];
+  // Five steps, not thirteen. Everything past the canary now lives behind auth
+  // in the React dashboard onboarding, and account creation is Clerk's hosted
+  // /sign-up — see the header comment in onboarding-steps.js.
+  const STEP_ORDER = ['welcome', 'canary_go', 'canary_listen', 'canary_reveal', 'account'];
 
-  const state = { url: '', platform: '', plan: 'max', billing: 'yearly' };
+  const state = { fp: '', canary: null, landed: false };
 
   const spark =
     `<svg viewBox="0 0 100 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -119,7 +119,7 @@
 
   function reset() {
     if (chatEl) chatEl.innerHTML = '';
-    state.url = ''; state.platform = ''; state.plan = 'max'; state.billing = 'yearly';
+    state.fp = ''; state.canary = null; state.landed = false;
     go('welcome');
   }
 
