@@ -133,6 +133,10 @@ _cors_origins = [
     settings.frontend_url,  # e.g. https://getbeam.fyi
     "http://localhost:3000",
     "http://localhost:3001",
+    # Browsers treat 127.0.0.1 as a distinct origin from localhost — allow both
+    # so local JWT login/dashboard work whichever host the user types.
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
     "https://getbeam.fyi",
     "https://www.getbeam.fyi",
     "https://retarget-agent.vercel.app",
