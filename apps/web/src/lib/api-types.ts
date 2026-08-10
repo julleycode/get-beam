@@ -316,6 +316,11 @@ export interface Visitor {
   is_internal_suspect?: boolean;
   // The human's manual call, which always wins over the automatic scorer.
   internal_override?: "internal" | "not_internal" | null;
+  // Sticky privacy hold: the visitor sent a privacy signal (GPC/DNT) or was
+  // cascaded from a suppression opt-out. When true, the row renders a "Privacy
+  // hold" state + owner "Clear privacy hold" control instead of Identify.
+  // Never auto-clears; a later opt-out event may legitimately re-set it.
+  do_not_resolve?: boolean;
 }
 
 export interface VisitorDetail extends Visitor {

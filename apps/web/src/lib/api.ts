@@ -395,6 +395,20 @@ class ApiClient {
     });
   }
 
+  // Lift ONE visitor's sticky privacy hold for ONE site — a deliberate,
+  // confirmed owner action. Writes ONLY do_not_resolve=false; never bypasses
+  // Identify (still gated by /resolve) and never un-suppresses. cleared=false
+  // means the row was already not held (idempotent no-op).
+  async clearPrivacyHold(siteId: string, visitorId: string) {
+    return this.request<{
+      visitor_id: string;
+      do_not_resolve: false;
+      cleared: boolean;
+    }>(`/api/v1/visitors/${siteId}/${visitorId}/clear-privacy-hold`, {
+      method: "POST",
+    });
+  }
+
   // Identity-honesty Phase 1: the human's verdict on an unconfirmed
   // identity-graph match. Confirm promotes candidate → identified (and stamps
   // confirmed_at); reject returns them to anonymous and marks the stale

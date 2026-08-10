@@ -70,6 +70,12 @@ class VisitorOut(BaseModel):
     # The human's manual call: None / "internal" / "not_internal". Always wins
     # over the automatic scorer, in both directions.
     internal_override: str | None = None
+    # Sticky privacy hold: the visitor sent a privacy signal (GPC/DNT) or was
+    # cascaded from a suppression opt-out, so the aggregator set do_not_resolve
+    # via BOOL_OR + sticky OR. Read-only projection of the ORM column (additive,
+    # no migration). Lets the list render the "Privacy hold" state and gate the
+    # site-owner Clear control. Never auto-clears — a human must act.
+    do_not_resolve: bool = False
 
     model_config = {"from_attributes": True}
 
