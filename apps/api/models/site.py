@@ -60,6 +60,12 @@ class Site(Base):
     tracking_enabled: Mapped[bool] = mapped_column(
         default=True, nullable=False, server_default="true"
     )
+    # Set (naive UTC) when the inactivity sweep paused this site; cleared on any
+    # authed request by the owner (silent auto-resume) and on any explicit
+    # owner write to `tracking_enabled`. This column is the ONLY thing that
+    # distinguishes an auto-pause from a MANUAL pause: tracking_enabled=False
+    # with auto_paused_at NULL is deliberate and is never auto-resumed.
+    auto_paused_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # Cookie-consent mode emitted into the pixel snippet as data-consent.
     #   "off" (default) — no banner; today's behavior (GPC/DNT opt-out still honored).
     #   "eu"  — Beam shows an opt-in banner + holds events for EU/EEA visitors only.

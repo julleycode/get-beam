@@ -194,6 +194,23 @@ class Settings(BaseSettings):
     # ─── Referral program ("give quota, get quota") ───
     referrals_enabled: bool = False  # master switch for the hourly activation-reward job
 
+    # ─── Inactivity lifecycle (re-engagement reminder + auto-pause) ───
+    # An owner who installs the pixel and never logs back in still costs money:
+    # the 30-min resolution sweep, the enrichment waterfall, geoip and Gemini
+    # segmentation all keep running for nobody. This remind-then-pause ladder
+    # stops that spend without deleting anything — resuming is just logging in.
+    # NOTE: the activity touch itself (users.last_active_at) is deliberately NOT
+    # gated on this flag, so baseline data accrues before the operator flips it.
+    reengagement_enabled: bool = False  # master switch for the daily sweep job
+    reengagement_sweep_hour_utc: int = 14  # 1h after the daily digest
+    reengagement_remind_after_days: int = 7
+    reengagement_pause_after_days: int = 14
+    # Minimum gap between the reminder and the pause. Guards against pausing on
+    # the back of an email that never actually landed.
+    reengagement_pause_warning_min_days: int = 3
+    reengagement_install_nudge_enabled: bool = False
+    reengagement_install_nudge_after_days: int = 3
+
     # ─── Identity Graph (person-level from IP) ───
     rb2b_api_key: str = ""          # RB2B API Suite — IP → hashed email → person (US traffic)
     leadpipe_api_key: str = ""      # Leadpipe — pixel-based identity graph (500 free IDs)

@@ -165,6 +165,20 @@ async def _daily_digest_job() -> None:
         logger.exception("daily_digest_crashed")
 
 
+async def _reengagement_sweep_job() -> None:
+    """Daily inactivity sweep: remind idle owners, then auto-pause them.
+
+    run_reengagement_sweep manages its own session, holds an advisory lock so
+    replicas can't double-send, and isolates per-user failures.
+    """
+    try:
+        from apps.api.services.reengagement import run_reengagement_sweep
+
+        await run_reengagement_sweep()
+    except Exception:
+        logger.exception("reengagement_sweep_crashed")
+
+
 async def _agent_ip_range_refresh_job() -> None:
     """Periodic job: re-fetch the published per-agent IP-range datasets.
 
@@ -846,6 +860,19 @@ def start_scheduler() -> None:
             # the per-site advisory lock already prevents replica double-sends).
             # A generous grace window so a deploy at the top of the hour doesn't
             # silently skip the whole day's digest.
+            misfire_grace_time=3600,
+        )
+    if settings.reengagement_enabled:
+        from apscheduler.triggers.cron import CronTrigger
+
+        scheduler.add_job(
+            _reengagement_sweep_job,
+            CronTrigger(hour=settings.reengagement_sweep_hour_utc, timezone="UTC"),
+            id="reengagement_sweep",
+            replace_existing=True,
+            # Cron, so no jitter (E20 excludes cron jobs); the advisory lock in
+            # run_reengagement_sweep is what keeps replicas from double-sending.
+            # Thresholds are day-granular, so a generous grace window is safe.
             misfire_grace_time=3600,
         )
     scheduler.start()
