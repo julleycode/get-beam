@@ -1,0 +1,30 @@
+wmn-data.json — WhatsMyName
+===========================
+
+Copyright (C) Micah Hoffman (@WebBreacher)
+Source:  https://github.com/WebBreacher/WhatsMyName
+License: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+         https://creativecommons.org/licenses/by-sa/4.0/
+
+Vendored copy
+-------------
+Downloaded : 2026-08-11
+From       : https://raw.githubusercontent.com/WebBreacher/WhatsMyName/main/wmn-data.json
+Upstream   : commit c03273c8de6703be2890dc5eb17f9a5569ecc919 (2026-08-10)
+Contents   : 708 sites; 706 carry e_string; 673 carry both e_string and m_string.
+
+ShareAlike obligation
+---------------------
+This file is vendored VERBATIM and must stay that way. Category and site-count
+filtering happens at RUNTIME in apps/api/services/social_rules.py — never by
+editing this file. Modifying it would make the modified version a derivative
+work that must itself be released under CC BY-SA 4.0.
+
+If a future change genuinely requires editing the data, that edited file must be
+published under CC BY-SA 4.0 with attribution retained.
+
+Refresh
+-------
+e_string / m_string markers rot as sites redesign. Re-download from upstream and
+update the date and commit hash above; re-run the site survey that picked the
+broad-tier list before trusting the new copy.

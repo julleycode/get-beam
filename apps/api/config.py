@@ -1267,6 +1267,18 @@ class Settings(BaseSettings):
     osint_scan_wall_clock_cap: float = 45.0     # overall scan budget; partial results returned past this
     osint_scan_skip_categories: str = "adult,nsfw,porn"  # category names to skip (NSFW)
     osint_scan_daily_budget: int = 5            # free scans/day/site (BYOK = unlimited)
+    # Rule-base (username→profile, stage C) — WhatsMyName-backed content check.
+    # Stage C shares the 45s wall-clock cap with Maigret. Measured 11-08-26:
+    # median 0.7s/check at concurrency 10; a HUNG check costs the full 8s timeout
+    # and holds 1/10 of capacity, so the budget is sized off the hang rate, not
+    # the median. At an assumed 5% hang rate ~420 checks fit in 45s; 300 leaves
+    # headroom for Railway's datacenter IP being blocked more often. Phase 4 of
+    # plans/260811-1611-social-resolution-accuracy re-measures and retunes these.
+    osint_rules_broad_sites: int = 150          # broad tier: site count (survey-picked list, not file order)
+    osint_rules_broad_candidates: int = 1       # broad tier: only the single best candidate
+    osint_rules_deep_sites: int = 16            # deep tier: high-value sites, all candidates
+    osint_rules_categories: str = "social,coding,tech,business,finance"  # WhatsMyName cats eligible for the broad tier
+    osint_rules_max_requests: int = 300         # HARD ceiling on stage-C outbound checks per run
     # Maigret (username→profile, stage B)
     osint_maigret_top_sites: int = 500          # check top-N ranked sites (3000 total)
     osint_maigret_parse: bool = True            # fetch+parse hit pages (real name/bio, fewer soft-404s; slower)

@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections import Counter
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import structlog
 
@@ -88,24 +90,61 @@ def _registered_sites(osint_blob: dict) -> set[str]:
     return sites
 
 
-def _classify(acc: OsintAccount, full_name: str | None, registered_sites: set[str]) -> str:
+def _url_handle_matches(acc: OsintAccount) -> bool:
+    """False when a row claims a handle that its own url does not point at.
+
+    Compares the url's handle POSITION — last path segment, or the leading
+    subdomain label for ``https://<handle>.substack.com`` — never a substring:
+    "nhanto" is a substring of ".../nhantochi95", which is the exact
+    two-different-people pair this whole change exists to separate. Substring
+    matching also lets a handle equal to the site's own domain match any url.
+    """
+    username = ((acc.extra or {}).get("username") or "").strip().lower()
+    if not username:
+        return True  # no handle claimed → nothing for the url to contradict
+    parsed = urlparse(acc.url or "")
+    if parsed.path.rstrip("/").rsplit("/", 1)[-1].lstrip("@").lower() == username:
+        return True
+    return parsed.netloc.split(":")[0].lower().split(".")[0] == username
+
+
+def _classify(
+    acc: OsintAccount,
+    full_name: str | None,
+    registered_sites: set[str],
+    per_site: Counter[str],
+) -> str:
     """Identity-based confidence — does this profile belong to the TARGET person?
 
     confirmed = email-keyed source OR the profile's real name matches full_name.
-    likely    = username from a known handle, OR the site is one the email is
-                registered on (they use it) — but the handle isn't identity-verified.
+    likely    = username from a known handle, OR the email is registered on the
+                site AND that site narrows to a single candidate.
     guess     = a guessed username, unverified, on a site we can't tie to them.
     """
+    extra = acc.extra or {}
     engines = {e.strip() for e in (acc.source_engine or "").split(",") if e.strip()}
+    # Email-keyed engines looked the handle up BY the email, so it provably
+    # belongs to this person. Most of them return the site homepage as the url
+    # (user-scanner does for 102 of its modules), so a url that does not carry
+    # the handle means "no profile url available", not "wrong person".
     if engines & _EMAIL_KEYED:
         return "confirmed"
-    extra = acc.extra or {}
     pname = extra.get("name") or extra.get("fullname") or extra.get("full_name")
     if pname and name_matches(pname, full_name):
         return "confirmed"
+    # Below the identity-proven tiers, a handle that its own url does not point
+    # at is evidence about nobody: a homepage, a search page, or another site.
+    # Demote rather than drop, so numeric-id urls fall to guesses (hidden)
+    # instead of vanishing.
+    if not _url_handle_matches(acc):
+        return "guess"
     if extra.get("cand_source") == "known":
         return "likely"
-    if _canon_site(acc.site_name).lower() in registered_sites:
+    # Site-overlap ("the email is registered here") only narrows to a person
+    # when the site has exactly ONE candidate. With several candidates it says
+    # they use the site but not which of the handles is theirs.
+    site = _canon_site(acc.site_name).lower()
+    if site in registered_sites and per_site.get(site, 0) == 1:
         return "likely"
     return "guess"
 
@@ -113,8 +152,20 @@ def _classify(acc: OsintAccount, full_name: str | None, registered_sites: set[st
 def _verify_identity(
     accounts: list[OsintAccount], full_name: str | None, registered_sites: set[str]
 ) -> None:
+    # A row whose url does not point at its own handle is already ruled out, so
+    # it is not a rival candidate — counting it would block the single-candidate
+    # rule from ever promoting the one genuine handle on that site.
+    eligible = [a for a in accounts if _url_handle_matches(a)]
+    per_site: Counter[str] = Counter(
+        _canon_site(a.site_name).lower() for a in eligible
+    )
     for a in accounts:
-        a.confidence = _classify(a, full_name, registered_sites)
+        a.confidence = _classify(a, full_name, registered_sites, per_site)
+    if len(eligible) != len(accounts):  # counts only — a handle is PII
+        logger.info(
+            "social_url_handle_mismatch",
+            mismatched=len(accounts) - len(eligible), total=len(accounts),
+        )
 
 
 def _slug(url: str | None) -> str | None:
@@ -221,7 +272,10 @@ async def resolve_social(db, *, visitor, identified, profile, run_gemini: bool =
     )
     for a in profile_accounts:  # canonicalize so cross-engine hits merge/cross-confirm
         a.site_name = _canon_site(a.site_name)
-    unified = _dedupe(profile_accounts)
+    # by_username: these rows came from looking up SEVERAL usernames, so two
+    # rows on one site can be two different people. Collapsing by site alone
+    # would keep one person's URL beside another person's username.
+    unified = _dedupe(profile_accounts, by_username=True)
     _verify_identity(unified, full_name, registered_sites)
     confirmed_count = sum(1 for a in unified if a.confidence == "confirmed")
 
@@ -250,7 +304,7 @@ async def resolve_social(db, *, visitor, identified, profile, run_gemini: bool =
             paid_accounts = [a for a in (_acc(d) for d in pr.get("accounts", [])) if a]
             for a in paid_accounts:
                 a.site_name = _canon_site(a.site_name)
-            unified = _dedupe(unified + paid_accounts)
+            unified = _dedupe(unified + paid_accounts, by_username=True)
             _verify_identity(unified, full_name, registered_sites)
             confirmed_count = sum(1 for a in unified if a.confidence == "confirmed")
             paid_info = {
