@@ -217,6 +217,76 @@ class TestFingerprintV3:
         )
 
 
+class TestAudioTimeoutDeterminism:
+    """The 1s audio watchdog is the ONLY nondeterministic fp3 input.
+
+    Every other "" the probe can yield (no OfflineAudioContext, a throw) is a
+    stable per-browser constant and is safe to hash — dropping fp3 for those
+    would needlessly cost coverage on a signal that already lands on only ~34%
+    of visitors. The watchdog is different: it is a race against machine load,
+    so the SAME browser can produce two different fp3 values across sessions
+    with no farbling involved. Since the server reads an fp3 change as evidence
+    of farbling, hashing that value would flag ordinary visitors and — once
+    farbled_fingerprint_gate_enabled is on — cost them Check 2 and Check 3.
+    """
+
+    def test_timeout_path_is_distinguishable_from_unsupported_path(
+        self, pixel_code: str
+    ):
+        assert 'finish("", false)' in pixel_code, (
+            "the audio watchdog must mark its value unreliable — otherwise it "
+            "is indistinguishable from the deterministic empty paths"
+        )
+        assert 'if (!C) return cb("")' in pixel_code, (
+            "the unsupported-browser path must stay a plain deterministic "
+            '"" — it is a stable per-browser constant'
+        )
+
+    def test_fp3_not_assigned_on_the_timeout_path(self, pixel_code: str):
+        body = pixel_code.split("whenBody(function() {")[1].split("\n  });")[0]
+        assert "if (ok === false) return;" in body, (
+            "an unreliable audio value must suppress fp3 for the session "
+            "instead of being hashed into it"
+        )
+        assert body.index("if (ok === false) return;") < body.index(
+            'fingerprint3 = "fp3_"'
+        ), "the suppression must guard the assignment, not follow it"
+
+    def test_fp3_still_assigned_on_the_deterministic_empty_path(
+        self, pixel_code: str
+    ):
+        """Only `false` suppresses — the unsupported path passes undefined."""
+        body = pixel_code.split("whenBody(function() {")[1].split("\n  });")[0]
+        assert "ok === false" in body, (
+            "the guard must be strict-equality on false; a truthiness check "
+            "would also drop fp3 for the deterministic unsupported path"
+        )
+
+    def test_timeout_suppression_present_in_minified(self, min_pixel_code: str):
+        assert "!1" in min_pixel_code or "false" in min_pixel_code, (
+            "the reliability flag is missing from tracker.min.js "
+            "— re-run `npm run build` in apps/pixel"
+        )
+
+    def test_fp_parts_still_unchanged(self, pixel_code: str):
+        """Re-assertion: the audio fix must not reach fpBase.
+
+        Any edit to fpParts() rotates every fp2 stored on disk, for every
+        tenant, globally.
+        """
+        body = pixel_code.split("function fpParts(")[1].split("\n  }")[0]
+        for banned in ("audioFp", "fontFp", "OfflineAudioContext", "navigator.brave"):
+            assert banned not in body, (
+                f"{banned!r} leaked into fpParts() — this rotates every stored "
+                "fp2 for every tenant"
+            )
+
+    def test_brave_probe_still_after_consent_gate(self, pixel_code: str):
+        """Re-assertion of Hard Guardrail G7 — unchanged by this work."""
+        gate_idx = pixel_code.index("var consentDecision = GATED")
+        assert pixel_code.index("navigator.brave") > gate_idx
+
+
 class TestIdentityGraphStacking:
     """Identity-vendor stacking is STRICTLY OPT-IN (default OFF).
 
@@ -281,6 +351,13 @@ class TestPixelSizeLimit:
     Raised from 5KB when the font-probe and audio-render signals landed
     (fp3): those two cost ~850B gzipped and the old ceiling left only 157B.
 
+    Raised again 5859 -> 6144 when the WS2 farbled-browser probe
+    (navigator.brave) landed: it cost 45B gzipped and the old 6000 ceiling left
+    only 41B. 6144 is not a NEW allowance — it is the value
+    tests/unit/test_pixel.py::test_minified_gzip_size_within_budget has always
+    asserted, so this reconciles two budgets that silently disagreed rather than
+    relaxing one.
+
     The unminified source is allowed to grow past the budget; serve_pixel()
     serves the minified build. A red here almost always means someone edited
     tracker.js without re-running `npm run build` in apps/pixel.
@@ -288,7 +365,7 @@ class TestPixelSizeLimit:
 
     def test_under_6kb_gzipped(self, min_pixel_code: str):
         compressed = gzip.compress(min_pixel_code.encode())
-        assert len(compressed) < 6000, (
+        assert len(compressed) < 6144, (
             f"Minified pixel is {len(compressed)} bytes gzipped, must be under 6KB "
             "— re-run `npm run build` in apps/pixel"
         )
@@ -309,3 +386,53 @@ class TestPixelSizeLimit:
                     f"{marker!r} is in tracker.js but missing from tracker.min.js "
                     "— re-run `npm run build` in apps/pixel"
                 )
+
+
+class TestFarbledBrowserProbe:
+    """WS2 Detector B — the navigator.brave probe (secondary detector).
+
+    String/regex assertions against raw source. They prove the probe is PRESENT
+    and POSITIONED correctly; that it actually EXECUTES is proven only by
+    apps/pixel/e2e/farbled-browser.spec.ts.
+    """
+
+    def test_probe_present_in_source(self, pixel_code: str):
+        assert "navigator.brave" in pixel_code
+        assert "isBrave" in pixel_code
+
+    def test_probe_present_in_minified(self, min_pixel_code: str):
+        assert "navigator.brave" in min_pixel_code, (
+            "the farbled probe is in tracker.js but missing from tracker.min.js "
+            "— re-run `npm run build` in apps/pixel"
+        )
+        assert "isBrave" in min_pixel_code
+
+    def test_marker_attached_in_push_event(self, pixel_code: str):
+        """_fb rides along on the outgoing event, next to _fp3/_asig."""
+        body = pixel_code.split("function pushEvent(")[1].split("\n  }")[0]
+        assert "evt._fb" in body, "_fb is not attached inside pushEvent"
+
+    def test_probe_is_after_consent_gate(self, pixel_code: str):
+        """Hard Guardrail G7: no signal is read before GATED resolves.
+
+        Same string-index technique as
+        test_pixel.py::test_agent_sig_collection_is_after_consent_gate.
+        """
+        gate_idx = pixel_code.index("var consentDecision = GATED")
+        assert pixel_code.index("navigator.brave") > gate_idx, (
+            "the navigator.brave probe is read before the consent gate — "
+            "bypasses the EU consent-hold (G7)"
+        )
+
+    def test_fp_parts_body_unchanged(self, pixel_code: str):
+        """The probe is a SIBLING signal, never a fingerprint component.
+
+        Folding it into fpParts()/fpBase would rotate every fp2 stored on disk,
+        globally, for every tenant — every already-known visitor would look new.
+        """
+        body = pixel_code.split("function fpParts(")[1].split("\n  }")[0]
+        for banned in ("navigator.brave", "isBrave", "FBL"):
+            assert banned not in body, (
+                f"{banned!r} leaked into fpParts() — this rotates every stored "
+                "fp2 for every tenant"
+            )

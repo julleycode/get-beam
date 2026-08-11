@@ -41,6 +41,13 @@ class Event(Base):
     # Privacy opt-out signal from the browser (GPC or DNT) on this event.
     # Aggregated per visitor (BOOL_OR) into visitors.do_not_resolve.
     optout: bool = Column(Boolean, default=False, server_default="false", nullable=False)
+    # Farbled-browser marker (WS2 Detector B): the pixel's navigator.brave probe
+    # resolved true. Aggregated per visitor (BOOL_OR) into
+    # visitors.has_unstable_fingerprint, exactly like optout -> do_not_resolve.
+    # Not indexed: it is never a query predicate, only a rollup input.
+    farbled: bool = Column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     # Ingest abuse marker (P3 site-ceiling trip OR P4 velocity flag), written at
     # insert time. Flag-but-store: the row is kept for forensics but is excluded
     # from the visitor rollup (aggregate_visitors_for_site) and, transitively,

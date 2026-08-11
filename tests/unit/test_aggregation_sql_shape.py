@@ -31,6 +31,7 @@ EXPECTED_FULL_RECOMPUTE_SQL = """
                 visitor_id, created_at, event_type, url, referrer,
                 utm_source, utm_medium, country_code, device_type,
                 scroll_depth, time_on_page, ip_address, optout, is_flagged_abuse,
+                farbled,
                 CASE
                     WHEN created_at - LAG(created_at) OVER (
                         PARTITION BY visitor_id ORDER BY created_at
@@ -64,7 +65,8 @@ EXPECTED_FULL_RECOMPUTE_SQL = """
             MAX(device_type) FILTER (WHERE device_type != '' AND NOT is_flagged_abuse) AS device_type,
             (ARRAY_AGG(ip_address ORDER BY created_at DESC) FILTER (WHERE ip_address != '' AND NOT is_flagged_abuse))[1] AS latest_ip,
             BOOL_OR(optout) AS do_not_resolve,
-            BOOL_OR(is_flagged_abuse) AS abuse_flagged
+            BOOL_OR(is_flagged_abuse) AS abuse_flagged,
+            BOOL_OR(farbled) AS has_unstable_fingerprint
         FROM session_numbered
         GROUP BY visitor_id
     """
@@ -146,7 +148,10 @@ class TestMergeSemantics:
         assert "jsonb_agg(DISTINCT p)" in expr
         assert "visitors.pages_visited" in expr and "EXCLUDED.pages_visited" in expr
 
-    @pytest.mark.parametrize("column", ["do_not_resolve", "is_abuse_flagged"])
+    @pytest.mark.parametrize(
+        "column",
+        ["do_not_resolve", "is_abuse_flagged", "has_unstable_fingerprint"],
+    )
     def test_sticky_flags_stay_sticky(self, column):
         assert _expr(column) == f"visitors.{column} OR EXCLUDED.{column}"
 
@@ -179,3 +184,48 @@ class TestSignatureCompatibility:
         sig = inspect.signature(va.aggregate_visitors_for_site)
         assert list(sig.parameters) == ["db", "site_id", "since"]
         assert sig.parameters["since"].default is None
+
+
+class TestFarbledRollup:
+    """WS2: events.farbled -> visitors.has_unstable_fingerprint.
+
+    The pixel probe is async, so only SOME events in a session carry the marker.
+    BOOL_OR is what makes one marked event enough, and the sticky-OR merge (also
+    asserted in TestIncrementalMergeSet above) is what stops a later all-clean
+    window from un-flagging a browser that still rotates its fingerprint.
+
+    Semantics against a live Postgres are Docker-gated by construction — this
+    module's docstring explains why no unit-tier parity file may exist.
+    """
+
+    def test_one_marked_event_flags_the_visitor(self):
+        """BOOL_OR, not BOOL_AND / MAX / EVERY."""
+        sql = va.build_aggregate_sql(None)
+        assert "BOOL_OR(farbled) AS has_unstable_fingerprint" in sql
+
+    def test_marker_is_carried_through_the_session_cte(self):
+        """Missing it from the CTE select list would make the outer query fail."""
+        import datetime
+
+        for sql in (
+            va.build_aggregate_sql(None),
+            va.build_aggregate_sql(datetime.datetime(2026, 1, 1)),
+        ):
+            head = sql.split("session_boundaries AS (")[1].split("FROM events")[0]
+            assert "farbled" in head
+
+    def test_marker_is_not_a_drop_or_block_signal(self):
+        """farbled is visibility + resolution-gating only; it filters nothing.
+
+        is_flagged_abuse appears in FILTER clauses because abusive rows are
+        excluded from every metric. farbled rows are ORDINARY traffic and must
+        keep counting.
+        """
+        sql = va.build_aggregate_sql(None)
+        assert "FILTER (WHERE NOT farbled)" not in sql
+        assert "NOT farbled" not in sql
+
+    def test_marker_never_touches_do_not_resolve(self):
+        """The GPC privacy flag stays sourced from optout alone."""
+        sql = va.build_aggregate_sql(None)
+        assert "BOOL_OR(optout) AS do_not_resolve" in sql

@@ -168,6 +168,7 @@ async def _upsert_visitor(
     first_touch_referrer: str | None = None,
     do_not_resolve: bool = False,
     is_abuse_flagged: bool = False,
+    has_unstable_fingerprint: bool = False,
 ) -> None:
     """Upsert a single visitor row into the visitors table."""
     if avg_time_on_page is None or (isinstance(avg_time_on_page, float) and math.isnan(avg_time_on_page)):
@@ -214,6 +215,7 @@ async def _upsert_visitor(
         intent_score=intent,
         do_not_resolve=do_not_resolve,
         is_abuse_flagged=is_abuse_flagged,
+        has_unstable_fingerprint=has_unstable_fingerprint,
     ).on_conflict_do_update(
         index_elements=["site_id", "visitor_id"],
         set_={
@@ -242,6 +244,12 @@ async def _upsert_visitor(
             # not launder it back into outreach eligibility.
             "is_abuse_flagged": text(
                 "visitors.is_abuse_flagged OR EXCLUDED.is_abuse_flagged"
+            ),
+            # Sticky farbled marker (WS2), same semantics as the two above: a
+            # browser that rotates its fingerprint does not stop doing so
+            # because one later window happened to carry no farbled event.
+            "has_unstable_fingerprint": text(
+                "visitors.has_unstable_fingerprint OR EXCLUDED.has_unstable_fingerprint"
             ),
             "updated_at": datetime.utcnow(),
         },
@@ -281,6 +289,7 @@ _AGGREGATE_SQL_TEMPLATE = """
                 visitor_id, created_at, event_type, url, referrer,
                 utm_source, utm_medium, country_code, device_type,
                 scroll_depth, time_on_page, ip_address, optout, is_flagged_abuse,
+                farbled,
                 CASE
                     WHEN created_at - LAG(created_at) OVER (
                         PARTITION BY visitor_id ORDER BY created_at
@@ -314,7 +323,8 @@ _AGGREGATE_SQL_TEMPLATE = """
             MAX(device_type) FILTER (WHERE device_type != '' AND NOT is_flagged_abuse) AS device_type,
             (ARRAY_AGG(ip_address ORDER BY created_at DESC) FILTER (WHERE ip_address != '' AND NOT is_flagged_abuse))[1] AS latest_ip,
             BOOL_OR(optout) AS do_not_resolve,
-            BOOL_OR(is_flagged_abuse) AS abuse_flagged
+            BOOL_OR(is_flagged_abuse) AS abuse_flagged,
+            BOOL_OR(farbled) AS has_unstable_fingerprint
         FROM session_numbered{window_clause}
         GROUP BY visitor_id
     """
@@ -493,6 +503,7 @@ async def aggregate_visitors_for_site(
                 total_sessions, max_scroll_depth, avg_time_on_page, pages_visited,
                 top_referrer, first_touch_referrer, utm_source, utm_medium,
                 country_code, device_type, latest_ip, do_not_resolve, abuse_flagged,
+                unstable_fp,
             ) = row
 
             await _upsert_visitor(
@@ -509,6 +520,7 @@ async def aggregate_visitors_for_site(
                 first_touch_referrer=first_touch_referrer,
                 do_not_resolve=bool(do_not_resolve),
                 is_abuse_flagged=bool(abuse_flagged),
+                has_unstable_fingerprint=bool(unstable_fp),
             )
             count += 1
     else:
@@ -620,6 +632,9 @@ _INCREMENTAL_SET = {
     # Sticky flags — unchanged from the full-recompute path.
     "do_not_resolve": text("visitors.do_not_resolve OR EXCLUDED.do_not_resolve"),
     "is_abuse_flagged": text("visitors.is_abuse_flagged OR EXCLUDED.is_abuse_flagged"),
+    "has_unstable_fingerprint": text(
+        "visitors.has_unstable_fingerprint OR EXCLUDED.has_unstable_fingerprint"
+    ),
 }
 
 
@@ -646,6 +661,7 @@ async def _bulk_upsert_visitors_incremental(
             total_sessions, max_scroll_depth, avg_time_on_page, pages_visited,
             top_referrer, first_touch_referrer, utm_source, utm_medium,
             country_code, device_type, latest_ip, do_not_resolve, abuse_flagged,
+            unstable_fp,
         ) = row
 
         first_seen = _strip_tz(first_seen or datetime.utcnow())
@@ -678,6 +694,7 @@ async def _bulk_upsert_visitors_incremental(
             "intent_score": 0.0,
             "do_not_resolve": bool(do_not_resolve),
             "is_abuse_flagged": bool(abuse_flagged),
+            "has_unstable_fingerprint": bool(unstable_fp),
         })
 
     chunk_size = max(settings.aggregation_upsert_chunk_size, 1)
