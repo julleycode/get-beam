@@ -15,7 +15,7 @@ Docker gate run: `tests/integration/test_usage_limits.py` 3/3 passed against rea
 proving both recorded residuals (NULL-exclusion 3VL; naive `_today_start()` vs `timestamptz`).
 Was CODE-DONE-pending-AC-7 since EXECUTE. See
 `process/features/visitors-identity/backlog/social-context-ac7-deferred_NOTE_07-08-26.md`
-(RESOLVED). Archival deferred — no archival moves in this session per orchestrator directive.
+(RESOLVED). Archived 11-08-26 → `completed/social-context-merge_07-08-26/`.
 **Complexity**: SIMPLE
 **Feature**: visitors-identity
 

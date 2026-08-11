@@ -3,7 +3,7 @@ title: Identity P1/P2 status honesty and observability
 description: >-
   Split identity_status into provider_candidate vs verified; fix resolution
   log-after-save; defer Fingerprint Pro / Luật 91 to backlog.
-status: completed
+status: completed # archived 11-08-26 → completed/identity-p1p2-status-observability_02-08-26/
 priority: P1
 effort: medium
 branch: main
