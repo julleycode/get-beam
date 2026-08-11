@@ -1,0 +1,485 @@
+/* ════════════════════════════════════════════════════════════════
+   beam — onboarding chat styles (React / dashboard)
+
+   Copied from public/beam/onboarding.css, with four deliberate changes so
+   this can be a plain CSS import instead of a runtime <link> injection:
+
+   1. The global block (`:root`, `* { box-sizing }`, `html, body`, `body`)
+      is GONE. Those four rules are the entire reason the old
+      onboarding-welcome-chat.tsx injected the stylesheet at runtime and
+      removed it on unmount — importing them would restyle the whole
+      dashboard. Every custom property is now scoped under `.ob-root`.
+   2. Fonts come from the root layout's next/font/google variables
+      (`--font-serif` = Fraunces, `--font-mono` = DM Mono, declared in
+      src/app/layout.tsx) instead of a runtime Google Fonts <link>.
+   3. `.ob-root` no longer claims the viewport. The chat renders inside the
+      dashboard layout's <main>, so the layout's single "Exit to dashboard"
+      control stays visible instead of being covered by a fixed overlay.
+   4. Selectors for the dropped legacy steps are removed: .ob-plan*,
+      .ob-toggle, .ob-auth-*, .ob-draftcard, .ob-dash*, .ob-checklist and
+      their children. .ob-map* is added for the Phase-3 location reveal.
+
+   The static funnel keeps its own copy at public/beam/onboarding.css —
+   these two are intentionally independent. Shared visual language, separate
+   lifecycles.
+   ════════════════════════════════════════════════════════════════ */
+
+/* ── root + soft backdrop ─────────────────────────────────────── */
+.ob-root {
+  /* Scoped custom properties — NOT :root. */
+  --cream:        #FAF6F0;
+  --cream-warm:   #F2EBDD;
+  --cloud:        #FBF6EE;
+  --cloud-shade:  #E9DFCD;
+  --ink:          #2B2530;
+  --ink-2:        #5A4F66;
+  --ink-3:        #8C8295;
+  --pink:         #FF3366;
+  --pink-soft:    #FF6B9D;
+  --pink-wash:    #FFE8EE;
+  --green:        #3ECF8E;
+  --line:         rgba(43,37,48,0.10);
+  --line-2:       rgba(43,37,48,0.06);
+  --card-shadow:  0 1px 0 rgba(43,37,48,0.04),
+                  0 2px 6px rgba(43,37,48,0.06),
+                  0 24px 60px -24px rgba(43,37,48,0.18);
+
+  /* Replaces the deleted `body` rule, scoped to the chat only. */
+  font-family: var(--font-mono), 'DM Mono', ui-monospace, monospace;
+  color: var(--ink);
+  line-height: 1.55;
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+
+  position: relative;
+  border-radius: 18px;
+  overflow: hidden;
+  /* Fills the dashboard <main> without covering its chrome. */
+  min-height: min(760px, calc(100vh - 140px));
+  display: flex;
+  flex-direction: column;
+}
+.ob-root *,
+.ob-root *::before,
+.ob-root *::after { box-sizing: border-box; }
+
+.ob-root .h-serif {
+  font-family: var(--font-serif), 'Fraunces', Georgia, serif;
+  font-weight: 500;
+  font-feature-settings: "ss01" 1;
+  letter-spacing: -0.022em;
+  line-height: 1.04;
+}
+
+/* absolute, not fixed — the chat is a panel now, not an overlay */
+.ob-bg {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(120% 90% at 50% -10%, #FFFFFF 0%, var(--cream) 46%, #F4ECE0 100%);
+  z-index: 0;
+}
+.ob-bg::after {
+  content: "";
+  position: absolute; inset: 0;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,107,157,0.16) 1px, transparent 1px);
+  background-size: 22px 22px;
+  opacity: 0.5;
+  mask-image: radial-gradient(120% 80% at 50% 0%, #000 30%, transparent 78%);
+  -webkit-mask-image: radial-gradient(120% 80% at 50% 0%, #000 30%, transparent 78%);
+}
+
+/* ── top bar ──────────────────────────────────────────────────── */
+.ob-top {
+  position: relative; z-index: 3;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 20px 28px;
+  gap: 16px;
+}
+.ob-logo {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-family: var(--font-serif), 'Fraunces', serif;
+  font-weight: 600; font-size: 21px;
+  letter-spacing: -0.02em;
+  color: var(--ink); text-decoration: none;
+}
+.ob-logo svg { height: 16px; width: auto; display: block;
+  filter: drop-shadow(0 2px 5px rgba(255,51,102,0.32)); }
+
+/* progress dots — 8 now, not 13 and not 2 */
+.ob-progress { display: flex; align-items: center; gap: 6px; }
+.ob-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--cloud-shade);
+  transition: background 0.3s ease, transform 0.3s ease, width 0.3s ease;
+}
+.ob-dot.done { background: var(--pink-soft); }
+.ob-dot.active { background: var(--pink); width: 20px; border-radius: 4px; }
+
+.ob-exit {
+  font-family: inherit; font-size: 12px;
+  color: var(--ink-3);
+  background: transparent; border: 1px solid var(--line);
+  border-radius: 999px; padding: 7px 14px; cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  text-decoration: none;
+}
+.ob-exit:hover { color: var(--ink); border-color: rgba(43,37,48,0.24); }
+
+/* ── stage → scrolling chat ───────────────────────────────────── */
+.ob-stage {
+  position: relative; z-index: 2;
+  flex: 1; min-height: 0;
+  display: flex; justify-content: center;
+  padding: 0;
+}
+.ob-scroll {
+  width: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex; justify-content: center;
+}
+.ob-chat {
+  width: 100%;
+  max-width: 640px;
+  padding: 10px 24px 40px;
+  display: flex; flex-direction: column;
+  gap: 12px;
+}
+
+/* ── message rows ─────────────────────────────────────────────── */
+.ob-msg { display: flex; align-items: flex-end; gap: 10px; max-width: 100%; }
+.ob-msg.bot { justify-content: flex-start; }
+.ob-msg.user { justify-content: flex-end; }
+.ob-msg.controls { justify-content: flex-end; padding-left: 0; margin-top: 2px; }
+.ob-msg.controls.wide { padding-left: 0; }
+
+.ob-av {
+  width: 36px; height: 36px; flex: none;
+  border-radius: 11px; overflow: hidden;
+  display: grid; place-items: end center;
+  background: linear-gradient(165deg, #FFE3EC 0%, #FFD0DE 100%);
+  box-shadow: 0 1px 0 rgba(43,37,48,0.05), 0 6px 14px -8px rgba(255,51,102,0.4);
+  align-self: flex-end;
+}
+.ob-av .beam-mascot-svg {
+  width: 80%; height: 86%; image-rendering: pixelated; display: block;
+}
+
+/* bubbles */
+.ob-bubble {
+  position: relative;
+  border-radius: 16px;
+  padding: 11px 15px;
+  font-size: 15px; line-height: 1.5;
+  max-width: 460px;
+  word-wrap: break-word;
+}
+.ob-msg.bot .ob-bubble {
+  background: #fff; color: var(--ink);
+  border: 1px solid var(--line);
+  border-bottom-left-radius: 5px;
+  box-shadow: 0 1px 0 rgba(43,37,48,0.03), 0 8px 22px -16px rgba(43,37,48,0.22);
+}
+.ob-msg.user .ob-bubble {
+  background: linear-gradient(160deg, var(--pink) 0%, #FF4F7E 100%);
+  color: #fff;
+  border-bottom-right-radius: 5px;
+  box-shadow: 0 1px 0 rgba(43,37,48,0.05), 0 8px 18px -10px rgba(255,51,102,0.5);
+  font-weight: 500;
+}
+.ob-bubble .lead { font-weight: 500; }
+.ob-bubble .muted { color: var(--ink-3); }
+.ob-bubble p { margin: 0; }
+.ob-bubble p + p { margin-top: 7px; }
+.ob-bubble a { color: var(--pink); text-decoration: none; }
+.ob-bubble a:hover { text-decoration: underline; }
+.ob-bubble code { background: var(--cloud); border: 1px solid var(--line-2); border-radius: 5px; padding: 1px 5px; font-size: 12.5px; }
+
+/* rich bubbles host cards / wider content */
+.ob-bubble.rich { max-width: 520px; width: 100%; }
+.ob-bubble.card { padding: 15px 16px; background: #fff; }
+.ob-bubble.plain { padding: 0; background: transparent; border: none; box-shadow: none; max-width: 540px; }
+.ob-bubble.wide { max-width: 100%; }
+
+/* reveal animation (transform-only so a backgrounded tab never blanks) */
+.ob-bubble.reveal { animation: obPop 0.34s cubic-bezier(0.22,1.2,0.4,1) both; }
+@keyframes obPop {
+  from { transform: translateY(8px) scale(0.97); }
+  to   { transform: translateY(0) scale(1); }
+}
+
+/* typing indicator */
+.ob-bubble.typing { padding: 13px 16px; }
+.ob-bubble .dots { display: inline-flex; gap: 4px; align-items: center; }
+.ob-bubble .dots span {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--pink-soft); display: inline-block;
+  animation: obDot 1.1s ease-in-out infinite;
+}
+.ob-bubble .dots span:nth-child(2) { animation-delay: 0.15s; }
+.ob-bubble .dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes obDot { 0%,100% { opacity: 0.3; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+
+/* controls action wrapper — interactive blocks live on the user's (right) side */
+.ob-actionwrap { display: flex; flex-direction: column; gap: 10px; animation: obPop 0.3s ease both; }
+.ob-msg.controls.wide .ob-actionwrap { width: 100%; }
+.ob-msg.controls:not(.wide) .ob-actionwrap { align-items: flex-end; max-width: 88%; margin-left: auto; }
+.ob-msg.controls:not(.wide) .ob-actionwrap > .ob-btn { width: auto; }
+.ob-msg.controls:not(.wide) .ob-field,
+.ob-msg.controls:not(.wide) .ob-card,
+.ob-msg.controls:not(.wide) .ob-actions,
+.ob-msg.controls:not(.wide) .ob-checks,
+.ob-msg.controls:not(.wide) .ob-textarea { width: 420px; max-width: 100%; }
+.ob-msg.controls:not(.wide) .ob-hint,
+.ob-msg.controls:not(.wide) .ob-error { text-align: right; }
+.ob-msg.controls:not(.wide) .ob-chips { justify-content: flex-end; }
+
+/* chips (quick replies) */
+.ob-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.ob-chip {
+  font-family: inherit; font-size: 13px;
+  background: #fff; border: 1px solid var(--line); color: var(--ink);
+  border-radius: 999px; padding: 8px 15px; cursor: pointer;
+  transition: border-color 0.14s ease, background 0.14s ease, transform 0.1s ease;
+}
+.ob-chip:hover { border-color: color-mix(in oklab, var(--pink) 40%, var(--line)); background: var(--pink-wash); transform: translateY(-1px); }
+
+/* inline badge for socials */
+.ob-ib { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 4px; background: var(--ink); color: #fff; font-size: 9px; font-weight: 600; line-height: 1; }
+
+/* ── buttons ──────────────────────────────────────────────────── */
+.ob-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.ob-actions.center { justify-content: center; }
+.ob-btn {
+  font-family: inherit; font-size: 14px; font-weight: 500;
+  border: none; border-radius: 12px;
+  padding: 14px 20px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 8px; justify-content: center;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+  white-space: nowrap;
+}
+.ob-btn-primary {
+  background: var(--pink); color: var(--cream);
+  box-shadow: 0 1px 0 rgba(43,37,48,0.1), 0 8px 20px -6px rgba(255,51,102,0.45);
+}
+.ob-btn-primary:hover { transform: translateY(-1px); box-shadow: 0 1px 0 rgba(43,37,48,0.1), 0 12px 26px -6px rgba(255,51,102,0.58); }
+.ob-btn-ghost {
+  background: transparent; color: var(--ink-2);
+  border: 1px solid var(--line);
+}
+.ob-btn-ghost:hover { color: var(--ink); border-color: rgba(43,37,48,0.22); }
+.ob-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+.ob-btn-lg { padding: 16px 26px; font-size: 15px; }
+.ob-btn-block { width: 100%; }
+
+.ob-skip {
+  margin-top: 14px; text-align: right;
+  font-size: 12.5px; color: var(--ink-3);
+  background: none; border: none; cursor: pointer; font-family: inherit;
+  align-self: flex-end;
+}
+.ob-skip:hover { color: var(--ink-2); text-decoration: underline; }
+
+/* ── inputs ───────────────────────────────────────────────────── */
+.ob-field {
+  display: flex; align-items: center; gap: 10px;
+  background: #fff;
+  border: 1.5px solid var(--line);
+  border-radius: 13px;
+  padding: 4px 4px 4px 16px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ob-field:focus-within {
+  border-color: color-mix(in oklab, var(--pink) 55%, var(--line));
+  box-shadow: 0 0 0 4px var(--pink-wash);
+}
+.ob-field .scheme { color: var(--ink-3); font-size: 14px; flex: none; }
+.ob-input {
+  flex: 1; min-width: 0;
+  border: none; outline: none; background: transparent;
+  font-family: inherit; font-size: 15px; color: var(--ink);
+  padding: 11px 0;
+}
+.ob-input::placeholder { color: var(--ink-3); }
+.ob-field .ob-btn { padding: 11px 18px; border-radius: 10px; }
+.ob-input-plain {
+  width: 100%;
+  border: 1.5px solid var(--line); border-radius: 12px;
+  background: #fff; font-family: inherit; font-size: 15px; color: var(--ink);
+  padding: 13px 15px; outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ob-input-plain:focus { border-color: color-mix(in oklab, var(--pink) 55%, var(--line)); box-shadow: 0 0 0 4px var(--pink-wash); }
+.ob-label { font-size: 12px; color: var(--ink-3); letter-spacing: 0.02em; margin-bottom: 2px; display: block; }
+.ob-hint { font-size: 12.5px; color: var(--ink-3); }
+.ob-error { font-size: 13px; color: var(--pink); }
+
+/* ── generic info card ───────────────────────────────────────── */
+.ob-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 0 rgba(43,37,48,0.03), 0 10px 26px -16px rgba(43,37,48,0.18);
+}
+.ob-rows { display: flex; flex-direction: column; gap: 0; }
+.ob-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 11px 0; gap: 12px;
+  border-bottom: 1px solid var(--line-2);
+}
+.ob-row:last-child { border-bottom: none; }
+.ob-row .k { color: var(--ink-3); font-size: 13px; }
+.ob-row .v { font-weight: 500; }
+.ob-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 11px; border-radius: 999px;
+  background: var(--pink-wash); color: var(--pink);
+  font-size: 12.5px; font-weight: 500;
+}
+.ob-pill.green { background: color-mix(in oklab, var(--green) 16%, transparent); color: #1c9d68; }
+.ob-pill .pdot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.ob-pill.green .pdot { animation: obPulse 1.4s ease-in-out infinite; }
+@keyframes obPulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--green) 50%, transparent); } 70% { box-shadow: 0 0 0 5px transparent; } }
+
+/* ── code / snippet block ─────────────────────────────────────── */
+.ob-code {
+  position: relative;
+  background: #211c27; color: #F3E9DD;
+  border-radius: 13px; padding: 16px 18px;
+  font-size: 13px; line-height: 1.6;
+  overflow-x: auto;
+}
+.ob-code .tag { color: #FF8FB0; }
+.ob-code .attr { color: #FFD27A; }
+.ob-code .str { color: #9FE0C0; }
+.ob-copy {
+  position: absolute; top: 10px; right: 10px;
+  font-family: inherit; font-size: 11.5px;
+  background: rgba(255,255,255,0.1); color: #F3E9DD;
+  border: 1px solid rgba(255,255,255,0.18); border-radius: 8px;
+  padding: 6px 11px; cursor: pointer;
+  transition: background 0.14s ease;
+}
+.ob-copy:hover { background: rgba(255,255,255,0.2); }
+.ob-copy.copied { background: var(--green); color: #06301f; border-color: transparent; }
+
+.ob-install-list { display: flex; flex-direction: column; gap: 8px; margin: 2px 0; }
+.ob-install-row {
+  display: flex; align-items: baseline; gap: 10px;
+  font-size: 13px; color: var(--ink-2);
+  padding: 9px 12px; border-radius: 10px;
+  background: var(--cloud); border: 1px solid var(--line-2);
+}
+.ob-install-row b { color: var(--ink); font-weight: 500; min-width: 78px; flex: none; }
+.ob-install-row.match { border-color: color-mix(in oklab, var(--pink) 30%, var(--line)); background: var(--pink-wash); }
+
+/* ── listening / pulse ───────────────────────────────────────── */
+.ob-listen {
+  display: flex; flex-direction: column; align-items: center; gap: 18px;
+  padding: 26px 0 12px; text-align: center;
+}
+.ob-radar {
+  position: relative; width: 96px; height: 96px;
+  display: grid; place-items: center;
+}
+.ob-radar .core {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--pink); box-shadow: 0 0 0 5px var(--pink-wash);
+  z-index: 2;
+}
+.ob-radar .ring {
+  position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid var(--pink-soft);
+  animation: obRing 2.2s ease-out infinite;
+}
+.ob-radar .ring:nth-child(2) { animation-delay: 0.7s; }
+.ob-radar .ring:nth-child(3) { animation-delay: 1.4s; }
+@keyframes obRing {
+  0%   { transform: scale(0.3); opacity: 0.9; }
+  100% { transform: scale(1); opacity: 0; }
+}
+
+/* ── skeleton ────────────────────────────────────────────────── */
+.ob-skel { background: linear-gradient(100deg, #EEE6DA 30%, #F7F1E7 50%, #EEE6DA 70%);
+  background-size: 200% 100%; animation: obShimmer 1.3s linear infinite; border-radius: 7px; }
+@keyframes obShimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ── location reveal (Phase 3) ───────────────────────────────── */
+.ob-map {
+  height: 220px; width: 100%;
+  border-radius: 13px; overflow: hidden;
+  border: 1px solid var(--line);
+  background: var(--cloud);
+}
+.ob-map-pin {
+  position: relative;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--pink); box-shadow: 0 0 0 4px var(--pink-wash);
+}
+.ob-map-pin::before,
+.ob-map-pin::after {
+  content: ""; position: absolute; inset: -6px;
+  border-radius: 50%; border: 2px solid var(--pink-soft);
+  animation: obRing 2.2s ease-out infinite;
+}
+.ob-map-pin::after { animation-delay: 1.1s; }
+.ob-map-note { font-size: 12px; color: var(--ink-3); margin-top: 8px; }
+
+/* ── journey / place rows ────────────────────────────────────── */
+.ob-path { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.ob-path code {
+  background: var(--cloud); border: 1px solid var(--line-2);
+  border-radius: 6px; padding: 1px 6px; font-size: 12px; color: var(--ink);
+}
+.ob-path .arr { color: var(--ink-3); }
+.ob-meta { display: flex; flex-direction: column; gap: 7px; margin-top: 14px; }
+.ob-meta .mrow { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink-2); }
+.ob-meta .mrow .ic { width: 15px; text-align: center; color: var(--ink-3); flex: none; }
+.ob-meta .mrow a { color: var(--pink); text-decoration: none; }
+.ob-meta .mrow a:hover { text-decoration: underline; }
+.ob-confirm-q { font-family: var(--font-serif), 'Fraunces', serif; font-style: italic; font-size: 16px; margin: 4px 0 0; }
+
+.ob-checks { display: flex; flex-direction: column; gap: 8px; }
+.ob-check {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 13px; border: 1px solid var(--line); border-radius: 11px;
+  cursor: pointer; font-size: 14px; background: #fff;
+  transition: border-color 0.14s ease, background 0.14s ease;
+}
+.ob-check:hover { border-color: rgba(43,37,48,0.2); }
+.ob-check input { accent-color: var(--pink); width: 16px; height: 16px; }
+.ob-check.on { border-color: color-mix(in oklab, var(--pink) 35%, var(--line)); background: var(--pink-wash); }
+.ob-textarea {
+  width: 100%; min-height: 80px; resize: vertical;
+  border: 1.5px solid var(--line); border-radius: 12px; background: #fff;
+  font-family: inherit; font-size: 14px; color: var(--ink); padding: 12px 14px; outline: none;
+}
+.ob-textarea:focus { border-color: color-mix(in oklab, var(--pink) 55%, var(--line)); box-shadow: 0 0 0 4px var(--pink-wash); }
+
+/* badge for "identified in N seconds" */
+.ob-speed {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 12.5px; color: var(--ink-2);
+  background: var(--cloud); border: 1px solid var(--line-2);
+  border-radius: 999px; padding: 5px 12px;
+}
+.ob-speed b { color: var(--pink); font-weight: 500; }
+
+/* ── responsive ──────────────────────────────────────────────── */
+@media (max-width: 540px) {
+  .ob-bubble { border-top-left-radius: 16px; max-width: 100%; }
+  .ob-top { padding: 16px; }
+  .ob-chat { padding: 10px 14px 32px; }
+}
+
+/* ── reduced motion: no typing bounce, no pulses ─────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .ob-root *,
+  .ob-root *::before,
+  .ob-root *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

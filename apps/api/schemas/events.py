@@ -66,6 +66,24 @@ class Event(BaseModel):
     # Privacy opt-out: pixel sets true when navigator.globalPrivacyControl (GPC)
     # or doNotTrack (DNT) is on. Defaults False for older pixel builds.
     optout: bool = False
+    # Farbled-browser marker: the pixel's navigator.brave probe resolved true.
+    # Absent on older pixel builds and on the first events of every session (the
+    # probe is async and is never awaited), so False is the correct default —
+    # the server sticky-ORs, and a later batch sets it.
+    farbled: bool = Field(False, alias="_fb")
+
+    # mode="before" is load-bearing, for the same reason as _asig below:
+    # /ingest is public and unauthenticated, and with the default "after" mode a
+    # non-bool _fb raises a ValidationError that 422s the WHOLE batch. One
+    # malformed optional signal must never drop a page's worth of legitimate
+    # events, so this coerces and falls back to False rather than rejecting.
+    @field_validator("farbled", mode="before")
+    @classmethod
+    def _sanitize_farbled(cls, v: object) -> bool:
+        try:
+            return bool(v)
+        except Exception:
+            return False
 
     # mode="before" is load-bearing, not stylistic: with the default "after" mode
     # a non-dict _asig raises a ValidationError and 422s the WHOLE batch, so one

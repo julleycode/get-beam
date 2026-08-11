@@ -27,6 +27,12 @@ logger = structlog.get_logger()
 # Below this many captured visitors the Safari-coverage estimate is noise.
 MIN_SAMPLE = 100
 
+# The bucket `classify_browser` returns for Chrome/Chromium, and the label used
+# when that bucket is known to be farbling its fingerprint. Named constants so
+# the relabel in the caller can never drift from the classifier's own vocabulary.
+CHROMIUM_FAMILY = "Chrome"
+FARBLED_FAMILY = "Chrome (farbled)"
+
 # Approximate all-platform Safari usage share by country (StatCounter, mid-2026).
 # Static v1 — refresh from the monthly StatCounter CSV. The exact values matter
 # less than the directional shortfall vs what we actually capture.
@@ -108,22 +114,48 @@ async def compute_browser_breakdown(
     ).all()
     ua_by_visitor = {vid: ua for vid, ua in ua_rows}
 
-    # Each captured visitor with its identity status + resolved country.
+    # Each captured visitor with its identity status + resolved country, plus
+    # the two privacy-shaped flags. Both ride along on the SAME query — no extra
+    # round-trip, no join, no index: this is the only place in the codebase that
+    # already pairs a browser family with a visitor row.
     v_rows = (
         await db.execute(
-            select(Visitor.visitor_id, Visitor.identity_status, Visitor.country_code)
-            .where(Visitor.site_id == site_id, Visitor.last_seen >= since)
+            select(
+                Visitor.visitor_id,
+                Visitor.identity_status,
+                Visitor.country_code,
+                Visitor.do_not_resolve,
+                Visitor.has_unstable_fingerprint,
+            ).where(Visitor.site_id == site_id, Visitor.last_seen >= since)
         )
     ).all()
 
     browsers: dict[str, dict[str, int]] = {}
     country_counts: dict[str, int] = {}
-    for visitor_id, identity_status, country_code in v_rows:
+    total_opted_out = 0
+    for (
+        visitor_id,
+        identity_status,
+        country_code,
+        do_not_resolve,
+        has_unstable_fp,
+    ) in v_rows:
         family = classify_browser(ua_by_visitor.get(visitor_id, ""))
-        bucket = browsers.setdefault(family, {"captured": 0, "identified": 0})
+        # Farbling browsers (Brave, Firefox RFP, CanvasBlocker, Tor) are
+        # indistinguishable from plain Chrome by UA alone — Brave ships a
+        # byte-identical UA. Relabel from the OBSERVED property, never the
+        # vendor: the same bucket holds several unrelated products.
+        if has_unstable_fp and family == CHROMIUM_FAMILY:
+            family = FARBLED_FAMILY
+        bucket = browsers.setdefault(
+            family, {"captured": 0, "identified": 0, "opted_out": 0}
+        )
         bucket["captured"] += 1
         if identity_status and identity_status not in ("anonymous", ""):
             bucket["identified"] += 1
+        if do_not_resolve:
+            bucket["opted_out"] += 1
+            total_opted_out += 1
         cc = (country_code or "").upper()
         if cc:
             country_counts[cc] = country_counts.get(cc, 0) + 1
@@ -136,6 +168,10 @@ async def compute_browser_breakdown(
             "captured": b["captured"],
             "identified": b["identified"],
             "identification_rate": round(b["identified"] / b["captured"], 4)
+            if b["captured"]
+            else 0.0,
+            "opted_out": b["opted_out"],
+            "optout_rate": round(b["opted_out"] / b["captured"], 4)
             if b["captured"]
             else 0.0,
             "share": round(b["captured"] / total, 4) if total else 0.0,
@@ -173,6 +209,15 @@ async def compute_browser_breakdown(
         "window_days": window_days,
         "total_visitors": total,
         "browsers": browser_list,
+        # Sticky visitor-level opt-out (GPC/DNT honored at `tracker.js` →
+        # `events.optout` → BOOL_OR → `visitors.do_not_resolve`). This is the
+        # number `resolve()` actually gates on, so it is the decision-relevant
+        # rate — the event-level rate is a noisier view of the same thing.
+        "privacy_optout": {
+            "visitors": total,
+            "opted_out": total_opted_out,
+            "rate": round(total_opted_out / total, 4) if total else 0.0,
+        },
         "safari_coverage": {
             "actual_share": round(actual_safari, 4),
             "expected_share": round(expected_safari, 4),

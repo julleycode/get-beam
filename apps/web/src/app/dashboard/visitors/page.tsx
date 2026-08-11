@@ -12,6 +12,7 @@ import { ErrorBanner } from "@/components/error-banner";
 import { EmptyState } from "@/components/empty-state";
 import { SiteSelector } from "@/components/site-selector";
 import { VisitorWidgets } from "@/components/visitor-widgets";
+import { ResolutionHealthCard } from "@/components/resolution-health-card";
 import { type Period } from "@/components/ui/period-toggle";
 import { PageHeader } from "@/components/page-header";
 import { VisitorsHelp } from "@/components/page-help";
@@ -572,6 +573,10 @@ export default function VisitorsPage() {
       <div className="mb-4">
         <UsageWarningBanner />
       </div>
+
+      {/* Not a removable widget: a dead identity provider is exactly the case
+          that must never be dismissible or silent. Renders nothing when healthy. */}
+      {siteId && <ResolutionHealthCard siteId={siteId} />}
 
       {siteId && (
         <VisitorWidgets

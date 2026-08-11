@@ -248,8 +248,17 @@ async def run_resolution_sweep() -> None:
             # Only sites that opted into auto-identify. Sites with the toggle off
             # (the default) are resolved one visitor at a time via the per-row
             # Identify button instead.
+            #
+            # `tracking_enabled` is a second, independent gate: a paused site
+            # (manual toggle OR the inactivity auto-pause) must not burn
+            # resolver/enrichment/Gemini credits draining its existing backlog.
+            # Ingest already 204s for these sites, so the backlog is frozen —
+            # this is what makes a pause actually stop spend.
             sites_result = await lock_db.execute(
-                select(Site).where(Site.auto_identify_enabled.is_(True))
+                select(Site).where(
+                    Site.auto_identify_enabled.is_(True),
+                    Site.tracking_enabled.is_(True),
+                )
             )
             sites = list(sites_result.scalars().all())
             totals = {"processed": 0, "resolved": 0, "enriched": 0, "skipped_plan_limit": 0}

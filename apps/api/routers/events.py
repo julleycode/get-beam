@@ -28,6 +28,45 @@ from apps.api.services.rate_limiter import limiter, site_ceiling_tripped
 router = APIRouter()
 logger = structlog.get_logger()
 
+# WS2 Detector A — server-side fingerprint mismatch (the PRIMARY detector).
+#
+# Vendor-independent: it fires for Brave, Firefox resist_fingerprinting, Tor and
+# CanvasBlocker alike, and costs zero pixel bytes. Especially well suited here
+# because a farbled browser still keeps its first-party cookie, so the visitor
+# returns under the SAME visitor_id and reliably trips the comparison.
+#
+# Evaluated inside the visitor-stub ON CONFLICT clause rather than a preceding
+# SELECT: /ingest is the hottest path in the API, and the comparison needs
+# exactly the two values that upsert already has in hand — zero extra
+# round-trips.
+#
+# Both IS NOT NULL guards are load-bearing: a NULL on either side means "no
+# evidence" (brand-new visitor, or a batch carrying no fp), never a mismatch.
+# Sticky-OR, same semantics as do_not_resolve / is_abuse_flagged.
+#
+# fp3 disjunct — LOW signal value, deliberately. fp3 = hash(fpBase | fonts |
+# audio) and fpBase ALREADY CONTAINS canvas + webgl, so a browser that farbles
+# canvas (Brave, i.e. the main case) rotates fp2 AND fp3 together and the fp2
+# disjunct alone already catches it. The set this adds is narrow: a browser that
+# randomizes fonts or audio but NOT canvas/webgl. Do not read it as a strong
+# detector. It is only defensible because the pixel now suppresses fp3 entirely
+# when the audio watchdog fires (tracker.js audioFp cb(value, reliable)) — before
+# that fix, the 1s render race populated exactly this fp3-only-mismatch
+# signature with noise from ordinary visitors.
+#
+# The same both-sides-NOT-NULL guards are what make the async-arrival window
+# safe: fp3 routinely lands on a LATER batch than fp2, so early batches
+# legitimately have a NULL on one side and must read as "no evidence".
+FARBLED_MISMATCH_SQL = (
+    "visitors.has_unstable_fingerprint OR ("
+    "visitors.fingerprint IS NOT NULL "
+    "AND EXCLUDED.fingerprint IS NOT NULL "
+    "AND visitors.fingerprint <> EXCLUDED.fingerprint) OR ("
+    "visitors.fingerprint_v3 IS NOT NULL "
+    "AND EXCLUDED.fingerprint_v3 IS NOT NULL "
+    "AND visitors.fingerprint_v3 <> EXCLUDED.fingerprint_v3)"
+)
+
 # Keep strong references to background tasks so they aren't GC'd
 _background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
 # Sites with an aggregation already in-flight — coalesce so a burst of ingest
@@ -403,6 +442,10 @@ async def ingest_events(
             # cannot have been minted is stored as NULL.
             link_marker=edge_marker_from_url(event.url),
             optout=bool(event.optout),
+            # WS2 Detector B (pixel navigator.brave probe). Rolled up per visitor
+            # via BOOL_OR into visitors.has_unstable_fingerprint. Never a drop or
+            # block signal on this path.
+            farbled=bool(event.farbled),
             # P3 site-ceiling trip OR P4 velocity flag. Written in the SAME INSERT
             # that stores the row, so there is no window where flood traffic is
             # durable and unmarked.
@@ -660,6 +703,33 @@ async def _process_signal_events(
                         # Prefer earliest first_seen if stub raced ahead of events.
                         "first_seen": sa_text(
                             "LEAST(visitors.first_seen, EXCLUDED.first_seen)"
+                        ),
+                        # WS2 Detector A — server-side fingerprint mismatch.
+                        #
+                        # The COALESCE above SILENTLY DISCARDS an incoming
+                        # fingerprint whenever the row already has one. That
+                        # discarded value is EVIDENCE: same visitor_id (Brave and
+                        # friends keep the first-party cookie), different fp2 =>
+                        # the fingerprinting surface is randomized per session.
+                        #
+                        # Evaluated inside THIS statement rather than a preceding
+                        # SELECT: /ingest is the hottest path in the API and the
+                        # comparison needs exactly the two values the upsert
+                        # already has in hand, so it costs zero extra round-trips.
+                        #
+                        # The stored `fingerprint` column keeps its write-once
+                        # COALESCE semantics untouched above — only the new flag
+                        # is written, and it is sticky-OR like do_not_resolve.
+                        # Both NOT NULL guards matter: a NULL on either side is
+                        # "no evidence", not a mismatch.
+                        #
+                        # fp3 is compared the same way, with the same guards —
+                        # but adds little detection power, because fpBase (and
+                        # therefore fp3) already contains canvas + webgl, so a
+                        # canvas-farbling browser rotates fp2 and fp3 together.
+                        # See the FARBLED_MISMATCH_SQL comment at module level.
+                        "has_unstable_fingerprint": sa_text(
+                            FARBLED_MISMATCH_SQL
                         ),
                     },
                 )

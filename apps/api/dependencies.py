@@ -17,6 +17,7 @@ from apps.api.models.site import Site
 from apps.api.models.user import User
 from apps.api.models.waitlist import WaitlistSignup
 from apps.api.services.pii import mask_email
+from apps.api.services.reengagement import record_user_activity
 
 logger = structlog.get_logger()
 
@@ -355,6 +356,10 @@ async def get_current_user(
                             clerk_id=clerk_user_id,
                         )
 
+            # Inactivity lifecycle: refresh last_active_at (hourly at most) and
+            # silently resume anything the sweep auto-paused. Never raises, and
+            # never uses this request's session.
+            await record_user_activity(user)
             return user
 
         except JWTError:
@@ -403,6 +408,8 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
+    # Same activity touch on the legacy HS256 path (see the Clerk branch above).
+    await record_user_activity(user)
     return user
 
 

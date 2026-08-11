@@ -1,6 +1,13 @@
 /* beam mascot — the pixel-art beam girl, lifted from the landing hero sprite.
    Exposes window.beamMascot({ className, pose }) → SVG string (viewBox 18×26).
-   Render at any size with CSS; image-rendering:pixelated keeps it crisp. */
+   Render at any size with CSS; image-rendering:pixelated keeps it crisp.
+
+   ⚠️ GRID SYNC: this file must stay a plain <script>. The static landing page
+   (public/beam/index.html) calls window.beamMascot() and cannot import from
+   src/. The React twin lives at src/components/beam-mascot.tsx and carries
+   BOTH palettes (`palette="chat"` is the one below, byte-for-byte). If you
+   change the GRID here, change it there in the same patch — they are two
+   renderers of one sprite, not two sprites. */
 (function () {
   const PAL = {
     H: '#C9785A', h: '#E89A7B', s: '#FBE2D2', S: '#3D2F4F',

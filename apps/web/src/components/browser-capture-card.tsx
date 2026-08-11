@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ShieldOff } from "lucide-react";
 import { api, BrowserBreakdown } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { optoutIsAbnormal, optoutMessage } from "@/lib/privacy-optout";
 import {
   PeriodToggle,
   periodToDays,
@@ -110,6 +111,13 @@ export function BrowserCaptureCard({ siteId, period, onPeriodChange }: { siteId:
   // title, with the detail on hover. Healthy / not-enough-data stays silent.
   const abnormal = cov.status === "watch" || cov.status === "likely_blocked";
 
+  // Same philosophy for privacy opt-out: the per-browser figure always shows in
+  // the segment tooltip, but the site-level indicator only appears when the rate
+  // is genuinely abnormal. A healthy card stays uncluttered.
+  const optout = data.privacy_optout;
+  const optoutAbnormal =
+    !!optout && optoutIsAbnormal(optout.visitors, optout.rate);
+
   return (
     <Card className="h-full">
       <CardHeader className="pb-2">
@@ -140,6 +148,28 @@ export function BrowserCaptureCard({ siteId, period, onPeriodChange }: { siteId:
                 </div>
               </span>
             )}
+            {optoutAbnormal && optout && (
+              <span className="group relative inline-flex">
+                <ShieldOff
+                  className="h-4 w-4 text-warning"
+                  aria-label={`Privacy opt-out: ${pct(optout.rate)}`}
+                />
+                <div
+                  role="tooltip"
+                  className="pointer-events-none absolute left-0 top-full z-50 mt-1.5 hidden w-64 whitespace-normal rounded-md border bg-popover p-3 text-left text-xs font-normal text-popover-foreground shadow-md group-hover:block group-focus-within:block"
+                >
+                  <p className="font-medium">
+                    Privacy opt-out: {pct(optout.rate)}
+                  </p>
+                  <p className="mt-0.5 text-muted-foreground">
+                    {optoutMessage(optout.visitors, optout.rate)}
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    {optout.opted_out} of {optout.visitors} visitors.
+                  </p>
+                </div>
+              </span>
+            )}
           </div>
           <PeriodToggle value={period} onChange={onPeriodChange} />
         </div>
@@ -163,6 +193,11 @@ export function BrowserCaptureCard({ siteId, period, onPeriodChange }: { siteId:
                   {b.captured} visitors · {pct(b.share)} · ID{" "}
                   {pct(b.identification_rate)}
                 </div>
+                {b.optout_rate !== undefined && (
+                  <div className="mt-0.5 text-muted-foreground">
+                    Privacy opt-out {pct(b.optout_rate)}
+                  </div>
+                )}
               </div>
             </div>
           ))}

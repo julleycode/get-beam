@@ -3,6 +3,7 @@ name: plan:github-reader
 description: "GitHub public-profile reader module enriching visitor profiles from a known github_url — new service + config only, no schema change"
 date: 07-08-26
 feature: visitors-identity
+status: "completed — EXECUTED + EVL green 8/8 07-08-26; archived 11-08-26. Known-gaps stay open: live GitHub response shape unproven; CONCERN-2 sibling-clobber (see backlog/social-context-wholesale-overwrite-bug_NOTE_07-08-26.md)"
 ---
 
 # GitHub Public-Profile Reader — Plan (SIMPLE)

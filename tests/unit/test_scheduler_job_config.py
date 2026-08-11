@@ -112,12 +112,13 @@ class TestSchedulerInventory:
         cron = [c for c in calls if not _is_interval(c)]
         assert len(interval) + len(cron) == len(calls)
         # Every job is either interval or CronTrigger — nothing else. The cron
-        # set is the two digest emails (weekly outcomes + daily activity); a new
-        # entry here means a new fixed-time job that Phase 4c's jitter assertion
-        # must keep excluding.
+        # set is the two digest emails (weekly outcomes + daily activity) plus
+        # the daily inactivity sweep; a new entry here means a new fixed-time job
+        # that Phase 4c's jitter assertion must keep excluding.
         assert {_kwargs(c)["id"].value for c in cron} == {
             "outcome_digest",
             "daily_digest",
+            "reengagement_sweep",
         }
 
 
@@ -173,9 +174,14 @@ class TestAC13IntervalJobHardening:
         assert [c for c in cron if "jitter" in _kwargs(c)] == []
 
     def test_the_asserted_set_is_derived_not_hardcoded(self):
-        """E20 arithmetic: 23 total / 21 interval / 2 cron — all AST-derived.
+        """E20 arithmetic: 24 total / 21 interval / 3 cron — all AST-derived.
 
-        Was 22/20/2; +1 interval job for ip_org_apnic_refresh (WS-E — APNIC
+        Was 23/21/2; +1 CRON job for reengagement_sweep (inactivity lifecycle —
+        remind an idle owner at 7d, auto-pause tracking at 14d, one-time install
+        nudge; flag-gated OFF on reengagement_enabled, advisory-locked). Cron,
+        not interval, because the thresholds are day-granular and a predictable
+        send hour is the point — so it is excluded from the jitter assertion.
+        Before that 22/20/2; +1 interval job for ip_org_apnic_refresh (WS-E — APNIC
         per-AS user-population dataset feeding classify_ip_org_kind's numeric
         eyeball pre-check; weekly, flag-gated OFF on ip_org_apnic_refresh_enabled,
         fail-open).
@@ -210,7 +216,7 @@ class TestAC13IntervalJobHardening:
         """
         calls = _add_job_calls()
         interval = [c for c in calls if _is_interval(c)]
-        assert len(calls) == 23, f"expected 23 add_job calls, found {len(calls)}"
+        assert len(calls) == 24, f"expected 24 add_job calls, found {len(calls)}"
         assert len(interval) == 21, (
             f"expected 21 interval calls, found {len(interval)}; if a job was "
             "added or removed, update E20's arithmetic — do not relax this gate"

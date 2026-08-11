@@ -8,11 +8,11 @@ ANY IP (residential, public WiFi, mobile) — not just business IPs.
 
 import asyncio
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from slowapi.util import get_remote_address
 
 from pydantic import BaseModel
@@ -21,10 +21,10 @@ from sqlalchemy import select
 
 from apps.api.config import settings
 from apps.api.models.database import async_session
-from apps.api.models.event import Event
 from apps.api.models.visitor import Visitor
 from apps.api.services.rate_limiter import limiter
 from apps.api.services.identity_resolver import IdentityResolver
+from apps.api.services.ip_resolution import resolve_client_ip
 from apps.api.services.pii import mask_email
 from apps.api.services.platform_detector import detect_platform
 from apps.api.services.redis_client import get_redis
@@ -304,65 +304,176 @@ async def demo_journey(request: Request, body: JourneyBody = JourneyBody()) -> d
     if not fp.startswith("fp2_"):
         return {"matched": False, "pages": []}
 
-    # Naive UTC to match Event.created_at (TIMESTAMP WITHOUT TIME ZONE — the
-    # ingest path strips tzinfo). Comparing an aware datetime would error in asyncpg.
-    since = datetime.utcnow() - timedelta(hours=1)
+    # Shared implementation with the authed onboarding canary. site_id is
+    # deliberately NOT passed here: this public path keeps its historical
+    # unscoped fingerprint match so the static funnel behaves identically.
+    # New callers must scope (see services/onboarding_canary.fetch_journey).
+    from apps.api.services.onboarding_canary import fetch_journey
+
     try:
         async with async_session() as db:
-            vids = (
-                await db.execute(
-                    select(Visitor.visitor_id).where(Visitor.fingerprint == fp)
-                )
-            ).scalars().all()
-            if not vids:
-                return {"matched": False, "pages": []}
-
-            rows = (
-                await db.execute(
-                    select(
-                        Event.event_type,
-                        Event.page_path,
-                        Event.page_title,
-                        Event.url,
-                        Event.time_on_page,
-                        Event.created_at,
-                    )
-                    .where(
-                        Event.visitor_id.in_(vids),
-                        Event.event_type.in_(("pageview", "time_on_page")),
-                        Event.created_at >= since,
-                    )
-                    .order_by(Event.created_at.asc())
-                    .limit(60)
-                )
-            ).all()
+            pages = await fetch_journey(db, fp)
     except Exception as e:  # noqa: BLE001 — demo never 500s the onboarding
         logger.debug("demo_journey_failed", error=str(e))
         return {"matched": False, "pages": []}
 
-    # seconds spent per url, from the dedicated time_on_page rows
-    secs_by_url: dict[str, int] = {}
-    for r in rows:
-        if r.event_type == "time_on_page" and r.url:
-            secs_by_url[r.url] = max(secs_by_url.get(r.url, 0), int(r.time_on_page or 0))
-
-    pages: list[dict] = []
-    for r in rows:
-        if r.event_type != "pageview":
-            continue
-        pages.append(
-            {
-                "path": (r.page_path or r.url or "/"),
-                "title": (r.page_title or "").strip(),
-                "seconds": int(r.time_on_page or 0) or secs_by_url.get(r.url or "", 0),
-                "at": r.created_at.isoformat() if r.created_at else None,
-            }
-        )
-        if len(pages) >= 8:
-            break
-
     logger.info("demo_journey", fp=fp[:12], pages=len(pages))
     return {"matched": bool(pages), "pages": pages}
+
+
+# ───────────────────────── public canary (static funnel) ─────────────────────
+# Unauthenticated twin of POST /api/v1/onboarding/canary. Same shared builders
+# (services/onboarding_canary.py), same response shape, no forked logic.
+#
+# Security posture — every line here is load-bearing:
+#
+# * THE ONLY IP EVER RESOLVED IS THE CALLER'S OWN, via
+#   ``ip_resolution.resolve_client_ip``. An IP is never accepted from the body
+#   or the query string; ``CanaryPublicBody`` has exactly one field and Pydantic
+#   drops the rest. Accepting a caller-supplied IP would turn this into a free
+#   geolocation-lookup API for arbitrary addresses.
+#   It also does NOT use ``demo._client_ip`` (used by the older demo routes),
+#   which trusts the first X-Forwarded-For entry with no hop check and is
+#   therefore client-spoofable.
+# * The journey is SCOPED to ``settings.beam_self_site_id``. The neighbouring
+#   ``demo_journey`` matches ``Visitor.fingerprint`` with no site predicate and
+#   is cross-tenant by construction — the exact class of bug commit 7e798ab
+#   ("close cross-tenant PII leak on /demo") had to fix once already. Do not
+#   copy that call shape here.
+# * No ip / site_id / visitor_id / fingerprint in the response body. The IP is
+#   logged truncated (``ip[:8]``), as the rest of this module does.
+# * No paid provider is called, so ``_enforce_demo_budget`` is deliberately NOT
+#   applied: a free geo lookup must not be able to exhaust the identity-graph
+#   budget that ``/identify`` depends on.
+# * Flag off => 404 on both routes (dormant, not merely disabled).
+_PUBLIC_CANARY_SURFACE = "public_onboarding_canary"
+
+# The static funnel polls: 2s for the first 20s, then 4s to a 90s deadline —
+# ~20 calls inside any single minute, ~27 over a full run. 40/minute leaves room
+# for one mid-run reload (which restarts the poll, since the static funnel has no
+# resume) while staying far below anything useful for bulk lookups. The authed
+# twin uses 30/minute; it can afford the tighter bound because a signed-in user's
+# flow state survives a reload.
+_PUBLIC_CANARY_RATE = "40/minute"
+
+
+def _require_location_reveal() -> None:
+    if not settings.location_reveal_enabled:
+        # Dormant: do not reveal that the endpoint exists when disabled.
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+class CanaryPublicBody(BaseModel):
+    """One field, on purpose. Any ``ip``/``site_id`` a caller adds is ignored."""
+
+    fingerprint: str | None = None
+
+
+@router.post("/canary")
+@limiter.limit(_PUBLIC_CANARY_RATE)
+async def demo_canary(request: Request, body: CanaryPublicBody = CanaryPublicBody()) -> dict:
+    """Public "we caught you": where the CALLER is, and what they just read.
+
+    Never 500s — a provider failure degrades to ``geo: null`` rather than an
+    error, because this runs inside a chat the user cannot retry.
+    """
+    _require_location_reveal()
+
+    from apps.api.services.geoip import resolve_geoip_full
+    from apps.api.services.onboarding_canary import (
+        build_geo,
+        build_network,
+        fetch_journey,
+    )
+
+    fp = (body.fingerprint or "").strip()
+    ip = resolve_client_ip(request)
+
+    pages: list[dict] = []
+    if fp:
+        try:
+            async with async_session() as db:
+                pages = await fetch_journey(db, fp, site_id=settings.beam_self_site_id)
+        except Exception as e:  # noqa: BLE001 — the reveal never 500s the funnel
+            logger.debug("demo_canary_journey_failed", error=str(e))
+
+    geo_raw = None
+    reason: str | None = None
+    try:
+        geo_raw = await resolve_geoip_full(ip)
+    except Exception as e:  # noqa: BLE001 — defensive; resolve_geoip_full swallows already
+        logger.debug("demo_canary_geo_failed", ip=ip[:8], error=str(e))
+    if geo_raw is None:
+        reason = "provider_unavailable"
+
+    geo = build_geo(geo_raw)
+    network = build_network(ip, geo_raw) if geo_raw is not None else None
+
+    logger.info(
+        "demo_canary", ip=ip[:8], fp=fp[:12], pages=len(pages), has_geo=geo is not None
+    )
+
+    result: dict = {
+        "landed": bool(pages),
+        "pages": pages,
+        "geo": geo,
+        "network": network,
+    }
+    if reason:
+        result["reason"] = reason
+    return result
+
+
+class CanaryFeedbackBody(BaseModel):
+    reasons: list[str] = []
+    note: str | None = None
+    shown: dict = {}
+    fingerprint: str | None = None
+
+
+@router.post("/identity-feedback", status_code=204)
+@limiter.limit("12/minute")
+async def demo_identity_feedback(request: Request, body: CanaryFeedbackBody) -> Response:
+    """Record a "not quite" answer from the public funnel. 204 always.
+
+    The client submits optimistically and advances in the same tick, so this must
+    never be something the funnel can block on. Unknown reasons are dropped
+    rather than stored, so the counts stay analysable — the same anti-fabrication
+    rule the authed twin applies.
+    """
+    _require_location_reveal()
+
+    from apps.api.models.identity_feedback import (
+        ANONYMOUS_USER_ID,
+        FEEDBACK_REASONS,
+        NOTE_MAX_CHARS,
+        IdentityFeedback,
+    )
+
+    reasons = [r for r in (body.reasons or []) if r in FEEDBACK_REASONS]
+    note = (body.note or "").strip()[:NOTE_MAX_CHARS] or None
+
+    try:
+        async with async_session() as db:
+            db.add(
+                IdentityFeedback(
+                    # No account exists at this beat — documented sentinel, not a
+                    # fabricated user. `surface` is the real discriminator.
+                    user_id=ANONYMOUS_USER_ID,
+                    site_id=None,
+                    fingerprint=(body.fingerprint or None),
+                    surface=_PUBLIC_CANARY_SURFACE,
+                    shown=(body.shown if isinstance(body.shown, dict) else {}),
+                    reasons=reasons,
+                    note=note,
+                )
+            )
+            await db.commit()
+    except Exception as e:  # noqa: BLE001 — a feedback write never breaks the funnel
+        logger.warning("demo_identity_feedback_failed", error=str(e))
+
+    logger.info("demo_identity_feedback", reasons=reasons, has_note=bool(note))
+    return Response(status_code=204)
 
 
 class EmailIdentifyRequest(BaseModel):

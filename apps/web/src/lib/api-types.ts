@@ -715,6 +715,48 @@ export interface BrowserRow {
   identified: number;
   identification_rate: number;
   share: number;
+  // Sticky privacy opt-out (GPC/DNT). Optional so the card degrades gracefully
+  // against a backend not yet deployed.
+  opted_out?: number;
+  optout_rate?: number; // 0..1
+}
+
+export interface PrivacyOptout {
+  visitors: number;
+  opted_out: number;
+  rate: number; // 0..1
+}
+
+export interface ProviderHealthRow {
+  provider: string;
+  attempts: number; // rows in resolution_logs (match + no_match)
+  successes: number;
+  unavailable: number; // auth/quota/outage — writes NO resolution_logs row
+  calls: number; // attempts + unavailable — the true call count
+  unavailable_rate: number; // 0..1
+}
+
+export interface ResolutionHealth {
+  providers: ProviderHealthRow[];
+  total_calls: number;
+  total_successes: number;
+  total_unavailable: number;
+}
+
+export interface IngestHealth {
+  site_id: string;
+  window_minutes: number;
+  total_events: number;
+  flagged_events: number;
+  clean_events: number;
+  distinct_visitors: number;
+  flagged_ratio: number;
+  flood_signal: "no_traffic" | "likely_flood" | "mixed" | "organic";
+  privacy_optout?: PrivacyOptout;
+  // Optional so the card degrades gracefully against a backend not yet deployed.
+  resolution_health?: ResolutionHealth;
+  flood_ratio_threshold: number;
+  celery_worker_enabled: boolean;
 }
 
 export interface SafariCoverage {
@@ -740,6 +782,7 @@ export interface BrowserBreakdown {
   browsers: BrowserRow[];
   // Optional so the card degrades gracefully against a backend not yet deployed.
   metrics?: BrowserMetrics;
+  privacy_optout?: PrivacyOptout;
   safari_coverage: SafariCoverage;
 }
 

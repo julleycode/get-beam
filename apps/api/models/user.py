@@ -64,6 +64,28 @@ class User(Base):
         Integer, default=0, nullable=False, server_default="0"
     )
 
+    # ─── Inactivity lifecycle (re-engagement reminder + auto-pause) ───
+    # Refreshed at most once an hour from get_current_user (see
+    # services/reengagement.record_user_activity). NOT NULL with a now()
+    # server_default: at migration time every existing user is seeded active, so
+    # the earliest possible auto-pause is migration+14d with a reminder forced in
+    # between — a day-one mass-pause is impossible by construction.
+    last_active_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # When the re-engagement reminder was last sent. NULL = never. Deliberately
+    # never cleared: "a reminder is outstanding" is expressed as
+    # `last_reengagement_sent_at > last_active_at`, so a login (which moves
+    # last_active_at) self-invalidates it with no extra hot-path write.
+    last_reengagement_sent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Stamped once when the "you never installed the pixel" nudge is sent.
+    # NULL = never nudged; the nudge never repeats.
+    install_nudge_sent_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # ─── Dashboard prefs ───
     # Per-surface widget layout, e.g. {"visitors": ["funnel", "traffic_fit"]}.
     # Nullable: a NULL/absent surface means "use the default layout".

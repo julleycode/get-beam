@@ -8,7 +8,7 @@ date: 10-08-26
 
 # Beam - All Context
 
-Last updated: 2026-08-10
+Last updated: 2026-08-11
 
 This file is the root context entrypoint for the repo.
 
@@ -104,27 +104,11 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
     `Site` has no `domain` col, needs `name`+`url`). Entry-gate for identity-coop still UNMET.
     Migration `d1a6c4e93f27` live round-trip IS closed (KG-5). See
     `backlog/docker-gate-run-findings_NOTE_07-08-26.md`.**
-  - `github-reader_07-08-26` — **EXECUTED + EVL green 8/8 (07-08-26).** New
-    `apps/api/services/github_reader.py` (flag `enable_github_reader` default OFF,
-    `github_osint_token`, 7d cache, fail-closed rate limit, single-host SSRF guard, `clean_text`
-    sanitization) + enricher call site `_fetch_and_store_github`; zero migrations, 1197-unit lane
-    green. Known-gaps: live GitHub response shape unproven; CONCERN-2 sibling-clobber documented
-    not fixed (`backlog/social-context-wholesale-overwrite-bug_NOTE_07-08-26.md` — its overwrite
-    half is resolved by social-context-merge below).
-  - `social-context-merge_07-08-26` — **EXECUTED + EVL green (07-08-26).** `store_social_context`
-    (`apps/api/services/social_intelligence.py`) now merge-preserving (the 1 overwrite writer of 9
-    fixed; census of 9 writers verified), deep-research meter stamp removed. PVL converged after 3
-    passes; 4 backlog notes written. **✅ VERIFIED 07-08-26** — AC-7 Hybrid gate ran in the
-    Docker gate run (`test_usage_limits.py` 3/3 vs real Postgres, both SQL residuals proven);
-    archival pending user.
   - `identity-coop_07-08-26` — Phase 1 **Dependency-BLOCKED** on graph-erasure reaching LIVE
     (entry gate); plan converged via supplement (bool-return accrual gating,
     write-nothing-when-blocked privacy invariant, site_id-only ledger, partial-unique dedup).
     `backlog/identity-coop-entry-gate-spec-a-live_NOTE_07-08-26.md` tracks 4 clearing conditions;
     phases 2-3 skipped.
-  - `identity-p1p2-status-observability_02-08-26` — audit verdict 07-08-26: ALL 3 phases
-    DONE-ON-DISK (vocabulary since renamed by identity-vocab-reconcile); its own `plan.md` says
-    `status: completed`. Archive-ready debt — RECOMMEND moving to `completed/` (not yet moved).
   - `identity-coverage-pixel-fppro_02-08-26` — audit verdict 07-08-26: Ph.01 done (manual gate
     transferred to recovery program); Ph.02 SUPERSEDED by `plans/260805-1543-identity-coverage-recovery/`
     on branch `dev_nhantc2` (outside `process/`, invisible to plan-discovery); Ph.03 backlog
@@ -206,6 +190,43 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
     adversarial verifier — that second leg found the top defect in all four prior cycles and
     overturned an orchestrator decision twice. `roster_precision_enabled` default OFF; nothing
     becomes emailable (`is_emailable_identity("hunter")` stays `False`, regression-gated).
+
+  Completed 11-08-26 (archived out of `active/`):
+  - `social-context-merge_07-08-26` — completed 11-08-26 →
+    `completed/social-context-merge_07-08-26/` (✅ VERIFIED 07-08-26; AC-7 Hybrid gate
+    `test_usage_limits.py` 3/3 vs real Postgres in the Docker gate run).
+  - `github-reader_07-08-26` — completed 11-08-26 → `completed/github-reader_07-08-26/`
+    (EXECUTED + EVL green 8/8 07-08-26). Known-gaps stay open: live GitHub response shape
+    unproven; CONCERN-2 sibling-clobber
+    (`backlog/social-context-wholesale-overwrite-bug_NOTE_07-08-26.md` — its overwrite half
+    resolved by social-context-merge).
+  - `identity-p1p2-status-observability_02-08-26` — completed 11-08-26 →
+    `completed/identity-p1p2-status-observability_02-08-26/` (all 3 phases done-on-disk per
+    07-08-26 audit; vocabulary since renamed by identity-vocab-reconcile).
+- `onboarding-canary` — conversational onboarding rebuild in React + a canarytokens-style
+  location reveal (Leaflet pin on the user's city, their network, and the pages they just read on
+  getbeam.fyi). 4-phase plan; **Phase 1 (backend, flag OFF) EXECUTED 10-08-26.** Widened
+  `services/geoip.py` (`resolve_geoip_full` + `GeoResult`; `resolve_geoip` is now a thin wrapper
+  with a frozen 2-tuple signature so `routers/events.py` needed zero edits; NEW `geoip2:` JSON
+  Redis prefix kept separate from the legacy pipe-joined `geoip:` key; added the missing
+  `mock_external_apis` branch and 429/`X-Ttl` backoff), new
+  `services/onboarding_canary.py` (journey query extracted from `demo_journey` and shared — the
+  new path adds the `site_id == settings.beam_self_site_id` predicate that `/demo/journey` still
+  lacks; ISP-vs-company ladder; Null-Island guard), new authed `routers/onboarding.py`
+  (`POST /api/v1/onboarding/canary` 30/min + `/identity-feedback`; flag-off => 404; IP never in
+  the response body), config `beam_self_site_id` + `location_reveal_enabled` (default OFF),
+  migration `a1c7f4e082d5` (`idx_visitors_fingerprint` + `identity_feedback` table) —
+  live up/down/up round-tripped on a disposable DB. Phases 2-4 (React chat shell, Leaflet canary,
+  follow-ups) not started. Plan:
+  `process/features/onboarding-canary/active/canary-onboarding_10-08-26/canary-onboarding_PLAN_10-08-26.md`
+- reengagement lifecycle (no feature folder — plan lived outside `process/` at
+  `~/.claude/plans/`; shipped 11-08-26, commit `b2a7eef`) — user-inactivity lifecycle:
+  `users.last_active_at` touch in `get_current_user` + 3-stage daily sweep (remind at 7d /
+  auto-pause at 14d with `sites.auto_paused_at` + silent auto-resume on login / one-time
+  install nudge); resolution sweep now skips `tracking_enabled=false` sites; migration
+  `f4b9d2a71c68`; 7 `reengagement_*` flags default OFF; EVL 7/7 green incl. live migration
+  round-trip. Operator steps remaining: deploy → 1 week baseline → dry-run
+  `run_reengagement_once` → flag flip.
 - `campaigns-outreach` — AI segmentation, campaign planning, email + social outreach, drafts
 - `billing` — Gumroad MoR billing, plans/quotas, BYOK keys
 - `marketing-site` — public site: landing, blog, changelog, SEO (content sources in `marketing/`)

@@ -194,6 +194,23 @@ class Settings(BaseSettings):
     # ─── Referral program ("give quota, get quota") ───
     referrals_enabled: bool = False  # master switch for the hourly activation-reward job
 
+    # ─── Inactivity lifecycle (re-engagement reminder + auto-pause) ───
+    # An owner who installs the pixel and never logs back in still costs money:
+    # the 30-min resolution sweep, the enrichment waterfall, geoip and Gemini
+    # segmentation all keep running for nobody. This remind-then-pause ladder
+    # stops that spend without deleting anything — resuming is just logging in.
+    # NOTE: the activity touch itself (users.last_active_at) is deliberately NOT
+    # gated on this flag, so baseline data accrues before the operator flips it.
+    reengagement_enabled: bool = False  # master switch for the daily sweep job
+    reengagement_sweep_hour_utc: int = 14  # 1h after the daily digest
+    reengagement_remind_after_days: int = 7
+    reengagement_pause_after_days: int = 14
+    # Minimum gap between the reminder and the pause. Guards against pausing on
+    # the back of an email that never actually landed.
+    reengagement_pause_warning_min_days: int = 3
+    reengagement_install_nudge_enabled: bool = False
+    reengagement_install_nudge_after_days: int = 3
+
     # ─── Identity Graph (person-level from IP) ───
     rb2b_api_key: str = ""          # RB2B API Suite — IP → hashed email → person (US traffic)
     leadpipe_api_key: str = ""      # Leadpipe — pixel-based identity graph (500 free IDs)
@@ -383,6 +400,66 @@ class Settings(BaseSettings):
     # the candidate). Turning this on is a separate deliberate operator action,
     # same posture as agent_detection_enabled / company_graph_enabled.
     candidate_outreach_enabled: bool = False
+
+    # ─── Fingerprint v2 fallback (WS3, per-site Check 2) ───
+    # Check 2 (per-site fingerprint match) historically selected ONE column —
+    # fingerprint_v3 when the visitor carried an fp3, else fingerprint (fp2) —
+    # despite a docstring claiming it "falls back". Choosing a column is not a
+    # fallback: one query ran against one column, so an fp3-carrying visitor was
+    # structurally incapable of matching the fp2-only rows (measured fp3 coverage
+    # is 34%, so ~66% of stored rows were unreachable to them).
+    #
+    # ON: Check 2 runs a v3-then-v2 candidate loop (same shape as Check 3), so an
+    # fp3 carrier that misses on v3 gets a second pass against the fp2 column.
+    # OFF (default): byte-identical to the historical behavior — an fp3 carrier
+    # searches v3 only, an fp2-only visitor searches v2 only.
+    #
+    # This flag WIDENS the fp2 match pool. Measured fp2 uniqueness ratio is
+    # 0.63-0.79 — those hashes already collide — so widening the pool also widens
+    # the false-positive surface. Enable it LAST in the rollout, only AFTER the
+    # farbled-fingerprint gate (WS2) is on, so browsers that rotate their
+    # fingerprint every session are already excluded from Check 2.
+    fingerprint_v2_fallback_enabled: bool = False
+
+    # ─── Farbled-browser guards (WS2) ───
+    # Brave, Firefox resist_fingerprinting, Tor and CanvasBlocker randomize the
+    # canvas/webgl/audio/font APIs per session, so the fp2/fp3 hash a visitor
+    # presents ROTATES every session. Two detectors converge on
+    # visitors.has_unstable_fingerprint: a server-side mismatch check at ingest
+    # (vendor-independent) and the pixel's navigator.brave probe (events.farbled
+    # -> BOOL_OR). Both are named for the OBSERVED PROPERTY, never for a vendor.
+    #
+    # Guard 1 — block the cross-tenant graph write. Pure safety: a rotating hash
+    # written into beam_identity_graph (conflict key fingerprint+email) poisons
+    # Check 3 for EVERY other tenant, permanently. Nothing is lost by enabling
+    # this early — the only writes suppressed are ones that should never have
+    # existed.
+    farbled_graph_write_guard_enabled: bool = False
+
+    # Guard 2 — skip Check 2 (per-site fingerprint) and Check 3 (Beam graph) for
+    # a flagged visitor.
+    #
+    # NOT VISIBILITY-ONLY. Unlike cadence_bot_flag_enabled and
+    # ws2_classifier_enabled, this flag CHANGES RESOLUTION BEHAVIOR: it removes
+    # two match attempts, so the expected effect is a small DECREASE in
+    # identified counts. That is the intended trade — a stored rotating hash is
+    # one random draw into a pool whose measured uniqueness ratio is 0.63-0.79,
+    # so a "match" there is a collision, and a collision copies a STRANGER's
+    # email/name/city onto a visitor at confidence 0.75.
+    #
+    # What stays ON for a flagged visitor: Check 0 (svid server cookie), Check 1
+    # (captured email), and Checks 4-7 (paid IP-based providers). Farbling
+    # touches none of those inputs. visitors.do_not_resolve is NEVER set by this
+    # path — that is the GPC privacy flag, it is sticky and irreversible, and
+    # conflating "your browser randomizes canvas" with "you invoked GPC" would be
+    # factually wrong.
+    #
+    # Rollout order (strict): live-apply the migration -> ship the pixel and let
+    # signal accumulate -> flip farbled_graph_write_guard_enabled -> measure ->
+    # flip farbled_fingerprint_gate_enabled -> flip
+    # fingerprint_v2_fallback_enabled LAST (it widens the very fp2 pool this gate
+    # exists to keep rotating hashes out of).
+    farbled_fingerprint_gate_enabled: bool = False
 
     # ─── Identity co-op (Phase 1) ───
     # Turns the implicit cross-tenant identity graph into an opt-in data co-op:
@@ -852,6 +929,32 @@ class Settings(BaseSettings):
     maxmind_asn_db_path: str = ""
     maxmind_license_key: str = ""
 
+    # MaxMind GeoLite2-City: the geo sibling of the ASN DB above, same free key.
+    # When maxmind_city_db_path points at a GeoLite2-City.mmdb, resolve_geoip_full
+    # reads city / region / lat / lon / accuracy_radius from it locally and only
+    # falls back to ip-api.com when the DB is absent or the IP isn't in it. That
+    # removes ip-api's 45-req/minute ceiling, its plaintext HTTP, and its
+    # non-commercial terms from a now user-facing path (the onboarding location
+    # reveal), and adds a real per-IP accuracy radius that ip-api does not return.
+    #
+    # Empty by default so the feature is fully DORMANT: with no path set, every
+    # lookup short-circuits and geo resolution is byte-identical to today.
+    #
+    # To populate: get a free key at https://www.maxmind.com/en/geolite2/signup,
+    # set MAXMIND_LICENSE_KEY, then run BOTH downloaders and set BOTH paths:
+    #   python -m scripts.download_geolite2_city  -> MAXMIND_CITY_DB_PATH
+    #   python -m scripts.download_geolite2_asn   -> MAXMIND_ASN_DB_PATH
+    #
+    # KNOWN LIMITATIONS:
+    #   - Install City WITHOUT ASN and the network label DEGRADES. The ASN rung is
+    #     dead in every environment today (maxmind_asn_db_path is "" and no .mmdb
+    #     ships), so org/isp come solely from ip-api — and a City hit skips the
+    #     ip-api call entirely. One key fixes both; download both.
+    #   - GeoLite2 is city-level at best and is refreshed weekly; re-run the
+    #     downloaders on deploy or from a weekly cron or the data goes stale.
+    #   - The City DB carries no isp/org/as fields at all — that is the ASN DB's job.
+    maxmind_city_db_path: str = ""
+
     # ─── Waterfall enrichment providers ───
     ipinfo_token: str = ""          # IP → company/geolocation (50K free/month)
     hunter_api_key: str = ""        # Domain → employee emails (25 free/month)
@@ -1207,6 +1310,45 @@ class Settings(BaseSettings):
     # the official X API v2 call errors / returns non-200 / no bearer token.
     # Gated: empty key = fallback disabled. See enricher._enrich_twitter.
     twitterapi_io_api_key: str = ""
+
+    # ─── Onboarding canary / location reveal ───
+    # Beam's OWN marketing site id. The pixel on getbeam.fyi reports under this
+    # id (hardcoded today in 6 static HTML files); the onboarding canary joins a
+    # caller's browser fingerprint to visitor rows SCOPED TO THIS SITE ONLY.
+    # That scoping predicate is the anti-regression for the cross-tenant leak
+    # closed in 7e798ab — /demo/journey still matches fingerprints with no site
+    # scope, so a collision there can surface another tenant's pages.
+    beam_self_site_id: str = "site_90a488f43eac"
+    # Gates POST /api/v1/onboarding/canary and /identity-feedback. When false
+    # BOTH answer 404 — dormant, not revealed (the agent_fetch_beacon_enabled
+    # posture): a 403/501 would confirm the endpoint exists.
+    #
+    # WHY OFF: the reveal shows a user their own city on a map. Geo comes from
+    # the CALLER's IP (never from a matched Visitor row), so a fingerprint
+    # collision cannot disclose someone else's location — but that property is
+    # only as good as `resolve_client_ip` behaving in the deployed topology. A
+    # CF-edge IP would pin every user in a datacenter.
+    #
+    # ROLLOUT ORDER (do not reorder):
+    #   1. Ship the widened ip-api field mask + the new `geoip2:` Redis key with
+    #      this flag OFF. Soak a full 24h cache cycle and confirm /ingest still
+    #      writes identical country_code/region. The mask is deliberately NOT
+    #      flagged — same request, same host, only more of the reply parsed.
+    #   2. Enable in staging. Eyeball the pin on residential, corporate, and
+    #      mobile/CGNAT networks; confirm the returned city matches a known
+    #      network (this is the resolve_client_ip check).
+    #   3. Prod.
+    #
+    # KNOWN LIMITATIONS:
+    #   - IP geo is city-level at best; mobile CGNAT can land a different city.
+    #     The UI must keep the accuracy circle and the honesty caption.
+    #   - `maxmind_asn_db_path` and `ipinfo_token` both default to "". With the
+    #     ASN rung dead the network label falls entirely to ip-api org/isp.
+    #     Verify the deployed env before promising a network line.
+    #   - ip-api's free tier is plaintext HTTP with non-commercial terms. It is
+    #     already in the ingest path; this promotes it to a user-facing moment.
+    #     Migrating to a local GeoLite2-City DB removes both concerns.
+    location_reveal_enabled: bool = False
 
     # ─── Rate limits ───
     default_daily_resolution_budget: int = 50   # Free tier: 50 visitor identifications/day per site (BYOK = unlimited)
