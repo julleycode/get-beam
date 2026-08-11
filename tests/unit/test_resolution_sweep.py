@@ -32,13 +32,23 @@ class _FakeResult:
         return self._items
 
 
-def _fake_session_factory(sites):
-    """async_session stand-in: any execute() returns the site list."""
+def _fake_session_factory(sites, captured: list | None = None):
+    """async_session stand-in: any execute() returns the site list.
+
+    When ``captured`` is passed, every statement handed to execute() is appended
+    to it so a test can assert on the query the sweep actually built.
+    """
 
     @asynccontextmanager
     async def factory():
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=_FakeResult(sites))
+
+        async def _execute(stmt, *args, **kwargs):
+            if captured is not None:
+                captured.append(stmt)
+            return _FakeResult(sites)
+
+        db.execute = _execute
         yield db
 
     return factory
@@ -104,3 +114,41 @@ async def test_sweep_proceeds_when_lock_unsupported(monkeypatch):
 
     assert run.await_count == 2
     release.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sweep_query_excludes_paused_sites(monkeypatch):
+    """A paused site (manual toggle OR inactivity auto-pause) must not have its
+    backlog drained — that would keep burning resolver/enrichment/Gemini credits
+    for a site whose ingest is already 204ing. `tracking_enabled` is therefore a
+    second gate alongside `auto_identify_enabled` in the sweep's site query."""
+    captured: list = []
+    monkeypatch.setattr(
+        resolution_runner, "async_session", _fake_session_factory(_sites(1), captured)
+    )
+    monkeypatch.setattr(
+        resolution_runner,
+        "run_resolution_for_site",
+        AsyncMock(
+            return_value={
+                "processed": 0,
+                "resolved": 0,
+                "enriched": 0,
+                "skipped_plan_limit": 0,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        resolution_runner, "_try_acquire_sweep_lock", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(resolution_runner, "_release_sweep_lock", AsyncMock())
+
+    await resolution_runner.run_resolution_sweep()
+
+    assert captured, "expected the sweep to issue a site query"
+    sql = str(captured[0]).lower()
+    assert "auto_identify_enabled" in sql
+    assert "tracking_enabled" in sql, (
+        "the sweep must filter on tracking_enabled; without it a paused site "
+        "keeps burning provider credits draining its existing backlog"
+    )

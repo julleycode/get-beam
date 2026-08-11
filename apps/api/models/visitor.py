@@ -71,6 +71,23 @@ class Visitor(Base):
     do_not_resolve: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    # WS2: this visitor's browser randomizes the fingerprinting surface
+    # (canvas/webgl/audio/fonts), so the fp2/fp3 hash it presents ROTATES per
+    # session. Named for the OBSERVED PROPERTY, never the vendor — Brave,
+    # Firefox resist_fingerprinting, Tor and CanvasBlocker all land here, so an
+    # `is_brave` column would be a lie within a quarter.
+    #
+    # Two independent writers converge on this column: the server-side mismatch
+    # detector at ingest (routers/events.py) writes it directly, and the pixel's
+    # navigator.brave probe arrives via events.farbled -> BOOL_OR in the
+    # aggregator. Sticky, same as do_not_resolve: a later clean recompute must
+    # not launder a known-rotating fingerprint back into Check 2/3.
+    #
+    # This is NOT a privacy flag and must never be conflated with
+    # do_not_resolve — see the farbled_* comments in config.py.
+    has_unstable_fingerprint: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False
+    )
     # EvalLayer Phase 05: True for a synthetic Visitor row created by the
     # agent-company-resolution sweep (visitor_id = f"agent:{agent_visit.id}").
     # Every human-facing query excludes these via human_only_visitor_filter()

@@ -2,7 +2,35 @@
 
 import pytest
 
-from apps.api.services.browser_breakdown import _coverage_status, classify_browser
+from apps.api.services.browser_breakdown import (
+    CHROMIUM_FAMILY,
+    FARBLED_FAMILY,
+    _coverage_status,
+    classify_browser,
+    compute_browser_breakdown,
+)
+
+_CHROME_UA = "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/120.0 Safari/537.36"
+_FIREFOX_UA = "Mozilla/5.0 (Windows) Gecko/20100101 Firefox/121.0"
+
+
+class _Result:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _FakeSession:
+    """Returns canned rows for the two SELECTs `compute_browser_breakdown` runs,
+    in order: latest-UA-per-visitor, then the per-visitor row."""
+
+    def __init__(self, ua_rows, v_rows):
+        self._queued = [ua_rows, v_rows]
+
+    async def execute(self, _stmt):
+        return _Result(self._queued.pop(0))
 
 
 @pytest.mark.parametrize(
@@ -66,3 +94,92 @@ def test_classify_browser_chrome_not_mistaken_for_safari() -> None:
 )
 def test_coverage_status(total: int, ratio: float | None, status: str) -> None:
     assert _coverage_status(total, ratio)[0] == status
+
+
+# ── Privacy opt-out visibility (WS1a) ────────────────────────────────────────
+
+
+def _rows(*specs):
+    """(visitor_id, identity_status, country_code, do_not_resolve, unstable)."""
+    return [
+        (vid, status, "US", optout, unstable)
+        for vid, status, optout, unstable in specs
+    ]
+
+
+async def _run(ua_rows, v_rows):
+    return await compute_browser_breakdown(_FakeSession(ua_rows, v_rows), "site_1")
+
+
+def _browser(result, name):
+    return next(b for b in result["browsers"] if b["browser"] == name)
+
+
+@pytest.mark.asyncio
+async def test_optout_counted_per_browser() -> None:
+    out = await _run(
+        [("v1", _FIREFOX_UA), ("v2", _FIREFOX_UA), ("v3", _CHROME_UA)],
+        _rows(
+            ("v1", "identified", True, False),
+            ("v2", "anonymous", True, False),
+            ("v3", "anonymous", False, False),
+        ),
+    )
+
+    ff = _browser(out, "Firefox")
+    assert ff["captured"] == 2
+    assert ff["opted_out"] == 2
+    assert ff["optout_rate"] == 1.0
+
+    chrome = _browser(out, CHROMIUM_FAMILY)
+    assert chrome["opted_out"] == 0
+    assert chrome["optout_rate"] == 0.0
+
+    assert out["privacy_optout"] == {"visitors": 3, "opted_out": 2, "rate": 0.6667}
+
+
+@pytest.mark.asyncio
+async def test_optout_rate_rounds_to_four_places() -> None:
+    # 1/3 must round to the existing 4-dp convention, not float-dump.
+    out = await _run(
+        [(f"v{i}", _CHROME_UA) for i in range(3)],
+        _rows(
+            ("v0", "anonymous", True, False),
+            ("v1", "anonymous", False, False),
+            ("v2", "anonymous", False, False),
+        ),
+    )
+    assert _browser(out, CHROMIUM_FAMILY)["optout_rate"] == 0.3333
+    assert out["privacy_optout"]["rate"] == 0.3333
+
+
+@pytest.mark.asyncio
+async def test_no_visitors_does_not_divide_by_zero() -> None:
+    out = await _run([], [])
+    assert out["browsers"] == []
+    assert out["privacy_optout"] == {"visitors": 0, "opted_out": 0, "rate": 0.0}
+
+
+@pytest.mark.asyncio
+async def test_farbled_relabel_only_fires_for_flagged_chrome() -> None:
+    out = await _run(
+        [("v1", _CHROME_UA), ("v2", _CHROME_UA), ("v3", _FIREFOX_UA)],
+        _rows(
+            ("v1", "anonymous", False, True),  # flagged → relabelled
+            ("v2", "anonymous", False, False),  # plain Chrome
+            ("v3", "anonymous", False, True),  # flagged, but not Chrome
+        ),
+    )
+    names = {b["browser"] for b in out["browsers"]}
+    assert FARBLED_FAMILY in names
+    assert _browser(out, FARBLED_FAMILY)["captured"] == 1
+    assert _browser(out, CHROMIUM_FAMILY)["captured"] == 1
+    # A flagged Firefox stays Firefox — the label describes the observed
+    # property on the Chromium bucket, it is not a vendor claim.
+    assert _browser(out, "Firefox")["captured"] == 1
+
+
+@pytest.mark.asyncio
+async def test_chromium_bucket_string_is_stable() -> None:
+    # The relabel compares against this exact string; pin it.
+    assert classify_browser(_CHROME_UA) == CHROMIUM_FAMILY == "Chrome"

@@ -346,6 +346,11 @@ async def update_site(
         site.hot_alert_enabled = body.hot_alert_enabled
     if body.tracking_enabled is not None:
         site.tracking_enabled = body.tracking_enabled
+        # Any EXPLICIT owner write clears the auto-pause stamp, in both
+        # directions. Re-enabling obviously ends the auto-pause; pausing by hand
+        # CONVERTS it into a manual pause, so the next login doesn't
+        # surprise-resume a site the owner deliberately switched off.
+        site.auto_paused_at = None
     if body.internal_damping_enabled is not None:
         site.internal_damping_enabled = body.internal_damping_enabled
     if body.consent_mode is not None:

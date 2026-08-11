@@ -162,8 +162,15 @@
   // Audio-stack probe: render a fixed oscillator through a compressor offline and
   // sum the tail. Differences in the DSP implementation produce a stable per-
   // device value. Async — hence the callback. sampleRate is pinned so the value
-  // does not move with the machine's audio config. Any failure yields "" (a
-  // stable value: unsupported/blocked is itself a per-browser constant).
+  // does not move with the machine's audio config.
+  //
+  // cb(value, reliable). Every "" here is a DETERMINISTIC per-browser constant
+  // (no OfflineAudioContext, or a throw) and is still safe to hash — EXCEPT the
+  // 1s watchdog below, which is a race: on a loaded machine the render can miss
+  // the deadline in one session and make it in the next, producing two different
+  // fp3 values for the SAME browser with no farbling involved. That path alone
+  // reports reliable === false and the caller then drops fp3 for the session,
+  // rather than feeding the server-side mismatch detector pure noise.
   function audioFp(cb) {
     try {
       var C = window.OfflineAudioContext || window.webkitOfflineAudioContext;
@@ -182,7 +189,7 @@
       cmp.connect(ctx.destination);
       osc.start(0);
       var done = false;
-      function finish(v) { if (!done) { done = true; cb(v); } }
+      function finish(v, ok) { if (!done) { done = true; cb(v, ok); } }
       ctx.oncomplete = function(e) {
         try {
           var d = e.renderedBuffer.getChannelData(0), sum = 0;
@@ -191,7 +198,7 @@
         } catch(err) { finish(""); }
       };
       ctx.startRendering();
-      setTimeout(function() { finish(""); }, 1000);
+      setTimeout(function() { finish("", false); }, 1000);
     } catch(e) { cb(""); }
   }
 
@@ -247,7 +254,13 @@
   var fingerprint3 = null;
   whenBody(function() {
     var f = fontFp();
-    audioFp(function(a) {
+    audioFp(function(a, ok) {
+      // Watchdog fired: the audio value is a timing artifact, not a property of
+      // this browser. Emit no fp3 at all this session — a wrong fp3 is worse
+      // than a missing one, because the server reads an fp3 change as evidence
+      // of farbling and would gate a perfectly ordinary visitor out of
+      // identification. Deterministic-empty paths (ok !== false) still hash.
+      if (ok === false) return;
       fingerprint3 = "fp3_" + hash128(fpBase + "|" + f + "|" + a);
     });
   });
@@ -269,6 +282,9 @@
     // WS2 signals. AS is assigned only AFTER the consent gate (G7) — falsy
     // until then, so nothing is collected or attached pre-gate.
     if (AS) evt._asig = AS();
+    // Farbled-browser marker. Absent until the async probe resolves; the server
+    // sticky-ORs events.farbled into visitors.has_unstable_fingerprint.
+    if (FBL) evt._fb = 1;
     evt.optout = OPTOUT;
     // Idempotency key — server drops duplicate event_ids (retry/replay safe).
     evt.event_id = uuid();
@@ -526,6 +542,25 @@
   // d is a per-event DELTA (reset on read) so the sweep's cross-event sum is a
   // true total, not a running tally counted repeatedly.
   var AS = function() { var s = { w: AWD, h: AHL, p: APM, d: ADC, c: clickCount }; ADC = 0; return s; };
+
+  // --- Farbled-browser probe (WS2 Detector B, secondary) ---
+  // Also strictly AFTER the GATED/consentDecision assignment (G7). Labels the
+  // vendor and gives an EARLY signal; the primary detector is server-side
+  // fingerprint mismatch, which needs no pixel bytes and catches Firefox RFP /
+  // Tor / CanvasBlocker too.
+  //
+  // Non-blocking by construction: the promise is never awaited and nothing reads
+  // FBL synchronously, so flush() is untouched. Early events in a session carry
+  // no _fb — the same async window already documented for _fp3 — and the server
+  // sticky-ORs, so a later batch sets it.
+  //
+  // This is a SIBLING signal, never a fingerprint component: folding it into
+  // fpParts()/fpBase would rotate every fp2 stored on disk, for every tenant.
+  var FBL = 0;
+  try {
+    var nb = navigator.brave;
+    if (nb && nb.isBrave) nb.isBrave().then(function (v) { FBL = v ? 1 : 0; });
+  } catch (e) {}
 
   // --- Per-site capture config (Phase 3, SPEC AC12) ---
   // The more consent-sensitive mechanisms (mailto, URL-param) are opt-OUT-able

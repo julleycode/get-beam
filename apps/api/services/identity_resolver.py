@@ -20,6 +20,7 @@ patch targets keep working after the split.
 import asyncio
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import httpx
 import structlog
@@ -418,16 +419,55 @@ class IdentityResolver(
         except Exception as exc:
             logger.warning("prior_signal_email_check_failed", error=str(exc))
 
+        # ── WS2 Guard 2: farbled browsers skip BOTH fingerprint checks ──
+        # A browser that randomizes canvas/webgl/audio/fonts presents a NEW hash
+        # every session, so the hash stored on this visitor is one random draw
+        # into a pool whose measured uniqueness ratio is 0.63-0.79. A "match"
+        # there is a collision, not a recognition, and a collision copies a
+        # stranger's email/name/city onto this visitor at confidence 0.75.
+        #
+        # One `return None` skips Check 2 AND Check 3, because Check 3 is the
+        # last statement in this method. Control returns to resolve(), which
+        # treats None as "no prior signal" and proceeds into the paid waterfall —
+        # byte-identical to today's no-match path. Checks 0 (svid cookie) and 1
+        # (captured email) have already run above and are deliberately kept:
+        # farbling touches neither a server cookie nor a typed-in address.
+        #
+        # This never sets visitor.do_not_resolve — that is the GPC privacy flag
+        # and conflating the two would be factually wrong and irreversible.
+        if settings.farbled_fingerprint_gate_enabled and getattr(
+            visitor, "has_unstable_fingerprint", False
+        ):
+            logger.info(
+                "fingerprint_checks_skipped_unstable", visitor_id=visitor.visitor_id[:8]
+            )
+            return None
+
         # ── Check 2: Fingerprint match against already-identified visitors ──
         # Prefer the fp3 hash (base signals + installed fonts + audio render): it
         # carries more entropy than fp2, so a v3 hit is a stronger claim and gets
-        # the higher confidence. Falls back to the fp2 column for visitors stored
-        # before fp3 existed, older pixel builds, and the async window before fp3
-        # resolves on the client.
+        # the higher confidence.
+        #
+        # Candidate order is v3 first, then fp2 — the same v3-then-v2 loop shape as
+        # Check 3 (_check_beam_identity_network). The fp2 SECOND pass for a visitor
+        # that already carries an fp3 is gated on fingerprint_v2_fallback_enabled:
+        # with the flag OFF this behaves byte-identically to the historical
+        # either/or selection (fp3 carrier searches v3 only; an fp2-only visitor
+        # searches v2 only). With the flag ON, an fp3 carrier that misses on v3
+        # also gets checked against the fp2 column, reaching the rows stored before
+        # fp3 existed, older pixel builds, and the async window before fp3 resolves
+        # on the client.
         fp_v3 = getattr(visitor, "fingerprint_v3", None)
-        fp_col = Visitor.fingerprint_v3 if fp_v3 else Visitor.fingerprint
-        fp_val = fp_v3 or getattr(visitor, "fingerprint", None)
-        if fp_val:
+        fp_v2 = getattr(visitor, "fingerprint", None)
+        candidates: list[tuple[Any, str, bool]] = []
+        if fp_v3:
+            candidates.append((Visitor.fingerprint_v3, fp_v3, True))
+            if fp_v2 and settings.fingerprint_v2_fallback_enabled:
+                candidates.append((Visitor.fingerprint, fp_v2, False))
+        elif fp_v2:
+            candidates.append((Visitor.fingerprint, fp_v2, False))
+
+        for fp_col, fp_val, is_v3 in candidates:
             try:
                 fp_result = await self.db.execute(
                     select(IdentifiedVisitor)
@@ -451,6 +491,8 @@ class IdentityResolver(
                 if matched and matched.email and await self._email_suppressed(matched.email):
                     # Same do_not_process guard as Check 0: the matched person may
                     # have opted out after being identified; don't re-copy them.
+                    # Evaluated PER CANDIDATE — a suppressed v3 hit must not stop
+                    # the v2 pass from running.
                     logger.info(
                         "fingerprint_match_skipped_suppressed",
                         visitor_id=visitor.visitor_id[:8],
@@ -462,7 +504,7 @@ class IdentityResolver(
                         "prior_signal_fingerprint_match",
                         visitor_id=visitor.visitor_id[:8],
                         matched_visitor=matched.visitor_id[:8],
-                        fp_version=3 if fp_v3 else 2,
+                        fp_version=3 if is_v3 else 2,
                     )
                     # Copy identity to this visitor
                     return await self._save_identified(
@@ -476,7 +518,7 @@ class IdentityResolver(
                             # fingerprint match — below the 0.90 deterministic
                             # svid path either way; fp3 carries more entropy than
                             # fp2, so a v3 hit is a slightly stronger claim.
-                            "confidence_score": 0.80 if fp_v3 else 0.75,
+                            "confidence_score": 0.80 if is_v3 else 0.75,
                         },
                         "fingerprint_match",
                     )
@@ -1283,6 +1325,19 @@ class IdentityResolver(
         fp = getattr(visitor, "fingerprint", None)
         email = data.get("email")
         if not fp or not email:
+            return False
+        # WS2 Guard 1 — never write a ROTATING fingerprint into the cross-tenant
+        # graph. This is the highest-value line in WS2: the conflict key here is
+        # (fingerprint, email), so one random per-session hash from a farbled
+        # browser poisons Check 3 for EVERY other tenant, permanently.
+        #
+        # Returning False rather than raising or short-circuiting later is
+        # deliberate: _save_identified uses this return value to decide whether
+        # to credit an identity-coop contribution, and a graph row that was never
+        # written must never be credited.
+        if settings.farbled_graph_write_guard_enabled and getattr(
+            visitor, "has_unstable_fingerprint", False
+        ):
             return False
         # Write-boundary erasure guard. Enforced HERE, not only upstream: this
         # is the sole write path into the cross-tenant graph, so a person who
