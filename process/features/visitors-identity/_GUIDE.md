@@ -4,7 +4,7 @@
 
 ## Scope
 
-The core visitor pipeline: raw pixel events → visitor aggregation + intent scoring → identity resolution waterfall (person-level from IP/fingerprint) → profile enrichment (job, company, socials) → optional OSINT deep scan. Covers provider budgets/caps, the owned identity graph, and privacy gates (GPC/DNT, suppression, do_not_resolve).
+The core visitor pipeline: raw pixel events → visitor aggregation + intent scoring → identity resolution waterfall (person-level from IP/fingerprint) → profile enrichment (job, company, socials) → optional OSINT deep scan. Covers provider budgets/caps, the owned identity graph, and privacy gates (GPC/DNT, suppression, sticky `do_not_resolve`, and site-owner explicit Clear via `POST …/clear-privacy-hold`).
 
 ## Key Source Files
 
@@ -15,7 +15,13 @@ The core visitor pipeline: raw pixel events → visitor aggregation + intent sco
 - `apps/api/services/identity_signals.py` — SendGrid open/click corroborating signals: `record_signal()` (4 write gates), `decay_confidence()`, `corroborate_identity()` (join-only, zero `IdentifiedVisitor` write access) (owned-data-layer, 23-07-26, `identity_signals_enabled` — default OFF)
 - `apps/api/models/company_graph.py` — `CompanyGraphNode`, durable cross-tenant company-from-IP store
 - `apps/api/models/identity_signal.py` — `IdentitySignal`, one row per SendGrid open/click corroborating event (PII ciphertext + blind index, same pattern as `beam_identity_graph`)
-- `apps/api/routers/visitors.py` (+ `visitors_helpers.py`) — list/stats/identify endpoints, `_compute_visitor_stat_counts`
+- `apps/api/routers/visitors.py` (+ `visitors_helpers.py`) — list/stats/identify endpoints,
+  `_compute_visitor_stat_counts`, `POST /{site_id}/{visitor_id}/clear-privacy-hold` (Option D,
+  09-08-26 — flips sticky `do_not_resolve` only; audited; no un-suppress / no Identify bypass)
+- `apps/api/schemas/visitors.py` — `VisitorOut.do_not_resolve: bool = False` (list/detail)
+- `apps/web/src/app/dashboard/visitors/page.tsx` — Privacy hold UI + confirm Clear
+- `apps/web/src/lib/api.ts` / `api-types.ts` — `clearPrivacyHold`, `Visitor.do_not_resolve?`
+- `tests/integration/test_privacy_hold_clear.py` — 8 Fully-Automated clear/auth/audit/no-unsuppress gates
 - `apps/api/models/visitor.py` — `Visitor`, `IdentifiedVisitor`; `apps/api/models/enrichment.py` — `EnrichmentProfile`
 - `apps/api/models/beam_identity.py` — `BeamIdentityNode` (cross-tenant identity graph); gained nullable `city`/`region`/`country` (owned-data-layer, 23-07-26)
 - `apps/api/tasks/resolution_tasks.py`, `apps/api/tasks/aggregation_tasks.py` — sweeps
@@ -50,7 +56,13 @@ autofill, shadow-DOM/same-origin-iframe capture feeding `visitor_emails`), shipp
 `completed/first-party-capture_24-07-26/`. Resolved backlog note:
 `backlog/first-party-capture-deferred-gates_NOTE_24-07-26.md`.
 
-Open followups (not blocking either archived plan): 5 unrelated pre-existing integration test
+Privacy-hold Clear (Option D): archived
+`completed/privacy-hold-clear_09-08-26/` (10-08-26, WITH_GAPS). Backend EVL green; Hybrid e2e
++ counsel copy still open — see
+`backlog/privacy-hold-clear-e2e-auth-harness_NOTE_09-08-26.md` and
+`backlog/privacy-copy-counsel-review_NOTE_07-08-26.md`.
+
+Open followups (not blocking archived plans): 5 unrelated pre-existing integration test
 failures (evallayer/handoff-detection, intent-signals, ai-referral — cross-feature triage needed)
 and a conftest Redis-isolation hardening recommendation. See
 `backlog/post-docker-gate-followups_NOTE_24-07-26.md`.

@@ -8,7 +8,7 @@ date: 21-07-26
 
 # Beam - All Tests
 
-Last updated: 21-07-26
+Last updated: 10-08-26
 
 Attach this file first when the task involves testing, verification, or test debugging.
 
@@ -115,3 +115,4 @@ pytest config: `pyproject.toml` — `asyncio_mode=auto`, markers `unit` / `integ
 - No automated test hits Gemini with a real key (deliberate — quota); real-key smoke is manual: ask `/ai/ask` a stats question, check `gemini_tool_call` in structlog
 - e2e specs cover dashboard/blog/onboarding/social/visitors/companies — no e2e for billing or exports
 - ClickHouse paths have no dedicated integration tests (events tested against the ingest API layer)
+- **Privacy-hold Clear Hybrid e2e** (`apps/web/e2e/visitors.spec.ts` describe "Visitors — privacy hold clear") is written but `test.skip`-guarded on `E2E_PRIVACY_HOLD_VISITOR` until the shared **Clerk Playwright auth-harness** can seed an authenticated dashboard session with a `do_not_resolve=true` visitor. Backend proof is Fully-Automated: `tests/integration/test_privacy_hold_clear.py` (8). Stub: `process/features/visitors-identity/backlog/privacy-hold-clear-e2e-auth-harness_NOTE_09-08-26.md`.

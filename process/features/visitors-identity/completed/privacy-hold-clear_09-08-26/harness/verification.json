@@ -1,0 +1,52 @@
+{
+  "artifact": "verification.json",
+  "phase": "EVL",
+  "role": "orchestrator-owned post-DONE confirmation run (vc-tester)",
+  "plan": "process/features/visitors-identity/completed/privacy-hold-clear_09-08-26/privacy-hold-clear_PLAN_09-08-26.md",
+  "date": "2026-08-10",
+  "evl_verdict": "PASS",
+  "closeout_classification": "WITH_GAPS",
+  "archived": true,
+  "update_process": "2026-08-10",
+  "db_pin": {
+    "DATABASE_URL": "postgresql+asyncpg://retarget:retarget_dev@localhost:5433/retarget_agent_test",
+    "REDIS_URL": "redis://localhost:6379/15",
+    "note": "Pinned to local docker infra-postgres-1 (localhost:5433). Used conftest test-isolation DB retarget_agent_test (drop_all/create_all safe) instead of retarget_agent to avoid clobbering local dev data. Production Supabase URL from .env NEVER used.",
+    "prod_supabase_used": false
+  },
+  "python": ".venv/Scripts/python.exe (Windows) — plan cites .venv/bin/python (Linux); mapped to Windows venv path",
+  "gate_reruns": [
+    {
+      "gate": "AC-4/5/7/9/10/11 — backend endpoint behavior",
+      "command": ".venv/Scripts/python.exe -m pytest tests/integration/test_privacy_hold_clear.py -q",
+      "result": "PASS",
+      "detail": "8 passed in 20.29s",
+      "note": "Redis async-GC 'Event loop is closed' at teardown is documented noise (all-tests.md), not a failure; exit code 0."
+    },
+    {
+      "gate": "AC-8 — aggregator stickiness / re-optout re-stick (regression)",
+      "command": ".venv/Scripts/python.exe -m pytest tests/integration/test_optout_flow.py -q",
+      "result": "PASS",
+      "detail": "4 passed in 9.25s"
+    },
+    {
+      "gate": "AC-12 — pixel untouched (regression)",
+      "command": ".venv/Scripts/python.exe -m pytest tests/unit/test_pixel.py tests/unit/test_pixel_fingerprint.py -q",
+      "result": "PASS",
+      "detail": "77 passed in 0.13s"
+    },
+    {
+      "gate": "web lint (optional)",
+      "command": "cd apps/web && npm run lint",
+      "result": "PASS",
+      "detail": "next lint — No ESLint warnings or errors"
+    }
+  ],
+  "known_gaps_conditional": [
+    "AC-1/2/3/6 — Playwright e2e dashboard legs blocked on shared Clerk auth-harness (recurring repo-wide gap). Not run; CONDITIONAL per validate-contract; NOT an EVL failure.",
+    "AC-13 (legal-adequacy) — counsel review, backlog privacy-copy-counsel-review_NOTE_07-08-26.md. CONDITIONAL residual."
+  ],
+  "e2e_run": false,
+  "e2e_reason": "Known Clerk Playwright auth-harness gap — per EVL instruction, do not fail EVL solely on this documented gap.",
+  "status": "DONE"
+}

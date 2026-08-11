@@ -1,3 +1,11 @@
+---
+name: context:all-context
+description: "Root context entrypoint — architecture, API surface, conventions, env, feature routing"
+keywords: architecture, api, visitors, privacy, do_not_resolve, clear-privacy-hold, identity, monorepo, env, conventions, routing
+related: [context:all-tests, context:all-planning]
+date: 10-08-26
+---
+
 # Beam - All Context
 
 Last updated: 2026-08-11
@@ -71,6 +79,8 @@ For most substantial tasks:
 | debugging backend/tests | `all-context.md`, `tests/all-tests.md` | the failing service/router source |
 | AI / agent-layer work | `all-context.md` (AI Layer section below) | `apps/api/services/gemini_client.py`, `apps/api/agents/` |
 | Beam Lab / edge AI detection | `docs/beam-lab-resume.md` | `docs/beam-lab-team-brief.md` (team talk), `docs/agent-detection-architecture.md` §5d, `docs/journals/260801-0051-beam-lab-soft-serve-bfm.md`, `infra/cloudflare/beam-lab/` |
+| Supabase prod DB (`retarget-agent`) | `docs/supabase-retarget-agent.md` | MCP + IDE: project ref **`hylcleqxlkdblibpdhhm`**. Never use `buildtolaunch` / `supabase-fuchsia-book`. |
+| Agent fetch beacon Worker (splittrip) | `infra/cloudflare/agent-beacon-worker/README.md` | Cloudflare account Worker **`beam-agent-beacon-splittrip`** (id `9e74d042…`); source `infra/cloudflare/agent-beacon-worker/`; deploy `npx wrangler deploy --env splittrip`. MCP get/build/push MUST use this Worker — not `quota-tracker`. |
 | visitor identity / enrichment | `all-context.md` | `process/features/visitors-identity/_GUIDE.md` |
 | segments / campaigns / outreach | `all-context.md` | `process/features/campaigns-outreach/_GUIDE.md` |
 | billing / quotas | `all-context.md` | `process/features/billing/_GUIDE.md` |
@@ -141,6 +151,9 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
     (G3's nonexistent `test_ip_org_domain_map.py`; G8/G10 flag-off vacuity precondition).
     Remaining = 3 operator steps (prod ingest `--apply --allow-remote`, flag flips, source-mix
     monitoring): `active/ip-org-database_07-08-26/ip-org-prod-enable_RUNBOOK_07-08-26.md`.
+    **Local dev enable (10-08-26):** 6 flags flipped in `.env`, CAIDA/RIR/RPKI/APNIC ingested on
+    `localhost:5433`, probe PASS — step-by-step in `docs/ip-org-local-enable.md` +
+    `active/ip-org-database_07-08-26/LOCAL_ENABLE_NOTES_vi.md`.
     Known-gaps + follow-ups: `backlog/ip-org-followups_NOTE_07-08-26.md` (extended 07-08-26:
     post-swap ANALYZE, G8 tail margin, eyeball token gaps); new source idea:
     `backlog/rb2b-ip-to-company-eyeball-source_NOTE_07-08-26.md`.
@@ -151,6 +164,11 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
     Kept in `active/` — see the "Migration head status" note above for the still-pending
     Alembic re-chain this plan carries. Known-gap:
     `process/features/visitors-identity/backlog/resolver-privacy-relay-callsite-coverage_NOTE_07-08-26.md`.
+  - `privacy-hold-clear_09-08-26` — **EXECUTED + EVL PASS + archived 10-08-26 (WITH_GAPS).**
+    Option D: site-owner explicit Clear for sticky `do_not_resolve`. See
+    `completed/privacy-hold-clear_09-08-26/` and §Privacy-Hold Clear below. Open residuals:
+    `backlog/privacy-hold-clear-e2e-auth-harness_NOTE_09-08-26.md` (Clerk e2e AC-1/2/3/6),
+    `backlog/privacy-copy-counsel-review_NOTE_07-08-26.md` (AC-13 counsel).
   - `roster-precision_07-08-26` — **SPLIT after PVL cycle 4; Part A SHIPPED + EVL-green,
     UNCOMMITTED.** Makes the Hunter/Apollo company-level pick *informed* instead of arbitrary
     (Hunter already returns and bills for 5 employees; `hunter.py:56` keeps `emails[0]` and discards
@@ -346,6 +364,8 @@ getbeam/
 - **Identity/enrichment providers:** RB2B, Leadpipe, Capturify, People Data Labs, ipinfo, Hunter, Apollo, Proxycurl, TwitterAPI.io — all waterfall-gated, budget-capped, toggleable via env
 - **Billing:** Gumroad (active MoR, URL-token webhook), Stripe + Lemon Squeezy legacy
 - **Hosting:** Railway (api), pixel via CDN; browser automation via Playwright (scraping + e2e)
+- **Supabase (prod Postgres, pinned 09-08-26):** project **`retarget-agent`**, ref/id **`hylcleqxlkdblibpdhhm`**, region `ap-southeast-1`, API `https://hylcleqxlkdblibpdhhm.supabase.co`, host `db.hylcleqxlkdblibpdhhm.supabase.co`. MCP `project_id` MUST be this ref. Local Docker PG remains `localhost:5433` for non-prod. IDE connect steps: `docs/supabase-retarget-agent.md`.
+- **Cloudflare Worker (agent fetch beacon, pinned 09-08-26):** live script name **`beam-agent-beacon-splittrip`** (id `9e74d04215224c4ab2cecc3e65939d21`), source `infra/cloudflare/agent-beacon-worker/`, wrangler env `splittrip`, route `splittrip.nhantown.com/*`. Use this name for MCP Workers get/list/builds and for `wrangler deploy --env splittrip`. Do not target `quota-tracker`. Details: `infra/cloudflare/agent-beacon-worker/README.md`.
 
 ## AI Layer (agentic-lite, shipped 20-07-26)
 
@@ -365,6 +385,10 @@ Consumers: `agents/segmenter.py` + `agents/campaign_planner.py` (JSON repair), `
 Detects AI-agent visits (GPTBot, PerplexityBot, ClaudeBot, etc.) at ingest and keeps them
 structurally separate from human Visitor/Event data, never as a targetable outreach contact:
 
+- **Edge beacon Worker (customer-site path):** Cloudflare Worker **`beam-agent-beacon-splittrip`** —
+  source `infra/cloudflare/agent-beacon-worker/` (`wrangler.toml` base name `beam-agent-beacon` +
+  `--env splittrip`). This is the account script to get/build/push for fetch-beacon data on
+  `splittrip.nhantown.com`. Separate from Beam Lab Pages (`infra/cloudflare/beam-lab/`).
 - `apps/api/services/agent_classifier.py` — UA-pattern classifier, drop-vs-classify token split
 - `apps/api/models/agent_visit.py` — dedicated `agent_visits` rollup table (one row per
   site/vendor/token tuple), never joined with `Visitor`/`Event`
@@ -517,6 +541,32 @@ from existing outbound email engagement:
   unverified against a real payload (Agent-Probe tier); account-level SendGrid tracking-settings
   override behavior needs-live-provider, not probed per policy — see
   `process/features/visitors-identity/backlog/post-docker-gate-followups_NOTE_24-07-26.md`.
+
+## Privacy-Hold Clear (Option D, shipped 09-08-26 — archived 10-08-26 WITH_GAPS)
+
+Gives site owners a deliberate, audited way out of sticky GPC/DNT `do_not_resolve` without
+loosening aggregator stickiness, suppression, or Identify gates:
+
+- **API:** `POST /api/v1/visitors/{site_id}/{visitor_id}/clear-privacy-hold` in
+  `apps/api/routers/visitors.py` — same site gate as `/resolve` / `set_internal_override`
+  (`get_current_user` + `_verify_site_access` + `human_only_visitor_filter`); writes ONLY
+  `Visitor.do_not_resolve = False`; returns `{visitor_id, do_not_resolve: false, cleared}`;
+  audits `privacy_hold_cleared` (site_id, visitor_id[:8], user_id, was_held — no PII).
+  Idempotent on non-held rows (`cleared: false`). Does **not** remove suppression-list entries
+  and does **not** auto-Identify.
+- **Schema:** `VisitorOut.do_not_resolve: bool = False` in `apps/api/schemas/visitors.py`
+  (additive; `VisitorDetailOut` inherits). Web list type: `do_not_resolve?: boolean` on
+  `Visitor` in `apps/web/src/lib/api-types.ts`; client method `api.clearPrivacyHold` in
+  `apps/web/src/lib/api.ts`.
+- **UI:** Visitors dashboard (`apps/web/src/app/dashboard/visitors/page.tsx`) — anonymous +
+  `do_not_resolve` rows show a distinct "Privacy hold" state (policy block, not a usage limit)
+  and a confirm dialog before Clear (deliberate / this-site-only / does-NOT-unsuppress).
+- **Untouched by design:** sticky aggregator (`BOOL_OR`/`OR`), suppression list, `/resolve`
+  short-circuit, pixel (`apps/pixel/src/tracker.js`).
+- **Tests:** `tests/integration/test_privacy_hold_clear.py` (8 Fully-Automated). Hybrid e2e
+  legs live in `apps/web/e2e/visitors.spec.ts` but stay CONDITIONAL (`E2E_PRIVACY_HOLD_VISITOR`
+  skip-guard) until Clerk Playwright auth-harness lands.
+- **Archive:** `process/features/visitors-identity/completed/privacy-hold-clear_09-08-26/`.
 
 ## First-Party Email Capture Expansion (v1, shipped 24-07-26 — VERIFIED 24-07-26)
 
@@ -676,7 +726,7 @@ concurrent programs move it repeatedly.
 
 1. **Email/outreach safety:** never auto-send; campaigns flow draft → approved → active with a human approval gate; unsubscribe link in every email; `do_not_email` after hard bounce; suppression list enforced; max 50 emails/hour/site.
 2. **Quota/credit burn:** Gemini runs on free tier (RPM caps; `thinkingBudget: 0` on JSON calls — thinking adds 60-100s latency); identity resolution budget default 50/day/site, deep research 3/day; never retry failed identity resolution within 30 days; cache identity 30d / enrichment 7d in Redis; new external calls must have a mock path.
-3. **PII/GDPR:** never log PII or prompt bodies (structlog events log keys/ids only); PII blind index + encryption keys required in prod (`validate_production`); raw events auto-purge at 90 days; GPC/DNT → `do_not_resolve` sticky; visitor data in prompts is hostile input (see AI Layer).
+3. **PII/GDPR:** never log PII or prompt bodies (structlog events log keys/ids only); PII blind index + encryption keys required in prod (`validate_production`); raw events auto-purge at 90 days; GPC/DNT → `do_not_resolve` sticky; site owners may **explicitly** clear a hold via `POST /api/v1/visitors/{site_id}/{visitor_id}/clear-privacy-hold` (does not un-suppress, does not bypass Identify — still goes through `/resolve`); visitor data in prompts is hostile input (see AI Layer).
 4. **Flaky e2e:** Playwright rules learned from CI failures are canonical — see `tests/all-tests.md` Debugging section before writing/modifying any e2e test.
 
 ## Environment and Configuration
@@ -708,7 +758,8 @@ concurrent programs move it repeatedly.
   standing lesson survives the fix: **do not add fields to the wrong schema class** — new
   detail-only fields go on `VisitorDetailOut`, never on `VisitorOut`.
 - **⚠️ SAFETY — bare `alembic upgrade` from repo root applies to Supabase PROD.** `.env`
-  `DATABASE_URL` points at production (`aws-1-ap-southeast-1.pooler.supabase.com`) and
+  `DATABASE_URL` points at production (`aws-1-ap-southeast-1.pooler.supabase.com`, project
+  **`retarget-agent`** / `hylcleqxlkdblibpdhhm` — see `docs/supabase-retarget-agent.md`) and
   `apps/api/migrations/env.py` has NO local-host guard — any unpinned alembic command (or DB
   script reading `.env`) hits prod. Discovered + refused at gate during the 07-08-26 ip-org
   live-apply session. Remedy: ALWAYS pin `DATABASE_URL` to `localhost:5433` (or the disposable

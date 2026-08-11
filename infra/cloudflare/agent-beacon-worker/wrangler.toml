@@ -1,3 +1,6 @@
+# Canonical live Worker on the Cloudflare account (after --env splittrip):
+#   beam-agent-beacon-splittrip  (id tag 9e74d04215224c4ab2cecc3e65939d21)
+# Always deploy / query / build against that script — never quota-tracker.
 name = "beam-agent-beacon"
 main = "worker.js"
 compatibility_date = "2024-11-01"

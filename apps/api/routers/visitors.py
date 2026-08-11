@@ -1075,6 +1075,66 @@ async def set_internal_override(
     }
 
 
+@router.post("/{site_id}/{visitor_id}/clear-privacy-hold")
+async def clear_privacy_hold(
+    site_id: str,
+    visitor_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Lift ONE visitor's sticky privacy hold for ONE site — deliberate owner act.
+
+    The aggregator sets ``do_not_resolve`` sticky (BOOL_OR + sticky OR upsert)
+    when a visitor sends a privacy signal (GPC/DNT) or is cascaded from a
+    suppression opt-out. Sticky is intentional: a "clean" recompute must never
+    silently re-enable identifying someone who opted out. This endpoint is the
+    ONLY in-product way to clear it, and it is deliberately narrow:
+
+      * It writes ONLY ``Visitor.do_not_resolve = False`` for the matched
+        ``(site_id, visitor_id)`` row — no suppression edit, no identity write,
+        no aggregate recompute.
+      * It provides NO resolve/identify capability. Identify stays the existing
+        ``/resolve`` endpoint, whose ``if visitor.do_not_resolve:`` short-circuit
+        is unchanged — so a still-held row can never be bypassed.
+      * A later opt-out event may legitimately re-set the flag via the aggregator
+        (expected; documented in the UI copy).
+
+    Auth mirrors ``/resolve`` and ``set_internal_override``: ``get_current_user``
+    + ``_verify_site_access``. A caller without the site gets 404 (not 403 — no
+    id-existence leak). Idempotent: clearing a not-held row is a 200 no-op.
+    """
+    await _verify_site_access(db, site_id, user)
+
+    result = await db.execute(
+        select(Visitor).where(
+            Visitor.site_id == site_id,
+            Visitor.visitor_id == visitor_id,
+            human_only_visitor_filter(),
+        )
+    )
+    visitor = result.scalar_one_or_none()
+    if not visitor:
+        raise HTTPException(status_code=404, detail="Visitor not found")
+
+    was_held = bool(visitor.do_not_resolve)
+    visitor.do_not_resolve = False
+    await db.commit()
+
+    # Audit via structlog (repo-wide pattern — Business Guardrail #3: keys/ids
+    # only, never PII). Truncated visitor_id, no email/raw. Deliberately NOT a
+    # billable api_usage_logs row nor a debug request_logs row — a clear is a
+    # product audit event, not an external-API cost or a dropped-request record.
+    logger.info(
+        "privacy_hold_cleared",
+        site_id=site_id,
+        visitor_id=visitor_id[:8],
+        user_id=str(user.id),
+        was_held=was_held,
+    )
+
+    return {"visitor_id": visitor_id, "do_not_resolve": False, "cleared": was_held}
+
+
 @router.post("/{site_id}/{visitor_id}/identify")
 async def manual_identify_visitor(
     site_id: str,

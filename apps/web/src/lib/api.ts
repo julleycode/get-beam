@@ -174,13 +174,21 @@ class ApiClient {
       // Don't clear Clerk token — Clerk handles re-auth via middleware
       if (!this.clerkToken) {
         this.clearToken();
-        if (typeof window !== "undefined") {
+        // Wrong email/password on the login/signup forms must surface as an
+        // error on the page — not a hard redirect that clears the message.
+        const isAuthForm =
+          path === "/api/v1/auth/login" || path === "/api/v1/auth/signup";
+        if (typeof window !== "undefined" && !isAuthForm) {
           // No Clerk key → local JWT login at /login; otherwise Clerk /sign-in.
           const hasClerk = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
           window.location.href = hasClerk ? "/sign-in" : "/login";
         }
       }
-      throw new Error("Unauthorized");
+      throw new Error(
+        path === "/api/v1/auth/login" || path === "/api/v1/auth/signup"
+          ? "Invalid email or password"
+          : "Unauthorized",
+      );
     }
 
     if (!res.ok) {
@@ -394,6 +402,20 @@ class ApiClient {
     }>(`/api/v1/visitors/${siteId}/${visitorId}/internal-override`, {
       method: "POST",
       body: JSON.stringify({ override }),
+    });
+  }
+
+  // Lift ONE visitor's sticky privacy hold for ONE site — a deliberate,
+  // confirmed owner action. Writes ONLY do_not_resolve=false; never bypasses
+  // Identify (still gated by /resolve) and never un-suppresses. cleared=false
+  // means the row was already not held (idempotent no-op).
+  async clearPrivacyHold(siteId: string, visitorId: string) {
+    return this.request<{
+      visitor_id: string;
+      do_not_resolve: false;
+      cleared: boolean;
+    }>(`/api/v1/visitors/${siteId}/${visitorId}/clear-privacy-hold`, {
+      method: "POST",
     });
   }
 

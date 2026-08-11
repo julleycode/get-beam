@@ -1,10 +1,10 @@
 # Deployment Guide
 
-Last updated: 2026-08-01
+Last updated: 2026-08-09
 
 ## Overview
 
-Beam runs locally via Docker Compose (PostgreSQL + Redis) plus Python API and Next.js dev servers. Production API deploys to **Railway** via root `Dockerfile`. The tracking pixel can be served from the API static mount or a **Cloudflare Worker** edge proxy.
+Beam runs locally via Docker Compose (PostgreSQL + Redis) plus Python API and Next.js dev servers. Production API deploys to **Railway** via root `Dockerfile`. Production Postgres is **Supabase** project **`retarget-agent`** (`hylcleqxlkdblibpdhhm`) — pin + DB IDE connect: [supabase-retarget-agent.md](./supabase-retarget-agent.md). The tracking pixel can be served from the API static mount or a **Cloudflare Worker** edge proxy.
 
 ## Prerequisites
 

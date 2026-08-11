@@ -38,6 +38,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 function intentColor(score: number): string {
   if (score >= 70) return "text-intent-high";
@@ -276,6 +284,10 @@ export default function VisitorsPage() {
   // limit is already exhausted. Reset per site so each site can show its own
   // limit state once, but don't re-open immediately after the user closes it.
   const [autoPromptSeenForSite, setAutoPromptSeenForSite] = useState<string | null>(null);
+  // Which held visitor is awaiting the "Clear privacy hold" confirmation. The
+  // clear is a deliberate, confirmed owner action (US-3/AC-3) — never fire it
+  // without this gate. null = dialog closed.
+  const [pendingClearId, setPendingClearId] = useState<string | null>(null);
   const { data: billing } = useBillingStatus();
 
   // A resolve/enrich outcome is an upgrade moment only when it's the monthly
@@ -321,6 +333,27 @@ export default function VisitorsPage() {
     },
     onError: (e) => setNotice(e instanceof Error ? e.message : "Enrich failed"),
     onSettled: refreshRows,
+  });
+
+  // Clear a single visitor's sticky privacy hold (do_not_resolve → false) for
+  // this site only. Confirmed via the dialog below. onSuccess re-fetches so the
+  // row re-renders with the normal Identify control; never bypasses /resolve.
+  const clearMut = useMutation({
+    mutationFn: (visitorId: string) => api.clearPrivacyHold(siteId, visitorId),
+    onMutate: (visitorId) => {
+      setActioningId(visitorId);
+      setNotice(null);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["visitors"] });
+      setNotice("Privacy hold cleared for this visitor on this site.");
+    },
+    onError: (e) =>
+      setNotice(e instanceof Error ? e.message : "Couldn't clear the privacy hold"),
+    onSettled: () => {
+      setActioningId(null);
+      setPendingClearId(null);
+    },
   });
 
   const autoMut = useMutation({
@@ -408,6 +441,32 @@ export default function VisitorsPage() {
           >
             {retrying ? "Retrying…" : "Retry"}
           </Button>
+        </div>
+      );
+    }
+    // Privacy hold: the visitor sent a privacy signal (GPC/DNT) or was cascaded
+    // from a suppression opt-out, so do_not_resolve is sticky. This is a POLICY
+    // block, not a usage limit (US-1) — show it plainly and offer a deliberate,
+    // confirmed owner Clear (AC-1/AC-2) instead of a dead-end Identify button.
+    if (v.identity_status === "anonymous" && v.do_not_resolve) {
+      const clearing = clearMut.isPending && actioningId === v.visitor_id;
+      return (
+        <div className="flex flex-col items-start gap-1">
+          <div className="flex items-center gap-2">
+            <StatusBadge status="vpn_filtered" label="Privacy hold" className="opacity-80" />
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={clearing}
+              onClick={() => setPendingClearId(v.visitor_id)}
+            >
+              {clearing ? "Clearing…" : "Clear privacy hold"}
+            </Button>
+          </div>
+          <span className="text-xs text-muted-foreground">
+            Opted out of identification (privacy signal) — a policy block, not a
+            usage limit.
+          </span>
         </div>
       );
     }
@@ -885,6 +944,52 @@ export default function VisitorsPage() {
         currentPlan={billing?.plan ?? "free"}
         reason="You've hit your plan's monthly identification limit."
       />
+
+      {/* Confirm dialog for clearing a sticky privacy hold. Deliberate,
+          site-scoped, non-un-suppressing (US-3/AC-3/AC-13). Cancel = no write. */}
+      <Dialog
+        open={pendingClearId !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingClearId(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear this visitor&apos;s privacy hold?</DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                <p>
+                  This is a deliberate action. It lifts the privacy hold for{" "}
+                  <span className="font-medium">this visitor on this site only</span>,
+                  so you can try to identify them through the normal flow.
+                </p>
+                <p>
+                  It does <span className="font-medium">not</span> remove this person
+                  from any suppression / do-not-process list, and it does not identify
+                  them by itself.
+                </p>
+                <p>
+                  If their browser later sends another opt-out signal, the privacy hold
+                  may return automatically.
+                </p>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingClearId(null)}>
+              Cancel
+            </Button>
+            <Button
+              disabled={clearMut.isPending}
+              onClick={() => {
+                if (pendingClearId) clearMut.mutate(pendingClearId);
+              }}
+            >
+              {clearMut.isPending ? "Clearing…" : "Clear privacy hold"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

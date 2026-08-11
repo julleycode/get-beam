@@ -207,11 +207,19 @@ Stop-Port 3000
 Start-Sleep -Seconds 1
 
 # --- Start API + Web in new windows ---------------------------
+# Tee uvicorn stdout/stderr into $Root\.dev-local-api.log (mirrors dev-local.sh)
+# so scripts\watch-local-logs.ps1 can read the current API session while the
+# output still shows live in the API PowerShell window.
+$ApiLog = Join-Path $Root '.dev-local-api.log'
 $ApiCmd = @"
 Set-Location '$Root'
 `$env:PYTHONPATH = '$Root'
 Write-Host '[API] http://localhost:8000/health' -ForegroundColor Green
-& '$VenvPython' -m uvicorn apps.api.main:app --reload --host 0.0.0.0 --port 8000
+Write-Host '[API] logging to $ApiLog' -ForegroundColor DarkGray
+# Truncate on each start so watchers see a fresh session.
+Set-Content -Path '$ApiLog' -Value "[`$(Get-Date -Format o)] API starting"
+& '$VenvPython' -m uvicorn apps.api.main:app --reload --host 0.0.0.0 --port 8000 *>&1 |
+  ForEach-Object { `$line = `$_.ToString(); Add-Content -Path '$ApiLog' -Value `$line; `$_ }
 "@
 
 $WebCmd = @"
@@ -222,6 +230,7 @@ npm run dev
 
 Write-Step "Opening API window (uvicorn :8000)..."
 Start-Process powershell -ArgumentList "-NoExit", "-Command", $ApiCmd
+Write-Step "API logs tee'd to $ApiLog (view: .\scripts\watch-local-logs.ps1)"
 
 Write-Step "Waiting for API /health..."
 $apiOk = $false
