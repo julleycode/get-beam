@@ -46,6 +46,7 @@ import type {
   OutcomesWebhookConfig,
   OutcomesWebhookSecret,
   BrowserBreakdown,
+  IngestHealth,
   TrafficFit,
   SiteKpis,
   SiteTimeseries,
@@ -614,6 +615,12 @@ class ApiClient {
   async getBrowserBreakdown(siteId: string, windowDays = 30) {
     return this.request<BrowserBreakdown>(
       `/api/v1/sites/${siteId}/browser-breakdown?window_days=${windowDays}`
+    );
+  }
+
+  async getIngestHealth(siteId: string, windowMinutes = 1440) {
+    return this.request<IngestHealth>(
+      `/api/v1/sites/${siteId}/ingest-health?window_minutes=${windowMinutes}`
     );
   }
 
@@ -1845,6 +1852,9 @@ export type {
   SafariCoverage,
   BrowserMetrics,
   BrowserBreakdown,
+  ProviderHealthRow,
+  ResolutionHealth,
+  IngestHealth,
   CountryShare,
   TrafficFit,
   SiteKpis,
