@@ -16,8 +16,24 @@ from apps.api.services.osint_scanner import (
     _dedupe,
     _map_holehe_out,
     _map_user_scanner_result,
+    is_skipped_category,
     run_osint_scan,
 )
+
+
+# ──────────────────────── category filter ────────────────────────
+
+
+def test_nsfw_category_matches_decorated_names():
+    """Engines decorate category names — WhatsMyName writes 'xx NSFW xx'. An
+    equality test against the skip set let all 39 of its adult sites through."""
+    skip = {"adult", "nsfw", "porn"}
+    assert is_skipped_category("xx NSFW xx", skip) is True
+    assert is_skipped_category("NSFW", skip) is True
+    assert is_skipped_category("adult_content", skip) is True
+    assert is_skipped_category("social", skip) is False
+    assert is_skipped_category("coding", skip) is False
+    assert is_skipped_category(None, skip) is False
 
 
 # ──────────────────────── result mapping ────────────────────────
@@ -109,6 +125,79 @@ def test_dedupe_keeps_distinct_sites():
         OsintAccount("Etsy", "shopping", None, "registered", "confirmed", "holehe", {}),
     ]
     assert len(_dedupe(accounts)) == 2
+
+
+def test_dedupe_by_username_keeps_distinct_people():
+    """Two real GitHub accounts owned by two different people. Collapsing them
+    would publish one person's URL under the other person's handle."""
+    accounts = [
+        OsintAccount("GitHub", "dev", "https://github.com/nhanto", "profile",
+                     "likely", "maigret", {"username": "nhanto"}),
+        OsintAccount("GitHub", "dev", "https://github.com/nhantochi95", "profile",
+                     "likely", "rule-base", {"username": "nhantochi95"}),
+    ]
+    out = _dedupe(accounts, by_username=True)
+    assert len(out) == 2
+    for acc in out:
+        assert acc.extra["username"] in acc.url
+
+
+def test_dedupe_by_username_still_merges_same_username():
+    accounts = [
+        OsintAccount("GitHub", "dev", "https://github.com/jdoe", "profile",
+                     "likely", "maigret", {"username": "jdoe"}),
+        OsintAccount("github", "dev", "https://github.com/jdoe", "profile",
+                     "likely", "rule-base", {"username": "jdoe", "avatar": "a"}),
+    ]
+    out = _dedupe(accounts, by_username=True)
+    assert len(out) == 1
+    assert out[0].source_engine == "maigret,rule-base"
+    assert out[0].extra["avatar"] == "a"
+
+
+def test_dedupe_default_unchanged_for_email_scan():
+    """The email-scan caller passes no flag: every row is about ONE email, so
+    collapsing by site stays correct even when the usernames differ."""
+    accounts = [
+        OsintAccount("GitHub", "dev", "https://github.com", "registered",
+                     "confirmed", "holehe", {}),
+        OsintAccount("github", "dev", "https://github.com/jdoe", "profile",
+                     "confirmed", "user-scanner", {"username": "jdoe"}),
+    ]
+    assert len(_dedupe(accounts)) == 1
+    # and still one row when the usernames genuinely differ — the email-scan
+    # caller knows every row belongs to the same person.
+    differing = [
+        OsintAccount("GitHub", "dev", "https://github.com/jdoe", "profile",
+                     "confirmed", "user-scanner", {"username": "jdoe"}),
+        OsintAccount("github", "dev", "https://github.com/j.doe", "profile",
+                     "confirmed", "holehe", {"username": "j.doe"}),
+    ]
+    assert len(_dedupe(differing)) == 1
+
+
+def test_dedupe_by_username_empty_username_collapses_by_site():
+    """A row carrying no username makes no identity claim, so it keeps the
+    site-level behaviour. Documented so the shared "" bucket is intentional."""
+    accounts = [
+        OsintAccount("Plurk", "social", "https://plurk.com", "registered",
+                     "likely", "holehe", {}),
+        OsintAccount("Plurk", "social", "https://plurk.com/about", "registered",
+                     "likely", "maigret", {}),
+    ]
+    assert len(_dedupe(accounts, by_username=True)) == 1
+
+
+def test_merge_engines_no_duplicates():
+    """Three merges in a row must not re-append a label already present."""
+    acc = lambda engine: OsintAccount(  # noqa: E731
+        "GitHub", "dev", "https://github.com/jdoe", "profile", "likely",
+        engine, {"username": "jdoe"},
+    )
+    out = _dedupe([acc("maigret"), acc("rule-base"), acc("rule-base"),
+                   acc("maigret"), acc("pdl")], by_username=True)
+    assert len(out) == 1
+    assert out[0].source_engine == "maigret,pdl,rule-base"
 
 
 # ──────────────────────── orchestrator ────────────────────────

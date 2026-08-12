@@ -98,6 +98,11 @@ def wired(monkeypatch):
     monkeypatch.setattr(res, "Enricher", _FakeEnricher)
     monkeypatch.setattr(res.settings, "osint_engines", "user-scanner,holehe,maigret")
     monkeypatch.setattr(res.settings, "osint_paid_min_profiles", 1)
+    # These tests were written against the site-overlap rule, which ships OFF
+    # (a degraded Maigret run inflates confidence — see the flag's comment).
+    # Turning it on here keeps them exercising the rule they describe; the
+    # shipped default is covered by test_site_overlap_does_not_promote_when_off.
+    monkeypatch.setattr(res.settings, "osint_site_overlap_promotes", True)
     monkeypatch.setattr(res.settings, "gemini_api_key", "")  # skip gemini unless a test enables
     return k
 
@@ -248,6 +253,195 @@ async def test_site_overlap_is_likely(wired):
     assert gh and gh[0]["confidence"] == "likely"
 
 
+@pytest.mark.asyncio
+async def test_site_overlap_does_not_promote_when_off(wired, monkeypatch):
+    """The shipped default. Same inputs as test_site_overlap_is_likely, but with
+    the flag at its real value: registration on a site is no longer enough on its
+    own, because "only one candidate" can just mean Maigret returned less this
+    run (measured: 7 vs 404 single-candidate sites across two runs)."""
+    monkeypatch.setattr(res.settings, "osint_site_overlap_promotes", False)
+    wired.osint_accounts = [
+        OsintAccount("GitHub", "dev", "https://github.com", "registered",
+                     "confirmed", "holehe", {}),
+    ]
+    wired.maigret = [_profile_acc("GitHub", username="ghuser", name=None)]
+    db, v, i, p = _run()
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    blob = p.social_context["social_resolution"]
+    assert blob["profiles"] == []
+    assert [a["confidence"] for a in blob["guesses"]] == ["guess"]
+
+
+@pytest.mark.asyncio
+async def test_site_overlap_not_likely_when_many_candidates(wired):
+    """Three different handles on one site: "the email is registered here" says
+    they use GitHub, not which of the three accounts is theirs."""
+    wired.osint_accounts = [
+        OsintAccount("GitHub", "dev", "https://github.com", "registered",
+                     "confirmed", "holehe", {}),
+    ]
+    wired.maigret = [
+        _profile_acc("GitHub", username=u, name=None)
+        for u in ("nhanto", "nhantochi95", "tonhan")
+    ]
+    db, v, i, p = _run()
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    blob = p.social_context["social_resolution"]
+    gh = [a for a in blob["profiles"] + blob["guesses"] if a["site_name"] == "GitHub"]
+    assert len(gh) == 3
+    assert {a["confidence"] for a in gh} == {"guess"}
+    assert blob["summary"]["likely_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_site_overlap_still_likely_when_single_candidate(wired):
+    """The original intent survives: one candidate → site-overlap still promotes."""
+    wired.osint_accounts = [
+        OsintAccount("GitHub", "dev", "https://github.com", "registered",
+                     "confirmed", "holehe", {}),
+    ]
+    wired.maigret = [_profile_acc("GitHub", username="ghuser", name=None)]
+    db, v, i, p = _run()
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    profs = p.social_context["social_resolution"]["profiles"]
+    assert [a["confidence"] for a in profs if a["site_name"] == "GitHub"] == ["likely"]
+
+
+@pytest.mark.asyncio
+async def test_url_username_mismatch_forces_guess(wired):
+    """The HackTheBox case: a homepage url carrying someone's guessed handle."""
+    wired.osint_accounts = [
+        OsintAccount("HackTheBox", "tech", "https://www.hackthebox.com/", "registered",
+                     "confirmed", "holehe", {}),
+    ]
+    wired.rules = [
+        OsintAccount("HackTheBox", "tech", "https://www.hackthebox.com/", "profile",
+                     "likely", "rule-base", {"username": "nhanto"}),
+    ]
+    db, v, i, p = _run()
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    blob = p.social_context["social_resolution"]
+    assert blob["profiles"] == []
+    assert [a["confidence"] for a in blob["guesses"]] == ["guess"]
+
+
+@pytest.mark.asyncio
+async def test_email_keyed_row_survives_homepage_url(wired):
+    """user-scanner keys on the EMAIL and returns the site homepage as the url
+    (102 of its modules do), so the handle is proven to be this person's even
+    though the url cannot carry it. The handle-in-url rule must not touch it —
+    demoting it would hide a true positive AND, because the paid gate is
+    confirmed_count < 1, would trigger a billed fallback lookup."""
+    wired.osint_accounts = [
+        OsintAccount("Etsy", "shopping", "https://www.etsy.com", "profile",
+                     "confirmed", "user-scanner", {"username": "jsmith"}),
+    ]
+    db, v, i, p = _run()
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    blob = p.social_context["social_resolution"]
+    etsy = [a for a in blob["profiles"] if a["site_name"] == "Etsy"]
+    assert etsy and etsy[0]["confidence"] == "confirmed"
+    assert wired.paid_called is False
+
+
+@pytest.mark.asyncio
+async def test_url_mismatch_beats_name_match(wired):
+    """A parsed display name cannot rescue a row whose url is not that handle's.
+
+    Measured on real data: a stranger's 2018 Freelancer account carrying the
+    display name "Nhanto" was promoted to "confirmed" against the target "Nhan
+    To", because name_matches concatenates tokens and the letters agree. Only
+    email-keyed engines are exempt from the url check — see
+    test_email_keyed_row_survives_homepage_url."""
+    wired.maigret = [
+        OsintAccount("Plurk", "social", "https://www.plurk.com/", "profile", "likely",
+                     "maigret", {"username": "nhanto", "name": "John Doe"}),
+    ]
+    db, v, i, p = _run()
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    blob = p.social_context["social_resolution"]
+    assert blob["summary"]["confirmed_count"] == 0
+    assert [a["confidence"] for a in blob["guesses"]] == ["guess"]
+
+
+@pytest.mark.asyncio
+async def test_email_keyed_row_counts_as_a_rival_candidate(wired):
+    """An email-keyed row is exempt from the url check but is still a candidate
+    on that site: a rival guess must not be promoted as if it stood alone."""
+    wired.osint_accounts = [
+        OsintAccount("Etsy", "shopping", "https://www.etsy.com", "registered",
+                     "confirmed", "holehe", {}),
+        OsintAccount("Etsy", "shopping", "https://www.etsy.com", "profile",
+                     "confirmed", "user-scanner", {"username": "jsmith"}),
+    ]
+    wired.maigret = [
+        OsintAccount("Etsy", "shopping", "https://www.etsy.com/jsmyth", "profile",
+                     "likely", "maigret", {"username": "jsmyth"}),
+    ]
+    db, v, i, p = _run()
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    blob = p.social_context["social_resolution"]
+    assert [a["extra"]["username"] for a in blob["profiles"]] == ["jsmith"]
+    assert [a["extra"]["username"] for a in blob["guesses"]] == ["jsmyth"]
+
+
+@pytest.mark.asyncio
+async def test_prefix_handle_does_not_match_longer_url_handle(wired):
+    """Substring matching would pass "nhanto" against ".../nhantochi95" — the
+    two-different-people pair this change exists to separate."""
+    wired.osint_accounts = [
+        OsintAccount("GitHub", "dev", "https://github.com", "registered",
+                     "confirmed", "holehe", {}),
+    ]
+    wired.maigret = [
+        OsintAccount("GitHub", "dev", "https://github.com/nhantochi95", "profile",
+                     "likely", "maigret", {"username": "nhanto"}),
+    ]
+    db, v, i, p = _run()
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    blob = p.social_context["social_resolution"]
+    assert blob["profiles"] == []
+    assert [a["confidence"] for a in blob["guesses"]] == ["guess"]
+
+
+@pytest.mark.asyncio
+async def test_subdomain_handle_url_is_not_a_mismatch(wired):
+    """Substack-style profile urls carry the handle as the subdomain label."""
+    wired.osint_accounts = [
+        OsintAccount("Substack", "blog", "https://substack.com", "registered",
+                     "confirmed", "holehe", {}),
+    ]
+    wired.maigret = [
+        OsintAccount("Substack", "blog", "https://nhantochi95.substack.com", "profile",
+                     "likely", "maigret", {"username": "nhantochi95"}),
+    ]
+    db, v, i, p = _run()
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    profs = p.social_context["social_resolution"]["profiles"]
+    assert [a["confidence"] for a in profs] == ["likely"]
+
+
+@pytest.mark.asyncio
+async def test_mismatched_row_does_not_block_single_candidate_promotion(wired):
+    """The single-candidate denominator counts only rows still in the running:
+    one genuine handle plus one ruled-out homepage row is still ONE candidate."""
+    wired.osint_accounts = [
+        OsintAccount("GitHub", "dev", "https://github.com", "registered",
+                     "confirmed", "holehe", {}),
+    ]
+    wired.maigret = [
+        OsintAccount("GitHub", "dev", "https://github.com/ghuser", "profile",
+                     "likely", "maigret", {"username": "ghuser"}),
+        OsintAccount("GitHub", "dev", "https://github.com", "profile",
+                     "likely", "maigret", {"username": "nhanto"}),
+    ]
+    db, v, i, p = _run()
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    blob = p.social_context["social_resolution"]
+    assert [a["extra"]["username"] for a in blob["profiles"]] == ["ghuser"]
+    assert [a["extra"]["username"] for a in blob["guesses"]] == ["nhanto"]
+
+
 def test_default_engines_include_maigret():
     """The shipped code default must enable maigret so the username stage runs
     without an operator manually setting OSINT_ENGINES (prod was patched via env;
@@ -272,6 +466,30 @@ async def test_maigret_stage_runs_with_default(wired, monkeypatch):
     out = await res.resolve_social(db, visitor=v, identified=i, profile=p)
     assert "maigret" in p.social_context["social_resolution"]["stages_run"]
     assert out["profiles"] == 1
+
+
+@pytest.mark.asyncio
+async def test_two_github_usernames_not_merged(wired):
+    """Regression for the 11-08-26 run: Maigret found github.com/nhanto (a real
+    account owned by someone else) and the rule branch found github.com/
+    nhantochi95 (the right person). Site-level dedupe collapsed them into one
+    row carrying the WRONG url beside the RIGHT username."""
+    wired.maigret = [
+        OsintAccount("GitHub", "dev", "https://github.com/nhanto", "profile",
+                     "likely", "maigret", {"username": "nhanto"}),
+    ]
+    wired.rules = [
+        OsintAccount("GitHub", "dev", "https://github.com/nhantochi95", "profile",
+                     "likely", "rule-base", {"username": "nhantochi95"}),
+    ]
+    db, v, i, p = _run()
+    await res.resolve_social(db, visitor=v, identified=i, profile=p)
+    blob = p.social_context["social_resolution"]
+    rows = [a for a in blob["profiles"] + blob["guesses"] if a["site_name"] == "GitHub"]
+    assert len(rows) == 2
+    assert {a["extra"]["username"] for a in rows} == {"nhanto", "nhantochi95"}
+    for a in rows:  # each row's handle must belong to its own url
+        assert a["extra"]["username"] in a["url"]
 
 
 @pytest.mark.asyncio
