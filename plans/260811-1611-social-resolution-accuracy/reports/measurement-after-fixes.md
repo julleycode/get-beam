@@ -162,9 +162,108 @@ kết luận nào cũng chỉ là kể lại một giai thoại.
 - [ ] Quyết F1 (`name_matches`) và F2 (kết quả đúng bị ẩn) — xem phần dưới.
 - [ ] Đo lại trên Railway trước khi bật `enable_osint_scan`.
 
+---
+
+# Lần đo 2 (12-08-26) — sau khi sửa F1
+
+Quyết định của chủ dự án: **chỉ miễn trừ nguồn email-keyed** khỏi luật handle-phải-khớp-URL;
+nhánh khớp-tên phải đi qua luật đó. Mẫu số `per_site` cũng sửa cho khớp: dòng email-keyed được
+miễn trừ nhưng **vẫn tính là ứng viên** (nếu không, một phỏng đoán cạnh nó sẽ được nâng hạng
+như thể nó đứng một mình).
+
+## F1 — ĐÃ SỬA, xác nhận bằng số đo
+
+| | Lần đo 1 | Lần đo 2 |
+|---|---|---|
+| `Freelancer.com` / `nhanto` | **confirmed, hiển thị** | **guess, ẩn** ✅ |
+
+URL của nó là endpoint API (`.../api/users/0.1/users?usernames[]=nhanto`), đoạn cuối không phải
+`nhanto` → luật URL hạ hạng. Trước đây nó thoát nhờ miễn trừ khớp-tên.
+
+Bốn dòng `confirmed` còn lại **khác loại** với Freelancer:
+
+| Site | Tên đọc được | Nhánh của `name_matches` |
+|---|---|---|
+| Facebook, Disqus, Duolingo, Chess | `"Nhan To"` | **mạnh** — khớp đủ 2 token |
+| ~~Freelancer~~ | `"Nhanto"` | ~~yếu — nối chuỗi~~ (đã bị chặn) |
+
+Đây là khớp tên **chính xác cả hai token** với tên thật của visitor, không phải trùng ngẫu nhiên
+kiểu nối chuỗi. **Cần chủ dự án xác nhận** (bước 8): `facebook.com/nhanto` hiển thị tên "Nhan To"
+có phải bạn không? Nếu có → đây là kết quả đúng đầu tiên mà đường ống tự tìm ra.
+
+## F3 — PHÁT HIỆN MỚI: luật "duy nhất 1 ứng viên" không ổn định
+
+Hai lần chạy cách nhau vài giờ, **cùng code, cùng visitor**:
+
+| | Lần 1 | Lần 2 |
+|---|---|---|
+| Số dòng Maigret trả về | **1.208** | **406** |
+| Tổng số dòng | 1.238 | 447 |
+| Site chỉ có **đúng 1** ứng viên | **7** | **404** |
+| Dòng hiển thị | 1 | **24** (4 confirmed + 20 likely) |
+
+**Toàn bộ 20 dòng `likely` mới đều là site mà lần 1 có 2–3 ứng viên.** Ví dụ Plurk: lần 1 có 3
+dòng (`nhanto`, `tonhan`, `nhan.to`) → `per_site = 3` → hạ hạng; lần 2 Maigret chỉ trả 1 dòng →
+`per_site = 1` → **nâng lên `likely`**, và `https://gab.com/nhanto` quay lại danh sách hiển thị.
+
+Nguyên nhân **không phải** thay đổi F1 — đã kiểm chứng: mỗi dòng `likely` mới đều có
+`per_site = 1` ở lần 2 và `per_site ≥ 2` ở lần 1.
+
+Hệ quả thiết kế, nói thẳng:
+
+> **Maigret trả về càng ít kết quả, Beam càng tự tin.** Mạng chậm, bị chặn, hay hết hạn giờ đều
+> làm giảm số ứng viên cạnh tranh, và luật "duy nhất 1 ứng viên" đọc đó thành "đã thu hẹp về một
+> người". Độ tin cậy đang phụ thuộc vào **độ phủ của một engine bên ngoài hay hỏng**, theo chiều
+> ngược với trực giác.
+
+D2/phương án B vẫn chặn đúng ca lỗi khi Maigret chạy đủ (lần 1: 28/28 → 0). Nhưng nó **không có
+sàn**: khi engine chạy kém, luật tự mở. Đây là thứ mà cả phân tích lúc validate lẫn lần đo 1 đều
+không thấy, vì cần **hai lần chạy** mới lộ ra.
+
+Chưa sửa — theo đúng nguyên tắc của plan: đo, báo, không tự đổi.
+
+---
+
+# Lần đo 3 (12-08-26) — sau khi tắt luật đếm
+
+Chủ dự án chốt: **tắt luật site-overlap**, đặt sau một công tắc mặc định TẮT
+(`osint_site_overlap_promotes`), để bật lại được khi đủ mẫu mà không phải viết lại code.
+`test_site_overlap_is_likely` **giữ nguyên, không sửa một dòng** — fixture bật cờ lên để test
+đó vẫn kiểm đúng hành vi nó mô tả; đường mặc định TẮT có test riêng.
+
+| | Lần 1 | Lần 2 | Lần 3 |
+|---|---|---|---|
+| Luật đếm | bật | bật | **tắt** |
+| Dòng Maigret | 1.208 | 406 | **0** |
+| Tổng dòng | 1.238 | 447 | 51 |
+| Dòng hiển thị | 1 (sai người) | 24 (bất ổn) | **0** |
+
+Luật đếm tắt ⇒ Maigret chạy kém **không còn** làm Beam tự tin hơn. Đó là điều cần đạt.
+
+## F4 — Maigret không ổn định ở mức nghiêm trọng
+
+Ba lần chạy cùng visitor, cùng code, cách nhau vài giờ: **1.208 → 406 → 0** dòng.
+
+Lần 3 Maigret chạy (có trong `stages_run`) nhưng trả về **không dòng nào**. Toàn bộ 51 dòng còn
+lại đến từ chặng đoán link.
+
+Hệ quả: 4 dòng khớp tên thật (Facebook, Disqus, Duolingo, Chess) **biến mất** ở lần 3, vì tên
+người chỉ đọc được từ Maigret. Chặng đoán link không đọc tên, nên nó không bao giờ tạo ra
+`confirmed`.
+
+Nói gọn: **hiện tại toàn bộ khả năng cho ra kết quả hiển thị đang phụ thuộc vào một engine trả
+về lúc 1.208 lúc 0.** Plan cấm đụng Maigret (đúng, vì lỗi không nằm ở nó), nhưng độ tin cậy của
+nó giờ là yếu tố chi phối. Chưa rõ nguyên nhân: hết hạn giờ, bị chặn IP, hay giới hạn tần suất —
+**cần đo riêng**, chưa ai đo.
+
 ## Điều chưa giải quyết
 
-1. **F1 — `name_matches` nối chuỗi quá lỏng với tên Việt hai âm tiết.** Ngoài phạm vi plan;
+1. ~~**F1 — `name_matches` nối chuỗi quá lỏng.**~~ **ĐÃ SỬA 12-08-26** bằng cách thu hẹp miễn trừ
+   xuống chỉ còn nguồn email-keyed. Nhánh nối chuỗi của `name_matches` **vẫn còn nguyên** —
+   nó chỉ không còn tự động vượt được luật URL. Nếu sau này gặp ca có URL khớp mà tên chỉ trùng
+   theo kiểu nối chuỗi, nó sẽ lại lọt.
+1b. **F3 — luật "duy nhất 1 ứng viên" phụ thuộc độ phủ của Maigret** (xem phần trên). Nghiêm
+   trọng hơn F1 vì nó làm kết quả không tái lập được giữa hai lần chạy. Chưa có hướng sửa;
    cần quyết định riêng.
 2. **F2 — không có đường nào để một ứng viên từ email được nâng hạng**, kể cả khi đã được
    xác minh nội dung. Chặng đoán link hiện không mang theo bằng chứng "đã xác minh nội dung"
