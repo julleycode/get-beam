@@ -183,10 +183,12 @@
     return 'text';
   }
 
-  // THE HONESTY CAPTION — load-bearing, not polish. Without it a 30km-off pin
-  // reads as "your product is broken", the #1 failure mode of a location reveal.
-  const HONESTY_CAPTION =
-    "that's an IP-level estimate — usually the right city, sometimes the wrong suburb.";
+  // The IP-level-estimate caption was removed by product decision. The accuracy
+  // circle drawn around the pin still carries the same message visually, and
+  // MAP_MAX_ZOOM keeps the view off street level, so nothing here claims more
+  // precision than the data has.
+  const TILE_FAILURE_NOTE =
+    "couldn't load the map here — something is blocking the tiles.";
 
   // ── Leaflet, loaded from CDN (no build step on this page) ───────────
   const LEAFLET_CSS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
@@ -197,8 +199,10 @@
   const TILE_ATTRIBUTION =
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
   // NEVER go past 13. An IP pin is city-level at best; zooming to street level
-  // makes a precision claim the data cannot support.
-  const MAP_MIN_ZOOM = 9, MAP_MAX_ZOOM = 13, MAP_ZOOM = 11;
+  // makes a precision claim the data cannot support. Zooming OUT is harmless —
+  // it only ever shows less certainty — so the floor is loose enough to reach
+  // country level.
+  const MAP_MIN_ZOOM = 3, MAP_MAX_ZOOM = 13, MAP_ZOOM = 11;
   const TILE_ERROR_THRESHOLD = 4, TILE_ERROR_WINDOW_MS = 2500, TILE_LOAD_DEADLINE_MS = 4000;
 
   let _leafletPromise = null;
@@ -232,11 +236,20 @@
       const map = L.map(host, {
         center: [geo.lat, geo.lng],
         zoom: MAP_ZOOM, minZoom: MAP_MIN_ZOOM, maxZoom: MAP_MAX_ZOOM,
-        // The map sits inside a scrolling chat transcript; wheel-zoom would
-        // hijack the scroll.
-        scrollWheelZoom: false, dragging: true,
-        zoomControl: false, attributionControl: true, keyboard: false,
+        // The map sits inside a scrolling chat transcript, so plain wheel-zoom
+        // stays OFF — it would eat the page scroll the moment the pointer
+        // crossed the map. Every other zoom gesture is on: the +/- control,
+        // double-click, pinch, and ctrl/⌘+wheel (Leaflet's own modifier path).
+        scrollWheelZoom: false, dragging: true, doubleClickZoom: true,
+        touchZoom: true, boxZoom: true,
+        zoomControl: true, attributionControl: true, keyboard: false,
       });
+      // Desktop escape hatch for wheel users: hold ctrl (or ⌘) and scroll.
+      host.addEventListener('wheel', (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        map.setZoom(map.getZoom() + (e.deltaY < 0 ? 1 : -1));
+      }, { passive: false });
 
       const startedAt = Date.now();
       let errors = 0, loadedAny = false;
@@ -425,24 +438,25 @@
 
       const wantsMap = chooseRevealMode(res, false) === 'map';
       const card = await ob.bot(`
-        ${wantsMap ? '<div class="ob-map" id="ob-map" role="img" aria-label="Approximate location on a map"></div>' : ''}
+        ${wantsMap ? '<div class="ob-map" id="ob-map" role="region" aria-label="Approximate location on a map"></div>' : ''}
         <div class="ob-meta">
           ${place ? '<div class="mrow"><span class="ic" aria-hidden="true">◎</span><span>' + _esc(place) + '</span></div>' : ''}
           ${network ? '<div class="mrow"><span class="ic" aria-hidden="true">⌁</span><span>' + _esc(network) + '</span></div>' : ''}
           ${pagesHtml}
         </div>
-        <p class="ob-map-note" id="ob-map-note">${_esc(HONESTY_CAPTION)}</p>`,
+        <p class="ob-map-note" id="ob-map-note" hidden></p>`,
         { cls: 'rich card', typing: false });
 
       if (wantsMap) {
         const host = card.querySelector('#ob-map');
         const ok = await renderMap(host, res.geo);
         if (!ok) {
-          // Tiles blocked or Leaflet itself unreachable → text reveal.
+          // Tiles blocked or Leaflet itself unreachable → text reveal. The note
+          // node stays in the DOM but hidden, so this is the only thing that
+          // ever un-hides it.
           if (host) host.remove();
           const note = card.querySelector('#ob-map-note');
-          if (note) note.textContent =
-            HONESTY_CAPTION + " (couldn't load the map here — something is blocking the tiles.)";
+          if (note) { note.textContent = TILE_FAILURE_NOTE; note.hidden = false; }
         }
         ob.scrollToEnd();
       }

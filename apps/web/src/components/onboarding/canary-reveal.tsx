@@ -22,15 +22,15 @@ const CanaryMap = dynamic(() => import("@/components/onboarding/canary-map"), {
 });
 
 /**
- * THE HONESTY CAPTION — load-bearing, not polish.
+ * The IP-level-estimate caption was removed by product decision.
  *
- * An IP pin is city-level at best and often lands on the ISP's registered
- * centroid (on mobile CGNAT, a different city entirely). Without this line a
- * 30km-off pin reads as "your product is broken", which is the #1 failure mode
- * of a location reveal. The accuracy circle is its visual half.
+ * An IP pin is still city-level at best and often lands on the ISP's registered
+ * centroid, so the honesty work now rests entirely on the accuracy circle drawn
+ * around the pin and on MAP_MAX_ZOOM keeping the view off street level. Keep
+ * both — they are what stops a 30km-off pin reading as "your product is broken".
  */
-export const HONESTY_CAPTION =
-  "that's an IP-level estimate — usually the right city, sometimes the wrong suburb.";
+export const TILE_FAILURE_NOTE =
+  "couldn't load the map here — something is blocking the tiles.";
 
 export function CanaryReveal({
   response,
@@ -97,12 +97,8 @@ export function CanaryReveal({
           )}
         </div>
 
-        {mode === "map" && <p className="ob-map-note">{HONESTY_CAPTION}</p>}
         {mode === "text" && response.geo && (
-          <p className="ob-map-note">
-            {HONESTY_CAPTION} (couldn&apos;t load the map here — something is
-            blocking the tiles.)
-          </p>
+          <p className="ob-map-note">{TILE_FAILURE_NOTE}</p>
         )}
       </div>
 

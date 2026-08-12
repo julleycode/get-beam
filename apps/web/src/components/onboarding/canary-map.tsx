@@ -30,8 +30,11 @@ export const TILE_ATTRIBUTION =
  * NEVER go past 13. An IP pin is city-level at best and frequently lands on the
  * ISP's registered centroid; zooming to street level makes a precision claim
  * the data cannot support and turns a "wow" into "your product is wrong".
+ *
+ * Zooming OUT only ever shows less certainty, so the floor is loose enough to
+ * reach country level.
  */
-export const MAP_MIN_ZOOM = 9;
+export const MAP_MIN_ZOOM = 3;
 export const MAP_MAX_ZOOM = 13;
 export const MAP_ZOOM = 11;
 
@@ -63,6 +66,7 @@ export default function CanaryMap({ geo, onTileFailure, onTileOk }: CanaryMapPro
   useEffect(() => {
     let cancelled = false;
     let deadline: ReturnType<typeof setTimeout> | undefined;
+    let wheelCleanup: (() => void) | undefined;
 
     (async () => {
       // SSR guard #2. The parent's next/dynamic({ ssr: false }) is guard #1;
@@ -70,22 +74,37 @@ export default function CanaryMap({ geo, onTileFailure, onTileOk }: CanaryMapPro
       // any server or module-scope evaluation even if the dynamic wrapper is
       // ever removed.
       const L = (await import("leaflet")).default;
-      if (cancelled || !hostRef.current || mapRef.current) return;
+      const hostEl = hostRef.current;
+      if (cancelled || !hostEl || mapRef.current) return;
 
-      const map = L.map(hostRef.current, {
+      const map = L.map(hostEl, {
         center: [geo.lat, geo.lng],
         zoom: MAP_ZOOM,
         minZoom: MAP_MIN_ZOOM,
         maxZoom: MAP_MAX_ZOOM,
-        // Panning is welcome; wheel-zoom is not — the map sits inside a
-        // scrolling chat transcript and would hijack the scroll.
+        // Panning is welcome; plain wheel-zoom is not — the map sits inside a
+        // scrolling chat transcript and would hijack the scroll. Every other
+        // zoom gesture is on: the +/- control, double-click, pinch, and
+        // ctrl/⌘+wheel below.
         scrollWheelZoom: false,
         dragging: true,
-        zoomControl: false,
+        doubleClickZoom: true,
+        touchZoom: true,
+        boxZoom: true,
+        zoomControl: true,
         attributionControl: true,
         keyboard: false,
       });
       mapRef.current = map;
+
+      // Desktop escape hatch for wheel users: hold ctrl (or ⌘) and scroll.
+      const onWheel = (e: WheelEvent) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        map.setZoom(map.getZoom() + (e.deltaY < 0 ? 1 : -1));
+      };
+      hostEl.addEventListener("wheel", onWheel, { passive: false });
+      wheelCleanup = () => hostEl.removeEventListener("wheel", onWheel);
 
       const startedAt = Date.now();
       let errors = 0;
@@ -132,7 +151,8 @@ export default function CanaryMap({ geo, onTileFailure, onTileOk }: CanaryMapPro
       }, TILE_LOAD_DEADLINE_MS);
 
       // The honest radius. IP geo is city-level, so the circle is doing real
-      // work here — it is the visual half of the honesty caption.
+      // work here — with the caption gone it is the ONLY thing conveying that the
+      // pin is an estimate. Do not drop it.
       L.circle([geo.lat, geo.lng], {
         radius: Math.max(1, geo.accuracy_km || 25) * 1000,
         color: "#FF3366",
@@ -165,6 +185,7 @@ export default function CanaryMap({ geo, onTileFailure, onTileOk }: CanaryMapPro
     return () => {
       cancelled = true;
       if (deadline) clearTimeout(deadline);
+      wheelCleanup?.();
       if (mapRef.current) {
         try {
           mapRef.current.remove();
@@ -182,7 +203,7 @@ export default function CanaryMap({ geo, onTileFailure, onTileOk }: CanaryMapPro
       className="ob-map"
       ref={hostRef}
       data-testid="canary-map"
-      role="img"
+      role="region"
       aria-label="Approximate location on a map"
     />
   );
