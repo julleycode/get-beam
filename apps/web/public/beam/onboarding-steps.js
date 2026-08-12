@@ -344,10 +344,16 @@
       const startedAt = Date.now();
       let errors = 0, last = null, baseline = null;
 
-      const isFresh = (res) => {
-        const paths = ((res && res.pages) || []).map(p => (p && p.path) || '');
-        return paths.some(p => p !== SELF_PATH && !(baseline && baseline.has(p)));
-      };
+      // KEY ON path+timestamp, NEVER ON PATH ALONE. The page we send people to
+      // is getbeam.fyi's root, and anyone arriving here from the landing page
+      // already has `/` in the journey — so a path-keyed baseline marks the very
+      // visit we asked for as "already seen" and the catch can never land. Each
+      // pageview carries its own `at`, so a repeat visit to the same path is a
+      // new key. `at` may be null on old rows; those degrade to path-only.
+      const pageKey = (p) => ((p && p.path) || '') + '|' + ((p && p.at) || '');
+      const isFresh = (res) => ((res && res.pages) || []).some(
+        p => (p && p.path) !== SELF_PATH && !(baseline && baseline.has(pageKey(p)))
+      );
 
       while (!stopped) {
         const elapsed = Date.now() - startedAt;
@@ -361,7 +367,7 @@
           if (baseline === null) {
             // Whatever is already in the journey belongs to THIS page, which
             // also runs the pixel. Only something new counts as the catch.
-            baseline = new Set(((res && res.pages) || []).map(p => (p && p.path) || ''));
+            baseline = new Set(((res && res.pages) || []).map(pageKey));
           } else if (isFresh(res)) {
             ob.state.canary = res;
             ob.state.landed = true;

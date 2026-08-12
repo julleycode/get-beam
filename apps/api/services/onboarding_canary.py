@@ -18,6 +18,7 @@ own site) — ``/demo/journey`` keeps calling it with ``site_id=None`` so the
 static funnel's behaviour is unchanged.
 """
 
+import re
 from datetime import datetime, timedelta
 
 import structlog
@@ -56,6 +57,13 @@ async def fetch_journey(
     Durations live in separate ``time_on_page`` rows keyed by url (the pixel
     fires them on page leave), so those seconds are merged onto each pageview.
     Read-only. Returns [] on any failure — never raises.
+
+    THE WINDOW IS ANCHORED TO *NOW*, NOT TO THE START OF THE HOUR. Both limits
+    select the NEWEST rows (``created_at DESC``) and the result is reversed back
+    into reading order. Selecting the oldest instead — which is what an ``ASC``
+    scan plus a head-slice does — silently breaks the canary for exactly the
+    users who try hardest: once eight pageviews sit in the window, the visit the
+    onboarding just asked for falls off the end and can never be reported.
     """
     fp = (fingerprint or "").strip()
     if not fp.startswith("fp2_"):
@@ -88,13 +96,17 @@ async def fetch_journey(
                     Event.event_type.in_(("pageview", "time_on_page")),
                     Event.created_at >= since,
                 )
-                .order_by(Event.created_at.asc())
+                .order_by(Event.created_at.desc())
                 .limit(_EVENT_ROW_LIMIT)
             )
         ).all()
     except Exception as e:  # noqa: BLE001 — the reveal never 500s the onboarding
         logger.debug("canary_journey_failed", error=str(e))
         return []
+
+    # The query returns newest-first; put it back into reading order before
+    # anything downstream (the reveal renders left-to-right as a journey).
+    rows = list(reversed(rows))
 
     secs_by_url: dict[str, int] = {}
     for r in rows:
@@ -113,10 +125,54 @@ async def fetch_journey(
                 "at": r.created_at.isoformat() if r.created_at else None,
             }
         )
-        if len(pages) >= MAX_PAGES:
-            break
 
-    return pages
+    # Keep the NEWEST MAX_PAGES, still in reading order. A head-slice here would
+    # reintroduce the "oldest eight win" bug the docstring warns about.
+    return pages[-MAX_PAGES:]
+
+
+# An ip-api `org` that differs from `isp` is NOT evidence of a corporate
+# network. On most consumer ranges outside the US the `org` field carries the
+# name of the access pool, or of the registry that holds the block — "FPT
+# DYNAMIC IP", "Vietnam Internet Network Information Center". Promoting either
+# to "looks like you're on X's network" is the exact fabrication this module's
+# docstring forbids. Two separate classes, because they need opposite handling:
+#
+#   POOL     — names no organisation the user belongs to. Prefer the carrier if
+#              we have one; otherwise make no claim at all.
+#   CARRIER  — a real ISP name ("FPT Telecom", "Comcast Cable"). Perfectly good
+#              to print, just never as the user's employer.
+#
+# Short tokens are word-bounded (NIC would otherwise fire inside "Technicolor");
+# long ones match anywhere because real labels arrive unspaced ("FPTDYNAMICIP").
+_POOL_RE = re.compile(
+    r"""(?ix)
+    dynamic | residential | subscriber | customer | dial-?up
+    | adsl | ftt[hxb] | wireless
+    | \b(?:pool|dsl|lte|ip)\b
+    | \b nic \b
+    | network \s* information \s* cent(?:er|re)
+    | (?:regional \s*)? internet \s* registry
+    | internet \s* exchange
+    """
+)
+_CARRIER_RE = re.compile(
+    r"""(?ix)
+    telecom | communications | broadband | cable | cellular | mobile
+    | \b isp \b
+    | internet \s* service
+    """
+)
+
+
+def _is_pool_label(org: str) -> bool:
+    """True when `org` names an address pool/registry, not an organisation."""
+    return bool(org) and bool(_POOL_RE.search(org))
+
+
+def _is_carrier_label(org: str) -> bool:
+    """True when `org` reads as an ISP's own name rather than an employer's."""
+    return bool(org) and bool(_CARRIER_RE.search(org))
 
 
 def _strip_as_prefix(as_str: str | None) -> str:
@@ -171,7 +227,26 @@ def build_network(ip: str, geo) -> dict | None:
     elif kind == "eyeball":
         # A distinct org on an eyeball range is the corporate case: the strongest
         # version of the line ("looks like you're on Acme Corp's network").
-        kind = "company" if (org and org.lower() != isp.lower()) else "isp"
+        distinct_org = bool(org) and org.lower() != isp.lower()
+        if not distinct_org:
+            kind = "isp"
+        elif _is_pool_label(org):
+            # An address pool differs from `isp` exactly the way a real employer
+            # does, so the plain distinctness test promotes it and the reveal
+            # tells the user they work at "FPT DYNAMIC IP". Prefer the carrier
+            # when there is one; otherwise use a kind neither client turns into
+            # a claim (both `default` branches print the label bare).
+            if isp and not _is_pool_label(isp):
+                if label == org:
+                    label = isp
+                kind = "isp"
+            else:
+                kind = "network"
+        elif _is_carrier_label(org):
+            # A carrier's own name is fine to print, never as an employer.
+            kind = "isp"
+        else:
+            kind = "company"
 
     return {"label": label[:120], "kind": kind}
 
