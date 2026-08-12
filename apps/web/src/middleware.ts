@@ -2,17 +2,11 @@ import { NextResponse } from "next/server";
 import type { NextRequest, NextFetchEvent } from "next/server";
 import { shouldFireFetchBeacon, fireFetchBeacon } from "@/lib/fetch-beacon";
 
-// Non-US visitors can't be identity-resolved yet (Beam only resolves US IPs),
-// so the onboarding "aha" demo falls flat for them — route them straight to
-// /login. US, and unknown country (e.g. localhost / geo miss), keep onboarding.
-// x-vercel-ip-country is set automatically on every Vercel request (no config).
-function geoRedirect(req: NextRequest): NextResponse | null {
-  if (req.nextUrl.pathname !== "/onboarding") return null;
-  const country = req.headers.get("x-vercel-ip-country");
-  return country && country !== "US"
-    ? NextResponse.redirect(new URL("/login", req.url))
-    : null;
-}
+// NOTE: /onboarding used to 307 non-US visitors to /login, on the premise that
+// the demo needs US-only identity resolution. The canary funnel replaced that
+// premise: geo comes from the CALLER's own IP (works worldwide) and the catch is
+// a fingerprint match, so nothing in it is US-gated. The gate only hid a working
+// funnel from every non-US visitor. Do not reintroduce a country check here.
 
 // Clerk middleware is only active when NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is set.
 // Without it, all routes are publicly accessible (local dev without Clerk).
@@ -56,9 +50,8 @@ export default function middleware(req: NextRequest, ev: NextFetchEvent) {
     // Never let the beacon disturb the request path.
   }
 
-  // Geo check runs first (covers every onboarding CTA at once); otherwise fall
-  // through to Clerk auth. Beacon above is a pure side-effect on this return.
-  return geoRedirect(req) ?? handler(req, ev);
+  // Beacon above is a pure side-effect on this return.
+  return handler(req, ev);
 }
 
 export const config = {
