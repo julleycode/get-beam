@@ -106,6 +106,17 @@ class OsintAdapter:
         return AdapterResult(engine=self.name)
 
 
+def is_skipped_category(cat_name: str | None, skip_categories: set[str]) -> bool:
+    """True if a source's category name should be skipped (NSFW filter).
+
+    Substring, not equality: engines decorate their category names (WhatsMyName
+    labels its adult sites ``xx NSFW xx``), so an exact match against
+    ``{"adult","nsfw","porn"}`` silently lets every one of them through.
+    """
+    name = (cat_name or "").lower()
+    return any(token in name for token in skip_categories)
+
+
 async def _bounded_check(
     semaphore: asyncio.Semaphore,
     deadline: float,
@@ -162,7 +173,7 @@ class UserScannerAdapter(OsintAdapter):
 
         modules = []
         for cat_name, cat_path in categories.items():
-            if cat_name.lower() in skip_categories:
+            if is_skipped_category(cat_name, skip_categories):
                 continue
             try:
                 modules.extend(engine.load_modules(cat_path))
@@ -267,7 +278,10 @@ class HoleheAdapter(OsintAdapter):
     ) -> AdapterResult:
         result = AdapterResult(engine=self.name)
         try:
-            funcs = [f for f in self._load_funcs() if self._category(f).lower() not in skip_categories]
+            funcs = [
+                f for f in self._load_funcs()
+                if not is_skipped_category(self._category(f), skip_categories)
+            ]
         except Exception as e:
             logger.warning("osint_holehe_load_failed", err=str(e))
             return result
@@ -370,20 +384,40 @@ def get_scanners() -> list[OsintAdapter]:
     return adapters
 
 
-def _dedupe(accounts: list[OsintAccount]) -> list[OsintAccount]:
-    """Collapse by site_name (case-insensitive). Prefer the richer row
-    (a profile/handle over a bare registration); merge source_engine labels."""
-    by_site: dict[str, OsintAccount] = {}
+def _merge_engines(a: str | None, b: str | None) -> str:
+    """Union two engine labels, each of which may ALREADY be comma-joined from a
+    previous merge. Splitting first keeps repeated merges from re-appending a
+    label that is already present (``maigret,rule-base`` + ``rule-base``)."""
+    parts = {p.strip() for s in (a, b) for p in (s or "").split(",") if p.strip()}
+    return ",".join(sorted(parts))
+
+
+def _dedupe(
+    accounts: list[OsintAccount], *, by_username: bool = False
+) -> list[OsintAccount]:
+    """Collapse duplicate rows. Prefer the richer row (a profile/handle over a
+    bare registration); merge source_engine labels.
+
+    by_username=False (default, email-scan flow): collapse by site. Every row
+    came from looking up ONE email, so two rows on the same site are two signals
+    about the same person and merging them is correct.
+
+    by_username=True (username-scan flow): collapse by (site, username). Rows
+    here came from looking up DIFFERENT usernames — i.e. potentially different
+    people — so collapsing by site alone mixes identities: it keeps one person's
+    URL next to another person's username.
+    """
+    by_key: dict[tuple[str, str], OsintAccount] = {}
     for acc in accounts:
-        key = (acc.site_name or "").strip().lower()
-        if not key:
+        site = (acc.site_name or "").strip().lower()
+        if not site:
             continue
-        existing = by_site.get(key)
+        username = ((acc.extra or {}).get("username") or "").strip().lower()
+        key = (site, username) if by_username else (site, "")
+        existing = by_key.get(key)
         if existing is None:
-            by_site[key] = acc
+            by_key[key] = acc
             continue
-        # Merge engine labels.
-        engines = sorted({existing.source_engine, acc.source_engine})
         winner = acc if (_richness(acc) > _richness(existing)) else existing
         merged = OsintAccount(
             site_name=winner.site_name,
@@ -391,11 +425,11 @@ def _dedupe(accounts: list[OsintAccount]) -> list[OsintAccount]:
             url=winner.url or existing.url or acc.url,
             kind="profile" if "profile" in (existing.kind, acc.kind) else "registered",
             confidence=winner.confidence,
-            source_engine=",".join(engines),
+            source_engine=_merge_engines(existing.source_engine, acc.source_engine),
             extra={**existing.extra, **acc.extra},
         )
-        by_site[key] = merged
-    return list(by_site.values())
+        by_key[key] = merged
+    return list(by_key.values())
 
 
 def _richness(acc: OsintAccount) -> int:
