@@ -129,33 +129,45 @@ def _classify(
     # the handle means "no profile url available", not "wrong person".
     if engines & _EMAIL_KEYED:
         return "confirmed"
+    # Everything below is only as good as its own url. A handle that its url
+    # does not point at is evidence about nobody: a homepage, a search page, or
+    # another site. This sits ABOVE the name check on purpose — a parsed display
+    # name is a weak signal for short two-syllable names, and measured on real
+    # data it promoted a stranger's 2018 Freelancer account to "confirmed"
+    # because "Nhanto" concatenates to the same letters as "Nhan To". Demote
+    # rather than drop, so numeric-id urls fall to guesses (hidden), not away.
+    if not _url_handle_matches(acc):
+        return "guess"
     pname = extra.get("name") or extra.get("fullname") or extra.get("full_name")
     if pname and name_matches(pname, full_name):
         return "confirmed"
-    # Below the identity-proven tiers, a handle that its own url does not point
-    # at is evidence about nobody: a homepage, a search page, or another site.
-    # Demote rather than drop, so numeric-id urls fall to guesses (hidden)
-    # instead of vanishing.
-    if not _url_handle_matches(acc):
-        return "guess"
     if extra.get("cand_source") == "known":
         return "likely"
-    # Site-overlap ("the email is registered here") only narrows to a person
-    # when the site has exactly ONE candidate. With several candidates it says
-    # they use the site but not which of the handles is theirs.
-    site = _canon_site(acc.site_name).lower()
-    if site in registered_sites and per_site.get(site, 0) == 1:
-        return "likely"
+    # Site-overlap ("the email is registered here") only narrows to a person when
+    # the site has exactly ONE candidate — with several it says they use the site
+    # but not which handle is theirs. Gated OFF by default: the candidate count
+    # is only as trustworthy as Maigret's coverage that run, so a degraded scan
+    # silently turns this into a promotion machine. See the flag's comment.
+    if settings.osint_site_overlap_promotes:
+        site = _canon_site(acc.site_name).lower()
+        if site in registered_sites and per_site.get(site, 0) == 1:
+            return "likely"
     return "guess"
 
 
 def _verify_identity(
     accounts: list[OsintAccount], full_name: str | None, registered_sites: set[str]
 ) -> None:
-    # A row whose url does not point at its own handle is already ruled out, so
-    # it is not a rival candidate — counting it would block the single-candidate
-    # rule from ever promoting the one genuine handle on that site.
-    eligible = [a for a in accounts if _url_handle_matches(a)]
+    # Denominator for the single-candidate rule = rows still in the running.
+    # A row ruled out by the url check is not a rival, and counting it would
+    # block the one genuine handle on that site from ever being promoted. An
+    # email-keyed row IS a rival even with a homepage url — it is exempt from
+    # the url check, and it names a handle the email itself proved.
+    eligible = [
+        a for a in accounts
+        if _url_handle_matches(a)
+        or {e.strip() for e in (a.source_engine or "").split(",")} & _EMAIL_KEYED
+    ]
     per_site: Counter[str] = Counter(
         _canon_site(a.site_name).lower() for a in eligible
     )

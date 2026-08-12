@@ -1267,6 +1267,15 @@ class Settings(BaseSettings):
     osint_scan_wall_clock_cap: float = 45.0     # overall scan budget; partial results returned past this
     osint_scan_skip_categories: str = "adult,nsfw,porn"  # category names to skip (NSFW)
     osint_scan_daily_budget: int = 5            # free scans/day/site (BYOK = unlimited)
+    # Promote a profile to "likely" when the email is registered on that site AND
+    # the site narrowed to a single candidate. OFF: measured 11/12-08-26, the
+    # candidate count depends on how many rows Maigret happened to return, so a
+    # DEGRADED scan raises confidence instead of lowering it — two runs of the
+    # same visitor gave 7 vs 404 single-candidate sites, and 1 vs 24 displayed
+    # rows. Re-enable only once the candidate list stops being dominated by
+    # name-derived guesses (needs >=8 confirmed visitors to judge; see
+    # plans/260811-1611-social-resolution-accuracy F3 + D4).
+    osint_site_overlap_promotes: bool = False
     # Rule-base (username→profile, stage C) — WhatsMyName-backed content check.
     # Stage C shares the 45s wall-clock cap with Maigret. Measured 11-08-26:
     # median 0.7s/check at concurrency 10; a HUNG check costs the full 8s timeout
