@@ -110,6 +110,10 @@ function IntentRing({ score }: { score: number }) {
   );
 }
 
+function withHttps(url: string): string {
+  return /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`;
+}
+
 function LinkPill({ href, label }: { href: string; label: string }) {
   return (
     <a
@@ -679,7 +683,7 @@ export default function VisitorDetailPage() {
               {visitor.email && (
                 <LinkPill href={`mailto:${visitor.email}`} label={visitor.email} />
               )}
-              {visitor.linkedin_url && <LinkPill href={visitor.linkedin_url} label="LinkedIn" />}
+              {visitor.linkedin_url && <LinkPill href={withHttps(visitor.linkedin_url)} label="LinkedIn" />}
               {visitor.twitter_handle && (
                 <LinkPill href={`https://x.com/${visitor.twitter_handle}`} label={`@${visitor.twitter_handle}`} />
               )}
@@ -901,7 +905,7 @@ export default function VisitorDetailPage() {
               action={
                 visitor.linkedin_url ? (
                   <a
-                    href={visitor.linkedin_url}
+                    href={withHttps(visitor.linkedin_url)}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-xs text-muted-foreground transition hover:text-primary"
@@ -915,7 +919,7 @@ export default function VisitorDetailPage() {
                 {liPosts.map((p) => (
                   <a
                     key={p.id}
-                    href={p.post_url ?? visitor.linkedin_url ?? "#"}
+                    href={p.post_url || visitor.linkedin_url ? withHttps((p.post_url ?? visitor.linkedin_url)!) : "#"}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="block rounded-lg border border-border/60 p-3 transition hover:border-primary/40"
