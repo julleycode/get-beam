@@ -177,6 +177,13 @@ def _pageview(path: str, at: datetime):
     )
 
 
+def _time_on_page(path: str, at: datetime, seconds: int):
+    return SimpleNamespace(
+        event_type="time_on_page", page_path=None, page_title=None,
+        url="https://x" + path, time_on_page=seconds, created_at=at,
+    )
+
+
 class TestJourneyWindow:
     """The window must be anchored to NOW, never to the start of the hour."""
 
@@ -207,6 +214,58 @@ class TestJourneyWindow:
     @pytest.mark.asyncio
     async def test_non_fp2_fingerprint_short_circuits(self):
         assert await fetch_journey(_FakeSession([]), "fp3_abc", site_id="site_x") == []
+
+
+class TestDurationAttribution:
+    """Seconds belong to one visit, never to every visit of the same path."""
+
+    @pytest.mark.asyncio
+    async def test_repeat_visits_do_not_share_one_duration(self):
+        base = datetime(2026, 8, 12, 10, 0, 0)
+        # / (12s) → /pricing → / again (300s). The old url-keyed dict gave BOTH
+        # "/" rows 300s, which is what rendered "/ · 3005s" four times over.
+        rows = [
+            _pageview("/", base),
+            _time_on_page("/", base + timedelta(seconds=12), 12),
+            _pageview("/pricing", base + timedelta(minutes=1)),
+            _pageview("/", base + timedelta(minutes=2)),
+            _time_on_page("/", base + timedelta(minutes=7), 300),
+        ][::-1]
+
+        pages = await fetch_journey(_FakeSession(rows), "fp2_abc", site_id="site_x")
+
+        assert [(p["path"], p["seconds"]) for p in pages] == [
+            ("/", 12),
+            ("/pricing", 0),
+            ("/", 300),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_chunks_for_one_visit_are_summed(self):
+        """The pixel emits a chunk per visible stretch — sum them, don't max."""
+        base = datetime(2026, 8, 12, 10, 0, 0)
+        rows = [
+            _pageview("/", base),
+            _time_on_page("/", base + timedelta(seconds=30), 30),
+            _time_on_page("/", base + timedelta(seconds=90), 45),
+        ][::-1]
+
+        pages = await fetch_journey(_FakeSession(rows), "fp2_abc", site_id="site_x")
+
+        assert [(p["path"], p["seconds"]) for p in pages] == [("/", 75)]
+
+    @pytest.mark.asyncio
+    async def test_orphan_duration_is_dropped(self):
+        """Its pageview fell outside the window — do not smear it elsewhere."""
+        base = datetime(2026, 8, 12, 10, 0, 0)
+        rows = [
+            _time_on_page("/gone", base, 900),
+            _pageview("/here", base + timedelta(minutes=1)),
+        ][::-1]
+
+        pages = await fetch_journey(_FakeSession(rows), "fp2_abc", site_id="site_x")
+
+        assert [(p["path"], p["seconds"]) for p in pages] == [("/here", 0)]
 
 
 class TestBuildGeo:

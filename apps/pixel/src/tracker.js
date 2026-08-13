@@ -664,6 +664,9 @@
   // --- Engagement signals: scroll depth, time on page, clicks ---
   // Feed intent scoring (scroll>=75, time>60s); without these those stay 0.
 
+  // Start of the CURRENT VISIBLE stretch, not of the page: without the
+  // visible-again reset below, a tab parked for an hour reports ~3600s of
+  // engagement nobody spent — and that feeds intent scoring, not just display.
   var pageStart = Date.now();
   var maxDepth = 0;
   var clickCount = 0;
@@ -769,6 +772,8 @@
   window.addEventListener("pagehide", leavePage);
   document.addEventListener("visibilitychange", function() {
     if (document.visibilityState === "hidden") leavePage();
+    // Back in view: restart the clock (leavePage already emitted + reset).
+    else pageStart = Date.now();
   });
 
   // --- Identity-vendor pixel stacking (STRICTLY OPT-IN, default OFF) ---

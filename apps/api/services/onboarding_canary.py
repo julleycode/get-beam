@@ -55,7 +55,8 @@ async def fetch_journey(
     match is cross-tenant by construction.
 
     Durations live in separate ``time_on_page`` rows keyed by url (the pixel
-    fires them on page leave), so those seconds are merged onto each pageview.
+    fires them on page leave and on tab-hide), so those seconds are merged onto
+    the pageview they follow — per visit, never per path.
     Read-only. Returns [] on any failure — never raises.
 
     THE WINDOW IS ANCHORED TO *NOW*, NOT TO THE START OF THE HOUR. Both limits
@@ -108,23 +109,35 @@ async def fetch_journey(
     # anything downstream (the reveal renders left-to-right as a journey).
     rows = list(reversed(rows))
 
-    secs_by_url: dict[str, int] = {}
-    for r in rows:
-        if r.event_type == "time_on_page" and r.url:
-            secs_by_url[r.url] = max(secs_by_url.get(r.url, 0), int(r.time_on_page or 0))
-
+    # Attach each `time_on_page` to the pageview it actually belongs to: the most
+    # recent pageview of the same url BEFORE it. Keying a dict by url instead —
+    # which is what this did — gives every visit to a repeated path the same
+    # number, so a journey that returns to "/" four times renders "/ · 3005s"
+    # four times over. Rows are already in chronological order here.
     pages: list[dict] = []
+    open_page_by_url: dict[str, dict] = {}
+
     for r in rows:
-        if r.event_type != "pageview":
-            continue
-        pages.append(
-            {
+        url = r.url or ""
+        if r.event_type == "pageview":
+            page = {
                 "path": (r.page_path or r.url or "/"),
                 "title": (r.page_title or "").strip(),
-                "seconds": int(r.time_on_page or 0) or secs_by_url.get(r.url or "", 0),
+                "seconds": int(r.time_on_page or 0),
                 "at": r.created_at.isoformat() if r.created_at else None,
             }
-        )
+            pages.append(page)
+            open_page_by_url[url] = page
+        elif r.event_type == "time_on_page":
+            page = open_page_by_url.get(url)
+            if page is None:
+                # The pageview fell outside the window (or predates the pixel
+                # sending one). Nothing to attribute it to — drop it rather than
+                # smear it across unrelated visits.
+                continue
+            # The pixel emits additive chunks per visible stretch, so a page left
+            # and returned to accrues several. Sum, don't max.
+            page["seconds"] += int(r.time_on_page or 0)
 
     # Keep the NEWEST MAX_PAGES, still in reading order. A head-slice here would
     # reintroduce the "oldest eight win" bug the docstring warns about.
