@@ -12,6 +12,7 @@ import structlog
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.config import settings
 from apps.api.models.database import async_session
 from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.known_contact import KnownContact
@@ -262,17 +263,20 @@ async def _resolution_skip_reason(
         return "below_intent_threshold"
     if not visitor.ip_address:
         return "no_ip_address"
-    # Checked before the 30-day gate: an outage-deferred visitor usually has NO
-    # ResolutionLog at all (outages deliberately write no ledger row), so the
-    # recency gate below would not fire and this would fall through to
+    # Checked before the retry-cooldown gate: an outage-deferred visitor usually
+    # has NO ResolutionLog at all (outages deliberately write no ledger row), so
+    # the recency gate below would not fire and this would fall through to
     # "awaiting_next_run" — technically true, but it hides the fact that the
     # providers were down and that a retry is already scheduled.
     deferred_until = getattr(visitor, "resolution_deferred_until", None)
     if deferred_until is not None:
         if deferred_until > datetime.now(timezone.utc).replace(tzinfo=None):
             return "provider_outage"
-    if last_attempt is not None:
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+    cooldown_days = settings.resolution_retry_cooldown_days
+    if last_attempt is not None and cooldown_days > 0:
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            days=cooldown_days
+        )
         if last_attempt >= cutoff:
             return "recently_attempted"
     if not await check_resolution_attempt_budget(db, site.site_id):

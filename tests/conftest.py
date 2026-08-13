@@ -36,6 +36,10 @@ os.environ.setdefault("TOKEN_ENCRYPTION_KEY", _Fernet.generate_key().decode())
 # agentic /ai/ask path would silently hit the live API before its fallback.
 # Env vars beat dotenv in pydantic-settings, so an empty value forces mocks.
 os.environ.setdefault("GEMINI_API_KEY", "")
+# Developer .env may set RESOLUTION_RETRY_COOLDOWN_DAYS=0 to disable the
+# no-retry lock locally. Tests that assert "recently_attempted" need the
+# historical 30-day window, so pin it before Settings loads.
+os.environ.setdefault("RESOLUTION_RETRY_COOLDOWN_DAYS", "30")
 # Same leak, different shape: a developer who turns the agent flags ON in their
 # root .env to exercise the feature locally would flip the DEFAULT every flag
 # test measures against. Two tests assert flag-OFF behaviour explicitly
