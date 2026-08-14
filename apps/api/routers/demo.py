@@ -406,11 +406,25 @@ async def demo_canary(request: Request, body: CanaryPublicBody = CanaryPublicBod
     if geo_raw is None:
         reason = "provider_unavailable"
 
-    geo = build_geo(geo_raw)
+    # Same second-opinion pass as the authed twin in routers/onboarding.py —
+    # the public funnel renders the identical card, so an un-cross-checked city
+    # here would print exactly the claim the authed route just learned to drop.
+    cross = None
+    if geo_raw is not None:
+        from apps.api.services.geoip_crosscheck import crosscheck_geo
+
+        cross = await crosscheck_geo(ip, geo_raw)
+
+    geo = build_geo(geo_raw, crosscheck=cross)
     network = build_network(ip, geo_raw) if geo_raw is not None else None
 
     logger.info(
-        "demo_canary", ip=ip[:8], fp=fp[:12], pages=len(pages), has_geo=geo is not None
+        "demo_canary",
+        ip=ip[:8],
+        fp=fp[:12],
+        pages=len(pages),
+        has_geo=geo is not None,
+        geo_confidence=(geo or {}).get("confidence"),
     )
 
     result: dict = {
@@ -427,6 +441,10 @@ async def demo_canary(request: Request, body: CanaryPublicBody = CanaryPublicBod
 class CanaryFeedbackBody(BaseModel):
     reasons: list[str] = []
     note: str | None = None
+    # Ground truth for a `wrong_city` report. Same field, same gating and same
+    # truncation as the authed twin — the public funnel is where MOST of these
+    # reports come from, so leaving it out here would starve the metric.
+    actual_city: str | None = None
     shown: dict = {}
     fingerprint: str | None = None
 
@@ -444,6 +462,7 @@ async def demo_identity_feedback(request: Request, body: CanaryFeedbackBody) -> 
     _require_location_reveal()
 
     from apps.api.models.identity_feedback import (
+        ACTUAL_CITY_MAX_CHARS,
         ANONYMOUS_USER_ID,
         FEEDBACK_REASONS,
         NOTE_MAX_CHARS,
@@ -452,6 +471,11 @@ async def demo_identity_feedback(request: Request, body: CanaryFeedbackBody) -> 
 
     reasons = [r for r in (body.reasons or []) if r in FEEDBACK_REASONS]
     note = (body.note or "").strip()[:NOTE_MAX_CHARS] or None
+    actual_city = (
+        (body.actual_city or "").strip()[:ACTUAL_CITY_MAX_CHARS] or None
+        if "wrong_city" in reasons
+        else None
+    )
 
     try:
         async with async_session() as db:
@@ -465,6 +489,7 @@ async def demo_identity_feedback(request: Request, body: CanaryFeedbackBody) -> 
                     surface=_PUBLIC_CANARY_SURFACE,
                     shown=(body.shown if isinstance(body.shown, dict) else {}),
                     reasons=reasons,
+                    actual_city=actual_city,
                     note=note,
                 )
             )
@@ -472,7 +497,12 @@ async def demo_identity_feedback(request: Request, body: CanaryFeedbackBody) -> 
     except Exception as e:  # noqa: BLE001 — a feedback write never breaks the funnel
         logger.warning("demo_identity_feedback_failed", error=str(e))
 
-    logger.info("demo_identity_feedback", reasons=reasons, has_note=bool(note))
+    logger.info(
+        "demo_identity_feedback",
+        reasons=reasons,
+        has_note=bool(note),
+        has_actual_city=bool(actual_city),
+    )
     return Response(status_code=204)
 
 

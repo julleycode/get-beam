@@ -54,6 +54,14 @@ for _flag in (
     "AGENT_MARKER_ENABLED",
 ):
     os.environ.setdefault(_flag, "false")
+# The geo cross-check is the one new-behaviour flag that defaults ON in code, and
+# it makes a SECOND outbound provider call (ipinfo.io). Existing canary tests
+# patch only `geoip.httpx`, so leaving it on sends real requests for every
+# fixture IP — the canary integration file went from seconds to ~10 minutes of
+# DNS/connect timeouts before this line existed. Pinned off; the tests that
+# exercise the cross-check enable it themselves via monkeypatch and stub
+# `_lookup_second`, which never touches the network.
+os.environ.setdefault("GEO_CROSSCHECK_ENABLED", "false")
 
 
 def _native_enum_names(metadata) -> list[str]:

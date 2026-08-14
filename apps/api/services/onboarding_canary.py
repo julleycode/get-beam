@@ -25,6 +25,7 @@ import structlog
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.config import settings
 from apps.api.models.event import Event
 from apps.api.models.visitor import Visitor
 from apps.api.services.company_resolver import (
@@ -264,11 +265,28 @@ def build_network(ip: str, geo) -> dict | None:
     return {"label": label[:120], "kind": kind}
 
 
-def build_geo(geo) -> dict | None:
+def build_geo(geo, *, crosscheck=None) -> dict | None:
     """Public geo payload, or None when unusable.
 
     Rejects lat==lon==0.0 — Null Island is the classic version of this bug and
     renders as a pin in the Gulf of Guinea.
+
+    ``crosscheck`` is a ``geoip_crosscheck.CrossCheck`` (duck-typed). It sets
+    ``confidence``, which the client uses to decide whether a CITY NAME may be
+    printed at all:
+
+      ``high``        two independent providers put this IP within
+                      ``geo_crosscheck_disagree_km`` of each other.
+      ``unverified``  no second opinion was obtainable — today's behaviour,
+                      unchanged. NOT an upgrade of ``low``.
+      ``low``         the providers disagree. THE CITY AND REGION ARE STRIPPED
+                      HERE, server-side, rather than left to the client to hide:
+                      a name that must not be shown must not be sent, or the
+                      next surface to read this payload reprints it.
+
+    On ``low`` the radius becomes the measured disagreement (capped), so the
+    circle genuinely contains both candidate answers instead of drawing a 25 km
+    promise around one of them.
     """
     if geo is None:
         return None
@@ -288,11 +306,35 @@ def build_geo(geo) -> dict | None:
     except (TypeError, ValueError):
         accuracy_km = _DEFAULT_ACCURACY_KM
 
-    return {
+    city = getattr(geo, "city", "") or ""
+    region = getattr(geo, "region", "") or ""
+    confidence = "unverified"
+    disagree_km: int | None = None
+
+    checked = bool(getattr(crosscheck, "checked", False)) if crosscheck else False
+    if checked:
+        if getattr(crosscheck, "agreed", False):
+            confidence = "high"
+        else:
+            confidence = "low"
+            city = ""
+            region = ""
+            raw = getattr(crosscheck, "distance_km", None) or 0.0
+            disagree_km = max(1, int(round(float(raw))))
+            accuracy_km = max(
+                accuracy_km,
+                min(disagree_km, settings.geo_crosscheck_max_radius_km),
+            )
+
+    payload: dict = {
         "lat": float(lat),
         "lng": float(lon),
         "accuracy_km": accuracy_km,
-        "city": (getattr(geo, "city", "") or ""),
-        "region": (getattr(geo, "region", "") or ""),
+        "city": city,
+        "region": region,
         "country_code": (getattr(geo, "country_code", "") or ""),
+        "confidence": confidence,
     }
+    if disagree_km is not None:
+        payload["disagree_km"] = disagree_km
+    return payload

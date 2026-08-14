@@ -38,6 +38,17 @@ export const MAP_MIN_ZOOM = 3;
 export const MAP_MAX_ZOOM = 13;
 export const MAP_ZOOM = 11;
 
+/**
+ * Above this radius the fixed MAP_ZOOM of 11 no longer contains the accuracy
+ * circle, and the user sees a full-bleed pink wash with the pin somewhere under
+ * it — which reads as a rendering bug, not as uncertainty. Past it, fit the view
+ * to the circle instead so the whole error bar is visible at once.
+ *
+ * Only reachable via the cross-check disagreement path (`confidence: "low"`),
+ * where the backend widens the radius to the measured provider disagreement.
+ */
+const FIT_BOUNDS_ABOVE_KM = 40;
+
 /** ≥4 tile errors this fast, or no successful tile at all, means blocked. */
 const TILE_ERROR_THRESHOLD = 4;
 const TILE_ERROR_WINDOW_MS = 2500;
@@ -153,8 +164,9 @@ export default function CanaryMap({ geo, onTileFailure, onTileOk }: CanaryMapPro
       // The honest radius. IP geo is city-level, so the circle is doing real
       // work here — with the caption gone it is the ONLY thing conveying that the
       // pin is an estimate. Do not drop it.
-      L.circle([geo.lat, geo.lng], {
-        radius: Math.max(1, geo.accuracy_km || 25) * 1000,
+      const radiusKm = Math.max(1, geo.accuracy_km || 25);
+      const circle = L.circle([geo.lat, geo.lng], {
+        radius: radiusKm * 1000,
         color: "#FF3366",
         weight: 1,
         opacity: 0.45,
@@ -162,6 +174,16 @@ export default function CanaryMap({ geo, onTileFailure, onTileOk }: CanaryMapPro
         fillOpacity: 0.1,
         interactive: false,
       }).addTo(map);
+
+      if (radiusKm > FIT_BOUNDS_ABOVE_KM) {
+        // maxZoom is belt-and-braces: fitBounds only ever zooms OUT for a circle
+        // this large, but the cap keeps the "never past street level" rule true
+        // no matter what radius the backend sends.
+        map.fitBounds(circle.getBounds(), {
+          maxZoom: MAP_MAX_ZOOM,
+          padding: [12, 12],
+        });
+      }
 
       // L.divIcon, NOT L.marker's default icon: Leaflet resolves that PNG
       // relative to the stylesheet and it 404s under bundlers (the classic

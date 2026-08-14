@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import {
+  formatConfidenceNote,
   formatNetwork,
   formatPageLine,
   formatPlace,
@@ -43,6 +44,7 @@ export function CanaryReveal({
 
   const mode = chooseRevealMode(response, tileState);
   const place = formatPlace(response.geo);
+  const confidenceNote = formatConfidenceNote(response.geo);
   const network = useMemo(() => formatNetwork(response.network), [response.network]);
   const pages = response.pages ?? [];
 
@@ -96,6 +98,17 @@ export function CanaryReveal({
             </div>
           )}
         </div>
+
+        {/* The honesty caption was removed by product decision for the CONFIDENT
+            case and must stay removed there. This one is different: it only
+            renders when the backend measured a real disagreement between two
+            providers, and without it a city-less pin looks like a failure
+            rather than like a deliberately wider claim. */}
+        {confidenceNote && (
+          <p className="ob-map-note" data-testid="canary-confidence-note">
+            {confidenceNote}
+          </p>
+        )}
 
         {mode === "text" && response.geo && (
           <p className="ob-map-note">{TILE_FAILURE_NOTE}</p>

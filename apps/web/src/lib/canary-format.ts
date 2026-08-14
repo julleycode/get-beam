@@ -9,6 +9,20 @@
  * class of claim, enforced on both sides of the wire.
  */
 
+/**
+ * How much of a claim the pin is allowed to make. Set server-side by
+ * `build_geo` from a second-provider cross-check.
+ *
+ * - `high`        two independent geo providers agree on where this IP is.
+ * - `unverified`  no second opinion was obtainable (provider down, flag off).
+ *                 The single-provider behaviour that shipped first. NOT a
+ *                 downgrade of `high` and NOT an upgrade of `low`.
+ * - `low`         the providers disagree. THE SERVER ALREADY SENT `city` AND
+ *                 `region` AS EMPTY STRINGS — there is no hidden name to
+ *                 reveal, so no client can leak one by forgetting to check.
+ */
+export type GeoConfidence = "high" | "unverified" | "low";
+
 /** Mirrors `build_geo` in apps/api/services/onboarding_canary.py. */
 export interface CanaryGeo {
   lat: number;
@@ -17,6 +31,10 @@ export interface CanaryGeo {
   city: string;
   region: string;
   country_code: string;
+  /** Absent on payloads written before the cross-check shipped. */
+  confidence?: GeoConfidence;
+  /** Km between the two providers' answers. Only present when `low`. */
+  disagree_km?: number;
 }
 
 /**
@@ -128,6 +146,27 @@ export function formatNetwork(
       // Unknown classification: print the label with no ownership claim.
       return { label, description: label, attributableToUser: false };
   }
+}
+
+/**
+ * The one line that keeps a disagreed pin honest, or "" when none is needed.
+ *
+ * WHY IT IS NOT OPTIONAL COPY: with the city stripped, a bare pin plus a large
+ * circle reads as "we didn't bother" rather than "we checked twice and the
+ * sources conflict". The measured disagreement is the whole credibility of the
+ * moment — a reveal that admits its own error bar survives being wrong; one
+ * that states Hanoi to a reader sitting in Ho Chi Minh City does not.
+ *
+ * Deliberately does NOT name the rejected cities. Printing "Hanoi or Haiphong?"
+ * invites the user to pick one and re-lands us on a coin flip.
+ */
+export function formatConfidenceNote(geo: CanaryGeo | null | undefined): string {
+  if (!geo || geo.confidence !== "low") return "";
+  const km = Math.round(geo.disagree_km ?? 0);
+  if (km > 0) {
+    return `two IP databases put you ${km}km apart, so this is a region, not a pin.`;
+  }
+  return "the IP databases disagree about your city, so this is a region, not a pin.";
 }
 
 /** `"/pricing · 42s"`. Seconds omitted when unknown or zero. */

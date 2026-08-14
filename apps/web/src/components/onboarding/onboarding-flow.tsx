@@ -239,6 +239,7 @@ export function OnboardingFlow() {
         .submitIdentityFeedback({
           reasons: payload.reasons,
           note: payload.note || null,
+          actual_city: payload.actualCity || null,
           shown: {
             city: geo?.city ?? null,
             region: geo?.region ?? null,
@@ -248,6 +249,11 @@ export function OnboardingFlow() {
             lng: geo ? Math.round(geo.lng * 100) / 100 : null,
             org: network?.label ?? null,
             kind: network?.kind ?? null,
+            // Whether the reveal had already hedged. A `wrong_city` report
+            // against a `high`-confidence pin means two providers agreed and
+            // were BOTH wrong — a different (and worse) failure than one
+            // against `unverified`, and indistinguishable without this field.
+            confidence: geo?.confidence ?? null,
           },
           site_id: state.siteId,
           fingerprint: state.fingerprint,
@@ -257,9 +263,11 @@ export function OnboardingFlow() {
         });
 
       setHandoffLine(
-        payload.reasons.includes("wrong_city")
-          ? "noted — 'wrong city' goes straight to the team that tunes IP geo."
-          : "noted, thanks — that goes straight to the team that tunes this.",
+        payload.actualCity
+          ? `${payload.actualCity} it is — that correction is worth more than the guess was.`
+          : payload.reasons.includes("wrong_city")
+            ? "noted — 'wrong city' goes straight to the team that tunes IP geo."
+            : "noted, thanks — that goes straight to the team that tunes this.",
       );
       dispatch({ type: "GOTO", step: "site" });
     },

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  formatConfidenceNote,
   formatPlace,
   formatNetwork,
   formatPageLine,
@@ -131,5 +132,54 @@ describe("formatPageLine", () => {
 
   it("falls back to / for an empty path", () => {
     expect(formatPageLine({ path: "" })).toBe("/");
+  });
+});
+
+describe("formatConfidenceNote", () => {
+  it("says nothing when the providers agreed", () => {
+    expect(formatConfidenceNote(geo({ confidence: "high" }))).toBe("");
+  });
+
+  it("says nothing when there was no second opinion", () => {
+    // `unverified` is today's single-provider behaviour, not a known failure —
+    // captioning it would apologise on every request in an env without ipinfo.
+    expect(formatConfidenceNote(geo({ confidence: "unverified" }))).toBe("");
+  });
+
+  it("says nothing for a payload written before the cross-check shipped", () => {
+    expect(formatConfidenceNote(geo())).toBe("");
+    expect(formatConfidenceNote(null)).toBe("");
+    expect(formatConfidenceNote(undefined)).toBe("");
+  });
+
+  it("reports the measured disagreement on a low-confidence pin", () => {
+    const note = formatConfidenceNote(
+      geo({ confidence: "low", city: "", region: "", disagree_km: 93 }),
+    );
+    expect(note).toContain("93km");
+    expect(note).toContain("region, not a pin");
+  });
+
+  it("still explains itself when the distance is missing", () => {
+    const note = formatConfidenceNote(geo({ confidence: "low", city: "" }));
+    expect(note).toContain("disagree");
+    expect(note).not.toContain("0km");
+  });
+
+  it("never names the rejected cities", () => {
+    // Offering "Hanoi or Haiphong?" invites the user to pick and re-lands us
+    // on the coin flip the cross-check exists to remove.
+    const note = formatConfidenceNote(
+      geo({ confidence: "low", city: "", region: "", disagree_km: 1150 }),
+    );
+    expect(note).not.toMatch(/hanoi|haiphong/i);
+  });
+});
+
+describe("formatPlace under a low-confidence cross-check", () => {
+  it("degrades to the country when the server stripped city and region", () => {
+    expect(
+      formatPlace(geo({ confidence: "low", city: "", region: "" })),
+    ).toBe("VN");
   });
 });

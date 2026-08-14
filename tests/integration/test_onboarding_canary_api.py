@@ -472,3 +472,185 @@ async def test_city_accuracy_radius_reaches_the_response(
     # City DB carries no org/isp and the ASN rung is dead here, so the network
     # line is OMITTED rather than filled with a guess (config KNOWN LIMITATIONS).
     assert body["network"] is None
+
+
+# ─── Two-provider cross-check ───────────────────────────────────────────────
+#
+# The reveal used to print whatever single provider it had. On residential
+# non-US ranges that provider geolocates by ASN registration: one real FPT
+# address resolved to Hanoi via ip-api, Haiphong via ipinfo, while the human was
+# in Ho Chi Minh City. These tests pin the wire contract of the fix — the city
+# must not merely be hidden by the client, it must not be SENT.
+#
+# `_lookup_second` is always stubbed. The suite pins GEO_CROSSCHECK_ENABLED off
+# in conftest precisely so no test reaches the network; enabling it here without
+# a stub would reintroduce that.
+
+@pytest.fixture
+def crosscheck_on(monkeypatch):
+    from apps.api.services import geoip_crosscheck as xc
+
+    monkeypatch.setattr(xc.settings, "geo_crosscheck_enabled", True)
+    monkeypatch.setattr(xc.settings, "geo_crosscheck_disagree_km", 50)
+    monkeypatch.setattr(xc.settings, "geo_crosscheck_max_radius_km", 300)
+    monkeypatch.setattr(xc.settings, "mock_external_apis", False)
+    # L1 is module-global and survives between tests in one process.
+    xc._L1.clear()
+
+
+def _second_provider(monkeypatch, point):
+    async def _fake(_ip):
+        return point
+
+    monkeypatch.setattr("apps.api.services.geoip_crosscheck._lookup_second", _fake)
+
+
+@pytest.mark.asyncio
+async def test_agreeing_providers_keep_the_city(
+    authed, flag_on, geo_ok, crosscheck_on, monkeypatch, test_engine
+):
+    _second_provider(monkeypatch, (21.05, 105.90, "Hanoi"))
+
+    r = await authed.post("/api/v1/onboarding/canary", json={})
+    assert r.status_code == 200
+    geo = r.json()["geo"]
+    assert geo["confidence"] == "high"
+    assert geo["city"] == "Hanoi"
+    assert geo["accuracy_km"] == 25
+
+
+@pytest.mark.asyncio
+async def test_disagreeing_providers_never_send_the_city(
+    authed, flag_on, geo_ok, crosscheck_on, monkeypatch, test_engine
+):
+    """The real incident: ip-api Hanoi vs ipinfo Haiphong, ~90km apart."""
+    _second_provider(monkeypatch, (20.8648, 106.6834, "Haiphong"))
+
+    r = await authed.post("/api/v1/onboarding/canary", json={})
+    assert r.status_code == 200
+    geo = r.json()["geo"]
+    assert geo["confidence"] == "low"
+    # Not "hidden by the UI" — absent from the payload. A future surface that
+    # reads this response cannot reprint a city it never received.
+    assert geo["city"] == ""
+    assert geo["region"] == ""
+    assert geo["country_code"] == "VN"
+    # The circle now genuinely contains both candidate answers.
+    assert 80 <= geo["disagree_km"] <= 100
+    assert geo["accuracy_km"] == geo["disagree_km"]
+    # Neither rejected city name leaks through any other field.
+    assert "Haiphong" not in r.text and "Hanoi" not in r.text
+
+
+@pytest.mark.asyncio
+async def test_dead_second_provider_is_unverified_not_degraded(
+    authed, flag_on, geo_ok, crosscheck_on, monkeypatch, test_engine
+):
+    """A provider outage must not manufacture a disagreement — that would blank
+    the city for every user the moment ipinfo rate-limits us."""
+    _second_provider(monkeypatch, None)
+
+    r = await authed.post("/api/v1/onboarding/canary", json={})
+    assert r.status_code == 200
+    geo = r.json()["geo"]
+    assert geo["confidence"] == "unverified"
+    assert geo["city"] == "Hanoi"
+    assert "disagree_km" not in geo
+
+
+@pytest.mark.asyncio
+async def test_crosscheck_disabled_leaves_the_payload_alone(
+    authed, flag_on, geo_ok, monkeypatch, test_engine
+):
+    """The conftest default. Confidence is still reported so the client never
+    has to distinguish "old payload" from "flag off"."""
+    r = await authed.post("/api/v1/onboarding/canary", json={})
+    assert r.status_code == 200
+    assert r.json()["geo"]["confidence"] == "unverified"
+
+
+# ─── Ground truth: "wrong city" → which city, then? ─────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_actual_city_is_stored_with_a_wrong_city_report(
+    authed, flag_on, test_engine, user_id
+):
+    r = await authed.post(
+        "/api/v1/onboarding/identity-feedback",
+        json={
+            "reasons": ["wrong_city"],
+            "actual_city": "  Ho Chi Minh City  ",
+            "shown": {"city": "Hanoi", "confidence": "unverified"},
+        },
+    )
+    assert r.status_code == 204
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        row = (await s.execute(select(IdentityFeedback))).scalars().one()
+    assert row.actual_city == "Ho Chi Minh City"
+
+
+@pytest.mark.asyncio
+async def test_actual_city_is_dropped_without_a_wrong_city_report(
+    authed, flag_on, test_engine, user_id
+):
+    """Keeps the column a clean ground-truth pair with `shown["city"]` rather
+    than a second free-text field anything could write into."""
+    r = await authed.post(
+        "/api/v1/onboarding/identity-feedback",
+        json={"reasons": ["vpn_or_proxy"], "actual_city": "Ho Chi Minh City"},
+    )
+    assert r.status_code == 204
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        row = (await s.execute(select(IdentityFeedback))).scalars().one()
+    assert row.actual_city is None
+
+
+@pytest.mark.asyncio
+async def test_actual_city_is_truncated_not_rejected(
+    authed, flag_on, test_engine, user_id
+):
+    r = await authed.post(
+        "/api/v1/onboarding/identity-feedback",
+        json={"reasons": ["wrong_city"], "actual_city": "x" * 400},
+    )
+    assert r.status_code == 204
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        row = (await s.execute(select(IdentityFeedback))).scalars().one()
+    assert len(row.actual_city) == 120
+
+
+@pytest.mark.asyncio
+async def test_stats_reports_the_city_correction_pairs(admin, flag_on, test_engine):
+    """The metric the table exists for: not "we were wrong N times" but "we said
+    Hanoi and they were in Ho Chi Minh City".
+
+    Posts as `admin` rather than pulling in `authed` too: both fixtures write
+    `app.dependency_overrides[get_current_user]`, so requesting both would leave
+    whichever set up last in charge and silently 403 the stats read.
+    """
+    for _ in range(2):
+        await admin.post(
+            "/api/v1/onboarding/identity-feedback",
+            json={
+                "reasons": ["wrong_city"],
+                "actual_city": "Ho Chi Minh City",
+                "shown": {"city": "Hanoi"},
+            },
+        )
+
+    r = await admin.get("/api/v1/onboarding/identity-feedback/stats")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["with_actual_city"] == 2
+    assert body["city_corrections"] == [
+        {"shown": "Hanoi", "actual": "Ho Chi Minh City", "count": 2}
+    ]
+    # The rounded coordinates stay unreturned — only the city pair was widened.
+    assert "lat" not in r.text and "lng" not in r.text

@@ -885,6 +885,8 @@ class ApiClient {
   async submitIdentityFeedback(body: {
     reasons: string[];
     note?: string | null;
+    /** Ground truth for a `wrong_city` report. Ignored server-side otherwise. */
+    actual_city?: string | null;
     shown?: Record<string, unknown>;
     site_id?: string | null;
     fingerprint?: string | null;
