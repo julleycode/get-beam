@@ -43,7 +43,7 @@ from apps.api.models.identity_feedback import (
 from apps.api.models.user import User
 from apps.api.services.geoip import resolve_geoip_full
 from apps.api.services.geoip_crosscheck import crosscheck_geo
-from apps.api.services.ip_resolution import resolve_client_ip
+from apps.api.services.ip_resolution import ip_family, resolve_client_ip
 from apps.api.services.onboarding_canary import build_geo, build_network, fetch_journey
 from apps.api.services.rate_limiter import limiter
 
@@ -115,6 +115,10 @@ async def onboarding_canary(
         pages=len(pages),
         has_geo=geo is not None,
         geo_confidence=(geo or {}).get("confidence"),
+        # The denominator for the v4-vs-v6 accuracy question. Logged on EVERY
+        # reveal, not only on complaints: without the total per family, a raw
+        # count of v4 corrections says nothing about the rate.
+        ip_family=ip_family(ip),
     )
 
     result: dict = {
@@ -164,13 +168,19 @@ async def onboarding_identity_feedback(
         else None
     )
 
+    # Server-owned, not client-supplied: `shown` is otherwise whatever the page
+    # posts, and the family is the one field here that must be trustworthy for
+    # the v4-vs-v6 comparison to mean anything.
+    shown = dict(body.shown or {})
+    shown["ip_family"] = ip_family(resolve_client_ip(request))
+
     db.add(
         IdentityFeedback(
             user_id=user.id,
             site_id=(body.site_id or None),
             fingerprint=(body.fingerprint or None),
             surface="onboarding_canary",
-            shown=body.shown or {},
+            shown=shown,
             reasons=reasons,
             actual_city=actual_city,
             note=note,
@@ -245,13 +255,28 @@ async def onboarding_identity_feedback_stats(
     # printed no city at all (the cross-check `confidence: "low"` path strips it)
     # collapse into a NULL bucket rather than vanishing.
     shown_city = IdentityFeedback.shown["city"].astext
+    shown_family = IdentityFeedback.shown["ip_family"].astext
     correction_rows = (
         await db.execute(
-            select(shown_city, IdentityFeedback.actual_city, func.count())
+            select(
+                shown_city,
+                IdentityFeedback.actual_city,
+                shown_family,
+                func.count(),
+            )
             .where(scope, IdentityFeedback.actual_city.isnot(None))
-            .group_by(shown_city, IdentityFeedback.actual_city)
+            .group_by(shown_city, IdentityFeedback.actual_city, shown_family)
             .order_by(func.count().desc())
             .limit(50)
+        )
+    ).all()
+
+    # Complaints per address family. Compare against the `ip_family` counts in
+    # the `onboarding_canary` log line (the denominator) to get a RATE — this
+    # count alone just tracks how many visitors happen to be on each family.
+    family_rows = (
+        await db.execute(
+            select(shown_family, func.count()).where(scope).group_by(shown_family)
         )
     ).all()
 
@@ -286,7 +311,11 @@ async def onboarding_identity_feedback_stats(
         "with_note": int(with_note or 0),
         "with_actual_city": int(with_actual_city or 0),
         "city_corrections": [
-            {"shown": s, "actual": a, "count": int(c)} for s, a, c in correction_rows
+            {"shown": s, "actual": a, "ip_family": f, "count": int(c)}
+            for s, a, f, c in correction_rows
+        ],
+        "by_ip_family": [
+            {"ip_family": f or "unknown", "count": int(c)} for f, c in family_rows
         ],
         # Zero-filled over the known vocabulary so an untouched reason reads as a
         # real 0 rather than a missing key the caller has to guess about.

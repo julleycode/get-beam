@@ -24,6 +24,7 @@ from apps.api.models.database import async_session
 from apps.api.models.visitor import Visitor
 from apps.api.services.rate_limiter import limiter
 from apps.api.services.identity_resolver import IdentityResolver
+from apps.api.services.ip_resolution import ip_family as _ip_family
 from apps.api.services.ip_resolution import resolve_client_ip
 from apps.api.services.pii import mask_email
 from apps.api.services.platform_detector import detect_platform
@@ -425,6 +426,10 @@ async def demo_canary(request: Request, body: CanaryPublicBody = CanaryPublicBod
         pages=len(pages),
         has_geo=geo is not None,
         geo_confidence=(geo or {}).get("confidence"),
+        # Denominator for the v4-vs-v6 accuracy question — see
+        # services/ip_resolution.ip_family. Most reveals happen here, so without
+        # this line the measurement is missing its larger half.
+        ip_family=_ip_family(ip),
     )
 
     result: dict = {
@@ -477,6 +482,11 @@ async def demo_identity_feedback(request: Request, body: CanaryFeedbackBody) -> 
         else None
     )
 
+    # Server-owned, not client-supplied — the family must be trustworthy for the
+    # v4-vs-v6 comparison to mean anything.
+    shown = dict(body.shown) if isinstance(body.shown, dict) else {}
+    shown["ip_family"] = _ip_family(resolve_client_ip(request))
+
     try:
         async with async_session() as db:
             db.add(
@@ -487,7 +497,7 @@ async def demo_identity_feedback(request: Request, body: CanaryFeedbackBody) -> 
                     site_id=None,
                     fingerprint=(body.fingerprint or None),
                     surface=_PUBLIC_CANARY_SURFACE,
-                    shown=(body.shown if isinstance(body.shown, dict) else {}),
+                    shown=shown,
                     reasons=reasons,
                     actual_city=actual_city,
                     note=note,

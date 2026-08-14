@@ -101,6 +101,33 @@ def resolve_client_ip(request: Request, trusted_proxy_hops: int | None = None) -
         return direct
 
 
+def ip_family(ip: str) -> str:
+    """``"v4"`` / ``"v6"`` / ``""`` for an unparseable or empty address. Pure.
+
+    WHY THIS IS WORTH RECORDING: the two families are not equally accurate. On
+    one measured FPT connection the SAME machine geolocated to Ho Chi Minh City
+    over IPv6 (both providers agreeing) and to Hanoi-or-Haiphong over IPv4 (the
+    providers disagreeing by 89km, neither correct). Carriers registered their
+    IPv4 blocks years ago under one national HQ; the newer IPv6 allocations tend
+    to carry per-POP registration, so they survive an ASN-registration lookup.
+
+    That is a single anecdote, and an anecdote is not a reason to build a
+    v6-only measurement endpoint (which would need a DNS record outside the
+    Cloudflare proxy, since a proxied hostname always publishes both families).
+    Tagging every reveal and every "wrong city" report with the family it came
+    from turns the anecdote into a rate: if v4 reveals are corrected far more
+    often than v6 ones, the endpoint is worth its cost; if v4 clients are simply
+    clients with no IPv6 at all, it is worthless to them by construction — a
+    client that cannot speak v6 cannot reach a v6-only host either.
+    """
+    if not ip:
+        return ""
+    try:
+        return f"v{ipaddress.ip_address(ip.strip()).version}"
+    except ValueError:
+        return ""
+
+
 def client_ip_key_func(request: Request) -> str:
     """slowapi ``key_func`` — per-IP limiter bucket keyed on the resolved IP.
 

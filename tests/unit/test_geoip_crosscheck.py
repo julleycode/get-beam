@@ -235,3 +235,42 @@ class TestBuildGeoConfidence:
             _geo(lat=0.0, lon=0.0),
             crosscheck=CrossCheck(checked=True, agreed=True),
         ) is None
+
+
+class TestIpFamily:
+    """The v4-vs-v6 tag. Pure, and must never raise on hostile input — it runs
+    on the reveal path, which is not allowed to 500."""
+
+    def test_v4(self):
+        from apps.api.services.ip_resolution import ip_family
+
+        assert ip_family("42.117.132.191") == "v4"
+
+    def test_v6(self):
+        from apps.api.services.ip_resolution import ip_family
+
+        assert ip_family("2606:4700:3036::ac43:bda4") == "v6"
+
+    def test_v6_shorthand_and_loopback(self):
+        from apps.api.services.ip_resolution import ip_family
+
+        assert ip_family("::1") == "v6"
+        assert ip_family("127.0.0.1") == "v4"
+
+    def test_whitespace_tolerated(self):
+        from apps.api.services.ip_resolution import ip_family
+
+        assert ip_family("  42.117.132.191  ") == "v4"
+
+    def test_unparseable_is_empty_not_an_exception(self):
+        from apps.api.services.ip_resolution import ip_family
+
+        for bad in ("", "   ", "unknown", "not-an-ip", "999.999.999.999", "1.2.3"):
+            assert ip_family(bad) == ""
+
+    def test_ipv4_mapped_v6_reports_v6(self):
+        """`::ffff:1.2.3.4` arrives as a v6 socket; reporting it as v4 would
+        make the two buckets disagree with what the connection actually used."""
+        from apps.api.services.ip_resolution import ip_family
+
+        assert ip_family("::ffff:1.2.3.4") == "v6"

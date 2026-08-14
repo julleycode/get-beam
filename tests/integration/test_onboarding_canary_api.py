@@ -649,8 +649,92 @@ async def test_stats_reports_the_city_correction_pairs(admin, flag_on, test_engi
     assert r.status_code == 200
     body = r.json()
     assert body["with_actual_city"] == 2
-    assert body["city_corrections"] == [
-        {"shown": "Hanoi", "actual": "Ho Chi Minh City", "count": 2}
-    ]
+    # Asserts the pair and the count, not the whole row: the address-family
+    # breakdown is this endpoint's own test (test_stats_breaks_corrections_down_
+    # by_family), and pinning the full dict here just makes both tests fail
+    # whenever one field is added.
+    assert len(body["city_corrections"]) == 1
+    row = body["city_corrections"][0]
+    assert row["shown"] == "Hanoi"
+    assert row["actual"] == "Ho Chi Minh City"
+    assert row["count"] == 2
     # The rounded coordinates stay unreturned — only the city pair was widened.
     assert "lat" not in r.text and "lng" not in r.text
+
+
+# ─── v4 vs v6 tagging ───────────────────────────────────────────────────────
+#
+# The reason this exists: the SAME machine geolocated correctly over IPv6 and
+# incorrectly over IPv4 on one measured FPT connection. One anecdote is not a
+# reason to build a v6-only measurement endpoint, so tag every report with the
+# family it came from and let the rate decide.
+
+
+@pytest.mark.asyncio
+async def test_feedback_records_the_address_family_server_side(
+    authed, flag_on, test_engine, monkeypatch
+):
+    monkeypatch.setattr(
+        "apps.api.routers.onboarding.resolve_client_ip",
+        lambda _r: "2606:4700:3036::ac43:bda4",
+    )
+    r = await authed.post(
+        "/api/v1/onboarding/identity-feedback",
+        json={"reasons": ["wrong_city"], "shown": {"city": "Hanoi"}},
+    )
+    assert r.status_code == 204
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        row = (await s.execute(select(IdentityFeedback))).scalars().one()
+    assert row.shown["ip_family"] == "v6"
+    assert row.shown["city"] == "Hanoi"
+
+
+@pytest.mark.asyncio
+async def test_client_cannot_forge_the_address_family(
+    authed, flag_on, test_engine, monkeypatch
+):
+    """`shown` is client-supplied; the family is the one key in it that has to
+    be trustworthy, or the v4-vs-v6 comparison measures nothing."""
+    monkeypatch.setattr(
+        "apps.api.routers.onboarding.resolve_client_ip", lambda _r: "42.117.132.191"
+    )
+    r = await authed.post(
+        "/api/v1/onboarding/identity-feedback",
+        json={"reasons": ["wrong_city"], "shown": {"ip_family": "v6"}},
+    )
+    assert r.status_code == 204
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        row = (await s.execute(select(IdentityFeedback))).scalars().one()
+    assert row.shown["ip_family"] == "v4"
+
+
+@pytest.mark.asyncio
+async def test_stats_breaks_corrections_down_by_family(admin, flag_on, test_engine, monkeypatch):
+    monkeypatch.setattr(
+        "apps.api.routers.onboarding.resolve_client_ip", lambda _r: "42.117.132.191"
+    )
+    await admin.post(
+        "/api/v1/onboarding/identity-feedback",
+        json={
+            "reasons": ["wrong_city"],
+            "actual_city": "Ho Chi Minh City",
+            "shown": {"city": "Hanoi"},
+        },
+    )
+
+    r = await admin.get("/api/v1/onboarding/identity-feedback/stats")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["by_ip_family"] == [{"ip_family": "v4", "count": 1}]
+    assert body["city_corrections"] == [
+        {
+            "shown": "Hanoi",
+            "actual": "Ho Chi Minh City",
+            "ip_family": "v4",
+            "count": 1,
+        }
+    ]
