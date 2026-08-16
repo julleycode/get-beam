@@ -235,3 +235,60 @@ async def increment_osint_paid_usage(site_id: str) -> None:
 async def osint_paid_budget_left(site_id: str) -> bool:
     """True while the site still has paid-lookup budget today."""
     return await get_osint_paid_usage(site_id) < settings.osint_paid_daily_budget
+
+
+# ─────────────── Site analysis (onboarding) daily budget ───────────────
+# Caps grounded company-profile ANALYSES per site/day (one run = one unit, never
+# one unit per Gemini call — a run makes two). Redis counter, no migration.
+#
+# NOT BYOK-exempt: the analysis burns the SYSTEM Gemini key (the operator pays),
+# so the correct posture precedent is the paid-OSINT block above, not the free
+# OSINT one. Copying check_osint_budget's BYOK-uncapped shape would hand any BYOK
+# user unlimited grounded runs on the operator's key.
+#
+# Deliberately no `db`/`user_id` parameters: is_full_byok is never called here, so
+# they would be dead params that both re-invite a BYOK exemption and add a DB
+# round-trip to GET /sites/{id}/analysis, which the panel polls every 4 s.
+
+
+def _site_analysis_count_key(site_id: str) -> str:
+    day = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return f"site_analysis:count:{site_id}:{day}"
+
+
+async def get_site_analysis_usage(site_id: str) -> int:
+    """Analyses started today for a site (Redis counter). Fail-open to 0.
+
+    Fails OPEN (unlike the paid-OSINT meter, which fails closed) because this
+    guards a free-tier system-key call, not billable credits — a Redis outage
+    must not block onboarding.
+    """
+    try:
+        raw = await get_redis().get(_site_analysis_count_key(site_id))
+        return int(raw or 0)
+    except Exception:
+        return 0
+
+
+async def increment_site_analysis_usage(site_id: str) -> None:
+    """Bump today's analysis counter (2-day TTL so it self-expires)."""
+    try:
+        redis = get_redis()
+        key = _site_analysis_count_key(site_id)
+        count = await redis.incr(key)
+        if count == 1:
+            await redis.expire(key, 2 * 86400)
+    except Exception:
+        logger.debug("site_analysis_usage_increment_failed", site_id=site_id)
+
+
+async def check_site_analysis_budget(site_id: str) -> dict:
+    """Check if a site can run another analysis today.
+
+    Returns the standard meter dict; the API projects exactly `used`, `limit` and
+    `allowed` into SiteAnalysisOut.budget and DROPS `is_byok` at that boundary —
+    it is permanently False here and would invite a future reader to reintroduce
+    an exemption.
+    """
+    used = await get_site_analysis_usage(site_id)
+    return _budget_result(used, settings.site_analysis_daily_budget, False)

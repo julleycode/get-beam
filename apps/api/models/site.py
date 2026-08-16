@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import String, DateTime, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from apps.api.models.database import Base
@@ -109,5 +109,27 @@ class Site(Base):
     # not provisioned yet (or Leadpipe not configured) → the snippet simply
     # omits the vendor tag.
     leadpipe_pixel_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # ─── Site analysis (onboarding) — all five flag-gated on settings.site_analysis_enabled ───
+    # Two-slot storage so a re-run can never destroy a confirmed profile.
+    # The CONFIRMED profile the site actually uses. NULL = the owner has never
+    # confirmed one. ONLY the PUT /sites/{id}/analysis endpoint writes this; the
+    # background analysis task structurally never touches it.
+    site_profile: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # The un-reviewed output of the latest analysis run, awaiting the owner's
+    # review. NULL = nothing pending review. ONLY the analysis task writes it;
+    # PUT NULLs it (on promote AND on dismiss).
+    site_profile_candidate: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # "pending" | "ready" | "failed". NULL = never analyzed (reported as "none").
+    # NOT the whole truth on its own: a "pending" row whose started_at is older
+    # than settings.site_analysis_stale_seconds is DERIVED as "failed" at read
+    # time and the row is never mutated by that read.
+    site_profile_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Naive UTC start stamp of the current run — the input to that stale
+    # derivation. Never re-armed by a POST that hits the in-flight guard.
+    site_profile_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Naive UTC completion time of the run that produced the candidate. Exactly
+    # one writer: the analysis task. PUT never stamps it. NULL on a
+    # user-authored profile with no analysis behind it.
+    site_profile_analyzed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

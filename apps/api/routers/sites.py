@@ -1,3 +1,4 @@
+import asyncio
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -25,7 +26,18 @@ from apps.api.schemas.sites import (
     SitePixelSnippet,
     SiteUpdate,
 )
+from apps.api.schemas.site_analysis import SiteAnalysisConfirm, SiteAnalysisOut
 from apps.api.services.billing import get_effective_plan, get_site_limit
+from apps.api.services.site_analysis import (
+    STATUS_PENDING,
+    STATUS_READY,
+    _analysis_inflight,
+    derive_message,
+    derive_status,
+    run_site_analysis,
+    sanitize_profile,
+)
+from apps.api.services.usage_limits import check_site_analysis_budget
 from apps.api.services.identity_coop import record_consent_acceptance
 from apps.api.services.identity_providers.base import _url_to_host
 from apps.api.services.leadpipe_pixels import ensure_pixel_for_domain
@@ -39,6 +51,37 @@ logger = structlog.get_logger()
 
 def _generate_site_id() -> str:
     return f"site_{uuid.uuid4().hex[:12]}"
+
+
+# Keep strong references to fired analysis tasks so they aren't GC'd mid-run.
+_analysis_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
+
+
+def _fire_site_analysis(site: Site) -> None:
+    """The ONLY place an analysis task is created — never a bare
+    asyncio.create_task at a call site.
+
+    It is the sole registrar of the done-callback that discards from BOTH sets. A
+    bare create_task breaks three things at once: the site_id is never discarded
+    (so every later POST returns already_running forever in-process and the re-run
+    path is permanently dead), the task is absent from _analysis_tasks (so a test
+    that gathers over that set awaits nothing), and the strong reference is
+    dropped (so the task can be garbage-collected mid-run).
+
+    The discards live in the done-callback and NOT in a `finally` inside the
+    coroutine: the callback fires on every outcome including cancellation, a
+    `finally` never runs if the task is cancelled before it starts.
+    """
+    site_id = site.site_id
+    _analysis_inflight.add(site_id)
+    task = asyncio.create_task(run_site_analysis(site_id))
+    _analysis_tasks.add(task)
+
+    def _done(t: "asyncio.Task", _sid: str = site_id) -> None:
+        _analysis_tasks.discard(t)
+        _analysis_inflight.discard(_sid)
+
+    task.add_done_callback(_done)
 
 
 # ──────────────────────────── Existing CRUD ────────────────────────────
@@ -188,6 +231,16 @@ async def create_site(
     logger.info(
         "site_created", site_id=site.site_id, reused_tombstone=reused_tombstone
     )
+    if settings.site_analysis_enabled:
+        # Fire-and-forget the onboarding analysis. create_site does NO budget work
+        # at all — the task owns the single check + increment, so auto-start and a
+        # manual re-run consume the counter identically. The dedup-return and 409
+        # branches above return before reaching this point and never fire it.
+        site.site_profile_status = STATUS_PENDING
+        site.site_profile_started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        await db.commit()
+        await db.refresh(site)
+        _fire_site_analysis(site)
     return SiteOut.model_validate(site)
 
 
@@ -285,6 +338,11 @@ async def delete_site(
             "agent_handoff_links",
             "request_logs",
             "ad_connections",
+            # H1: close the site_id-reuse gap for spendable co-op credit.
+            # identity_contribution_consent_acceptances is DELIBERATELY retained
+            # (append-only legal audit trail, inert alone) — plan decision H1-D.
+            "identity_contribution_events",
+            "identity_credit_ledger",
         ):
             r = await db.execute(
                 sql_text(f"DELETE FROM {table} WHERE site_id = :sid"),
@@ -363,6 +421,13 @@ async def update_site(
     # co-op must never be gated on anything.
     if body.contribution_enabled is not None:
         if body.contribution_enabled:
+            # M2: opting IN is unreachable while the deployment flag is OFF.
+            # 422 (not 404) matches the digest guard below; 404 is tenancy-only.
+            if not settings.identity_coop_enabled:
+                raise HTTPException(
+                    status_code=422,
+                    detail="identity co-op is not enabled on this deployment",
+                )
             tv = body.terms_version
             # Constant-compare against the pinned digest (E4). Phase 3's
             # coop_terms.py replaces this with real version history.
@@ -467,6 +532,138 @@ async def detect_platform_endpoint(
         has_gtm=result["has_gtm"],
         gtm_id=result["gtm_id"],
     )
+
+
+# ──────────────────────── Site analysis (onboarding) ────────────────────
+#
+# All three endpoints: flag check FIRST (inside the body, following the
+# routers/onboarding.py _require_flag precedent — a Depends resolves AFTER auth
+# and so cannot run first), then verify_site_access (404 for foreign ids, never
+# 403), then logic. Accepted consequence, matching repo posture everywhere else:
+# an UNAUTHENTICATED probe gets 401 from get_current_user before reaching the flag
+# check, so flag-off hides the endpoints from authenticated users but not from an
+# unauthenticated 401-vs-404 oracle.
+
+
+def _require_site_analysis_flag() -> None:
+    if not settings.site_analysis_enabled:
+        # Dormant: do not reveal the endpoint exists when disabled.
+        raise HTTPException(status_code=404, detail="Not Found")
+
+
+async def _analysis_out(
+    site: Site, *, already_running: bool = False, budget: dict | None = None
+) -> SiteAnalysisOut:
+    """Assemble the response. `message` comes from the ONE derivation helper —
+    never re-derived per handler."""
+    status = derive_status(site)
+    if budget is None:
+        budget = await check_site_analysis_budget(site.site_id)
+    return SiteAnalysisOut(
+        site_id=site.site_id,
+        status=status,
+        profile=site.site_profile,
+        candidate=site.site_profile_candidate,
+        analyzed_at=(
+            site.site_profile_analyzed_at.isoformat()
+            if site.site_profile_analyzed_at
+            else None
+        ),
+        message=derive_message(allowed=bool(budget["allowed"]), status=status),
+        already_running=already_running,
+        budget={
+            "used": budget["used"],
+            "limit": budget["limit"],
+            "allowed": budget["allowed"],
+        },
+    )
+
+
+@router.get("/{site_id}/analysis", response_model=SiteAnalysisOut)
+async def get_site_analysis(
+    site_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SiteAnalysisOut:
+    _require_site_analysis_flag()
+    site = await verify_site_access(db, site_id, user)
+    # budget is one plain Redis GET — no user_api_keys SELECT, so a 4 s poll costs
+    # zero extra DB round-trips.
+    return await _analysis_out(site)
+
+
+@router.put("/{site_id}/analysis", response_model=SiteAnalysisOut)
+async def confirm_site_analysis(
+    site_id: str,
+    body: SiteAnalysisConfirm,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SiteAnalysisOut:
+    _require_site_analysis_flag()
+    site = await verify_site_access(db, site_id, user)
+
+    if not body.promote:
+        # DISMISS only: NULL the candidate and touch NOTHING else — not the
+        # confirmed profile, not the status, neither timestamp, not description
+        # or category. "Keep what I have, throw away this re-run."
+        site.site_profile_candidate = None
+        await db.commit()
+        await db.refresh(site)
+        return await _analysis_out(site)
+
+    profile = sanitize_profile(body.profile.model_dump())
+    profile["meta"]["user_edited"] = True
+    site.site_profile = profile
+    site.site_profile_candidate = None
+
+    # Never downgrade an in-flight run: a "pending" row still feeds the stale
+    # derivation and the cross-process in-flight check, and overwriting it would
+    # erase both.
+    if derive_status(site) != STATUS_PENDING:
+        site.site_profile_status = STATUS_READY
+    # site_profile_analyzed_at is deliberately NOT stamped here — it means "when
+    # the analysis run that produced the candidate finished" and has exactly one
+    # writer, the task.
+
+    if body.apply_description and profile.get("summary"):
+        site.description = profile["summary"][:1000]
+    if body.apply_category and profile.get("category"):
+        site.category = profile["category"][:100]
+
+    await db.commit()
+    await db.refresh(site)
+    return await _analysis_out(site)
+
+
+@router.post("/{site_id}/analysis", response_model=SiteAnalysisOut)
+async def rerun_site_analysis(
+    site_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SiteAnalysisOut:
+    _require_site_analysis_flag()
+    site = await verify_site_access(db, site_id, user)
+
+    # (a) In-flight guard FIRST. No increment, no started_at re-stamp (which would
+    # defeat the stale derivation), no second task.
+    if derive_status(site) == STATUS_PENDING or site_id in _analysis_inflight:
+        return await _analysis_out(site, already_running=True)
+
+    # (b) CHECK only — the task owns the single increment.
+    budget = await check_site_analysis_budget(site_id)
+    if not budget["allowed"]:
+        # HTTP 200 with allowed=false. Never 4xx, never a partial profile.
+        return await _analysis_out(site, budget=budget)
+
+    # (c) site_profile is never touched by a re-run — the new run lands in the
+    # candidate slot and only PUT promotes it.
+    site.site_profile_status = STATUS_PENDING
+    site.site_profile_started_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    await db.commit()
+    await db.refresh(site)
+
+    _fire_site_analysis(site)
+    return await _analysis_out(site, budget=budget)
 
 
 # ──────────────────────── Pixel Verification ───────────────────────────
