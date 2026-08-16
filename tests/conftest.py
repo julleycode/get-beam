@@ -36,6 +36,10 @@ os.environ.setdefault("TOKEN_ENCRYPTION_KEY", _Fernet.generate_key().decode())
 # agentic /ai/ask path would silently hit the live API before its fallback.
 # Env vars beat dotenv in pydantic-settings, so an empty value forces mocks.
 os.environ.setdefault("GEMINI_API_KEY", "")
+# Developer .env may set RESOLUTION_RETRY_COOLDOWN_DAYS=0 to disable the
+# no-retry lock locally. Tests that assert "recently_attempted" need the
+# historical 30-day window, so pin it before Settings loads.
+os.environ.setdefault("RESOLUTION_RETRY_COOLDOWN_DAYS", "30")
 # Same leak, different shape: a developer who turns the agent flags ON in their
 # root .env to exercise the feature locally would flip the DEFAULT every flag
 # test measures against. Two tests assert flag-OFF behaviour explicitly
@@ -50,6 +54,14 @@ for _flag in (
     "AGENT_MARKER_ENABLED",
 ):
     os.environ.setdefault(_flag, "false")
+# The geo cross-check is the one new-behaviour flag that defaults ON in code, and
+# it makes a SECOND outbound provider call (ipinfo.io). Existing canary tests
+# patch only `geoip.httpx`, so leaving it on sends real requests for every
+# fixture IP — the canary integration file went from seconds to ~10 minutes of
+# DNS/connect timeouts before this line existed. Pinned off; the tests that
+# exercise the cross-check enable it themselves via monkeypatch and stub
+# `_lookup_second`, which never touches the network.
+os.environ.setdefault("GEO_CROSSCHECK_ENABLED", "false")
 
 
 def _native_enum_names(metadata) -> list[str]:

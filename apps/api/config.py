@@ -1371,15 +1371,82 @@ class Settings(BaseSettings):
     #     Migrating to a local GeoLite2-City DB removes both concerns.
     location_reveal_enabled: bool = False
 
+    # Cross-check the reveal's city against a SECOND free geo provider
+    # (ipinfo.io) and degrade the claim when they disagree.
+    #
+    # WHY THIS EXISTS: ip-api resolves residential VN ranges by ASN
+    # REGISTRATION, not by the subscriber's actual location. A measured example
+    # on FPT (AS18403): ip-api says Hanoi, ipinfo says Haiphong, the subscriber
+    # is in Ho Chi Minh City — one IP, three answers, ~1100 km of error against
+    # a circle that claims 25 km. A single-provider city name is a coin flip on
+    # these ranges, and a confidently wrong city turns the reveal's "wow" into
+    # "your product is broken" at the exact moment it must look omniscient.
+    #
+    # DEFAULT ON, unlike the other new-behaviour flags in this file, because it
+    # can only run inside the already-dormant `location_reveal_enabled` surface
+    # and it only ever makes a claim WEAKER. Set false to restore the
+    # single-provider behaviour.
+    #
+    # QUOTA NOTE before enabling the reveal in prod: the second provider is
+    # ipinfo.io, and its KEYLESS ceiling (~1k/day) is counted against the
+    # REQUESTING address — which is the API server, not the visitor. So the whole
+    # fleet shares one bucket, and past it every lookup 429s. That degrades
+    # safely (no second opinion -> `confidence: "unverified"` -> today's
+    # behaviour) but silently, so set `ipinfo_token` before relying on the check
+    # at volume; the token is already read here for the enrichment waterfall.
+    geo_crosscheck_enabled: bool = True
+    # Distance between the two providers' points above which the city claim is
+    # dropped. 50 km keeps intra-metro disagreement (different POPs of the same
+    # city) reading as agreement, while Hanoi-vs-Haiphong (~100 km) and
+    # Hanoi-vs-HCMC (~1100 km) both fail it.
+    geo_crosscheck_disagree_km: int = 50
+    # Ceiling on the drawn radius after a disagreement. Without it a
+    # Hanoi/HCMC split draws a 1100 km circle that swallows the country and
+    # reads as a bug rather than as honesty.
+    geo_crosscheck_max_radius_km: int = 300
+
+    # ─── Site analysis (onboarding) ───
+    # Auto company-profile / ICP / competitor analysis fired asynchronously after
+    # Add-Site, reviewed on the install step. Default OFF: flag-off behavior is
+    # byte-identical to today and all three /sites/{id}/analysis endpoints 404.
+    # Flipping this ON in a real environment is a SEPARATE, explicit operator
+    # action taken only AFTER migration c5e1a9b73d20 is live on that database —
+    # never bundled into a deploy.
+    site_analysis_enabled: bool = False
+    # Analyses (NOT Gemini calls) per site per day. One user-visible run consumes
+    # exactly one unit, incremented once inside run_site_analysis. NOT BYOK-exempt:
+    # the analysis burns the SYSTEM Gemini key (operator pays), so the cap always
+    # applies — same posture as the paid-OSINT meter.
+    site_analysis_daily_budget: int = 3
+    # A "pending" row older than this is DERIVED as failed at read time (a process
+    # restart loses the in-memory task, so without this the UI hangs forever).
+    #
+    # LOAD-BEARING ORDERING — three constants, one chain, do not change one alone:
+    #   panel poll cap (60 polls x 4 s = 240 s) > this (180 s) > worst-case
+    #   grounded latency (~120 s).
+    # The panel must still be polling when the row crosses into stale, so a dead
+    # run resolves to "failed" on screen without a reload; and this threshold must
+    # stay above real latency so a live run is never derived FAILED mid-flight.
+    # Changing one of the three without the other two is a regression.
+    site_analysis_stale_seconds: int = 180
+    # Timeout for the single outbound fetch of the customer's site.
+    site_analysis_fetch_timeout_seconds: int = 10
+
     # ─── Rate limits ───
     default_daily_resolution_budget: int = 50   # Free tier: 50 visitor identifications/day per site (BYOK = unlimited)
+    # Days a failed paid-provider attempt locks the visitor against retry.
+    # 0 disables the gate (immediate retries allowed; still bounded by the
+    # daily budget + plan cap). Historical default was 30. Temporarily 0 on
+    # main so operators can re-run failed visitors without a code change —
+    # set RESOLUTION_RETRY_COOLDOWN_DAYS=30 to restore.
+    resolution_retry_cooldown_days: int = 0
     # Comma-separated hostnames; sites whose url matches get US-any-intent resolution
     # eligibility (all other sites keep the RESOLUTION_MIN_INTENT gate). Empty string disables.
     resolve_all_us_domains: str = "getbeam.fyi"
     # While a site has fewer than N identified visitors EVER, the resolution intent
     # floor is waived entirely for that site (aha-moment bootstrap — a brand-new site
     # can't clear the floor on first-visit traffic). Highest-intent-first ordering,
-    # the daily budget, the plan cap, and the 30-day no-retry gate are unchanged.
+    # the daily budget, the plan cap, and the retry-cooldown gate are unchanged.
     # 0 disables the boost.
     first_win_boost_count: int = 5
     default_daily_enrichment_budget: int = 3    # Free tier: 3 deep research/day (BYOK = unlimited)

@@ -2,8 +2,8 @@
 
 Sample-data onboarding sends users to getbeam.fyi (which runs the pixel),
 then replays the pages they browsed by matching their browser fingerprint.
-This verifies the fingerprint match + the duration merge (time_on_page rows
-are separate from pageview rows and keyed by url).
+This verifies the fingerprint match + the duration merge (time_on_page rows are
+separate from pageview rows and are attributed to the pageview they follow).
 """
 
 from datetime import datetime, timedelta
@@ -35,7 +35,10 @@ async def _seed(db) -> None:
         Event(site_id="beam_getbeam_fyi", visitor_id="vis_journey_1", event_type="pageview",
               url="https://getbeam.fyi/pricing", page_path="/pricing", page_title="pricing",
               created_at=now - timedelta(minutes=3)),
-        # duration lives in separate time_on_page rows keyed by url; dup → max wins
+        # Duration lives in separate time_on_page rows. The pixel emits one per
+        # visible stretch and resets its counter after each, so two rows for the
+        # same visit are two CHUNKS of it — they sum. (This used to assert `max`,
+        # which silently discarded every stretch but the longest.)
         Event(site_id="beam_getbeam_fyi", visitor_id="vis_journey_1", event_type="time_on_page",
               url="https://getbeam.fyi/", time_on_page=5, created_at=now - timedelta(minutes=3, seconds=30)),
         Event(site_id="beam_getbeam_fyi", visitor_id="vis_journey_1", event_type="time_on_page",
@@ -56,8 +59,9 @@ async def test_journey_returns_pages_with_merged_seconds(test_db, test_client):
     data = resp.json()
     assert data["matched"] is True
     paths = [(p["path"], p["seconds"]) for p in data["pages"]]
-    # pageview order preserved; seconds merged from time_on_page rows (max on dup)
-    assert paths == [("/", 12), ("/pricing", 30)]
+    # pageview order preserved; the two "/" chunks (5s + 12s) sum onto the one
+    # "/" visit rather than being collapsed to the larger of the two.
+    assert paths == [("/", 17), ("/pricing", 30)]
 
 
 @pytest.mark.asyncio

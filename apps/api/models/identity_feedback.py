@@ -47,6 +47,15 @@ FEEDBACK_REASONS: frozenset[str] = frozenset(
 )
 
 NOTE_MAX_CHARS = 500
+# Ground truth: the city the user says they are ACTUALLY in, asked for only when
+# they tick `wrong_city`. This is the one field that turns the reveal's error
+# rate from a count into a measurement — `wrong_city` alone says "we were wrong",
+# this says BY HOW MUCH and IN WHICH DIRECTION, which is what decides whether a
+# provider swap (GeoLite2-City, a paid feed) is worth paying for.
+#
+# Kept OUT of `note`: `note` is free text whose content is deliberately never
+# returned by the stats endpoint, so a city buried in it is unanalysable.
+ACTUAL_CITY_MAX_CHARS = 120
 
 
 class IdentityFeedback(Base):
@@ -72,6 +81,10 @@ class IdentityFeedback(Base):
     reasons: Mapped[list[str]] = mapped_column(
         ARRAY(String(40)), nullable=False, default=list
     )
+    # A place NAME the user typed, never a coordinate and never geocoded — the
+    # point is to compare it against `shown["city"]`, not to locate anybody more
+    # precisely than the IP already did.
+    actual_city: Mapped[str | None] = mapped_column(String(120), nullable=True)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()

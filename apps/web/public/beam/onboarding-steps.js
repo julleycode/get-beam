@@ -141,6 +141,17 @@
     if (left && cc) return left + ' · ' + cc;
     return left || cc;
   }
+  // Mirrors formatConfidenceNote in src/lib/canary-format.ts. Renders only when
+  // the backend measured a real disagreement between two geo providers and
+  // therefore sent city/region as empty strings — without it a city-less pin
+  // reads as a failure rather than as a deliberately wider claim.
+  function formatConfidenceNote(geo) {
+    if (!geo || geo.confidence !== 'low') return '';
+    const km = Math.round(geo.disagree_km || 0);
+    return km > 0
+      ? 'two IP databases put you ' + km + 'km apart, so this is a region, not a pin.'
+      : 'the IP databases disagree about your city, so this is a region, not a pin.';
+  }
   function formatNetwork(net) {
     if (!net) return null;                       // omit the line entirely rather
     const label = (net.label || '').trim();      // than print "Unknown ISP"
@@ -183,10 +194,12 @@
     return 'text';
   }
 
-  // THE HONESTY CAPTION — load-bearing, not polish. Without it a 30km-off pin
-  // reads as "your product is broken", the #1 failure mode of a location reveal.
-  const HONESTY_CAPTION =
-    "that's an IP-level estimate — usually the right city, sometimes the wrong suburb.";
+  // The IP-level-estimate caption was removed by product decision. The accuracy
+  // circle drawn around the pin still carries the same message visually, and
+  // MAP_MAX_ZOOM keeps the view off street level, so nothing here claims more
+  // precision than the data has.
+  const TILE_FAILURE_NOTE =
+    "couldn't load the map here — something is blocking the tiles.";
 
   // ── Leaflet, loaded from CDN (no build step on this page) ───────────
   const LEAFLET_CSS = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
@@ -197,8 +210,10 @@
   const TILE_ATTRIBUTION =
     '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
   // NEVER go past 13. An IP pin is city-level at best; zooming to street level
-  // makes a precision claim the data cannot support.
-  const MAP_MIN_ZOOM = 9, MAP_MAX_ZOOM = 13, MAP_ZOOM = 11;
+  // makes a precision claim the data cannot support. Zooming OUT is harmless —
+  // it only ever shows less certainty — so the floor is loose enough to reach
+  // country level.
+  const MAP_MIN_ZOOM = 3, MAP_MAX_ZOOM = 13, MAP_ZOOM = 11;
   const TILE_ERROR_THRESHOLD = 4, TILE_ERROR_WINDOW_MS = 2500, TILE_LOAD_DEADLINE_MS = 4000;
 
   let _leafletPromise = null;
@@ -232,11 +247,20 @@
       const map = L.map(host, {
         center: [geo.lat, geo.lng],
         zoom: MAP_ZOOM, minZoom: MAP_MIN_ZOOM, maxZoom: MAP_MAX_ZOOM,
-        // The map sits inside a scrolling chat transcript; wheel-zoom would
-        // hijack the scroll.
-        scrollWheelZoom: false, dragging: true,
-        zoomControl: false, attributionControl: true, keyboard: false,
+        // The map sits inside a scrolling chat transcript, so plain wheel-zoom
+        // stays OFF — it would eat the page scroll the moment the pointer
+        // crossed the map. Every other zoom gesture is on: the +/- control,
+        // double-click, pinch, and ctrl/⌘+wheel (Leaflet's own modifier path).
+        scrollWheelZoom: false, dragging: true, doubleClickZoom: true,
+        touchZoom: true, boxZoom: true,
+        zoomControl: true, attributionControl: true, keyboard: false,
       });
+      // Desktop escape hatch for wheel users: hold ctrl (or ⌘) and scroll.
+      host.addEventListener('wheel', (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        map.setZoom(map.getZoom() + (e.deltaY < 0 ? 1 : -1));
+      }, { passive: false });
 
       const startedAt = Date.now();
       let errors = 0, loadedAny = false;
@@ -260,11 +284,19 @@
       setTimeout(() => { if (!loadedAny) fail(); }, TILE_LOAD_DEADLINE_MS);
 
       // The honest radius — the visual half of the caption above.
-      L.circle([geo.lat, geo.lng], {
-        radius: Math.max(1, geo.accuracy_km || 25) * 1000,
+      const radiusKm = Math.max(1, geo.accuracy_km || 25);
+      const circle = L.circle([geo.lat, geo.lng], {
+        radius: radiusKm * 1000,
         color: '#FF3366', weight: 1, opacity: 0.45,
         fillColor: '#FF3366', fillOpacity: 0.1, interactive: false,
       }).addTo(map);
+      // Past ~40km the fixed zoom no longer contains the circle and the user
+      // sees a full-bleed pink wash with the pin buried under it, which reads as
+      // a rendering bug rather than as uncertainty. Only reachable via the
+      // cross-check disagreement path, which widens the radius on purpose.
+      if (radiusKm > 40) {
+        map.fitBounds(circle.getBounds(), { maxZoom: MAP_MAX_ZOOM, padding: [12, 12] });
+      }
 
       // divIcon, not the default marker: Leaflet resolves that PNG relative to
       // the stylesheet, which is the classic broken-marker bug.
@@ -344,10 +376,16 @@
       const startedAt = Date.now();
       let errors = 0, last = null, baseline = null;
 
-      const isFresh = (res) => {
-        const paths = ((res && res.pages) || []).map(p => (p && p.path) || '');
-        return paths.some(p => p !== SELF_PATH && !(baseline && baseline.has(p)));
-      };
+      // KEY ON path+timestamp, NEVER ON PATH ALONE. The page we send people to
+      // is getbeam.fyi's root, and anyone arriving here from the landing page
+      // already has `/` in the journey — so a path-keyed baseline marks the very
+      // visit we asked for as "already seen" and the catch can never land. Each
+      // pageview carries its own `at`, so a repeat visit to the same path is a
+      // new key. `at` may be null on old rows; those degrade to path-only.
+      const pageKey = (p) => ((p && p.path) || '') + '|' + ((p && p.at) || '');
+      const isFresh = (res) => ((res && res.pages) || []).some(
+        p => (p && p.path) !== SELF_PATH && !(baseline && baseline.has(pageKey(p)))
+      );
 
       while (!stopped) {
         const elapsed = Date.now() - startedAt;
@@ -361,7 +399,7 @@
           if (baseline === null) {
             // Whatever is already in the journey belongs to THIS page, which
             // also runs the pixel. Only something new counts as the catch.
-            baseline = new Set(((res && res.pages) || []).map(p => (p && p.path) || ''));
+            baseline = new Set(((res && res.pages) || []).map(pageKey));
           } else if (isFresh(res)) {
             ob.state.canary = res;
             ob.state.landed = true;
@@ -409,6 +447,7 @@
       }
 
       const place = formatPlace(res.geo);
+      const confidenceNote = formatConfidenceNote(res.geo);
       const network = formatNetwork(res.network);
       const pages = (res.pages || []);
       const pagesHtml = pages.length
@@ -419,24 +458,26 @@
 
       const wantsMap = chooseRevealMode(res, false) === 'map';
       const card = await ob.bot(`
-        ${wantsMap ? '<div class="ob-map" id="ob-map" role="img" aria-label="Approximate location on a map"></div>' : ''}
+        ${wantsMap ? '<div class="ob-map" id="ob-map" role="region" aria-label="Approximate location on a map"></div>' : ''}
         <div class="ob-meta">
           ${place ? '<div class="mrow"><span class="ic" aria-hidden="true">◎</span><span>' + _esc(place) + '</span></div>' : ''}
           ${network ? '<div class="mrow"><span class="ic" aria-hidden="true">⌁</span><span>' + _esc(network) + '</span></div>' : ''}
           ${pagesHtml}
         </div>
-        <p class="ob-map-note" id="ob-map-note">${_esc(HONESTY_CAPTION)}</p>`,
+        ${confidenceNote ? '<p class="ob-map-note">' + _esc(confidenceNote) + '</p>' : ''}
+        <p class="ob-map-note" id="ob-map-note" hidden></p>`,
         { cls: 'rich card', typing: false });
 
       if (wantsMap) {
         const host = card.querySelector('#ob-map');
         const ok = await renderMap(host, res.geo);
         if (!ok) {
-          // Tiles blocked or Leaflet itself unreachable → text reveal.
+          // Tiles blocked or Leaflet itself unreachable → text reveal. The note
+          // node stays in the DOM but hidden, so this is the only thing that
+          // ever un-hides it.
           if (host) host.remove();
           const note = card.querySelector('#ob-map-note');
-          if (note) note.textContent =
-            HONESTY_CAPTION + " (couldn't load the map here — something is blocking the tiles.)";
+          if (note) { note.textContent = TILE_FAILURE_NOTE; note.hidden = false; }
         }
         ob.scrollToEnd();
       }
@@ -452,10 +493,22 @@
           <div class="ob-checks">
             ${FEEDBACK_REASONS.map(r => `<label class="ob-check"><input type="checkbox" value="${r.value}"> <span>${r.label}</span></label>`).join('')}
           </div>
+          <input type="text" class="ob-input-plain" style="margin-top:10px" hidden maxlength="120"
+                 data-actual-city autocomplete="off"
+                 placeholder="so where are you actually? (optional)" aria-label="The city you are actually in">
           <textarea class="ob-textarea" style="margin-top:10px" maxlength="500" placeholder="anything else? (optional)" aria-label="Additional feedback"></textarea>
           <button class="ob-btn ob-btn-primary" style="margin-top:10px" data-fb>send it</button>`, true);
+        const cityInput = cc.querySelector('[data-actual-city]');
         cc.querySelectorAll('.ob-check').forEach(l =>
-          l.addEventListener('change', () => l.classList.toggle('on', l.querySelector('input').checked)));
+          l.addEventListener('change', () => {
+            l.classList.toggle('on', l.querySelector('input').checked);
+            // Revealed only by "wrong city", never asked up front: unprompted it
+            // is a location request, here it is the user correcting a claim Beam
+            // just made about them. Same words, opposite feeling.
+            const wrongCity = !!cc.querySelector('.ob-check input[value="wrong_city"]:checked');
+            cityInput.hidden = !wrongCity;
+            if (!wrongCity) cityInput.value = '';
+          }));
         cc.querySelector('[data-fb]').addEventListener('click', () => {
           const reasons = Array.from(cc.querySelectorAll('.ob-check input:checked')).map(i => i.value);
           const note = (cc.querySelector('.ob-textarea').value || '').trim();
@@ -463,9 +516,13 @@
           const net = (res && res.network) || null;
           // OPTIMISTIC: fire and advance in the same tick. A feedback write must
           // never block the funnel, so failures are swallowed deliberately.
+          const actualCity = reasons.indexOf('wrong_city') >= 0
+            ? (cityInput.value || '').trim()
+            : '';
           apiPost('/api/v1/demo/identity-feedback', {
             reasons: reasons,
             note: note || null,
+            actual_city: actualCity || null,
             fingerprint: ob.state.fp || null,
             shown: {
               city: geo ? geo.city : null,
@@ -476,9 +533,21 @@
               lng: geo ? Math.round(geo.lng * 100) / 100 : null,
               org: net ? net.label : null,
               kind: net ? net.kind : null,
+              // Whether the reveal had already hedged. A wrong_city report
+              // against `high` means two providers agreed and were both wrong —
+              // a worse failure than one against `unverified`.
+              confidence: geo ? (geo.confidence || null) : null,
             },
           }).catch(() => {});
-          ob.answer('sent you some feedback', 'account');
+          // _esc is mandatory here, not cosmetic: ob.answer -> ob.user assigns
+          // straight to innerHTML, so echoing a raw typed string back into the
+          // transcript is an HTML injection into the user's own page.
+          ob.answer(
+            actualCity
+              ? _esc(actualCity) + ' it is — that correction is worth more than the guess was.'
+              : 'sent you some feedback',
+            'account',
+          );
         });
       });
     },

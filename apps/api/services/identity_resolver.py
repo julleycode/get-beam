@@ -167,7 +167,10 @@ class IdentityResolver(
         return await check_resolution_attempt_budget(self.db, site_id)
 
     async def was_recently_attempted(self, site_id: str, visitor_id: str) -> bool:
-        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+        days = settings.resolution_retry_cooldown_days
+        if days <= 0:
+            return False
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
         result = await self.db.execute(
             select(ResolutionLog).where(
                 ResolutionLog.site_id == site_id,

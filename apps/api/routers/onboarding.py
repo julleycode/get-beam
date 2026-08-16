@@ -35,12 +35,14 @@ from apps.api.config import settings
 from apps.api.dependencies import get_current_user, require_admin
 from apps.api.models.database import get_db
 from apps.api.models.identity_feedback import (
+    ACTUAL_CITY_MAX_CHARS,
     FEEDBACK_REASONS,
     NOTE_MAX_CHARS,
     IdentityFeedback,
 )
 from apps.api.models.user import User
 from apps.api.services.geoip import resolve_geoip_full
+from apps.api.services.geoip_crosscheck import crosscheck_geo
 from apps.api.services.ip_resolution import resolve_client_ip
 from apps.api.services.onboarding_canary import build_geo, build_network, fetch_journey
 from apps.api.services.rate_limiter import limiter
@@ -93,7 +95,17 @@ async def onboarding_canary(
     if geo_raw is None:
         reason = "provider_unavailable"
 
-    geo = build_geo(geo_raw)
+    # Second opinion on the CITY, not on the pin. A single provider geolocates
+    # most non-US residential ranges by ASN registration, so the city name it
+    # returns is frequently the carrier's HQ rather than the subscriber's town;
+    # `build_geo` strips the name when the two providers disagree. Fail-open —
+    # `crosscheck_geo` never raises and an unobtainable second opinion degrades
+    # to `confidence: "unverified"`, which renders exactly as before.
+    cross = None
+    if geo_raw is not None:
+        cross = await crosscheck_geo(ip, geo_raw)
+
+    geo = build_geo(geo_raw, crosscheck=cross)
     network = build_network(ip, geo_raw) if geo_raw is not None else None
 
     logger.info(
@@ -102,6 +114,7 @@ async def onboarding_canary(
         fp=fp[:12],
         pages=len(pages),
         has_geo=geo is not None,
+        geo_confidence=(geo or {}).get("confidence"),
     )
 
     result: dict = {
@@ -118,6 +131,9 @@ async def onboarding_canary(
 class IdentityFeedbackBody(BaseModel):
     reasons: list[str] = Field(default_factory=list)
     note: str | None = None
+    # Ground truth for a `wrong_city` report — the city the user says they are
+    # actually in. See ACTUAL_CITY_MAX_CHARS for why it is not folded into `note`.
+    actual_city: str | None = None
     shown: dict = Field(default_factory=dict)
     site_id: str | None = None
     fingerprint: str | None = None
@@ -139,6 +155,14 @@ async def onboarding_identity_feedback(
 
     reasons = [r for r in (body.reasons or []) if r in FEEDBACK_REASONS]
     note = (body.note or "").strip()[:NOTE_MAX_CHARS] or None
+    # Only meaningful alongside a `wrong_city` report. Dropped otherwise so the
+    # column stays a clean ground-truth pair with `shown["city"]` rather than a
+    # second free-text field that anything could have written into.
+    actual_city = (
+        (body.actual_city or "").strip()[:ACTUAL_CITY_MAX_CHARS] or None
+        if "wrong_city" in reasons
+        else None
+    )
 
     db.add(
         IdentityFeedback(
@@ -148,12 +172,20 @@ async def onboarding_identity_feedback(
             surface="onboarding_canary",
             shown=body.shown or {},
             reasons=reasons,
+            actual_city=actual_city,
             note=note,
         )
     )
     await db.commit()
 
-    logger.info("onboarding_identity_feedback", reasons=reasons, has_note=bool(note))
+    # The city NAME is not logged — it is a self-reported location and belongs
+    # in the row, not in a log aggregator. Presence only, same as `note`.
+    logger.info(
+        "onboarding_identity_feedback",
+        reasons=reasons,
+        has_note=bool(note),
+        has_actual_city=bool(actual_city),
+    )
     return Response(status_code=204)
 
 
@@ -178,9 +210,17 @@ async def onboarding_identity_feedback_stats(
     have no site and a per-site view would be mostly empty. ``require_admin``
     (the ``request_logs`` precedent) is the gate instead.
 
-    PII posture: aggregate counts only. The ``shown`` JSONB holds place names and
-    a rounded lat-lng and is never returned, not even sampled. ``note`` is
-    free text so only its presence is counted, never its content.
+    PII posture: aggregate counts only. ``note`` is free text so only its
+    presence is counted, never its content.
+
+    ONE DELIBERATE NARROWING of the original "``shown`` is never returned" rule:
+    ``city_corrections`` returns the ``shown["city"]`` -> ``actual_city`` pair as
+    a GROUP BY count. That pair IS the metric this table was built for — without
+    it ``wrong_city`` says only "we were wrong", never "we said Hanoi and they
+    were in Ho Chi Minh City", which is the difference between knowing the
+    reveal is broken and knowing whether a provider swap fixes it. The rounded
+    lat-lng is still never returned, no individual row is ever returned, and a
+    city name is not an identifier.
 
     Reports ``enabled`` rather than 404ing when the flag is off — an operator
     still needs to read the history of a feature they just switched off, and the
@@ -190,14 +230,30 @@ async def onboarding_identity_feedback_stats(
     since = datetime.utcnow() - timedelta(days=days)
     scope = IdentityFeedback.created_at >= since
 
-    total, with_note = (
+    total, with_note, with_actual_city = (
         await db.execute(
             select(
                 func.count(),
                 func.count().filter(IdentityFeedback.note.isnot(None)),
+                func.count().filter(IdentityFeedback.actual_city.isnot(None)),
             ).where(scope)
         )
     ).one()
+
+    # shown-city -> reported-city pairs. `.astext` (not `[]`) so the comparison
+    # is against a text value rather than a JSON scalar, and rows whose reveal
+    # printed no city at all (the cross-check `confidence: "low"` path strips it)
+    # collapse into a NULL bucket rather than vanishing.
+    shown_city = IdentityFeedback.shown["city"].astext
+    correction_rows = (
+        await db.execute(
+            select(shown_city, IdentityFeedback.actual_city, func.count())
+            .where(scope, IdentityFeedback.actual_city.isnot(None))
+            .group_by(shown_city, IdentityFeedback.actual_city)
+            .order_by(func.count().desc())
+            .limit(50)
+        )
+    ).all()
 
     # `reasons` is a text[]; unnest in a subquery so the GROUP BY is over a plain
     # column rather than a set-returning function in the select list.
@@ -228,6 +284,10 @@ async def onboarding_identity_feedback_stats(
         "window_days": days,
         "total": int(total or 0),
         "with_note": int(with_note or 0),
+        "with_actual_city": int(with_actual_city or 0),
+        "city_corrections": [
+            {"shown": s, "actual": a, "count": int(c)} for s, a, c in correction_rows
+        ],
         # Zero-filled over the known vocabulary so an untouched reason reads as a
         # real 0 rather than a missing key the caller has to guess about.
         "by_reason": [

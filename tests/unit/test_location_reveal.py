@@ -4,12 +4,19 @@ Covers the ISP-vs-company ladder rung by rung, the "omit rather than guess"
 rule, org-kind mapping, and every degraded geo path (including Null Island).
 """
 
+from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
 from apps.api.services.geoip import GeoResult
-from apps.api.services.onboarding_canary import build_geo, build_network
+from apps.api.services.onboarding_canary import (
+    MAX_PAGES,
+    build_geo,
+    build_network,
+    fetch_journey,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -89,6 +96,176 @@ class TestNetworkKind:
         with _no_asn():
             n = build_network("2a09:bac3:1234::1", _geo(org="Acme Inc", isp="Comcast"))
         assert n["kind"] == "relay"
+
+
+class TestAccessNetworkIsNotACompany:
+    """Regression: an access-pool / registry `org` must never read as an employer.
+
+    Both cases below were observed live on getbeam.fyi's own onboarding and both
+    rendered as "looks like you're on X's network".
+    """
+
+    def test_registry_org_does_not_become_a_company(self):
+        with _no_asn():
+            n = build_network(
+                "1.2.3.4",
+                _geo(org="Vietnam Internet Network Information Center", isp=""),
+            )
+        assert n["kind"] != "company"
+
+    def test_dynamic_pool_org_prefers_the_carrier(self):
+        """`org` is the pool, `isp` is the real carrier — print the carrier."""
+        with _no_asn():
+            n = build_network("1.2.3.4", _geo(org="FPT DYNAMIC IP", isp="FPT Telecom"))
+        assert n["kind"] == "isp"
+        assert n["label"] == "FPT Telecom"
+
+    def test_unspaced_pool_label_still_matched(self):
+        """Real payloads arrive unspaced ("FPTDYNAMICIP") — substring, not word."""
+        with _no_asn():
+            n = build_network("1.2.3.4", _geo(org="FPTDYNAMICIP", isp=""))
+        assert n["kind"] != "company"
+
+    def test_pool_org_without_a_clean_isp_makes_no_claim(self):
+        """No carrier to fall back on: use a kind both clients print bare."""
+        with _no_asn():
+            n = build_network("1.2.3.4", _geo(org="Some Broadband Pool", isp=""))
+        assert n["kind"] == "network"
+        assert n["label"] == "Some Broadband Pool"
+
+    def test_real_company_still_promoted(self):
+        """The guard must not swallow the case the feature exists for."""
+        with _no_asn():
+            n = build_network("1.2.3.4", _geo(org="Acme Inc", isp="Comcast Cable"))
+        assert n["kind"] == "company"
+
+    def test_nic_does_not_fire_inside_an_unrelated_word(self):
+        with _no_asn():
+            n = build_network("1.2.3.4", _geo(org="Technicolor SA", isp="Orange"))
+        assert n["kind"] == "company"
+
+
+class _FakeResult:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self._rows
+
+
+class _FakeSession:
+    """Returns visitor ids on the first execute, event rows on the second.
+
+    The event rows are handed back NEWEST-FIRST, mirroring the `created_at DESC`
+    the query now issues — the point of the assertions below.
+    """
+
+    def __init__(self, rows):
+        self._results = [_FakeResult(["v1"]), _FakeResult(rows)]
+
+    async def execute(self, _q):
+        return self._results.pop(0)
+
+
+def _pageview(path: str, at: datetime):
+    return SimpleNamespace(
+        event_type="pageview", page_path=path, page_title="", url="https://x" + path,
+        time_on_page=0, created_at=at,
+    )
+
+
+def _time_on_page(path: str, at: datetime, seconds: int):
+    return SimpleNamespace(
+        event_type="time_on_page", page_path=None, page_title=None,
+        url="https://x" + path, time_on_page=seconds, created_at=at,
+    )
+
+
+class TestJourneyWindow:
+    """The window must be anchored to NOW, never to the start of the hour."""
+
+    @pytest.mark.asyncio
+    async def test_keeps_the_newest_pages_not_the_oldest(self):
+        base = datetime(2026, 8, 12, 10, 0, 0)
+        total = MAX_PAGES + 4
+        # Newest first, as the DESC query returns them.
+        rows = [_pageview(f"/p{i}", base + timedelta(minutes=i)) for i in range(total)][::-1]
+
+        pages = await fetch_journey(_FakeSession(rows), "fp2_abc", site_id="site_x")
+
+        assert len(pages) == MAX_PAGES
+        # The four oldest fell off — under the old head-slice these were the ONLY
+        # ones kept, so a fresh visit could never be reported.
+        assert [p["path"] for p in pages] == [f"/p{i}" for i in range(4, total)]
+
+    @pytest.mark.asyncio
+    async def test_result_is_in_reading_order(self):
+        base = datetime(2026, 8, 12, 10, 0, 0)
+        rows = [_pageview("/b", base + timedelta(minutes=1)), _pageview("/a", base)]
+
+        pages = await fetch_journey(_FakeSession(rows), "fp2_abc", site_id="site_x")
+
+        assert [p["path"] for p in pages] == ["/a", "/b"]
+        assert pages[0]["at"] < pages[1]["at"]
+
+    @pytest.mark.asyncio
+    async def test_non_fp2_fingerprint_short_circuits(self):
+        assert await fetch_journey(_FakeSession([]), "fp3_abc", site_id="site_x") == []
+
+
+class TestDurationAttribution:
+    """Seconds belong to one visit, never to every visit of the same path."""
+
+    @pytest.mark.asyncio
+    async def test_repeat_visits_do_not_share_one_duration(self):
+        base = datetime(2026, 8, 12, 10, 0, 0)
+        # / (12s) → /pricing → / again (300s). The old url-keyed dict gave BOTH
+        # "/" rows 300s, which is what rendered "/ · 3005s" four times over.
+        rows = [
+            _pageview("/", base),
+            _time_on_page("/", base + timedelta(seconds=12), 12),
+            _pageview("/pricing", base + timedelta(minutes=1)),
+            _pageview("/", base + timedelta(minutes=2)),
+            _time_on_page("/", base + timedelta(minutes=7), 300),
+        ][::-1]
+
+        pages = await fetch_journey(_FakeSession(rows), "fp2_abc", site_id="site_x")
+
+        assert [(p["path"], p["seconds"]) for p in pages] == [
+            ("/", 12),
+            ("/pricing", 0),
+            ("/", 300),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_chunks_for_one_visit_are_summed(self):
+        """The pixel emits a chunk per visible stretch — sum them, don't max."""
+        base = datetime(2026, 8, 12, 10, 0, 0)
+        rows = [
+            _pageview("/", base),
+            _time_on_page("/", base + timedelta(seconds=30), 30),
+            _time_on_page("/", base + timedelta(seconds=90), 45),
+        ][::-1]
+
+        pages = await fetch_journey(_FakeSession(rows), "fp2_abc", site_id="site_x")
+
+        assert [(p["path"], p["seconds"]) for p in pages] == [("/", 75)]
+
+    @pytest.mark.asyncio
+    async def test_orphan_duration_is_dropped(self):
+        """Its pageview fell outside the window — do not smear it elsewhere."""
+        base = datetime(2026, 8, 12, 10, 0, 0)
+        rows = [
+            _time_on_page("/gone", base, 900),
+            _pageview("/here", base + timedelta(minutes=1)),
+        ][::-1]
+
+        pages = await fetch_journey(_FakeSession(rows), "fp2_abc", site_id="site_x")
+
+        assert [(p["path"], p["seconds"]) for p in pages] == [("/here", 0)]
 
 
 class TestBuildGeo:
