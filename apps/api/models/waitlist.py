@@ -21,6 +21,20 @@ class WaitlistSignup(Base):
     # signup opts in by entering it — providing it is consent to appear on the
     # public Founders Wall. Never derived from email.
     x_handle: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # ── Private beta application fields (all nullable; legacy email-only rows read NULL) ──
+    # Free text: UNTRUSTED applicant input. Sanitized on write with
+    # apps.api.agents.prompt_safety.clean_text; rendered escaped (never dangerouslySetInnerHTML).
+    business_description: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    use_case: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Enum-ish buckets: validated against Python allow-lists on write (no DB CHECK constraint,
+    # which would not be additive-nullable-safe on a table with existing rows).
+    monthly_visitors: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    role: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    company_size: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    plan_interest: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Set only when the extended application form is submitted; distinguishes an
+    # application from a legacy email-only signup.
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending/approved/rejected
     invite_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
