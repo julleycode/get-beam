@@ -1,0 +1,61 @@
+{
+  "task": "phase-01-incremental-aggregation-soak-and-prod-flag",
+  "result": "PASS",
+  "commands": [
+    {
+      "step": "Phase 1 unit gates (mutex, sweep fail-open, sweep full recompute, ingest fail-open, bootstrap, scheduler job count)",
+      "command": ".venv\\Scripts\\python.exe -m pytest tests/unit/test_aggregation_mutex.py tests/unit/test_aggregation_sweep_failopen.py tests/unit/test_aggregation_sweep_full_recompute.py tests/unit/test_aggregation_ingest_failopen.py tests/unit/test_aggregation_bootstrap.py tests/unit/test_scheduler_job_config.py -q",
+      "result": "PASS",
+      "notes": "31 passed in 3.45s. Independent cook-tester re-run with PYTHONPATH=repo root."
+    },
+    {
+      "step": "Phase 1 integration gates (incremental, debounce, watermark bootstrap, visitor aggregation)",
+      "command": ".venv\\Scripts\\python.exe -m pytest tests/integration/test_visitor_aggregation_incremental.py tests/integration/test_aggregation_debounce.py tests/integration/test_aggregation_watermark_bootstrap.py tests/integration/test_visitor_aggregation.py -q",
+      "result": "PASS",
+      "notes": "27 passed in 64.60s after debugger fixture fix. Postgres:5433 and Redis:6379 listening. Prior FAIL was TestFutureEventTs (NoResultFound on evt-future-ts-1 after HTTP 204): POST omitted header User-Agent; is_bot('') True; ingest bot-dropped with 204 and 0 rows. Fix: add User-Agent: _BROWSER_UA to that POST only. Production ingest/bot logic unchanged. Independent debugger re-run: watermark file 4 passed in 9.93s; full Phase 1 set 27 passed."
+    }
+  ],
+  "manualChecks": [
+    {
+      "check": "config.py aggregation_incremental_enabled default False",
+      "result": "PASS",
+      "notes": "apps/api/config.py line 127 unchanged: aggregation_incremental_enabled: bool = False"
+    },
+    {
+      "check": "Pixel ingest still returns 204 before background agg",
+      "result": "PASS",
+      "notes": "Response(status_code=204) at events.py:578; create_task(_background_aggregate) does not gate the response. After fixture User-Agent fix, TestFutureEventTs 204 is a successful insert (row created_at ~utcnow), not bot_drop."
+    },
+    {
+      "check": "No schema/API/auth/billing change in blast radius",
+      "result": "PASS",
+      "notes": "No migrations; aggregation_tasks.py untouched; public ingest contract unchanged. Only tests/integration/test_aggregation_watermark_bootstrap.py header fixture edited."
+    },
+    {
+      "check": "Prod soak canary + Railway flag ON",
+      "result": "SKIP",
+      "notes": "Operator leftover. Do not treat as verified. Do not start Phase 2."
+    }
+  ],
+  "steps": [
+    {
+      "step": "Independent unit re-run of Phase 1 aggregation tests",
+      "command": "pytest tests/unit/test_aggregation_mutex.py tests/unit/test_aggregation_sweep_failopen.py tests/unit/test_aggregation_sweep_full_recompute.py tests/unit/test_aggregation_ingest_failopen.py tests/unit/test_aggregation_bootstrap.py tests/unit/test_scheduler_job_config.py -q",
+      "result": "PASS",
+      "notes": "31 passed."
+    },
+    {
+      "step": "Integration / soak (infra up)",
+      "command": "pytest tests/integration/test_visitor_aggregation_incremental.py tests/integration/test_aggregation_debounce.py tests/integration/test_aggregation_watermark_bootstrap.py tests/integration/test_visitor_aggregation.py -q",
+      "result": "PASS",
+      "notes": "27 passed in 64.60s after adding User-Agent: _BROWSER_UA to TestFutureEventTs ingest POST. F2 HTTP ingest now empirically proven."
+    }
+  ],
+  "findingProof": {
+    "F2": "empirically proven — integration TestFutureEventTs after User-Agent header fixture; ingest stores created_at = utcnow, future event.ts does not inflate pageviews on second incremental.",
+    "F6": "empirically proven — integration TestBackgroundAggregateStampsFullBootstrap + TestSweepDoesNotStamp against Postgres.",
+    "F7": "unit-mocked-only (fake Redis ConnectionError + patched aggregate). No integration ingest-degraded case in this blast radius.",
+    "F8": "empirically proven — integration TestDebounce.test_mutex_held_longer_than_ttl_no_double_count against Redis.",
+    "F9": "empirically proven — integration TestFleetBootstrap.test_f9_stamps_sites_with_events_only against Postgres. Job still not registered in start_scheduler (AST/unit)."
+  }
+}

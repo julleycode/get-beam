@@ -113,6 +113,39 @@ class TestDebounce:
         assert await get_redis().exists(f"agg:debounce:{SITE_ID}")
 
 
+    @pytest.mark.asyncio
+    async def test_mutex_held_longer_than_ttl_no_double_count(self, runs, monkeypatch):
+        """F8 — lock survives a run longer than the old 60s TTL analog.
+
+        Inject TTL=1s and a 2.1s aggregate; a second trigger after 1.2s must
+        not start another run. No real 120s wait.
+        """
+        monkeypatch.setattr(
+            "apps.api.config.settings.aggregation_min_interval_seconds", 1
+        )
+        slow: list = []
+
+        async def _slow_aggregate(db, site_id, since=None):
+            slow.append((site_id, since))
+            await asyncio.sleep(2.1)
+            return 0
+
+        monkeypatch.setattr(
+            "apps.api.services.visitor_aggregator.aggregate_visitors_for_site",
+            _slow_aggregate,
+        )
+
+        async def _second():
+            await asyncio.sleep(1.2)
+            await events_router._background_aggregate(SITE_ID)
+
+        await asyncio.gather(
+            events_router._background_aggregate(SITE_ID),
+            _second(),
+        )
+        assert len(slow) == 1, slow
+
+
 class TestSweepYieldMarker:
     """E16(b) — a per-ingest trigger stands down while the sweep is waiting."""
 
