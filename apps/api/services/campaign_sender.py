@@ -92,23 +92,42 @@ def _tidy(text: str) -> str:
     return text
 
 
+# Placeholder standing in for a RESOLVED booking URL while ``_tidy`` runs.
+# ``_tidy`` post-processes the substituted text (it is applied to the return
+# value), and ``_LEFTOVER_HINT`` deletes any lowercase-led ``[...]`` span — so a
+# booking URL containing e.g. ``/[team]`` would be silently mangled if it were
+# substituted before tidying. The sentinel contains no bracket, paren, or
+# whitespace, so every ``_tidy`` rule is a no-op on it; the real URL is swapped
+# back in afterwards, byte-for-byte.
+_BOOKING_SENTINEL = "\x00BOOKINGLINK\x00"
+
+
 def _personalize(
     text: str,
     full_name: str | None,
     company_name: str | None = None,
     sender_name: str | None = None,
+    booking_url: str | None = None,
 ) -> str:
     """Fill campaign template placeholders.
 
-    Handles ``{{first_name}}``, ``{{company_name}}`` (both single- and
-    double-brace forms) and the AI planner's ``[Your Name]`` signature stub.
-    Anything we can't resolve falls back to a neutral phrase, and any remaining
-    ``{{token}}`` is stripped so broken templates can't ship literal mustache.
+    Handles ``{{first_name}}``, ``{{company_name}}``, ``{{booking_link}}`` (all
+    in both single- and double-brace forms) and the AI planner's ``[Your Name]``
+    signature stub. Anything we can't resolve falls back to a neutral phrase, and
+    any remaining ``{{token}}`` is stripped so broken templates can't ship
+    literal mustache.
+
+    ``{{booking_link}}`` is documented as **bare-URL-only**: templates must not
+    wrap it in ``<a href="...">``. When the site has no ``booking_url`` the token
+    is RESOLVED to an empty string (never the literal ``"None"``, and never left
+    for ``_LEFTOVER_TOKEN`` to strip — which would silently miss the
+    single-brace form).
     """
     first = (full_name or "").strip().split(" ")[0] if full_name else ""
     first = first or "there"
     company = (company_name or "").strip() or "your company"
     sender = (sender_name or "").strip() or "The Beam Team"
+    booking = (booking_url or "").strip()
 
     out = (
         text.replace("{{first_name}}", first)
@@ -117,7 +136,19 @@ def _personalize(
         .replace("{company_name}", company)
         .replace("[Your Name]", sender)
     )
-    return _tidy(out)
+    # Resolve BOTH brace forms. Only the double-brace form is reachable by
+    # _LEFTOVER_TOKEN, so a single-brace {booking_link} — exactly what an LLM
+    # planner emits when brace-escaping slips — would otherwise ship as literal
+    # text in an outbound email.
+    booking_repl = _BOOKING_SENTINEL if booking else ""
+    out = out.replace("{{booking_link}}", booking_repl).replace(
+        "{booking_link}", booking_repl
+    )
+
+    out = _tidy(out)
+    if booking:
+        out = out.replace(_BOOKING_SENTINEL, booking)
+    return out
 
 
 class PersonalizationGateError(RuntimeError):
@@ -160,6 +191,7 @@ def _assert_personalization_allowed(
 def _compose_generic(
     text: str,
     sender_name: str | None = None,
+    booking_url: str | None = None,
 ) -> str:
     """Generic composition for an unconfirmed (candidate-tier) recipient.
 
@@ -168,8 +200,12 @@ def _compose_generic(
     reach the copy. Placeholders resolve to the neutral fallbacks ("there",
     "your company"); the sender's own signature is still filled (that is Beam's
     own first-party data, not a guess about the recipient).
+
+    ``booking_url`` is likewise Beam-customer first-party data, so it resolves
+    here identically to the verified branch — otherwise every candidate /
+    anonymous recipient would silently lose the booking link.
     """
-    return _personalize(text, None, None, sender_name)
+    return _personalize(text, None, None, sender_name, booking_url)
 
 
 def _compose_for_recipient(
@@ -181,6 +217,7 @@ def _compose_for_recipient(
     sender_name: str | None = None,
     visitor_id: str | None = None,
     resolution_provider: str | None = None,
+    booking_url: str | None = None,
 ) -> tuple[str, str]:
     """Send-time personalization gate — returns ``(subject, body_html)``.
 
@@ -190,11 +227,15 @@ def _compose_for_recipient(
     """
     if is_verified_identity(identity_status):
         _assert_personalization_allowed(identity_status, visitor_id, resolution_provider)
-        subject = _personalize(subject_tpl, full_name, company_name, sender_name)
-        body = _personalize(body_tpl, full_name, company_name, sender_name)
+        subject = _personalize(
+            subject_tpl, full_name, company_name, sender_name, booking_url
+        )
+        body = _personalize(
+            body_tpl, full_name, company_name, sender_name, booking_url
+        )
     else:
-        subject = _compose_generic(subject_tpl, sender_name)
-        body = _compose_generic(body_tpl, sender_name)
+        subject = _compose_generic(subject_tpl, sender_name, booking_url)
+        body = _compose_generic(body_tpl, sender_name, booking_url)
     return subject, body.replace("\n", "<br/>")
 
 
@@ -245,7 +286,12 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
 
     site_row = (
         await db.execute(
-            select(Site.url, Site.name, User.full_name, User.email)
+            # booking_url is appended LAST on purpose: site_row[0..3] are
+            # consumed positionally just below, so inserting a column mid-list
+            # would silently rebind site_name / sender_name / owner_email.
+            select(
+                Site.url, Site.name, User.full_name, User.email, Site.booking_url
+            )
             .outerjoin(User, User.id == Site.user_id)
             .where(Site.site_id == campaign.site_id)
         )
@@ -257,6 +303,10 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
     site_name = (site_row[1] if site_row else None) or "Beam"
     sender_name = (site_row[2] if site_row else None) or None
     owner_email = (site_row[3] if site_row else None) or None
+    # The site's demo/meeting booking link, threaded to _compose_for_recipient
+    # below so {{booking_link}} resolves on the REAL send path (not just in the
+    # compose helpers a unit test can call directly).
+    booking_url = (site_row[4] if site_row else None) or None
     site_host = urlsplit(site_url or "").netloc or None
 
     # If the site owner connected their Gmail, send FROM their address (no "via
@@ -383,6 +433,7 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
             sender_name,
             visitor_id=vid,
             resolution_provider=iv.resolution_provider,
+            booking_url=booking_url,
         )
 
         # Claim the recipient by inserting the touchpoint BEFORE sending. This

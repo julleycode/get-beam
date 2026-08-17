@@ -41,6 +41,25 @@ class TestDecorateLinks:
         assert "_bid" not in out.split("acme.com/buy")[0]  # only the acme link tagged
         assert len(_bids(out)) == 1
 
+    def test_booking_url_on_third_party_host_not_decorated(self):
+        """A site's configured booking_url on a third-party host stays clean.
+
+        This is a PRIVACY guarantee, not a link-parsing limitation: the _bid
+        token encrypts the recipient's email, so handing it to Calendly/Cal.com
+        would leak it. The consequence — booking clicks carry no _tp/_bid, so
+        attribution runs through the customer's own thank-you page instead — is
+        documented in decorate_links and the backlog note.
+        """
+        booking_url = "https://cal.com/acme/demo"
+        html = f'Book: <a href="{booking_url}">demo</a> or <a href="https://acme.com/pricing">pricing</a>'
+        out = decorate_links(html, "u@x.com", "acme.com")
+        # The booking link survives byte-for-byte — no _bid, no _tp appended.
+        assert booking_url + '"' in out
+        # Non-vacuity control: the same-host link in the SAME call IS decorated,
+        # so a no-op decorate_links (e.g. unset encryption_key) fails here.
+        assert len(_bids(out)) == 1
+        assert "acme.com/pricing?_bid=" in out
+
     def test_existing_query_and_bid_preserved(self):
         html = "https://acme.com/p?ref=email and https://acme.com/q?_bid=already"
         out = decorate_links(html, "u@x.com", "acme.com")

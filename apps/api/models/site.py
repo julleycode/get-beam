@@ -109,6 +109,12 @@ class Site(Base):
     # not provisioned yet (or Leadpipe not configured) → the snippet simply
     # omits the vendor tag.
     leadpipe_pixel_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Owner-supplied demo/meeting booking link (Calendly, Cal.com, or a page on
+    # their own site). Rendered into campaign drafts via the {{booking_link}}
+    # token. NULL = not configured → the token resolves to an empty string.
+    # Validated at the API boundary (http(s) only, no HTML-injection or
+    # link-decorator-terminator characters) — nothing downstream escapes it.
+    booking_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # ─── Site analysis (onboarding) — all five flag-gated on settings.site_analysis_enabled ───
     # Two-slot storage so a re-run can never destroy a confirmed profile.
     # The CONFIRMED profile the site actually uses. NULL = the owner has never

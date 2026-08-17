@@ -116,7 +116,15 @@ async def test_campaign_sender_excludes_agent_origin(monkeypatch):
     member_result = MagicMock()
     member_result.all.return_value = [("vid-1",)]
     site_result = MagicMock()
-    site_result.first.return_value = ("https://site.example", "Site", "Owner", "o@e.com")
+    # 5-tuple: the send-path select is
+    # (Site.url, Site.name, User.full_name, User.email, Site.booking_url).
+    site_result.first.return_value = (
+        "https://site.example",
+        "Site",
+        "Owner",
+        "o@e.com",
+        None,
+    )
     iv_result = MagicMock()
     iv_result.scalar_one_or_none.return_value = _agent_origin_iv()
 

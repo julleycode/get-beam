@@ -101,6 +101,14 @@ def decorate_links(
     ONLY the customer's own host (and its subdomains) is decorated: the encrypted
     _bid token is never leaked to third-party domains. No-op when the key/host is
     missing, the email is empty, or a link already carries a _bid.
+
+    Attribution consequence: a booking link on a third-party host (Calendly,
+    Cal.com) therefore carries neither _bid nor _tp, so demo-booking attribution
+    cannot run off the click. It runs instead off the customer redirecting their
+    booking confirmation to their own pixel'd thank-you page, matched by a
+    "Demo booked" url_match ConversionGoal. Decorating third-party links is NOT
+    the fix — see process/features/campaigns-outreach/backlog/
+    third-party-link-attribution_NOTE_16-08-26.md for the two valid v2 routes.
     """
     if not html or not email or not site_host:
         return html

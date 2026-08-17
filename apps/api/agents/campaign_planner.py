@@ -73,8 +73,8 @@ Create a campaign plan with:
       "channel": "email",
       "delay_hours_from_start": 0,
       "subject": "Email subject line",
-      "body": "Full email body. Use {{{{first_name}}}} for personalization.",
-      "personalization_fields": ["first_name", "company_name"],
+      "body": "Full email body. Use {{{{first_name}}}} for personalization. Use {{{{booking_link}}}} ONLY if the site has a booking URL configured — it resolves to the owner's demo booking link, and to an empty string when none is set. Write it bare on its own, never wrapped in an <a href=\"...\"> tag.",
+      "personalization_fields": ["first_name", "company_name", "booking_link"],
       "cta": "What action you want them to take"
     }},
     {{
@@ -151,6 +151,72 @@ def _generic_copy_note(visitor_profiles: list[dict]) -> str:
     return _GENERIC_COPY_NOTE.format(share=share)
 
 
+_MEASURED_STATS_NOTE = """
+## What this site's past sends actually did
+{lines}
+Use this as evidence, not as a template — write what the numbers support and
+never claim a result the numbers do not show. {caveat}
+"""
+
+
+async def _measured_stats_note(db: AsyncSession, site_id: str) -> str:
+    """Feed measured campaign performance back into the planning prompt.
+
+    This is the learning loop (marketing-claims-gap Phase 3, D3) and its ONLY
+    injection site: ``services/auto_drafter.py`` is a SOCIAL-REPLY drafter, so
+    email-campaign metrics there would be a category error.
+
+    Returns "" when the flag is off or the site has sent nothing — with zero
+    sends there is no data, and telling the model "0% open rate" would be a
+    false claim rather than a missing one. Drafts remain drafts either way:
+    nothing here reaches ``campaign_sender.send_campaign_emails``.
+    """
+    if not settings.campaign_benchmark_enabled:
+        return ""
+    from datetime import datetime, timedelta, timezone
+
+    from apps.api.models.campaign import CampaignTouchpoint
+    from apps.api.models.outcome import Conversion
+    from apps.api.services.campaign_stats import (
+        OPEN_RATE_CAVEAT,
+        clicked_count_expr,
+        opened_count_expr,
+        sent_count_expr,
+    )
+
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+    row = (
+        await db.execute(
+            select(
+                sent_count_expr(cutoff),
+                opened_count_expr(cutoff),
+                clicked_count_expr(cutoff),
+            )
+            .select_from(CampaignTouchpoint)
+            .join(Campaign, Campaign.id == CampaignTouchpoint.campaign_id)
+            .where(Campaign.site_id == site_id)
+        )
+    ).one()
+    sent, opened, clicked = (int(v or 0) for v in row)
+    if sent == 0:
+        return ""
+    conversions = len(
+        (
+            await db.execute(
+                select(Conversion.id).where(
+                    Conversion.site_id == site_id, Conversion.occurred_at >= cutoff
+                )
+            )
+        ).all()
+    )
+    lines = (
+        f"- Last 30 days: {sent} emails sent, "
+        f"{opened / sent * 100:.1f}% opened, {clicked / sent * 100:.1f}% clicked.\n"
+        f"- Conversions recorded in that window: {conversions}."
+    )
+    return _MEASURED_STATS_NOTE.format(lines=lines, caveat=OPEN_RATE_CAVEAT)
+
+
 def _validate_plan(parsed: dict) -> str | None:
     """Shape check driving the JSON repair retry (None = usable)."""
     touchpoints = parsed.get("touchpoints")
@@ -208,6 +274,7 @@ async def plan_campaign(
         connected_accounts_info=accounts_info,
     )
     prompt += _generic_copy_note(visitor_profiles)
+    prompt += await _measured_stats_note(db, segment.site_id)
 
     if not settings.gemini_api_key:
         raise RuntimeError(

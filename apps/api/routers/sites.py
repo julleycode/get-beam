@@ -413,6 +413,11 @@ async def update_site(
         site.internal_damping_enabled = body.internal_damping_enabled
     if body.consent_mode is not None:
         site.consent_mode = body.consent_mode
+    # Validated in SiteUpdate (http(s) only, no HTML-injection or
+    # link-decorator-terminator characters, <=500 chars) — that validator is the
+    # security contract, since nothing downstream escapes this value.
+    if body.booking_url is not None:
+        site.booking_url = body.booking_url
 
     # Identity co-op opt-in (AC-10). Turning it ON requires accepting the exact
     # currently-pinned terms, and the acceptance row is written in the SAME
@@ -448,6 +453,21 @@ async def update_site(
                 db, site_id=site.site_id, terms_version=tv, user_id=user.id
             )
         site.contribution_enabled = body.contribution_enabled
+
+    # Campaign-benchmark opt-in (marketing-claims-gap Phase 3, D3). Structurally
+    # SEPARATE from the co-op block above: no terms_version, no acceptance row,
+    # and it neither reads nor writes contribution_enabled. The pooled benchmark
+    # data is zero-PII and k-anonymous (>=5 sites per row), so the proportionate
+    # consent artifact is this structlog audit line, not an acceptance table.
+    # Unconditional in both directions — opting out is never gated.
+    if body.benchmark_contribution_enabled is not None:
+        site.benchmark_contribution_enabled = body.benchmark_contribution_enabled
+        logger.info(
+            "benchmark_contribution_toggled",
+            site_id=site.site_id,
+            user_id=str(user.id),
+            enabled=body.benchmark_contribution_enabled,
+        )
 
     await db.commit()
     await db.refresh(site)

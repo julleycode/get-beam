@@ -81,7 +81,15 @@ async def _run_send(monkeypatch, *, gmail_connected: bool) -> str:
     member_result = MagicMock()
     member_result.all.return_value = [("vid-1",)]
     site_result = MagicMock()
-    site_result.first.return_value = (_SITE_URL, "Site", "Owner", "owner@site.example")
+    # 5-tuple: the send-path select is
+    # (Site.url, Site.name, User.full_name, User.email, Site.booking_url).
+    site_result.first.return_value = (
+        _SITE_URL,
+        "Site",
+        "Owner",
+        "owner@site.example",
+        None,
+    )
     iv_result = MagicMock()
     iv_result.scalar_one_or_none.return_value = _emailable_iv()
     existing_result = MagicMock()

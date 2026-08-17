@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Settings } from "lucide-react";
 import { api, ConsentMode } from "@/lib/api";
+import type { GoalCreatePayload } from "@/lib/api-types";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Separator } from "@/components/ui/separator";
@@ -82,6 +83,11 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
     message: string;
   } | null>(null);
   const [uninstallOpen, setUninstallOpen] = useState(false);
+  // Booking link is a free-text field, so it needs local draft state; seeded
+  // from the server value once the site query resolves.
+  const [bookingUrl, setBookingUrl] = useState("");
+  const [bookingSeeded, setBookingSeeded] = useState(false);
+  const [goalPath, setGoalPath] = useState("/thanks");
 
   const invalidateSite = () =>
     queryClient.invalidateQueries({ queryKey: ["site", siteId] });
@@ -101,6 +107,16 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
   const dampingMut = useMutation({
     mutationFn: (enabled: boolean) => api.setInternalDamping(siteId, enabled),
     onSettled: invalidateSite,
+  });
+  const bookingMut = useMutation({
+    mutationFn: (url: string) => api.updateSite(siteId, { booking_url: url }),
+    onSuccess: invalidateSite,
+  });
+  const goalMut = useMutation({
+    mutationFn: (payload: GoalCreatePayload) =>
+      api.createConversionGoal(siteId, payload),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["conversionGoals", siteId] }),
   });
   const verifyMut = useMutation({
     mutationFn: () => api.verifyPixel(siteId),
@@ -166,6 +182,12 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
   }
 
+  // Seed the booking-link draft once, without clobbering an in-progress edit.
+  if (!bookingSeeded) {
+    setBookingSeeded(true);
+    setBookingUrl(site.booking_url ?? "");
+  }
+
   const platform = site.detected_platform || "unknown";
 
   return (
@@ -227,6 +249,106 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
             {copied ? "Copied!" : "Copy"}
           </Button>
         </div>
+      </section>
+
+      <Separator />
+
+      {/* Demo booking link */}
+      <section className="space-y-2">
+        <p className="font-medium text-foreground">Demo booking link</p>
+        <p className="text-xs text-muted-foreground">
+          Your Calendly / Cal.com link, or a booking page on your own site. Beam
+          drops it into campaign drafts wherever the AI writes{" "}
+          <code className="rounded bg-muted px-1">{"{{booking_link}}"}</code>.
+          Leave it empty and that placeholder simply disappears.
+        </p>
+        <div className="flex gap-2">
+          <input
+            id="booking-url"
+            type="url"
+            className="flex-1 rounded-md border bg-muted px-3 py-2 text-sm"
+            placeholder="https://cal.com/you/demo"
+            value={bookingUrl}
+            onChange={(e) => setBookingUrl(e.target.value)}
+            disabled={bookingMut.isPending}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => bookingMut.mutate(bookingUrl.trim())}
+            disabled={bookingMut.isPending || bookingUrl.trim() === (site.booking_url ?? "")}
+          >
+            {bookingMut.isPending ? "Saving…" : "Save"}
+          </Button>
+        </div>
+        {bookingMut.isError && (
+          <p className="text-xs text-warning">
+            That link was rejected. Use a full http(s) URL with no spaces and no
+            {" "}
+            <code className="rounded bg-muted px-1">{`< > " ' )`}</code> characters.
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Note: if your booking link is on a subdomain of your own site, campaign
+          links to it will carry Beam&apos;s encrypted click token. Use a path on
+          your own site, or a third-party booking host, if you&apos;d rather they
+          didn&apos;t.
+        </p>
+
+        {/* D3 — one-click "Demo booked" conversion goal preset. Pre-fills the
+            normal goal form and posts to the existing goals endpoint; nothing is
+            created automatically when the booking URL is saved. */}
+        {site.booking_url && (
+          <div className="space-y-2 rounded-md border p-3">
+            <p className="text-xs font-medium text-foreground">
+              Track demo bookings
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Point your booking tool&apos;s confirmation redirect at a thank-you
+              page on your own site, then enter{" "}
+              <strong>the path of that page</strong> (e.g.{" "}
+              <code className="rounded bg-muted px-1">/thanks</code>) — not a full
+              URL. It must start with{" "}
+              <code className="rounded bg-muted px-1">/</code>.
+            </p>
+            <div className="flex gap-2">
+              <input
+                id="demo-goal-path"
+                className="flex-1 rounded-md border bg-muted px-3 py-2 text-sm"
+                placeholder="/thanks"
+                value={goalPath}
+                onChange={(e) => setGoalPath(e.target.value)}
+                disabled={goalMut.isPending}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  goalMut.mutate({
+                    name: "Demo booked",
+                    goal_type: "url_match",
+                    match_type: "prefix",
+                    pattern: goalPath.trim(),
+                  })
+                }
+                disabled={goalMut.isPending || !goalPath.trim().startsWith("/")}
+              >
+                {goalMut.isPending ? "Creating…" : "Create goal"}
+              </Button>
+            </div>
+            {goalMut.isSuccess && (
+              <p className="text-xs text-success">
+                &quot;Demo booked&quot; goal created.
+              </p>
+            )}
+            {goalMut.isError && (
+              <p className="text-xs text-warning">
+                Could not create the goal — it may already exist, or the path is
+                invalid.
+              </p>
+            )}
+          </div>
+        )}
       </section>
 
       <Separator />

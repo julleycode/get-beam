@@ -465,9 +465,16 @@ async def test_send_campaign(
     # preview to themselves). Mirrors the real send in campaign_sender.
     from apps.api.models.site import Site
 
-    site_name = (
-        await db.execute(select(Site.name).where(Site.site_id == site_id))
-    ).scalar_one_or_none() or "Beam"
+    # Two-column select — must use .first(), not .scalar_one_or_none() (which
+    # raises on a multi-column row). booking_url feeds {{booking_link}} so the
+    # preview renders exactly what a real send would.
+    site_row = (
+        await db.execute(
+            select(Site.name, Site.booking_url).where(Site.site_id == site_id)
+        )
+    ).first()
+    site_name = (site_row[0] if site_row else None) or "Beam"
+    booking_url = (site_row[1] if site_row else None) or None
 
     # Sample recipient values so the preview renders fully (no raw
     # {{placeholders}}); [Your Name] resolves to the admin running the test.
@@ -475,12 +482,12 @@ async def test_send_campaign(
     sample_company = "Acme Inc"
     sender_name = user.full_name or None
     subject = "[TEST] " + _personalize(
-        touchpoint["subject"], sample_name, sample_company, sender_name
+        touchpoint["subject"], sample_name, sample_company, sender_name, booking_url
     )
     # Links are NOT click-decorated here: a test click must not create
     # VisitorEmail rows or tracking state for the admin's own address.
     body_html = _personalize(
-        touchpoint["body"], sample_name, sample_company, sender_name
+        touchpoint["body"], sample_name, sample_company, sender_name, booking_url
     ).replace("\n", "<br/>")
 
     # Preview through the SAME channel a real send would use: the owner's
