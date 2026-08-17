@@ -67,3 +67,8 @@ dnspython==2.8.0
 # (services/asn_lookup.py; replaces per-IP IPinfo calls in is_datacenter_ip)
 geoip2==4.8.1
 maxminddb==2.6.2
+
+# ASGI lifespan runner — TEST-ONLY (tests/e2e_disposable/ boots the app through
+# LifespanManager so start_scheduler() actually runs; httpx ASGITransport does not
+# run lifespan). Lives here because the Dockerfile installs from this file.
+asgi-lifespan==2.1.0
