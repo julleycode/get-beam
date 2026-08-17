@@ -7,6 +7,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Target, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ConversionGoal, GoalCreatePayload } from "@/lib/api-types";
+import {
+  OPEN_RATE_CAVEAT,
+  WHATS_WORKING_SUBTITLE,
+  WHATS_WORKING_TITLE,
+  benchmarkComparisonLabel,
+  openRateLabel,
+} from "@/lib/open-rate-copy";
 import { TableSkeleton } from "@/components/skeletons";
 import { SiteSelector } from "@/components/site-selector";
 import { PageHeader } from "@/components/page-header";
@@ -270,6 +277,74 @@ export default function OutcomesPage() {
             />
             <StatTile label="Organic (baseline)" value={totals?.organic ?? 0} />
           </div>
+
+          {(report?.whats_working ?? []).length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm">{WHATS_WORKING_TITLE}</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  {WHATS_WORKING_SUBTITLE}
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>What</TableHead>
+                      <TableHead>Type</TableHead>
+                      <TableHead className="text-right">Sent</TableHead>
+                      <TableHead className="text-right">Clicked</TableHead>
+                      <TableHead className="text-right">
+                        <span className="inline-flex items-center gap-1.5">
+                          Open rate
+                          {/* The caveat sits ON the open-rate column header, so
+                              no open-rate value is ever read without it. */}
+                          <InfoTooltip label="About open rates">
+                            {OPEN_RATE_CAVEAT}
+                          </InfoTooltip>
+                        </span>
+                      </TableHead>
+                      <TableHead className="text-right">Converted</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(report?.whats_working ?? []).slice(0, 8).map((r) => (
+                      <TableRow key={`${r.kind}-${r.label}`}>
+                        <TableCell className="font-medium">{r.label}</TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {r.kind === "segment" ? "Segment" : "Campaign"}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{r.sent}</TableCell>
+                        <TableCell className="text-right tabular-nums">{r.clicked}</TableCell>
+                        <TableCell
+                          className={
+                            r.open_rate === null
+                              ? "text-right text-muted-foreground"
+                              : "text-right tabular-nums"
+                          }
+                        >
+                          {openRateLabel(r.open_rate)}
+                        </TableCell>
+                        <TableCell className="text-right font-medium tabular-nums text-primary">
+                          {r.converted}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                <p className="text-xs text-muted-foreground">{OPEN_RATE_CAVEAT}</p>
+                {report?.benchmark && (
+                  <p className="text-xs text-muted-foreground">
+                    {benchmarkComparisonLabel(
+                      report.benchmark.category,
+                      report.benchmark.site_open_rate,
+                      report.benchmark.category_open_rate,
+                    )}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>

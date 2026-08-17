@@ -27,7 +27,15 @@ from apps.api.models.outcome import Conversion, ConversionGoal
 from apps.api.models.site import Site
 from apps.api.models.user import User
 from apps.api.models.visitor_email import VisitorEmail
+from apps.api.services.campaign_stats import (
+    OPEN_RATE_CAVEAT,
+    clicked_count_expr,
+    opened_count_expr,
+    sent_count_expr,
+)
+from apps.api.models.segment import Segment
 from apps.api.schemas.outcomes import (
+    BenchmarkComparison,
     CampaignOutcomeRow,
     GoalCreate,
     GoalListResponse,
@@ -40,6 +48,7 @@ from apps.api.schemas.outcomes import (
     OutcomeWebhookResponse,
     WebhookConfigResponse,
     WebhookSecretResponse,
+    WhatsWorkingRow,
     validate_goal_pattern,
 )
 from apps.api.services.conversion_tracker import MAX_GOALS_PER_SITE, record_conversion
@@ -284,24 +293,15 @@ async def outcomes_report(
             select(
                 Campaign.id,
                 Campaign.name,
-                func.count()
-                .filter(
-                    CampaignTouchpoint.status == "sent",
-                    CampaignTouchpoint.sent_at >= cutoff,
-                )
-                .label("sent"),
-                func.count()
-                .filter(
-                    CampaignTouchpoint.opened_at.is_not(None),
-                    CampaignTouchpoint.sent_at >= cutoff,
-                )
-                .label("opened"),
-                func.count()
-                .filter(
-                    CampaignTouchpoint.clicked_at.is_not(None),
-                    CampaignTouchpoint.sent_at >= cutoff,
-                )
-                .label("clicked"),
+                # Shared predicate set — services/campaign_stats.py is the SINGLE
+                # funnel definition. Imported as EXPRESSIONS so this stays one
+                # grouped aggregate: no rows are materialized, per-campaign
+                # grouping is preserved, and the query cost is unchanged.
+                # Deliberately unfiltered by channel: /outcomes has never
+                # filtered on channel and must keep counting every touchpoint.
+                sent_count_expr(cutoff).label("sent"),
+                opened_count_expr(cutoff).label("opened"),
+                clicked_count_expr(cutoff).label("clicked"),
             )
             .join(CampaignTouchpoint, CampaignTouchpoint.campaign_id == Campaign.id)
             .where(Campaign.site_id == site_id)
@@ -362,7 +362,98 @@ async def outcomes_report(
         )
     campaigns.sort(key=lambda c: (c.converted, c.sent), reverse=True)
 
-    return OutcomesReportResponse(days=days, totals=totals, campaigns=campaigns, goals=goals)
+    # ── "What's working" (marketing-claims-gap Phase 3, D2) ──
+    # Ranked by CAMPAIGN and SEGMENT only. Subject-line ranking is a named
+    # deferral: tenant-authored subject text would need clean_text sanitization
+    # before it could be surfaced, so nothing here reads it.
+    # open_rate is None for a campaign that sent nothing — no sends is not a
+    # measured zero — and every open-rate value ships with OPEN_RATE_CAVEAT.
+    whats_working: list[WhatsWorkingRow] = [
+        WhatsWorkingRow(
+            kind="campaign",
+            label=c.name,
+            sent=c.sent,
+            clicked=c.clicked,
+            converted=c.converted,
+            conversion_rate=c.conversion_rate,
+            open_rate=round(c.opened / c.sent, 4) if c.sent else None,
+        )
+        for c in campaigns
+    ]
+    segment_names = dict(
+        (
+            await db.execute(
+                select(Campaign.id, Segment.name)
+                .join(Segment, Segment.id == Campaign.segment_id)
+                .where(Campaign.site_id == site_id)
+            )
+        ).all()
+    )
+    by_segment: dict[str, dict[str, int]] = {}
+    for cid, agg in funnel.items():
+        name = segment_names.get(cid)
+        if not name:
+            continue
+        conv = conv_by_campaign.get(cid, {"converted": 0})
+        bucket = by_segment.setdefault(
+            name, {"sent": 0, "opened": 0, "clicked": 0, "converted": 0}
+        )
+        bucket["sent"] += agg["sent"]
+        bucket["opened"] += agg["opened"]
+        bucket["clicked"] += agg["clicked"]
+        bucket["converted"] += conv["converted"]
+    whats_working.extend(
+        WhatsWorkingRow(
+            kind="segment",
+            label=name,
+            sent=agg["sent"],
+            clicked=agg["clicked"],
+            converted=agg["converted"],
+            conversion_rate=(
+                round(agg["converted"] / agg["sent"], 4) if agg["sent"] else 0.0
+            ),
+            open_rate=round(agg["opened"] / agg["sent"], 4) if agg["sent"] else None,
+        )
+        for name, agg in by_segment.items()
+        if agg["sent"] or agg["converted"]
+    )
+    whats_working.sort(key=lambda r: (r.converted, r.sent), reverse=True)
+
+    # Absolute pooled category average only — no period-over-period delta.
+    benchmark = None
+    if settings.campaign_benchmark_enabled:
+        from apps.api.services.campaign_benchmark import benchmark_for_category
+
+        site_row = (
+            await db.execute(
+                select(Site.category, Site.benchmark_contribution_enabled).where(
+                    Site.site_id == site_id
+                )
+            )
+        ).first()
+        if site_row is not None and site_row[1]:
+            row = await benchmark_for_category(db, site_row[0])
+            if row is not None and row.sends:
+                site_sent = sum(c.sent for c in campaigns)
+                site_opened = sum(c.opened for c in campaigns)
+                benchmark = BenchmarkComparison(
+                    category=row.category_normalized,
+                    site_open_rate=(
+                        round(site_opened / site_sent, 4) if site_sent else None
+                    ),
+                    category_open_rate=round(row.opens / row.sends, 4),
+                    caveat=OPEN_RATE_CAVEAT,
+                )
+
+    return OutcomesReportResponse(
+        days=days,
+        totals=totals,
+        campaigns=campaigns,
+        goals=goals,
+        whats_working=whats_working,
+        open_rate_caveat=OPEN_RATE_CAVEAT,
+        benchmark=benchmark,
+    )
 
 
 @router.delete("/{site_id}/goals/{goal_id}", status_code=204)
@@ -430,6 +521,14 @@ async def outcomes_webhook(
     NO bearer auth — verified via ``X-Beam-Signature``: hex HMAC-SHA256 of the
     raw request body with the site's webhook secret (billing-webhook pattern).
     Payload: {goal, email|visitor_id, value?, occurred_at?, event_id?}.
+
+    Demo-booking v2 route (NOT implemented in v1): a booking provider
+    (Calendly / Cal.com) can POST its booking event straight here, giving
+    attribution without ever handing a third party Beam's encrypted ``_bid``
+    click token. v1 instead relies on the customer redirecting their booking
+    confirmation to their own pixel'd thank-you page, matched by a "Demo booked"
+    url_match ConversionGoal. See process/features/campaigns-outreach/backlog/
+    third-party-link-attribution_NOTE_16-08-26.md.
     """
     body = await request.body()
 

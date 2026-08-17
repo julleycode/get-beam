@@ -27,6 +27,11 @@ from apps.api.models.outcome import Conversion
 from apps.api.models.site import Site
 from apps.api.models.user import User
 from apps.api.models.visitor import IdentifiedVisitor
+from apps.api.services.campaign_stats import (
+    OPEN_RATE_CAVEAT,
+    opened_count_expr,
+    sent_count_expr,
+)
 from apps.api.services.email_sender import EmailSender
 from apps.api.services.identity_classification import is_emailable_identity
 
@@ -48,6 +53,27 @@ class DigestStats(NamedTuple):
     attributed_revenue_cents: int
 
 
+class DigestBenchmark(NamedTuple):
+    """Optional benchmark payload for the digest line (marketing-claims-gap
+    Phase 3, D1).
+
+    Rides as a keyword-only argument to :func:`build_digest_email` rather than as
+    new ``DigestStats`` fields: ``DigestStats`` is a second public structure with
+    its own producer, and the digest has never rendered an open rate at all.
+
+    ``category_open_rate`` is a pooled MEAN over >=5 opted-in sites — a category
+    AVERAGE. It is never a median (sums plus a tenant count cannot yield one),
+    and the word "median" must never appear on this surface.
+
+    ``site_open_rate`` is None when the site sent nothing in the window; the line
+    then renders as "no data", never as 0%.
+    """
+
+    category_label: str
+    site_open_rate: float | None
+    category_open_rate: float | None
+
+
 class VisitorHighlight(NamedTuple):
     """A digest-safe slice of an identified visitor. Deliberately excludes the
     email address: this email is BUILT to be forwarded, so anything in it leaks
@@ -65,12 +91,46 @@ def _visitor_line(v: VisitorHighlight) -> str:
     return f"<li><strong>{name}</strong>{f' &mdash; {detail}' if detail else ''}</li>"
 
 
+def _benchmark_line(benchmark: "DigestBenchmark | None") -> str:
+    """Render the optional benchmark line, or "" when there is nothing to say.
+
+    Two honesty rules are enforced here, not at the call site:
+
+    * Zero sends is NOT a measured zero — with ``site_open_rate is None`` the
+      line says "no sends this week", never "0%".
+    * Every open-rate value carries the MPP/image-blocking caveat. The digest is
+      BUILT to be forwarded, so an uncaveated open rate would travel outside the
+      account and be read as fact.
+    """
+    if benchmark is None or benchmark.category_open_rate is None:
+        return ""
+    category = escape(benchmark.category_label.replace("_", " "))
+    average = f"{benchmark.category_open_rate * 100:.1f}%"
+    yours = (
+        f"{benchmark.site_open_rate * 100:.1f}%"
+        if benchmark.site_open_rate is not None
+        else "no sends this week"
+    )
+    return (
+        f"<p><strong>How you compare:</strong> your open rate is {escape(yours)} "
+        f"against a {escape(average)} category average for {category} sites.</p>"
+        f'<p style="font-size:12px;color:#777;">{escape(OPEN_RATE_CAVEAT)}</p>'
+    )
+
+
 def build_digest_email(
     site_name: str,
     stats: DigestStats,
     visitors: Sequence[VisitorHighlight] = (),
+    *,
+    benchmark: "DigestBenchmark | None" = None,
 ) -> tuple[str, str]:
-    """Build (subject, html). Pure — unit-testable without a DB."""
+    """Build (subject, html). Pure — unit-testable without a DB.
+
+    ``benchmark`` is keyword-only and defaulted, so every existing positional
+    call site is unaffected. When None (flag off, site not opted in, or no row
+    cleared the k-floor) the digest renders exactly as it did before.
+    """
     subject = (
         f"Beam this week: {stats.conversions} conversion"
         f"{'s' if stats.conversions != 1 else ''} for {site_name}"
@@ -103,6 +163,10 @@ def build_digest_email(
         if settings.referrals_enabled
         else ""
     )
+    # Optional benchmark line. Absolute values only — NO period-over-period
+    # delta is computed or rendered here: near the k-floor, differencing
+    # consecutive periods can narrow an individual tenant's numbers.
+    benchmark_section = _benchmark_line(benchmark)
     html = (
         f"<p>Hi,</p>"
         f"<p>Your Beam week for <strong>{escape(site_name)}</strong>:</p>"
@@ -112,6 +176,7 @@ def build_digest_email(
         f"<li><strong>{stats.conversions}</strong> conversions — "
         f"<strong>{stats.attributed}</strong> driven by Beam campaigns{escape(revenue)}</li>"
         f"</ul>"
+        f"{benchmark_section}"
         f"{visitors_section}"
         f'<p><a href="{escape(outcomes_url, quote=True)}">See the full outcomes report &rarr;</a></p>'
         f"{referral_cta}"
@@ -203,6 +268,39 @@ async def _site_week_stats(db, site_id: str, cutoff: datetime) -> DigestStats:
     )
 
 
+async def _site_benchmark(
+    db, site_id: str, category: str | None, opted_in: bool, cutoff: datetime
+) -> DigestBenchmark | None:
+    """Build the digest benchmark payload, or None to render nothing.
+
+    Returns None when the feature flag is off, when the site has not opted in
+    (write-nothing/read-nothing-when-blocked), or when no category row cleared
+    the k-floor. Never raises into the digest send loop.
+    """
+    if not settings.campaign_benchmark_enabled or not opted_in:
+        return None
+    from apps.api.services.campaign_benchmark import benchmark_for_category
+
+    row = await benchmark_for_category(db, category)
+    if row is None or not row.sends:
+        return None
+    site_row = (
+        await db.execute(
+            select(sent_count_expr(cutoff), opened_count_expr(cutoff))
+            .select_from(CampaignTouchpoint)
+            .join(Campaign, Campaign.id == CampaignTouchpoint.campaign_id)
+            .where(Campaign.site_id == site_id)
+        )
+    ).one()
+    sends, opens = int(site_row[0] or 0), int(site_row[1] or 0)
+    return DigestBenchmark(
+        category_label=row.category_normalized,
+        # None (not 0.0) when nothing was sent — no sends is not a measured zero.
+        site_open_rate=(opens / sends) if sends else None,
+        category_open_rate=row.opens / row.sends,
+    )
+
+
 async def _try_acquire_lock(db) -> bool | None:
     """True = acquired, False = held elsewhere, None = unsupported (SQLite)."""
     try:
@@ -243,7 +341,13 @@ async def send_weekly_outcome_digests() -> int:
         try:
             rows = (
                 await db.execute(
-                    select(Site.site_id, Site.name, User.email)
+                    select(
+                        Site.site_id,
+                        Site.name,
+                        User.email,
+                        Site.category,
+                        Site.benchmark_contribution_enabled,
+                    )
                     .join(User, User.id == Site.user_id)
                     .where(
                         or_(
@@ -256,7 +360,7 @@ async def send_weekly_outcome_digests() -> int:
             ).all()
 
             sender = EmailSender()
-            for site_id, site_name, owner_email in rows:
+            for site_id, site_name, owner_email, category, benchmark_opt_in in rows:
                 if not owner_email:
                     continue
                 try:
@@ -268,7 +372,12 @@ async def send_weekly_outcome_digests() -> int:
                         # alone DO earn a digest: pre-campaign owners forwarding
                         # a "who visited" report is the growth loop.
                         continue
-                    subject, html = build_digest_email(site_name, stats, visitors)
+                    benchmark = await _site_benchmark(
+                        db, site_id, category, bool(benchmark_opt_in), cutoff
+                    )
+                    subject, html = build_digest_email(
+                        site_name, stats, visitors, benchmark=benchmark
+                    )
                     # Pass db so recipient opt-out (unsubscribe/bounce) is honored.
                     await sender.send(
                         to_email=owner_email,

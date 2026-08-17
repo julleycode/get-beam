@@ -115,6 +115,18 @@ class Site(Base):
     # Validated at the API boundary (http(s) only, no HTML-injection or
     # link-decorator-terminator characters) — nothing downstream escapes it.
     booking_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Campaign-benchmark opt-in (marketing-claims-gap Phase 3). When True AND
+    # settings.campaign_benchmark_enabled is True, this site's ZERO-PII campaign
+    # counters (sends/opens/clicks/conversions) are pooled into a k-anonymous
+    # per-category average. Default OFF, and a site that has not opted in is
+    # never even fetched by the aggregation job.
+    # DELIBERATELY SEPARATE from contribution_enabled above: that flag is the
+    # identity co-op's consent basis for PII-bearing identity sharing against
+    # specific policy text. Reusing it here would be a purpose-limitation
+    # breach — it would enroll co-op sites in a purpose they never saw.
+    benchmark_contribution_enabled: Mapped[bool] = mapped_column(
+        default=False, nullable=True, server_default="false"
+    )
     # ─── Site analysis (onboarding) — all five flag-gated on settings.site_analysis_enabled ───
     # Two-slot storage so a re-run can never destroy a confirmed profile.
     # The CONFIRMED profile the site actually uses. NULL = the owner has never

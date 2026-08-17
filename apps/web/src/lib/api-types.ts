@@ -162,6 +162,12 @@ export interface Site {
   tracking_enabled: boolean;
   /** Outlier/internal-traffic damping opt-in for this site. Default false. */
   internal_damping_enabled?: boolean;
+  /**
+   * Demo/meeting booking link (Calendly, Cal.com, or a page on your own site),
+   * rendered into campaign drafts via the {{booking_link}} token. null = not
+   * configured, in which case the token resolves to an empty string.
+   */
+  booking_url?: string | null;
   /** Cookie-consent mode emitted into the pixel snippet: off | eu | all | cmp. */
   consent_mode: ConsentMode;
   /** Optional — backend SiteOut may not return it; callers fall back to "unknown". */
@@ -180,6 +186,7 @@ export interface SiteUpdate {
   tracking_enabled: boolean;
   internal_damping_enabled: boolean;
   consent_mode: ConsentMode;
+  booking_url: string;
 }
 
 // ── Agent gateway (agent-facing site content) ─────────────
@@ -324,6 +331,10 @@ export interface Visitor {
 }
 
 export interface VisitorDetail extends Visitor {
+  // Deterministic 0-100 fit against the site's reviewed ICP profile. Detail-only
+  // (absent from the list `Visitor` type by design). null/undefined = not
+  // scored — never 0, which would mean "scored and a poor fit".
+  icp_fit?: number | null;
   email?: string | null;
   full_name?: string | null;
   phone?: string | null;
@@ -647,11 +658,36 @@ export interface GoalOutcomeRow {
   revenue_cents: number;
 }
 
+/** One ranked "what's working" entry. Campaign/segment only — never subject. */
+export interface WhatsWorkingRow {
+  kind: "campaign" | "segment";
+  label: string;
+  sent: number;
+  clicked: number;
+  converted: number;
+  conversion_rate: number;
+  /** null = the campaign sent nothing; render "no data", never 0%. */
+  open_rate: number | null;
+}
+
+/** Pooled category AVERAGE (mean) over >=5 opted-in sites. Never a median,
+ * never a period-over-period delta, and site_count is not exposed. */
+export interface BenchmarkComparison {
+  category: string;
+  site_open_rate: number | null;
+  category_open_rate: number;
+  caveat: string;
+}
+
 export interface OutcomesReport {
   days: number;
   totals: OutcomeTotals;
   campaigns: CampaignOutcomeRow[];
   goals: GoalOutcomeRow[];
+  // Additive (marketing-claims-gap Phase 3) — optional so older responses parse.
+  whats_working?: WhatsWorkingRow[];
+  open_rate_caveat?: string | null;
+  benchmark?: BenchmarkComparison | null;
 }
 
 export interface OutcomesWebhookConfig {

@@ -151,6 +151,21 @@ async def _outcome_digest_job() -> None:
         logger.exception("outcome_digest_crashed")
 
 
+async def _campaign_benchmark_job() -> None:
+    """Weekly job: pool opted-in sites' campaign counters into k-anonymous
+    per-category benchmark rows.
+
+    aggregate_weekly_benchmarks manages its own session, re-checks the feature
+    flag itself, and reads only sites with benchmark_contribution_enabled=True.
+    """
+    try:
+        from apps.api.services.campaign_benchmark import aggregate_weekly_benchmarks
+
+        await aggregate_weekly_benchmarks()
+    except Exception:
+        logger.exception("campaign_benchmark_crashed")
+
+
 async def _daily_digest_job() -> None:
     """Daily job: email owners of pixel-active sites their 24h working report.
 
@@ -847,6 +862,18 @@ def start_scheduler() -> None:
             CronTrigger(day_of_week="mon", hour=15, timezone="UTC"),
             id="outcome_digest",
             replace_existing=True,
+        )
+    if settings.campaign_benchmark_enabled:
+        from apscheduler.triggers.cron import CronTrigger
+
+        scheduler.add_job(
+            _campaign_benchmark_job,
+            # Sunday 03:00 UTC — deliberately CLEAR of the Monday 15:00 outcome
+            # digest, so the digest always reads rows aggregated this cycle.
+            CronTrigger(day_of_week="sun", hour=3, timezone="UTC"),
+            id="campaign_benchmark",
+            replace_existing=True,
+            misfire_grace_time=3600,
         )
     if settings.daily_digest_enabled:
         from apscheduler.triggers.cron import CronTrigger

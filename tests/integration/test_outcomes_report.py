@@ -172,6 +172,78 @@ class TestOutcomesReport:
         assert resp.status_code == 404
 
 
+class TestFunnelPredicateRefactorRegression:
+    """AC-13: /outcomes still counts EVERY channel after the campaign_stats
+    refactor (marketing-claims-gap Phase 3).
+
+    /outcomes has never filtered on channel and must not start. Without a
+    non-email row present, a channel filter leaking into this path would be
+    invisible and the "values unchanged" assertions above would pass vacuously.
+
+    The social touchpoint is constructed DIRECTLY via the ORM: no application
+    path emits one (campaign_sender hardcodes channel="email"), and the send
+    path is read-only in this phase — a synthetic row is the only way to make
+    this assertion real.
+    """
+
+    @pytest.mark.asyncio
+    async def test_social_touchpoints_are_counted_by_outcomes(
+        self, test_client, test_db, report_setup
+    ):
+        sid, token = report_setup["site_id"], report_setup["token"]
+        url = f"/api/v1/outcomes/{sid}/report?days=30"
+        before = (await test_client.get(url, headers=_auth(token))).json()
+        row_before = before["campaigns"][0]
+        assert (row_before["sent"], row_before["opened"], row_before["clicked"]) == (
+            4,
+            2,
+            1,
+        )
+
+        sent_at = datetime.utcnow() - timedelta(days=2)
+        test_db.add(
+            CampaignTouchpoint(
+                id=uuidlib.uuid4(),
+                campaign_id=uuidlib.UUID(report_setup["campaign_id"]),
+                visitor_id="rv-social",
+                channel="social_reply",
+                touchpoint_order=2,
+                status="sent",
+                content={},
+                sent_at=sent_at,
+                opened_at=sent_at + timedelta(hours=1),
+                clicked_at=sent_at + timedelta(hours=2),
+            )
+        )
+        await test_db.commit()
+
+        after = (await test_client.get(url, headers=_auth(token))).json()
+        row_after = after["campaigns"][0]
+        # Every counter moves by exactly one — no channel filter leaked in.
+        assert (row_after["sent"], row_after["opened"], row_after["clicked"]) == (
+            5,
+            3,
+            2,
+        )
+
+    @pytest.mark.asyncio
+    async def test_report_carries_the_open_rate_caveat_and_whats_working(
+        self, test_client, report_setup
+    ):
+        sid, token = report_setup["site_id"], report_setup["token"]
+        body = (
+            await test_client.get(
+                f"/api/v1/outcomes/{sid}/report?days=30", headers=_auth(token)
+            )
+        ).json()
+        assert "Apple Mail Privacy Protection" in (body["open_rate_caveat"] or "")
+        labels = {r["kind"] for r in body["whats_working"]}
+        assert "campaign" in labels
+        # Flag OFF by default -> no benchmark block, and the report is otherwise
+        # byte-identical to before this phase.
+        assert body["benchmark"] is None
+
+
 class TestCampaignStatsConversions:
     @pytest.mark.asyncio
     async def test_stats_include_converted_and_revenue(self, test_client, report_setup):

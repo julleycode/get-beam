@@ -127,11 +127,47 @@ class GoalOutcomeRow(BaseModel):
     revenue_cents: int
 
 
+class WhatsWorkingRow(BaseModel):
+    """One ranked entry in the "what's working" panel.
+
+    Ranked by CAMPAIGN and SEGMENT only. Subject-line ranking is a named
+    deferral (marketing-claims-gap Phase 3, D2) — the copy must never say
+    "subject", because nothing here is derived from subject text.
+
+    ``open_rate`` is None when the campaign sent nothing in the window: no sends
+    is not a measured zero, and the surface must render "no data" for it.
+    """
+
+    kind: str  # "campaign" | "segment"
+    label: str
+    sent: int
+    clicked: int
+    converted: int
+    conversion_rate: float
+    open_rate: float | None = None
+
+
+class BenchmarkComparison(BaseModel):
+    """Pooled category AVERAGE (mean) — never a median, and never a
+    period-over-period delta (differencing near the k-floor can narrow an
+    individual tenant's numbers). ``site_count`` is deliberately NOT exposed."""
+
+    category: str
+    site_open_rate: float | None
+    category_open_rate: float
+    caveat: str
+
+
 class OutcomesReportResponse(BaseModel):
     days: int
     totals: OutcomeTotals
     campaigns: list[CampaignOutcomeRow]
     goals: list[GoalOutcomeRow]
+    # Additive (marketing-claims-gap Phase 3). Existing clients ignoring these
+    # are unaffected; no field was removed or retyped.
+    whats_working: list[WhatsWorkingRow] = []
+    open_rate_caveat: str | None = None
+    benchmark: BenchmarkComparison | None = None
 
 
 # ── Server-side conversion webhook ──

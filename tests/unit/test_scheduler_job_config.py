@@ -112,13 +112,16 @@ class TestSchedulerInventory:
         cron = [c for c in calls if not _is_interval(c)]
         assert len(interval) + len(cron) == len(calls)
         # Every job is either interval or CronTrigger — nothing else. The cron
-        # set is the two digest emails (weekly outcomes + daily activity) plus
-        # the daily inactivity sweep; a new entry here means a new fixed-time job
-        # that Phase 4c's jitter assertion must keep excluding.
+        # set is the two digest emails (weekly outcomes + daily activity), the
+        # daily inactivity sweep, and the weekly campaign-benchmark aggregation
+        # (marketing-claims-gap Phase 3 — Sunday, deliberately clear of the
+        # Monday digest); a new entry here means a new fixed-time job that
+        # Phase 4c's jitter assertion must keep excluding.
         assert {_kwargs(c)["id"].value for c in cron} == {
             "outcome_digest",
             "daily_digest",
             "reengagement_sweep",
+            "campaign_benchmark",
         }
 
 
@@ -200,6 +203,10 @@ class TestAC13IntervalJobHardening:
         gates the REMOVAL of data Beam promised to delete).
         Before that 17/15/2; +1 interval job for ws2_classifier_sweep (WS2 agent-operated
         session classifier — batch-only, flag-gated OFF, visibility-only).
+        Was 24/21/3; +1 CRON job for campaign_benchmark (marketing-claims-gap
+        Phase 3 — the weekly cross-tenant benchmark aggregation runs at a fixed
+        Sunday hour so the Monday digest always reads fresh rows, so it is
+        excluded from the jitter assertion).
         Note: job-change detection adds NO add_job call — its two sweeps are
         Celery beat entries (celery_app.py), not APScheduler jobs.
         Before that 16/14/2; +1 interval job for promotion_sweep (identity-honesty
@@ -216,7 +223,7 @@ class TestAC13IntervalJobHardening:
         """
         calls = _add_job_calls()
         interval = [c for c in calls if _is_interval(c)]
-        assert len(calls) == 24, f"expected 24 add_job calls, found {len(calls)}"
+        assert len(calls) == 25, f"expected 25 add_job calls, found {len(calls)}"
         assert len(interval) == 21, (
             f"expected 21 interval calls, found {len(interval)}; if a job was "
             "added or removed, update E20's arithmetic — do not relax this gate"

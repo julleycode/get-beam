@@ -1432,6 +1432,32 @@ class Settings(BaseSettings):
     # Timeout for the single outbound fetch of the customer's site.
     site_analysis_fetch_timeout_seconds: int = 10
 
+    # ─── ICP-fit scoring ───
+    # Deterministic 0-100 scoring of a visitor against the site's REVIEWED
+    # `sites.site_profile` ICP. Gates ONLY the aggregation second pass
+    # (`_score_icp_fit_for_site` in services/visitor_aggregator.py) and nothing
+    # else — the pure scorer, the schema field and the conviction clause are all
+    # inert without a persisted `Visitor.icp_fit`. Default OFF: flag-off behavior
+    # is byte-identical to today (nothing is written, `icp_fit` stays NULL, and
+    # the conviction line is unchanged). MUST be declared here rather than read
+    # ad hoc — `model_config` carries `"extra": "ignore"`, so an undeclared
+    # ICP_FIT_ENABLED env var would be silently discarded and every flag-gated
+    # test would run vacuously flag-OFF.
+    icp_fit_enabled: bool = False
+
+    # ─── Campaign benchmarks (marketing-claims-gap Phase 3) ───
+    # Master switch for the cross-tenant campaign benchmark: the weekly
+    # APScheduler aggregation job, the digest benchmark line, and the planner
+    # stat injection. Default OFF — flag-off behavior is byte-identical to
+    # today (no job registered, no rows written, digest/report unchanged).
+    # MUST be declared here: `model_config` carries `"extra": "ignore"`, so an
+    # undeclared CAMPAIGN_BENCHMARK_ENABLED env var would be silently dropped
+    # and every flag-gated test would run vacuously flag-OFF.
+    # Contribution is additionally per-site gated on
+    # `sites.benchmark_contribution_enabled` — a SEPARATE consent basis from
+    # the identity co-op's `contribution_enabled` (purpose limitation).
+    campaign_benchmark_enabled: bool = False
+
     # ─── Rate limits ───
     default_daily_resolution_budget: int = 50   # Free tier: 50 visitor identifications/day per site (BYOK = unlimited)
     # Days a failed paid-provider attempt locks the visitor against retry.
