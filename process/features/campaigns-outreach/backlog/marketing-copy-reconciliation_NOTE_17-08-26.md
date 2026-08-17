@@ -2,6 +2,7 @@
 name: note:marketing-copy-reconciliation
 description: "Deferred P4 from the archived marketing-claims-gap program — reword auto-send-implying marketing copy to draft-and-approve language; copy edit only, no code change"
 date: 17-08-26
+status: RESOLVED 17-08-26
 metadata:
   node_type: memory
   type: note
@@ -28,3 +29,7 @@ language, not implemented.
 
 **Reference:** charter + P4 in
 `process/features/campaigns-outreach/completed/marketing-claims-gap_16-08-26/marketing-claims-gap-umbrella_PLAN_16-08-26.md`.
+
+## Resolution (17-08-26)
+
+Sweep result: index.html, pricing/page.tsx, README.md were already draft-and-approve compliant. Only violation was PRODUCT_ROADMAP.md line 4 vision sentence ("automatically plans + executes") — reworded to "automatically plans + drafts ... you approve every send". Screenshot landing copy ("coordinated automatically" / "adjusts automatically") is NOT in this repo — it is an external draft; reword guidance handed to user in chat.

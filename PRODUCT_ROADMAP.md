@@ -1,7 +1,7 @@
 # ReTargetAgent: Product Roadmap for MVP
 
 ## Product Vision (One Sentence)
-An AI agent that sits on any website via a lightweight pixel, identifies anonymous visitors, enriches their profiles across social channels, and automatically plans + executes personalized retargeting campaigns across organic and paid touchpoints.
+An AI agent that sits on any website via a lightweight pixel, identifies anonymous visitors, enriches their profiles across social channels, and automatically plans + drafts personalized retargeting campaigns across organic and paid touchpoints — you approve every send.
 
 ## Target User
 Founders and operators of DTC (Direct to Consumer) websites, vibe coded web apps, and indie SaaS products who:
