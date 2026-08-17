@@ -13,7 +13,7 @@ metadata:
 
 **Date**: 16-08-26
 **Complexity**: COMPLEX
-**Status**: 🧪 TESTING — code-complete, pending container-gate closure (WITH_GAPS)
+**Status**: ✅ VERIFIED (17-08-26) — complete: code verified via container-gate closure; flags OFF pending operator enable
 
 - Program type: PHASE PROGRAM (3 phases + Phase 0 operator precondition)
 - Feature folder: `process/features/campaigns-outreach/`
@@ -310,9 +310,9 @@ loop SKIPS SPEC — SPEC runs once in the outer program loop, not per phase.
 | Phase | Status |
 |---|---|
 | 0 — Operator precondition (commit site-analysis) | ✅ COMPLETE (decision recorded in Phase 2 report) |
-| 1 — Demo booking | 🧪 TESTING (CODE DONE + EVL-green; WITH_GAPS — Hybrid gates blocked) |
-| 2 — ICP-fit scoring | 🧪 TESTING (CODE DONE + EVL-green; WITH_GAPS — Hybrid gates blocked) |
-| 3 — Learning loop + benchmarks | 🧪 TESTING (CODE DONE + EVL-green; WITH_GAPS — Hybrid gates blocked) |
+| 1 — Demo booking | ✅ VERIFIED (17-08-26 container-gate closure; EVL-2 independent confirmation) |
+| 2 — ICP-fit scoring | ✅ VERIFIED (17-08-26; one source defect — icp_fit silent no-op — found flag-ON and fixed) |
+| 3 — Learning loop + benchmarks | ✅ VERIFIED (17-08-26; flag-ON + flag-OFF pairing both green) |
 
 Status values: ⏳ PLANNED | 🔨 CODE DONE | 🧪 TESTING | ✅ VERIFIED | 🚧 BLOCKED | ✅ COMPLETE
 
@@ -320,14 +320,15 @@ Status values: ⏳ PLANNED | 🔨 CODE DONE | 🧪 TESTING | ✅ VERIFIED | 🚧
 
 ## Implementation Checklist (program level)
 
-- [ ] P0. Operator commits or explicitly freezes the site-analysis working tree; record SHA/decision
-- [ ] P1. Run Phase 1 inner loop to VERIFIED; commit; update this file's Current Execution State
-- [ ] P2. Run Phase 2 inner loop to VERIFIED; commit; update Current Execution State
-- [ ] P3. Run Phase 3 inner loop to VERIFIED; commit; update Current Execution State
+- [x] P0. Operator commits or explicitly freezes the site-analysis working tree; record SHA/decision (recorded in Phase 2 report)
+- [x] P1. Run Phase 1 inner loop to VERIFIED; commit; update this file's Current Execution State (VERIFIED 17-08-26)
+- [x] P2. Run Phase 2 inner loop to VERIFIED; commit; update Current Execution State (VERIFIED 17-08-26 after icp_fit fix)
+- [x] P3. Run Phase 3 inner loop to VERIFIED; commit; update Current Execution State (VERIFIED 17-08-26)
 - [ ] P4. Marketing copy reconciliation pass: reword any "coordinated automatically" / auto-send
       implication in `apps/web/public/beam/index.html`, `PRODUCT_ROADMAP.md`, and landing copy to
-      draft-and-approve language. This is a copy edit, not a code change.
-- [ ] P5. Archive the program task folder to `process/features/campaigns-outreach/completed/`
+      draft-and-approve language. This is a copy edit, not a code change. (OPEN — follow-up outside
+      this archived program; a copy edit, no code risk.)
+- [x] P5. Archive the program task folder to `process/features/campaigns-outreach/completed/` (17-08-26)
 
 ---
 
@@ -412,20 +413,21 @@ Per-phase evidence tables live in the phase plans. Testing context:
 
 ## Current Execution State
 
-Last updated: 17-08-26
+Last updated: 17-08-26 (container-gate closure)
 Current phase: 3 of 3 (all agent phases complete)
 Phase 3 name: Learning loop + benchmarks
-Phase 3 status: EXECUTED + EVL-green — classification WITH_GAPS (as are Phases 1 and 2)
-Phase 3 EVL: PASS-WITH-GAPS / HALTED_SUCCESS (1 cycle; independent vc-tester)
-Phase 3 report: process/features/campaigns-outreach/active/marketing-claims-gap_16-08-26/phase-3-learning-loop-benchmarks_REPORT_16-08-26.md
-Next phase: none — remaining work is operator-side container-gate closure (see
-  process/features/campaigns-outreach/backlog/marketing-claims-gap-container-gates_NOTE_16-08-26.md),
-  the execution commit (vc-git-manager), and umbrella checklist P4 (marketing copy pass)
-Program status: code-complete, pending container-gate closure — all 3 phases EXECUTED +
-  EVL-green, classification WITH_GAPS; every Hybrid/flag-ON gate unrun (Docker daemon down all
-  session); no plan archived — task folder stays in active/ until flag-ON gates pass
-  (vacuous-green ban / ip-org G8/G10 precedent). Program closeout:
-  marketing-claims-gap_REPORT_16-08-26.md (this folder)
+Phase 3 status: EXECUTED + EVL-green + ✅ VERIFIED (as are Phases 1 and 2 — 17-08-26)
+Phase 3 EVL: VERIFIED / HALTED_SUCCESS-after-1-fix-cycle (evl-2, independent confirmation)
+Phase 3 report: phase-3-learning-loop-benchmarks_REPORT_16-08-26.md (this folder); container-gate
+  closure evidence: container-gate-closure-evl-iteration-002_REPORT_17-08-26.md
+Next phase: none — program complete. Remaining: process commit (vc-git-manager) and umbrella
+  checklist P4 (marketing copy pass, tracked as follow-up); flag flips are operator steps
+Program status: complete — code verified, flags OFF pending operator enable. All 3 phases
+  EXECUTED + EVL-green + VERIFIED 17-08-26: Docker came back up, all container gates ran, one
+  source defect found flag-ON and fixed (icp_fit silent no-op in visitor_aggregator.py),
+  migrations e4b1d78c3a05 → f6a3c81d5e27 → a8c2f47e91b6 live-round-tripped from EMPTY DB.
+  Task folder archived to completed/. Closeout: marketing-claims-gap_REPORT_16-08-26.md
+  §Post-closeout (this folder)
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS
 Orchestrator rule: read "Current loop step" and "validate-contract status" before spawning any

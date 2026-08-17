@@ -1,9 +1,9 @@
 ---
 name: report:marketing-claims-gap-program-closeout
-description: "Program-level UPDATE PROCESS closeout for the 3-phase marketing-claims-gap program — all phases EXECUTED + EVL-green, classification WITH_GAPS, plans kept in active/ pending container-gate closure"
+description: "Program-level UPDATE PROCESS closeout for the 3-phase marketing-claims-gap program — WITH_GAPS classification SUPERSEDED 17-08-26: container gates ran, one source defect fixed, all 3 phases VERIFIED (see Post-closeout section)"
 date: 16-08-26
 phase: program-closeout
-status: COMPLETE_WITH_GAPS
+status: COMPLETE
 feature: campaigns-outreach
 plan: process/features/campaigns-outreach/active/marketing-claims-gap_16-08-26/marketing-claims-gap-umbrella_PLAN_16-08-26.md
 metadata:
@@ -126,3 +126,40 @@ Strongly recommend UPDATE PROCESS -- harness/protocol files touched.
 
 `Invoke vc-git-manager for a logical execution commit, then close the container gates per the
 backlog note; keep all marketing-claims-gap plans active until flag-ON gates pass.`
+
+---
+
+## Post-closeout: container-gate closure (17-08-26)
+
+**The WITH_GAPS classification above is SUPERSEDED. All 3 phases are now ✅ VERIFIED.**
+Evidence: `container-gate-closure-evl-iteration-002_REPORT_17-08-26.md` (this folder) +
+`results.tsv` row `evl-2 2026-08-17 ALL-3-PHASES ... VERIFIED HALTED_SUCCESS-after-1-fix-cycle`.
+
+What happened:
+
+- **Docker daemon came back up** (infra-postgres-1 `:5433` + infra-redis-1 `:6379`); every
+  previously-blocked Hybrid/integration/migration gate ran.
+- **One real source defect found and fixed** — the exact class the vacuity precedent warns
+  about: `apps/api/services/visitor_aggregator.py`'s icp_fit bulk write used
+  `update(Visitor)` + WHERE + param list; SQLAlchemy 2 raised `InvalidRequestError`, and the
+  contract-mandated try/except swallowed it into a warning log. **icp_fit was NEVER written
+  when `icp_fit_enabled=true` — a silent no-op in production.** It survived 4 PVL cycles + 2
+  EVL passes because every prior gate ran flag-OFF (ip-org G8/G10 vacuity, proven again).
+  Fix: retarget the write to the Core table (`update(Visitor.__table__)`), bypassing the ORM
+  bulk-update path. Also fixed: a never-executed test in `test_outcomes_report.py` (missing
+  function-local `CampaignTouchpoint` import).
+- **Migrations live-round-tripped clean from an EMPTY DB**: `e4b1d78c3a05` →
+  `f6a3c81d5e27` → `a8c2f47e91b6` (current head) all up/down/up, single head, DDL verified.
+- **Independent EVL confirmation (round 3)**: icp_fit 10/10, outcomes 8/8,
+  booking+benchmark 13/13, unit 2926/2 zero drift; non-vacuity checks (a)–(e) all PASS —
+  including the flag-ON test asserting the PERSISTED value is not None, which goes red if
+  the broken write is reverted.
+- **SPEC achievement revision**: umbrella charter definition-of-done items 1–3 are now
+  **met** by passing flag-ON automated gates (item 9 above superseded).
+
+Residual (operator, by design): prod flags `icp_fit_enabled` / `campaign_benchmark_enabled`
+remain OFF — schema-applied ≠ feature-enabled.
+
+**Archival decision revised:** the §Explicit Archival Decision above is superseded — the
+flag-ON condition is satisfied; the task folder is archived to
+`process/features/campaigns-outreach/completed/marketing-claims-gap_16-08-26/`.

@@ -229,13 +229,17 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   `run_reengagement_once` → flag flip.
 - `campaigns-outreach` — AI segmentation, campaign planning, email + social outreach, drafts.
   **marketing-claims-gap (16-08-26):** 3-phase program (demo-booking link/attribution, deterministic
-  `icp_fit` scoring, learning-loop + zero-PII cross-tenant benchmarks) — all 3 phases EXECUTED +
-  EVL-green, classification WITH_GAPS, kept in `active/marketing-claims-gap_16-08-26/`. Flags
-  shipped OFF: `icp_fit_enabled`, `campaign_benchmark_enabled` (Phase 1's `Site.booking_url` is
-  data, not a flag). New migrations `e4b1d78c3a05` → `f6a3c81d5e27` → `a8c2f47e91b6` (current
-  head). Known-gap: Docker daemon was down all session, so every Hybrid/integration/migration
-  round-trip gate — and every flag-ON positive case — is unrun (vacuous per ip-org G8/G10);
-  re-run commands in `backlog/marketing-claims-gap-container-gates_NOTE_16-08-26.md`.
+  `icp_fit` scoring, learning-loop + zero-PII cross-tenant benchmarks) — **all 3 phases ✅ VERIFIED
+  17-08-26**, archived to `completed/marketing-claims-gap_16-08-26/`. Container gates ran when
+  Docker came back up; the first flag-ON run exposed and fixed a real source defect: the icp_fit
+  bulk write in `visitor_aggregator.py` was a **silent no-op** (SQLAlchemy 2 `InvalidRequestError`
+  swallowed by the contract-mandated try/except) that survived 4 PVL cycles + 2 EVL passes on
+  flag-OFF-only evidence — flag-OFF-only evidence is vacuous (reinforces ip-org G8/G10; a
+  flag-gated feature is unproven until the flag-ON path executes against real infra). Migrations
+  `e4b1d78c3a05` → `f6a3c81d5e27` → `a8c2f47e91b6` (current head) live-round-tripped clean from an
+  EMPTY DB. Flags `icp_fit_enabled` + `campaign_benchmark_enabled` still OFF (operator step;
+  Phase 1's `Site.booking_url` is data, not a flag). Open: marketing copy pass
+  (`backlog/marketing-copy-reconciliation_NOTE_17-08-26.md`).
 - `billing` — Gumroad MoR billing, plans/quotas, BYOK keys
 - `marketing-site` — public site: landing, blog, changelog, SEO (content sources in `marketing/`)
 - `pixel` — tracking pixel, event ingest, consent, bot filtering; ingest-abuse-hardening

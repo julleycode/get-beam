@@ -827,3 +827,16 @@ What this coverage does NOT prove:
 
 Gate: CONDITIONAL (0 FAILs; 4 CONCERNs — M-1 AC-2b gate mechanism does not exist, M-2 two `site_row` 4-tuple fixtures break unnamed, M-3 `_tidy` post-processes the resolved URL, M-4 four numeric snapshots already stale. The prior cycle's FAIL (N-8) and all 5 CONCERNs are CONFIRMED FIXED against live source.)
 Accepted by: not accepted — vc-validate-agent may not self-accept its own verdict. No user acceptance recorded this session. All four CONCERNs are cheap plan-text edits (R1–R4, est. ~15 min total); recommended route is one more vc-plan-agent PVL-supplement cycle, then re-run PVL from V1. Alternatively the orchestrator/user may explicitly accept M-1..M-4 as documented gaps, in which case EXECUTE may proceed with E9/E5/E10/E15 carrying the corrections.
+
+### Contract Errata (post-EVL)
+
+Recorded 17-08-26 during the EVL fix cycle. The Validate Contract body above is left
+UNCHANGED — these are corrections to it, not rewrites.
+
+| # | Contract says | Reality on disk | Correction |
+|---|---|---|---|
+| E-1 | The AC-2b Hybrid gate runs `tests/integration/test_campaign_send_booking_link.py` (Test Gates table, and repeated in the closing gate list) | That file does not exist. The gate file that exists and passes is `tests/unit/test_campaign_send_booking_link.py` | Read every `tests/integration/test_campaign_send_booking_link.py` occurrence in the contract as `tests/unit/test_campaign_send_booking_link.py`, run WITHOUT `-m integration`. This matches M-1's own re-tier note ("re-tier to Fully-Automated unit is RECOMMENDED") and the Verification Evidence row at line 398, which already names the unit path — the Test Gates table and the closing list simply never absorbed the re-tier. |
+
+No other contract rows are affected. AC-2b's substance (drive `send_campaign_emails`,
+assert the booking URL lands in `body_html`, non-vacuity guard on `summary["sent"] == 1`)
+is unchanged — only the file path and the tier marker were stale.
