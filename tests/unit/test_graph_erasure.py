@@ -508,3 +508,86 @@ def test_volume_marker_is_never_a_filter_on_the_claim_path():
 
     # ...and the enqueue producer genuinely does write it.
     assert "throttle_flagged" in inspect.getsource(ge.enqueue_erasure)
+
+
+# ──────────── SG-15: the enqueue tombstone is SAVEPOINT-scoped ────────────
+
+
+class _Savepoint:
+    """No-op async CM standing in for db.begin_nested().
+
+    Same pattern as tests/unit/test_site_limit.py:100-114. It cannot model
+    Postgres transaction abort — the unit lane has no transaction — so this gate
+    proves the savepoint is ENTERED, not that the server honours it (SG-16).
+    """
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def _enqueue_session(tombstone_raises: bool = False) -> MagicMock:
+    """Fake session covering enqueue_erasure's reads plus the tombstone write.
+
+    The module-level `_scalar_result` helper is not reusable here:
+    `_collect_match_keys` needs `.first()` and `.scalars().all()`, which it does
+    not expose. A non-empty email list is essential — with an empty bidx,
+    enqueue_erasure skips the tombstone branch entirely and never calls
+    begin_nested, so the assertions below would go red rather than pass
+    vacuously.
+    """
+    db = MagicMock()
+    db.recorded: list[str] = []
+
+    def _result(rows):
+        r = MagicMock()
+        r.first = MagicMock(return_value=("fp-abc", None))
+        scalars = MagicMock()
+        scalars.all = MagicMock(return_value=rows)
+        r.scalars = MagicMock(return_value=scalars)
+        r.scalar = MagicMock(return_value=0)  # volume marker: not tripped
+        return r
+
+    async def _execute(stmt, *a, **kw):
+        text = str(stmt).lower()
+        if "suppression_list" in text:
+            db.recorded.append("tombstone_insert")
+            if tombstone_raises:
+                raise RuntimeError("deadlock detected")
+            return _result([])
+        return _result([EMAIL])
+
+    db.execute = AsyncMock(side_effect=_execute)
+    db.add = MagicMock()
+    db.commit = AsyncMock()
+    db.rollback = AsyncMock()
+    db.begin_nested = MagicMock(return_value=_Savepoint())
+    return db
+
+
+@pytest.mark.asyncio
+async def test_tombstone_write_failure_preserves_erasure_request():
+    """SG-15 — a failing tombstone must not cost us the ErasureRequest.
+
+    The `db.begin_nested` assertion is the load-bearing one: a bare try/except
+    implementation never enters a savepoint, so it goes RED here. Without that
+    assertion the gate would be vacuous — against a fake session a Python raise
+    never aborts a real transaction, so "nothing escaped" passes either way.
+    """
+    db = _enqueue_session(tombstone_raises=True)
+
+    row = await ge.enqueue_erasure(db, site_id="site_a", visitor_id="v-sg15")
+
+    assert db.begin_nested.call_count == 1, (
+        "the tombstone write was not SAVEPOINT-scoped — a bare try/except cannot "
+        "un-abort a Postgres transaction, so the ErasureRequest would be lost"
+    )
+    assert "tombstone_insert" in db.recorded, "the tombstone statement never ran"
+    assert db.add.call_count == 1, "the ErasureRequest was not added"
+    assert db.commit.await_count == 1, (
+        "db.commit() was not awaited after the tombstone failure — the queued "
+        "request would never be persisted"
+    )
+    assert row is not None, "enqueue_erasure returned no row"

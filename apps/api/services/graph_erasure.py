@@ -191,6 +191,10 @@ async def enqueue_erasure(
 
     Commits its own insert so the queued request survives even if the caller's
     subsequent local deletion partially fails.
+
+    The suppression tombstone is written HERE, not at sweep, so no re-resolve can
+    slip through the sweep-interval window and mint a permanent cross-tenant row
+    for a person who has already asked to be forgotten.
     """
     fingerprints, bidx = await _collect_match_keys(db, site_id, visitor_id)
 
@@ -212,6 +216,18 @@ async def enqueue_erasure(
         throttle_flagged=flagged,
     )
     db.add(row)
+    # SAVEPOINT is load-bearing, do NOT "simplify" to a bare try/except: execute()
+    # autoflushes the ErasureRequest INSERT into this same transaction, so a
+    # DB-level tombstone failure would abort the whole transaction and the commit
+    # below would silently lose the queued request (a false compliance receipt).
+    # begin_nested() flushes ahead of the SAVEPOINT, so a rollback here discards
+    # only the tombstone and behaviour degrades to exactly today's (sweep writes it).
+    if bidx:
+        try:
+            async with db.begin_nested():
+                await db.execute(_tombstone_stmt(bidx))
+        except Exception:  # noqa: BLE001 — never fail an erasure request on this
+            logger.warning("tombstone_write_failed", site_id=site_id)  # no PII
     await db.commit()
     logger.info(
         "erasure_enqueued",
@@ -560,6 +576,8 @@ async def lookup_graph_identity(
         ).scalars().all()
     )
 
+    # Since S2 the tombstone is written at enqueue, so erased_tombstone now means
+    # "erasure requested OR completed", no longer completed-only.
     erased = False
     if bidx is not None:
         erased = (
