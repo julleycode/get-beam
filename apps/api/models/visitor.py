@@ -62,6 +62,13 @@ class Visitor(Base):
     # instead of re-paying a provider to re-identify someone we already own.
     server_visitor_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     intent_score: Mapped[float] = mapped_column(Float, default=0.0)
+    # Deterministic 0-100 fit against the site's REVIEWED `sites.site_profile`
+    # ICP. NULL means "not scored" — never 0, which would read as "scored and a
+    # poor fit". Written ONLY by the full-recompute branch of
+    # aggregate_visitors_for_site (since=None), exactly like intent_score above;
+    # the incremental branch deliberately leaves it untouched (see the
+    # DELIBERATELY ABSENT note in visitor_aggregator.py).
+    icp_fit: Mapped[float | None] = mapped_column(Float, nullable=True)
     identity_status: Mapped[str] = mapped_column(String(30), default="anonymous")
     enrichment_status: Mapped[str] = mapped_column(String(20), default="pending")
     segmented: Mapped[bool] = mapped_column(Boolean, default=False)

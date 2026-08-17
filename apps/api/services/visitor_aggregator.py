@@ -2,7 +2,7 @@ import math
 from datetime import datetime, timedelta, timezone
 
 import structlog
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import bindparam, delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -532,6 +532,31 @@ async def aggregate_visitors_for_site(
     # genuinely new provider query, so re-queue it for the resolution sweep.
     await revive_returning_unresolvable(db, site_id, unresolvable_pre)
 
+    # ICP-fit second pass — FULL-RECOMPUTE BRANCH ONLY, exactly like
+    # intent_score (see the DELIBERATELY ABSENT (D7) note below on
+    # _INCREMENTAL_SET). Staleness caveat, stated in its sharper user-visible
+    # form: `icp_fit` LAGS ENRICHMENT BY UP TO ONE FULL-RECOMPUTE SWEEP
+    # INTERVAL. Role and firmographics both come from the same
+    # EnrichmentProfile row, and the scorer needs >= 2 dimensions, so a visitor
+    # usually needs that row before any score exists — but enrichment lands
+    # after resolution, which runs after aggregation. A visitor's icp_fit stays
+    # NULL until the first FULL recompute that runs AFTER their enrichment row
+    # lands. The lag is BOUNDED by the scheduled repair sweep's interval (the
+    # only since=None caller, jobs/scheduler.py).
+    #
+    # Best-effort and NEVER fails the run — same posture as _advance_watermark
+    # below. This pass sits UPSTREAM of _resolve_companies on this branch, so an
+    # unhandled raise here would propagate out, be swallowed by the scheduler's
+    # blanket except, and suppress IP->company resolution for the whole site: a
+    # cosmetic score must never cost real resolution work. The rollback is
+    # required — an aborted transaction would otherwise poison what follows.
+    if since is None:
+        try:
+            await _score_icp_fit_for_site(db, site_id)
+        except Exception as exc:
+            await db.rollback()
+            logger.warning("icp_fit_pass_failed", site_id=site_id, error=str(exc))
+
     # Watermark advances ONLY after a successful commit of this run's upserts
     # (checklist item 9). A crash before this point simply re-reads the same
     # half-open window next time; because the window is `created_at > watermark`
@@ -555,6 +580,89 @@ async def aggregate_visitors_for_site(
         incremental=since is not None,
     )
     return count
+
+
+async def _score_icp_fit_for_site(db: AsyncSession, site_id: str) -> None:
+    """Score every visitor of `site_id` against the site's REVIEWED ICP.
+
+    Bounded cost: 3 reads + 1 bulk write, INDEPENDENT of visitor count. A
+    per-visitor enrichment lookup here would be an N+1 inside the aggregation
+    path and is deliberately avoided by bulk-loading into a dict.
+
+    Writes nothing at all when the flag is off, when the site has no reviewed
+    `site_profile`, or when a visitor scores None — `icp_fit` is left
+    untouched/NULL, never set to 0 (0 means "scored and a poor fit", a
+    different claim). Only the REVIEWED profile column is read — the unreviewed
+    candidate column is deliberately never touched, because it is raw LLM output
+    the site owner has not approved.
+    """
+    from apps.api.config import settings
+    from apps.api.models.enrichment import EnrichmentProfile
+    from apps.api.models.site import Site
+    from apps.api.services.icp_fit import estimate_icp_fit
+
+    if not settings.icp_fit_enabled:
+        return
+
+    # Read 1 — the reviewed profile. No JSONB content-query: the column is
+    # selected whole and scored in Python (its migration explicitly assumed the
+    # column is never content-queried).
+    site_profile = (
+        await db.execute(select(Site.site_profile).where(Site.site_id == site_id))
+    ).scalar_one_or_none()
+    if not site_profile:
+        return
+
+    # Read 2 — every enrichment row for the site, in ONE query.
+    enrich_rows = (
+        await db.execute(
+            select(
+                EnrichmentProfile.visitor_id,
+                EnrichmentProfile.job_title,
+                EnrichmentProfile.seniority_level,
+                EnrichmentProfile.industry,
+                EnrichmentProfile.company_size,
+            ).where(EnrichmentProfile.site_id == site_id)
+        )
+    ).all()
+    enrichment = {row[0]: row for row in enrich_rows}
+
+    # Read 3 — the visitors. `country_code` is the sole geography input;
+    # city/region/country are IdentifiedVisitor columns and do NOT exist here.
+    visitor_rows = (
+        await db.execute(
+            select(Visitor.id, Visitor.visitor_id, Visitor.country_code).where(
+                Visitor.site_id == site_id
+            )
+        )
+    ).all()
+
+    updates: list[dict] = []
+    for row_id, visitor_id, country_code in visitor_rows:
+        enriched = enrichment.get(visitor_id)
+        estimate = estimate_icp_fit(
+            site_profile=site_profile,
+            job_title=enriched[1] if enriched else None,
+            seniority_level=enriched[2] if enriched else None,
+            industry=enriched[3] if enriched else None,
+            company_size=enriched[4] if enriched else None,
+            country_code=country_code,
+        )
+        if estimate.score is None:
+            continue
+        updates.append({"b_id": row_id, "icp_fit": float(estimate.score)})
+
+    if not updates:
+        return
+
+    # Write 1 — one executemany UPDATE keyed on the primary key.
+    await db.execute(
+        update(Visitor).where(Visitor.id == bindparam("b_id")).values(
+            icp_fit=bindparam("icp_fit")
+        ),
+        updates,
+    )
+    await db.commit()
 
 
 async def _advance_watermark(db: AsyncSession, site_id: str, stamp: datetime) -> None:
@@ -599,6 +707,12 @@ async def get_aggregation_watermark(db: AsyncSession, site_id: str) -> datetime 
 # correct weighted merge without a stored contributing-event count, and
 # intent_score is computed in Python from all-time inputs. The full-recompute
 # repair sweep is their sole writer.
+#
+# `icp_fit` is absent for the same reason and by the same precedent: it is
+# computed in Python from all-time inputs (enrichment + country) by
+# _score_icp_fit_for_site, which runs ONLY on the since=None branch. The
+# user-visible consequence — the score lags enrichment by up to one
+# full-recompute sweep interval — is documented at that call site.
 _INCREMENTAL_SET = {
     "last_seen": text("GREATEST(visitors.last_seen, EXCLUDED.last_seen)"),
     "total_pageviews": text("visitors.total_pageviews + EXCLUDED.total_pageviews"),

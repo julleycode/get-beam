@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { api, OsintAccount, SocialPost, VisitorDetail } from "@/lib/api";
 import { aiSourceLabel } from "@/lib/ai-sources";
+import { icpFitLabel, icpFitTooltip } from "@/lib/icp-fit-copy";
 import { cn } from "@/lib/utils";
 import { CardGridSkeleton, PageHeaderSkeleton, StatGridSkeleton } from "@/components/skeletons";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -695,6 +696,17 @@ export default function VisitorDetailPage() {
           {/* Intent + primary action */}
           <div className="flex shrink-0 flex-row items-center gap-4 sm:flex-col sm:items-end">
             <IntentRing score={visitor.intent_score} />
+            {/* ICP fit — band vocabulary only. Never renders raw site_profile
+                text: the label and tooltip come from constant-only builders. */}
+            {icpFitLabel(visitor.icp_fit) && (
+              <Badge
+                variant="outline"
+                className="whitespace-nowrap"
+                title={icpFitTooltip(visitor.icp_fit) ?? undefined}
+              >
+                {icpFitLabel(visitor.icp_fit)}
+              </Badge>
+            )}
             {researchButton}
           </div>
         </div>

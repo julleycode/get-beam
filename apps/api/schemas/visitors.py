@@ -99,6 +99,13 @@ class VisitorDetailOut(VisitorOut):
     resolution_provider: str | None = None
     social_context: dict | None = None
     auto_draft_count: int | None = None
+    # Deterministic 0-100 fit against the site's REVIEWED ICP profile. None =
+    # not scored (feature off, no reviewed profile, or too little data) — never
+    # 0, which would mean "scored and a poor fit". Declared `float` to match the
+    # nullable Float column so pydantic performs no silent int-coercion.
+    # DETAIL-ONLY, deliberately: it is NOT on VisitorOut, so the list endpoint's
+    # select does not need to provide it.
+    icp_fit: float | None = None
     # Resolution observability — why is this visitor still anonymous?
     last_resolution_attempt: datetime | None = None
     resolution_providers_tried: list[str] | None = None

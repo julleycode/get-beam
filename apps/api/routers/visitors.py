@@ -691,6 +691,12 @@ async def get_visitor_detail(
         raise HTTPException(status_code=404, detail="Visitor not found")
 
     data = VisitorOut.model_validate(visitor).model_dump()
+    # DETAIL-ONLY field: `icp_fit` lives on VisitorDetailOut, not VisitorOut, so
+    # the seed above does not carry it. Without this line build_conviction()
+    # below would never see it AND the response field would be permanently null.
+    # It stays OFF VisitorOut deliberately — a field on the wrong schema class
+    # is what caused the GET /visitors 500.
+    data["icp_fit"] = visitor.icp_fit
 
     # Resolution observability: latest attempt + skip reason for stuck visitors
     logs_result = await db.execute(

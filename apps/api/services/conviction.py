@@ -75,4 +75,28 @@ def build_conviction(d: dict) -> str | None:
 
     head = parts[:3]
     head.append(f"intent {score}")
+
+    # ICP fit — APPENDED AFTER the parts[:3] slice, deliberately. Appending here
+    # is structurally un-truncatable: a fifth `parts` entry would vanish for
+    # exactly the enriched, engaged visitors that can carry a score. It also
+    # displaces nothing, so output for a visitor without a score is
+    # byte-identical to before this clause existed.
+    #
+    # NOTE this is NOT an iff: the `not parts and score < HIGH_INTENT` guard
+    # above returns None BEFORE this point, so a scored visitor with no
+    # behavioural signal and low intent still gets no conviction line at all.
+    # That guard is deliberately UNCHANGED — an ICP score must never resurrect
+    # a null conviction.
+    #
+    # Only the fixed band vocabulary from icp_fit_verdict is rendered. Raw
+    # site_profile strings are LLM output derived from third-party page content
+    # and are never interpolated into copy.
+    icp_fit = d.get("icp_fit")
+    if icp_fit is not None:
+        from apps.api.services.icp_fit import icp_fit_verdict
+
+        band = icp_fit_verdict(icp_fit)
+        if band:
+            head.append(band)
+
     return " · ".join(head)
