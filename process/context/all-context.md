@@ -227,7 +227,15 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   `f4b9d2a71c68`; 7 `reengagement_*` flags default OFF; EVL 7/7 green incl. live migration
   round-trip. Operator steps remaining: deploy → 1 week baseline → dry-run
   `run_reengagement_once` → flag flip.
-- `campaigns-outreach` — AI segmentation, campaign planning, email + social outreach, drafts
+- `campaigns-outreach` — AI segmentation, campaign planning, email + social outreach, drafts.
+  **marketing-claims-gap (16-08-26):** 3-phase program (demo-booking link/attribution, deterministic
+  `icp_fit` scoring, learning-loop + zero-PII cross-tenant benchmarks) — all 3 phases EXECUTED +
+  EVL-green, classification WITH_GAPS, kept in `active/marketing-claims-gap_16-08-26/`. Flags
+  shipped OFF: `icp_fit_enabled`, `campaign_benchmark_enabled` (Phase 1's `Site.booking_url` is
+  data, not a flag). New migrations `e4b1d78c3a05` → `f6a3c81d5e27` → `a8c2f47e91b6` (current
+  head). Known-gap: Docker daemon was down all session, so every Hybrid/integration/migration
+  round-trip gate — and every flag-ON positive case — is unrun (vacuous per ip-org G8/G10);
+  re-run commands in `backlog/marketing-claims-gap-container-gates_NOTE_16-08-26.md`.
 - `billing` — Gumroad MoR billing, plans/quotas, BYOK keys
 - `marketing-site` — public site: landing, blog, changelog, SEO (content sources in `marketing/`)
 - `pixel` — tracking pixel, event ingest, consent, bot filtering; ingest-abuse-hardening
@@ -483,9 +491,12 @@ structurally separate from human Visitor/Event data, never as a targetable outre
   — **but re-check their premise first: Docker IS available on this machine.** The CLI is simply off
   `PATH` (`/Applications/Docker.app/Contents/Resources/bin/docker`), so `which docker` returns
   nothing and agents have repeatedly concluded the runtime was absent. Detect via
-  `lsof -nP -iTCP -sTCP:LISTEN | grep -E '5433|6379'` instead. Every gate deferred as
+  `lsof -nP -iTCP -sTCP:LISTEN | grep -E '5433|6379'` instead. Gates deferred as
   "environment-blocked" / `needs-container` across `process/features/*/backlog/*deferred-gates*` and
-  `*docker-verification*` rests on a false premise and is re-classifiable as RUNNABLE. Full gotcha:
+  `*docker-verification*` may rest on that false premise and are candidate-RUNNABLE — but verify
+  per-session with the lsof check: **do NOT assume :5433/:6379 are live.** On 16-08-26 the daemon
+  itself was down (`~/.docker/run/docker.sock` missing) and both listeners were genuinely absent
+  all session — a distinct failure mode from CLI-off-PATH. Full gotcha:
   `process/context/tests/all-tests.md` §Debugging Quick Reference.
 
 ## AI-Referral Attribution (v1, shipped 23-07-26)
