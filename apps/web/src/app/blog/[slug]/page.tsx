@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Markdown } from "@/components/blog/markdown";
 import {
+  OG_IMAGE,
   REVALIDATE_SECONDS,
   SITE_URL,
   fetchPublishedPost,
@@ -27,8 +28,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   // Fall back to the site's default social card so every post has an OG image
   // (a card-less link previews poorly and the twitter summary_large_image needs
   // an image to render). Posts can still override via og_image_url/cover.
-  const ogImage =
-    post.og_image_url || post.cover_image_url || `${SITE_URL}/beam/social-share.png`;
+  const ogImage = post.og_image_url || post.cover_image_url || OG_IMAGE;
 
   return {
     title: post.meta_title || post.title,
@@ -117,7 +117,7 @@ export default async function BlogPostPage({ params }: Params) {
     datePublished: post.published_at || undefined,
     dateModified: post.published_at || undefined,
     author: { "@type": "Person", name: post.author_name },
-    image: post.og_image_url || post.cover_image_url || `${SITE_URL}/beam/social-share.png`,
+    image: post.og_image_url || post.cover_image_url || OG_IMAGE,
     mainEntityOfPage: { "@type": "WebPage", "@id": canonical },
     url: canonical,
   };

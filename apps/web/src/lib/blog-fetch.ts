@@ -19,6 +19,12 @@ export const SITE_URL = (
   process.env.NEXT_PUBLIC_SITE_URL || "https://getbeam.fyi"
 ).replace(/\/$/, "");
 
+// Default social card for every App Router page that doesn't supply its own.
+// The static marketing pages (public/beam/*.html) hard-code the same path.
+export const OG_IMAGE = `${SITE_URL}/beam/social-share.png`;
+export const OG_IMAGE_WIDTH = 1122;
+export const OG_IMAGE_HEIGHT = 636;
+
 export const REVALIDATE_SECONDS = 300;
 
 export async function fetchPublishedPosts(

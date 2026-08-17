@@ -1,6 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { REVALIDATE_SECONDS, fetchPublishedPosts, SITE_URL } from "@/lib/blog-fetch";
+import {
+  OG_IMAGE,
+  OG_IMAGE_HEIGHT,
+  OG_IMAGE_WIDTH,
+  REVALIDATE_SECONDS,
+  fetchPublishedPosts,
+  SITE_URL,
+} from "@/lib/blog-fetch";
 import { PostList } from "@/components/blog/post-list";
 
 // ISR instead of force-dynamic: a publish shows within 5 minutes instead of
@@ -18,11 +25,27 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const tag = decodeTag(params.tag);
   const title = `Posts tagged “${tag}”`;
   const description = `Beam blog articles about ${tag}: visitor identification, retargeting, and turning anonymous traffic into pipeline.`;
+  const canonical = `${SITE_URL}/blog/tag/${encodeURIComponent(tag)}`;
+  // `images` is spelled out because Next merges metadata shallowly — this
+  // `openGraph` replaces the root layout's, so omitting it means no social card.
   return {
     title,
     description,
-    alternates: { canonical: `${SITE_URL}/blog/tag/${encodeURIComponent(tag)}` },
-    openGraph: { type: "website", title, description },
+    alternates: { canonical },
+    openGraph: {
+      type: "website",
+      siteName: "Beam",
+      title,
+      description,
+      url: canonical,
+      images: [{ url: OG_IMAGE, width: OG_IMAGE_WIDTH, height: OG_IMAGE_HEIGHT }],
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description,
+      images: [OG_IMAGE],
+    },
   };
 }
 

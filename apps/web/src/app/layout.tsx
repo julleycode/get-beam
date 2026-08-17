@@ -4,6 +4,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { Analytics } from "@vercel/analytics/next";
 import { cn } from "@/lib/utils";
 import { ClerkTokenSync } from "@/components/clerk-token-sync";
+import { OG_IMAGE, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH, SITE_URL } from "@/lib/blog-fetch";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -13,9 +14,34 @@ const dmMono = DM_Mono({ subsets: ["latin"], variable: "--font-mono", weight: ["
 
 const HAS_CLERK = !!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
+// Social-card defaults for every App Router page. Without these, any route
+// outside /blog (e.g. /pricing) shared on LinkedIn/Facebook/X previews as a
+// bare title with no image, because the static landing page's OG tags live in
+// public/beam/index.html and only cover "/".
+//
+// Next merges metadata SHALLOWLY: a child that exports its own `openGraph`
+// REPLACES this object rather than extending it. Any page setting openGraph
+// must therefore repeat `images` itself — see blog/page.tsx and blog/tag.
+const OG_DESCRIPTION = "See who visits your site. Reach out on their turf.";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "Beam",
-  description: "See who visits your site. Reach out on their turf.",
+  description: OG_DESCRIPTION,
+  openGraph: {
+    type: "website",
+    siteName: "Beam",
+    title: "Beam — see who's into you. say hi back.",
+    description: OG_DESCRIPTION,
+    url: SITE_URL,
+    images: [{ url: OG_IMAGE, width: OG_IMAGE_WIDTH, height: OG_IMAGE_HEIGHT }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Beam — see who's into you. say hi back.",
+    description: OG_DESCRIPTION,
+    images: [OG_IMAGE],
+  },
 };
 
 // Warm DNS/TLS to the external Clerk + API origins during HTML parse, so the

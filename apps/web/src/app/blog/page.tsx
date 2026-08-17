@@ -1,5 +1,12 @@
 import type { Metadata } from "next";
-import { REVALIDATE_SECONDS, SITE_URL, fetchPublishedPosts } from "@/lib/blog-fetch";
+import {
+  OG_IMAGE,
+  OG_IMAGE_HEIGHT,
+  OG_IMAGE_WIDTH,
+  REVALIDATE_SECONDS,
+  SITE_URL,
+  fetchPublishedPosts,
+} from "@/lib/blog-fetch";
 import { PostList } from "@/components/blog/post-list";
 
 // ISR instead of force-dynamic: a publish/unpublish now shows within a 5-minute
@@ -10,12 +17,30 @@ import { PostList } from "@/components/blog/post-list";
 export const revalidate = 300;
 
 // The layout supplies the "| Beam" title template, so don't repeat the suffix.
+const DESCRIPTION =
+  "Guides on website visitor identification, retargeting, and turning anonymous traffic into pipeline.";
+
+// `images` is spelled out here rather than inherited: Next merges metadata
+// shallowly, so this `openGraph` REPLACES the root layout's — the bare
+// `{ type: "website" }` this used to be left the page with no social card.
 export const metadata: Metadata = {
   title: "Blog",
-  description:
-    "Guides on website visitor identification, retargeting, and turning anonymous traffic into pipeline.",
+  description: DESCRIPTION,
   alternates: { canonical: `${SITE_URL}/blog` },
-  openGraph: { type: "website" },
+  openGraph: {
+    type: "website",
+    siteName: "Beam",
+    title: "Beam Blog",
+    description: DESCRIPTION,
+    url: `${SITE_URL}/blog`,
+    images: [{ url: OG_IMAGE, width: OG_IMAGE_WIDTH, height: OG_IMAGE_HEIGHT }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Beam Blog",
+    description: DESCRIPTION,
+    images: [OG_IMAGE],
+  },
 };
 
 export default async function BlogIndexPage() {
