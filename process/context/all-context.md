@@ -510,7 +510,7 @@ Perplexity, Gemini, Copilot, Claude, You.com, Grok, DeepSeek, Mistral — explic
 in-SERP Google/Bing, a known coverage limit): `apps/api/services/ai_referral.py`
 (`classify_ai_source`, pure). Adds `Visitor.first_touch_referrer` (fixed a pre-existing
 lexicographic-MAX bug — now true chronological first touch) and `Visitor.ai_source` (migration
-`b3f9a1d2c7e5`, pending live-apply). Surfaced as an "Arrived via" badge/pill/facet on the Visitors
+`b3f9a1d2c7e5`, applied in prod via deploy auto-apply — see AI-Agent-Traffic Layer). Surfaced as an "Arrived via" badge/pill/facet on the Visitors
 dashboard; fed into the segmenter as a signal (not a bypass). Safety: `ai_source` is attribution
 metadata on a separate write path from `source_agent_visit_id` — `is_emailable_identity` never
 reads it, and AI-referred humans stay fully emailable (the opposite guarantee from EvalLayer's
