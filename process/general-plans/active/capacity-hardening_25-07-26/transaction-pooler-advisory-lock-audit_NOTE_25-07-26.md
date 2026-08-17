@@ -48,6 +48,12 @@ documented in the `config.py` 4b pool math and applies under either pooler.
    application-level single-flight (the Redis debounce pattern already used by
    `services/aggregation_debounce.py`), before any port change.
 
+## Additional session-scoped advisory-lock users (append-only)
+
+| Sweep | Lock key | Scope | Residual |
+|---|---|---|---|
+| `services/coop_expiry_sweep.run_coop_expiry_sweep` (identity-coop Phase 2a, 17-08-26) | `coop_expiry_sweep` | session-scoped `pg_try_advisory_lock` / `pg_advisory_unlock` in `try/finally` | Per-lot `commit()` in `expire_lapsed_lots` can return the connection to the pool, so the unlock may run on a different connection and no-op — the same shape all four existing precedents have. **ACCEPTED**: the lock is efficiency-only here; the correctness boundary is the `uq_coop_ledger_expire_per_lot` partial unique index, so the worst outcome is a wedged sweep (visible as a flat EXPIRE-row count), never audit corruption. |
+
 ## Status
 
 - **OPEN.** Phase 4b's code is port-aware and safe under either pooler; the

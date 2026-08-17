@@ -1,12 +1,73 @@
 {
   "task": "identity-coop Phase 1 — ledger + contribution substrate",
   "planPath": "process/features/visitors-identity/active/identity-coop_07-08-26/phase-1-ledger-substrate_PLAN_07-08-26.md",
-  "decision": "PENDING USER APPROVE/REJECT",
-  "decisionEnumNote": "The vc-risk-evidence-pack validator expects `decision` to be one of approved / approved-with-concerns / rejected, and will report this file as a FAILURE. That failure is INTENTIONAL and disclosed. The EXECUTE instruction for this phase (E-5) requires the verdict field to read `PENDING USER APPROVE/REJECT` and explicitly forbids the implementing agent from self-approving. Self-approving to make the validator green would defeat the entire purpose of a manual-first high-risk gate on a billing/credits surface. A human reviewer should replace this value with one of the three enum values and fill `reviewer` + `reviewedAt`.",
-  "reviewer": null,
-  "reviewedAt": null,
-  "implementedBy": "vc-execute-agent (autopilot EXECUTE, 2026-08-07)",
-  "blockingFindings": [],
+  "decision": "approved",
+  "decisionEnumNote": "REAL HUMAN VERDICT, recorded in two rounds. Round 1 (2026-08-16, earlier in the same session): `rejected`, scoped to the six defects in `blockingFindings` (H1, H2, M2, M3 + the L1/R1 bookkeeping corrections) surfaced by an adversarial re-audit. Round 2 (2026-08-16, this entry): the reviewer APPROVED after every one of those six defects shipped a fix and an independent vc-tester EVL run re-confirmed all 16 supplement gates (SG-1…SG-16) green with five mutation-kill proofs. Only a HUMAN may change this field; no agent may self-approve, and no agent did — both verdicts were spoken by the reviewer named below and transcribed by the orchestrator.",
+  "reviewer": "Julley Thai (via orchestrator session 16-08-26)",
+  "reviewedAt": "2026-08-16",
+  "approvalPreconditions": [
+    "STANDING AND UNCHANGED BY THIS APPROVAL: `coop_terms_version` is a PLACEHOLDER digest (NB-6). Legal review of the co-op contribution terms and a re-pin of that digest are REQUIRED before `identity_coop_enabled` or any site's `contribution_enabled` is flipped ON in any real environment. This approval covers the code as shipped — both flags OFF, zero production exposure — not the decision to enable it.",
+    "Multi-process concurrency on the H2 enqueue→sweep window is an accepted known-gap: SG-6/SG-6b prove the sequential window only. SG-16 DID close the savepoint half against a real Postgres (mutation-proven).",
+    "Rollout order documented inline in `apps/api/config.py` and in the terms-repin runbook still governs any enable."
+  ],
+  "round2Evidence": {
+    "evlConfirmation": "process/features/visitors-identity/active/identity-coop_07-08-26/harness/evl-supplement-confirmation-16-08-26.json",
+    "executeReport": "process/features/visitors-identity/active/identity-coop_07-08-26/phase-1-supplement-execute_REPORT_16-08-26.md",
+    "gates": "16/16 green, independently re-run: unit lane 2801 passed / 2 skipped / 0 failed; SG-11 20 passed / 0 failed; all 9 integration selectors select exactly 1 (non-vacuous); SG-15 selects 1 not 0; SG-16 real-Postgres savepoint leg passed; regression test_graph_erasure_flow.py 14 passed + tests/unit/test_graph_erasure.py 28 passed.",
+    "mutationKills": "Reverting S1 → SG-4 red; S2 → SG-6 + SG-7 red; S3 → SG-9 red; savepoint → bare try/except → SG-15 red AND SG-16 red against real Postgres.",
+    "knownStaleField": "The legacy `notes` field below predates round 1 and describes the 2026-08-07 state; retained as historical record, superseded by this block."
+  },
+  "implementedBy": "vc-execute-agent (autopilot EXECUTE, 2026-08-07); supplement S1–S7 by vc-execute-agent 2026-08-16",
+  "blockingFindings": [
+    {
+      "id": "H1",
+      "severity": "high",
+      "finding": "The site-delete cascade omitted the co-op tables, so deleting and re-creating a site with the same site_id resurrected the old site's spendable credit balance and its partial-unique accrual suppression state.",
+      "supplementSection": "S1 (plan decision H1-D)",
+      "fixShipped": "identity_contribution_events + identity_credit_ledger added to the direct-site_id delete tuple; identity_contribution_consent_acceptances deliberately RETAINED as an append-only legal audit trail.",
+      "provingGates": ["SG-4", "SG-5"]
+    },
+    {
+      "id": "H2",
+      "severity": "high",
+      "finding": "The erasure enqueue→sweep window (default 5 minutes) let a re-resolve mint a permanent co-op bidx row and a credit for a person who had already requested erasure.",
+      "supplementSection": "S2 (plan decision H2-D, shape (a))",
+      "fixShipped": "The suppression tombstone is now written inside enqueue_erasure's own transaction, SAVEPOINT-scoped (db.begin_nested) so a tombstone failure can never discard the ErasureRequest. The sweep's later write is an idempotent no-op.",
+      "provingGates": ["SG-6", "SG-6b", "SG-7", "SG-8", "SG-15", "SG-16"]
+    },
+    {
+      "id": "M2",
+      "severity": "medium",
+      "finding": "update_site allowed contribution_enabled=True gated only on the terms digest, NOT on settings.identity_coop_enabled — live on prod.",
+      "supplementSection": "S3 (plan decision M2-D)",
+      "fixShipped": "The True-flip raises 422 when the deployment flag is OFF, before the digest comparison. Opting OUT stays unconditional and ungated.",
+      "provingGates": ["SG-9", "SG-10"]
+    },
+    {
+      "id": "M3",
+      "severity": "medium",
+      "finding": "The resolver hook wiring had zero test execution — maybe_record_contribution's happy path was never run by any test.",
+      "supplementSection": "S4",
+      "fixShipped": "tests/unit/test_identity_coop_hook.py (3 decision-half cases) plus the Hybrid end-to-end accrual leg against a real database.",
+      "provingGates": ["SG-2", "SG-3"]
+    },
+    {
+      "id": "L1",
+      "severity": "low",
+      "finding": "adversarial-validation.json cited mock tripwires that can never fire (an armed record_contribution mock off the tested call path, and session.added inspection that cannot observe execute()-path writes).",
+      "supplementSection": "S6",
+      "fixShipped": "ADV-1/ADV-2 non-vacuity claims rewritten to cite only the `wrote is False/True` identity assertions and the Hybrid integration legs; the F14 third leg recorded as vacuous-and-retired.",
+      "provingGates": ["SG-13"]
+    },
+    {
+      "id": "R1",
+      "severity": "bookkeeping",
+      "finding": "This file still read `PENDING USER APPROVE/REJECT` after a human had actually reviewed and rejected the pack.",
+      "supplementSection": "S7",
+      "fixShipped": "The real verdict is recorded here.",
+      "provingGates": ["SG-14"]
+    }
+  ],
   "nonBlockingFindings": [
     {
       "id": "NB-1",

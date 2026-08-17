@@ -119,3 +119,82 @@ below are handled by ordering, not by partitioning:
 Cross-PROGRAM conflict (the real risk): `apps/api/services/identity_resolver.py` is contested by
 three programs. Only Phase 1 of this program touches it, with a ~2-line footprint. Hard gate: this
 program's EXECUTE cannot begin until `identity-vocab-reconcile_07-08-26` reaches PASS/descope.
+
+---
+
+## Phase 1 — status update (16-08-26, append-only)
+
+status: DONE — supplement S1–S7 shipped; evidence pack APPROVED by human reviewer 16-08-26.
+
+Trail: EXECUTE + EVL green 07-08-26 → independent re-audit 16-08-26 (vc-tester 11/11 gates still
+green; vc-code-reviewer adversarial found H1/H2/M2/M3/L1 outside the gate-fenced resolve path) →
+human REJECT → `## Post-Audit Fix Supplement (16-08-26)` (PVL cycles 1-3, verdict CONDITIONAL
+user-accepted) → EXECUTE 16-08-26 → independent EVL 16/16 green with 5 mutation-kill proofs →
+human APPROVE.
+
+Additional files touched by the supplement (beyond the original Phase 1 claim above):
+- `apps/api/services/graph_erasure.py` (MODIFY — tombstone-at-enqueue inside `db.begin_nested()`)
+- `apps/api/models/suppression.py` (MODIFY — docstring only, 2 falsified sentences replaced)
+- `tests/unit/test_identity_coop_hook.py` (CREATE)
+- `tests/unit/test_graph_erasure.py` (MODIFY — SG-15 savepoint gate)
+- `tests/integration/test_identity_coop_contribution.py` (MODIFY — 9 new functions incl. SG-16)
+
+Standing precondition carried into Phase 2 and beyond: `coop_terms_version` is a PLACEHOLDER
+digest. Legal review + re-pin REQUIRED before `identity_coop_enabled` or any site's
+`contribution_enabled` is flipped ON. Both flags remain OFF; production exposure is NONE.
+
+Accepted known-gap: multi-process concurrency on the H2 enqueue→sweep window is not gated
+(SG-6/SG-6b cover the sequential window; SG-16 closed the savepoint half on real Postgres).
+
+---
+
+## Phase 2 SPLIT into 2a + 2b (17-08-26, append-only)
+
+Explicit user decision. The `## Phase 2 — Consumption aggregation + spend` claim above is
+**SUPERSEDED** by the two claims below; it is retained unedited for the chain. Program is now
+**4 phases: 1, 2a, 2b, 3**.
+
+Reason: five PVL cycles + three adversarial rounds produced a stable design core, but every fix cycle
+produced a NEW defect of one class — a gate that passes on the implementation it exists to forbid.
+Root cause was phase size; the split is the fix.
+
+### Phase 2a — Consumption aggregation + FIFO expiry
+Plan: `phase-2-consumption-spend_PLAN_07-08-26.md` (retitled in place to Phase 2a)
+Claims (10 files — amended in place 17-08-26 at EXECUTE per S-3; the former 8-file list predated
+the supplement cycles that added the seeding helper and the mandatory E2 migration):
+- `apps/api/services/identity_coop.py` — `consumption_count`, `contribution_count`, `spendable_lots`, `expire_lapsed_lots`, S-4 clamp
+- `apps/api/services/coop_expiry_sweep.py` (NEW) — sweep body
+- `apps/api/jobs/scheduler.py` — wrapper + one `add_job`
+- `apps/api/config.py` — `coop_expiry_sweep_interval_minutes`
+- `apps/api/models/identity_coop.py` — S-10c stamping prose **+ the E2 `uq_coop_ledger_expire_per_lot` index mirror in `__table_args__`** (~12 lines). **"Prose only" is RETRACTED** — the integration schema is built by `create_all`, never alembic, so without the mirror G-21 fails outright. **No `LEDGER_ENTRY_TYPES` change** — REVERSE is dropped to K-1, so no vocabulary edit ships.
+- `tests/integration/test_identity_coop_ledger.py` (NEW) — incl. the module-local `seed_api_usage_logs` bulk helper for G-4
+- `apps/api/migrations/versions/b7e4d21a9c58_add_coop_expire_unique.py` (NEW, **MANDATORY** — E2). E1 was CONDITIONAL and **did not fire**: G-4's EXPLAIN showed a Bitmap Index Scan on `api_usage_logs`, no seq scan, so no covering index was added and no second migration file exists.
+- this registry
+- `process/general-plans/active/capacity-hardening_25-07-26/transaction-pooler-advisory-lock-audit_NOTE_25-07-26.md` (S-27, one row)
+
+status: DONE (EXECUTE 17-08-26 — all gates green)
+Explicitly NOT claimed by 2a: `apps/api/services/billing.py`, `apps/api/routers/billing.py` (empty
+diff on both is a 2a exit gate), `apps/api/services/identity_resolver.py`.
+
+**Freeze-scope reading (S-3, recorded):** the Phase 1 schema freeze covers D-D scoping (no `user_id`
+column, no per-site gate). It does not cover the application-level `LEDGER_ENTRY_TYPES` tuple — but
+**Phase 2a does not extend it anyway**, so the exception is moot until K-1 is picked up.
+
+### Phase 2b — Spend wiring
+Plan: `phase-2b-spend-wiring_PLAN_16-08-26.md` — ⏳ PLANNED, **entry-gated on Phase 2a LIVE**
+Claims (5 files):
+- `apps/api/services/identity_coop.py` — `spend_credits` only (**sequential after 2a**, same file, disjoint functions)
+- `apps/api/services/billing.py` — read gate + SPEND write on a savepoint
+- `apps/api/routers/billing.py` — `monthly_limit` extension + unlimited guard
+- `tests/integration/test_identity_coop_spend.py` (NEW)
+- this registry
+Carries the D-D user-pooling constraint (registry lines 77-82) — the user-level view is a JOIN at
+read/draw time, never a column.
+
+**Overlap with 2a:** `apps/api/services/identity_coop.py` and this registry only. Resolution:
+**sequential, not parallel** — 2b cannot start until 2a is LIVE, so no concurrent edit is possible.
+
+### Dropped from Phase 2 entirely
+All REVERSE artefacts (P2-D1, S-1, S-2/S-2b/S-2c, G-1/G-2, Constraint 12b's composition clause) moved
+to `process/features/visitors-identity/backlog/coop-credit-reversal-semantics_NOTE_16-08-26.md` (K-1).
+No phase in this program claims `LEDGER_ENTRY_TYPES` any more.

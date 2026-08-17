@@ -1,6 +1,14 @@
 {
   "task": "identity-coop Phase 1 — ledger + contribution substrate",
   "riskLevel": "high",
+  "retiredLegs": [
+    {
+      "id": "F14-L3",
+      "leg": "The THIRD leg of F14 / test_erased_person_leaves_no_new_bidx_row — the 'no email_bidx-bearing write occurred' assertion, made by inspecting `session.added` on the fake session, together with the armed `record_contribution` mock (side_effect=AssertionError) relied on alongside it.",
+      "status": "vacuous-and-retired",
+      "reason": "It cannot fail. The co-op persists via `execute()` (pg_insert), which never populates `session.added`, so the assertion is blind to the exact write it claims to exclude; and the armed mock sits off the tested call path (the test calls _upsert_beam_identity directly and never reaches the hook site), so it can never fire. Retired 2026-08-16 per supplement item 17. The behaviour it was meant to cover is now proven by the Hybrid legs test_erasure_window_race_blocked / _control, which assert real row counts in a real database."
+    }
+  ],
   "scenarios": [
     {
       "id": "ADV-1",
@@ -11,7 +19,7 @@
         "tests/unit/test_identity_coop.py::test_blocked_graph_write_accrues_nothing (3 parametrized paths: no_fingerprint, no_email, do_not_resolve)",
         "tests/unit/test_identity_coop.py::test_upsert_returns_bool_and_existing_callers_unaffected (True only on committed write; False on a raising write)"
       ],
-      "nonVacuity": "Against the pre-change code these tests are genuinely RED: `_upsert_beam_identity` returned None, so `assert wrote is False` fails (None is not False) and `assert ... is True` fails. The assertions are identity checks on the exact value, not truthiness, so they cannot pass against the old implementation.",
+      "nonVacuity": "The load-bearing signal is the `wrote is False` / `wrote is True` IDENTITY assertion against `_upsert_beam_identity`'s `-> bool` return. Against the pre-change code these are genuinely RED: the function returned None, and None is neither False nor True under an identity check, so they cannot pass against the old implementation. CORRECTED 2026-08-16 (supplement L1): the armed `record_contribution` mock inside test_blocked_graph_write_accrues_nothing proves NOTHING — that test calls `_upsert_beam_identity` DIRECTLY, so the hook site is never on its call path and the armed mock is unreachable by construction. It is not cited as evidence. The hook site itself is now covered by executing gates: tests/unit/test_identity_coop_hook.py (3 cases: fires on flag-ON + wrote_graph True; silent on wrote_graph False; silent on flag OFF) and the Hybrid integration legs test_end_to_end_accrual (1 event + 1 ACCRUE against a real DB) and test_erasure_window_race_control (its positive control).",
       "residual": "A future editor could add a new early-return to _upsert_beam_identity and forget `False`. Mitigation: the function's docstring states the contract explicitly, and test_blocked_graph_write_accrues_nothing parametrizes per path so a new unguarded path is likely to surface. Not fully mechanical — accepted."
     },
     {
@@ -20,10 +28,12 @@
       "ruled_out": true,
       "mechanism": "Two independent layers. (1) The erasure guard inside _upsert_beam_identity returns False for anyone tombstoned under GRAPH_WRITE_BLOCKING_SCOPES or 'all', so the hook never fires — NOTHING is written, not even an excluded_reason='erased' audit row (decision D-B chose 'write nothing' over 'write an excluded row', precisely because an excluded row still carries the email_bidx). (2) identity_coop.py imports no suppression symbol and re-lists no scope literal, so there is no second, drifting copy of the scope list that could go narrower than the resolver's — the exact defect class (erased-only narrowness) found as C1. ERASURE_TARGETS and the sweep are untouched by this phase.",
       "provingTests": [
-        "tests/unit/test_identity_coop.py::test_erased_person_leaves_no_new_bidx_row (asserts wrote is False AND no email_bidx-bearing write occurred)",
-        "tests/unit/test_identity_coop.py::test_coop_module_imports_no_suppression_scope (AST-based tripwire: no suppression import, no 'erased'/'do_not_process'/'all' string literal in executable code)"
+        "tests/unit/test_identity_coop.py::test_erased_person_leaves_no_new_bidx_row (the `wrote is False` identity assertion ONLY — see retiredLegs/F14-L3)",
+        "tests/unit/test_identity_coop.py::test_coop_module_imports_no_suppression_scope (AST-based tripwire: no suppression import, no 'erased'/'do_not_process'/'all' string literal in executable code)",
+        "tests/integration/test_identity_coop_contribution.py::test_erasure_window_race_blocked (Hybrid, real DB: 0 event rows + 0 ledger rows for a person whose erasure was enqueued before the resolve)",
+        "tests/integration/test_identity_coop_contribution.py::test_erasure_window_race_control (Hybrid positive control: the same resolve WITHOUT the enqueue mints exactly 1 event + 1 ACCRUE)"
       ],
-      "nonVacuity": "test_erased_person_leaves_no_new_bidx_row patches is_email_suppressed_any to return True and asserts the record_contribution mock is NEVER awaited (it is armed with side_effect=AssertionError). If the guard were removed the mock fires and the test fails loudly. The tripwire test is AST-based rather than substring-based specifically so it cannot be satisfied vacuously by the module's own docstring naming the forbidden symbols.",
+      "nonVacuity": "CORRECTED 2026-08-16 (supplement L1). The previous claim rested on two signals that cannot fire: (a) an armed `record_contribution` mock — unreachable, because the test calls `_upsert_beam_identity` directly and never reaches the hook site; and (b) inspecting `session.added` for an email_bidx-bearing write — structurally blind, because the co-op writes go through `execute()` (pg_insert), which never populates `session.added`. Neither is cited any more. The real load-bearing signals are: the `wrote is False` IDENTITY assertion on the blocked path (genuinely red against the prior `None`-returning code); the AST tripwire test_coop_module_imports_no_suppression_scope, which is AST-based rather than substring-based so a docstring naming the forbidden symbols cannot satisfy it; and — new in this supplement — the Hybrid integration leg test_erasure_window_race_blocked, which asserts 0 event rows and 0 ledger rows against a REAL database for a person whose erasure was enqueued before the resolve, with test_erasure_window_race_control proving the same resolve mints exactly 1 event + 1 ACCRUE without the enqueue. That pair is what makes the zero non-vacuous; both were confirmed to go RED against the un-fixed source by mutation on 2026-08-16.",
       "residual": "The invariant depends on the resolver's erasure guard remaining upstream of the hook. If a future edit moved the hook above that guard, ADV-2 reopens. The hook's position immediately after the _upsert_beam_identity call (and its dependence on that call's return) makes this structurally hard but not impossible."
     },
     {

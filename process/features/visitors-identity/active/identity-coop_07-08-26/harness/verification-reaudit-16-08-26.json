@@ -1,0 +1,97 @@
+{
+  "task": "identity-coop Phase 1 — independent EVL re-audit (confirmation sweep)",
+  "date": "2026-08-16",
+  "note": "ADDITIVE re-audit. Does NOT supersede or overwrite harness/verification.json (07-08-26 original EVL evidence), which is left intact.",
+  "planPath": "process/features/visitors-identity/active/identity-coop_07-08-26/phase-1-ledger-substrate_PLAN_07-08-26.md",
+  "result": "PASS — all re-run validate-contract gates green on today's tree. No regression attributable to Phase 1.",
+  "environment": {
+    "docker": "29.4.2",
+    "disposablePostgres": "postgres:16-alpine container `coop-reaudit` on port 55446 (created and destroyed within this audit; never dev DB, never prod)",
+    "sharedDevPostgres": "localhost:5433 (integration lane, conftest-managed)",
+    "redis": "6379 LISTENING (docker) — noted as a known unit-lane poisoning hazard; unit lane was nonetheless 0-failure",
+    "python": ".venv/bin/python3.11 -m pytest (never .venv/bin/pytest — broken shebang)",
+    "gitHead": "d82a1dc",
+    "alembicHeadNow": "d7e2b4c81f93 (single head; moved from 07-08-26's a3e8d5c71f02 via concurrent onboarding/waitlist workstreams)",
+    "productionTouched": false,
+    "sourceFilesModified": false
+  },
+  "gates": [
+    {
+      "gate": "Alembic single-head check",
+      "command": "DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/postgres .venv/bin/python3.11 -m alembic -c apps/api/alembic.ini heads",
+      "result": "PASS",
+      "output": "d7e2b4c81f93 (head) — exactly ONE head. DAG not forked despite two untracked concurrent migrations (c5e1a9b73d20, d7e2b4c81f93)."
+    },
+    {
+      "gate": "Coop unit tests",
+      "command": ".venv/bin/python3.11 -m pytest tests/unit/test_identity_coop.py -m unit -q",
+      "result": "PASS",
+      "output": "21 passed in 0.92s — identical count to the 07-08-26 baseline."
+    },
+    {
+      "gate": "Unit-lane regression",
+      "command": ".venv/bin/python3.11 -m pytest tests/unit -m unit -q",
+      "result": "PASS",
+      "output": "1835 passed, 2 skipped, 962 deselected, 0 failed. Baseline 07-08-26 was 1224P/2S; the +611 growth is other workstreams' new tests, not coop."
+    },
+    {
+      "gate": "Coop integration tests",
+      "command": ".venv/bin/python3.11 -m pytest tests/integration/test_identity_coop_contribution.py -q",
+      "result": "PASS",
+      "output": "10 passed in 7.69s — identical count to the 07-08-26 baseline. No isolated run needed; passed on the shared lane first try."
+    },
+    {
+      "gate": "Integration-lane regression",
+      "command": ".venv/bin/python3.11 -m pytest tests/ -m integration -q",
+      "result": "PASS_WITH_FLAKE",
+      "output": "1 failed, 613 passed, 2874 deselected in 746s. Sole failure: tests/integration/test_ip_org_pipeline.py::TestLockSerialization::test_a_second_refresh_backs_off_while_the_shared_lock_is_held — PASSES on isolated re-run (1 passed in 2.15s). Advisory-lock contention flake in the ip-org feature, outside the coop blast radius. NOT a coop regression."
+    },
+    {
+      "gate": "Migration round-trip on DISPOSABLE Postgres (e7b3d5f19c46 + f2c81a6b4d09)",
+      "command": "docker run -d --name coop-reaudit -p 55446:5432 postgres:16-alpine; DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:55446/postgres alembic upgrade head; alembic downgrade d1a6c4e93f27; alembic upgrade head",
+      "result": "PASS",
+      "output": "Full chain applied from EMPTY DB to d7e2b4c81f93. Downgrade walked a3e8d5c71f02 -> f2c81a6b4d09 -> e7b3d5f19c46 -> d1a6c4e93f27 clean; coop table count 0 and sites.contribution_enabled column count 0 after downgrade (true teardown, not a no-op). Re-upgrade restored both revisions and returned to head. Clean both directions."
+    },
+    {
+      "gate": "Partial unique index uq_coop_accrued_site_email present",
+      "command": "psql -tAc \"SELECT indexdef FROM pg_indexes WHERE indexname='uq_coop_accrued_site_email';\"",
+      "result": "PASS",
+      "output": "CREATE UNIQUE INDEX uq_coop_accrued_site_email ON public.identity_contribution_events USING btree (site_id, email_bidx) WHERE (accrued IS TRUE) — UNIQUE and PARTIAL. Verified present again AFTER the down/up round-trip."
+    },
+    {
+      "gate": "Duplicate ACCRUE rejection (DB is the enforcement point)",
+      "command": "raw psql INSERTs bypassing all service code",
+      "result": "PASS",
+      "output": "1st accrued=true insert: INSERT 0 1. 2nd accrued=true insert, same (site_id,email_bidx), different contributed_on: ERROR duplicate key value violates unique constraint \"uq_coop_accrued_site_email\". 3rd insert with accrued=false and the SAME key: INSERT 0 1 — proves the index is genuinely PARTIAL, not merely unique (a non-partial index would have rejected it). This partiality leg is stronger than the 07-08-26 evidence."
+    },
+    {
+      "gate": "Flags inert — config defaults",
+      "command": "grep -n coop apps/api/config.py",
+      "result": "PASS",
+      "output": "identity_coop_enabled: bool = False; coop_credit_per_contribution=1; coop_credit_expiry_days=90; coop_credit_hold_hours=24; coop_terms_version present. All five settings intact and OFF/inert."
+    },
+    {
+      "gate": "Flags inert — Site.contribution_enabled server_default false",
+      "command": "psql -tAc information_schema.columns query on the disposable DB",
+      "result": "PASS",
+      "output": "contribution_enabled|NO|false — NOT NULL, server default false. Verified after the round-trip. Column survives despite models/site.py being concurrently modified by the site-analysis workstream (contribution_enabled still at site.py:38)."
+    },
+    {
+      "gate": "Diff footprint on contested identity_resolver.py",
+      "command": "git diff --stat apps/api/services/identity_resolver.py",
+      "result": "PASS",
+      "output": "Empty — file is committed with no uncommitted drift. Hook intact: `wrote_graph = await self._upsert_beam_identity(...)` then flag-gated `maybe_record_contribution`. Signature still `-> bool`. Call-graph anchor moved 1252 -> 1308 from concurrent churn; call-graph positioning (not line numbers) held as the plan designed."
+    },
+    {
+      "gate": "E2/E4 acceptance guard survives concurrent edits to routers/sites.py",
+      "command": "grep -n 'terms_version|contribution_enabled' apps/api/routers/sites.py",
+      "result": "PASS",
+      "output": "Guard intact at routers/sites.py:417-438 — rejects contribution_enabled=true unless terms_version equals settings.coop_terms_version, then writes the acceptance row via record_consent_acceptance in the same transaction."
+    }
+  ],
+  "regressions": [],
+  "knownGaps": [
+    "test_ip_org_pipeline TestLockSerialization is contention-flaky under the full shared integration lane (passes isolated). Pre-existing, ip-org feature, not coop.",
+    "Local Redis on 6379 was LISTENING during the unit lane (documented poisoning hazard). No unit failures resulted this run, but the run is not a clean-port run."
+  ]
+}

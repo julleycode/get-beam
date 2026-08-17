@@ -1,0 +1,99 @@
+{
+  "artifact": "EVL confirmation run — independent gate re-run",
+  "task": "identity-coop Phase 1 — Post-Audit Fix Supplement (S1–S7, gates SG-1…SG-16)",
+  "planPath": "process/features/visitors-identity/active/identity-coop_07-08-26/phase-1-ledger-substrate_PLAN_07-08-26.md",
+  "gateTableSection": "## Post-Audit Fix Supplement (16-08-26) → ## Test Gates (Supplement)",
+  "executeReportUnderConfirmation": "process/features/visitors-identity/active/identity-coop_07-08-26/phase-1-supplement-execute_REPORT_16-08-26.md",
+  "confirmedBy": "vc-tester (independent EVL re-run, not the execute-agent's own loop)",
+  "date": "2026-08-16",
+  "verdict": "ALL 16 SUPPLEMENT GATES CONFIRMED GREEN + 2 REGRESSION LANES GREEN",
+  "shorthandExpansion": "`...` = `.venv/bin/python3.11 -m pytest tests/integration -q` (the directory, per the plan's Path note SUP-F2 + SUP2-C2)",
+
+  "environment": {
+    "postgres": "docker infra-postgres-1, host port 5433 (confirmed LISTEN via lsof)",
+    "redis": "docker infra-redis-1, host port 6379 (confirmed LISTEN); no stray non-docker Redis observed",
+    "dockerCli": "/Applications/Docker.app/Contents/Resources/bin/docker (off PATH, per repo gotcha)",
+    "pythonRunner": ".venv/bin/python3.11 -m pytest (shebang-safe form)",
+    "databaseUrlSafety": "NEVER exported. `.env` DATABASE_URL points at Supabase PROD; integration conftest manages its own retarget_agent_test DB. No DB command in this run touched a remote DSN.",
+    "gitPosture": "READ-ONLY. No source edits, no checkout/stash/restore/rebase. No results.tsv write.",
+    "pytestPlugins": "pytest 8.3.3, pytest-asyncio 0.24.0, pytest-httpx 0.32.0 — no xdist, no random ordering"
+  },
+
+  "gates": [
+    { "id": "SG-1",  "strategy": "Fully-Automated", "command": ".venv/bin/python3.11 -m pytest tests/unit -q", "observed": "2801 passed, 2 skipped, 16 warnings, 0 failed", "expected": "0 failed; count >= baseline + new hook tests", "result": "PASS", "matchesExecuteReport": true },
+    { "id": "SG-2",  "strategy": "Fully-Automated", "command": ".venv/bin/python3.11 -m pytest tests/unit/test_identity_coop_hook.py -q", "observed": "3 passed", "expected": "3 passed", "result": "PASS", "matchesExecuteReport": true },
+    { "id": "SG-3",  "strategy": "Hybrid", "command": "... -k end_to_end_accrual", "observed": "1 passed, 630 deselected", "expected": "exactly 1 selected + passed", "result": "PASS", "nonVacuous": true, "matchesExecuteReport": true },
+    { "id": "SG-4",  "strategy": "Hybrid", "command": "... -k site_delete_removes_coop", "observed": "1 passed, 630 deselected", "expected": "exactly 1 selected + passed", "result": "PASS", "nonVacuous": true, "matchesExecuteReport": true },
+    { "id": "SG-5",  "strategy": "Hybrid", "command": "... -k site_delete_retains_consent", "observed": "1 passed, 630 deselected", "expected": "exactly 1 selected + passed", "result": "PASS", "nonVacuous": true, "matchesExecuteReport": true },
+    { "id": "SG-6",  "strategy": "Hybrid", "command": "... -k erasure_window_race_blocked", "observed": "1 passed, 630 deselected", "expected": "exactly 1 selected + passed", "result": "PASS", "nonVacuous": true, "matchesExecuteReport": true },
+    { "id": "SG-6b", "strategy": "Hybrid", "command": "... -k erasure_window_race_control", "observed": "1 passed, 630 deselected", "expected": "exactly 1 selected + passed (positive control)", "result": "PASS", "nonVacuous": true, "matchesExecuteReport": true },
+    { "id": "SG-7",  "strategy": "Hybrid", "command": "... -k enqueue_writes_tombstone", "observed": "1 passed, 630 deselected", "expected": "exactly 1 selected + passed", "result": "PASS", "nonVacuous": true, "matchesExecuteReport": true },
+    { "id": "SG-8",  "strategy": "Hybrid", "command": "... -k sweep_tombstone_idempotent", "observed": "1 passed, 630 deselected", "expected": "exactly 1 selected + passed", "result": "PASS", "nonVacuous": true, "matchesExecuteReport": true },
+    { "id": "SG-9",  "strategy": "Hybrid", "command": "... -k contribution_flip_gated_on_global_flag", "observed": "1 passed, 630 deselected", "expected": "exactly 1 selected + passed", "result": "PASS", "nonVacuous": true, "matchesExecuteReport": true },
+    { "id": "SG-10", "strategy": "Hybrid", "command": "... -k contribution_optout_never_gated", "observed": "1 passed, 630 deselected", "expected": "exactly 1 selected + passed", "result": "PASS", "nonVacuous": true, "matchesExecuteReport": true },
+    { "id": "SG-11", "strategy": "Hybrid", "command": ".venv/bin/python3.11 -m pytest tests/integration/test_identity_coop_contribution.py -q", "observed": "20 passed, 0 failed (clean-window run)", "expected": "0 failed", "result": "PASS", "matchesExecuteReport": true, "note": "Split escape hatch NOT used — tests/integration/test_identity_coop_supplement.py does not exist, so SG-11's single-file form is the correct expansion." },
+    { "id": "SG-12", "strategy": "Agent-Probe", "command": "git diff apps/api/routers/sites.py", "observed": "Site-analysis work is COMMITTED (7081402 'feat(sites): grounded site-analysis onboarding with two-slot profile storage'); 43 site-analysis/profile markers present and intact in the file. Co-op edits also committed and visible as unchanged context lines ('# Identity co-op opt-in (AC-10)'). The only working-tree delta is a single unrelated additive 5-line hunk at @@ -413,6 +413,11 @@ from a THIRD concurrent workstream (booking_url).", "expected": "site-analysis hunks present and unmodified alongside the additive co-op edits", "result": "PASS", "note": "Baseline shifted vs the plan's assumption: the concurrent hunks moved from working-tree to HEAD via commit 7081402. Nothing was clobbered; the additive-only rule held." },
+    { "id": "SG-13", "strategy": "Agent-Probe", "command": "read harness/adversarial-validation.json", "observed": "retiredLegs[0] = F14-L3 with status 'vacuous-and-retired'. ADV-1 provingTests cite only the `-> bool` identity assertions (test_blocked_graph_write_accrues_nothing, test_upsert_returns_bool_and_existing_callers_unaffected). ADV-2 cites 'the `wrote is False` identity assertion ONLY' plus the Hybrid integration legs test_erasure_window_race_blocked/_control. No armed-mock or session.added tripwire remains cited as load-bearing.", "expected": "ADV-1/ADV-2 cite `wrote is False/True` + integration legs only; F14 third leg marked vacuous-and-retired", "result": "PASS" },
+    { "id": "SG-14", "strategy": "Agent-Probe", "command": "read harness/review-decision.json", "observed": "decision='rejected'; reviewer='Julley Thai (via orchestrator session 16-08-26)'; reviewedAt='2026-08-16'; decisionEnumNote explicitly states no agent may self-approve and that only a HUMAN may change the field. File READ ONLY — not modified by this confirmation run.", "expected": "decision 'rejected', reviewer + reviewedAt set, no self-approval", "result": "PASS", "observation": "The legacy `notes` field (and top-level `date: 2026-08-07`) still asserts 'All 16 contract gates are green' from the ORIGINAL Phase-1 pack, which reads oddly next to decision='rejected'. Cosmetic staleness in a non-gated field; SG-14's required fields are all correct. Left untouched deliberately — only a human may edit this file." },
+    { "id": "SG-15", "strategy": "Fully-Automated", "command": ".venv/bin/python3.11 -m pytest tests/unit/test_graph_erasure.py -q -k tombstone_write_failure", "observed": "1 passed, 27 deselected", "expected": "1 passed (NOT 0-selected — an unmatched -k exits 5 vacuously)", "result": "PASS", "nonVacuous": true, "matchesExecuteReport": true, "note": "E-S1 satisfied: the selector resolves to exactly one function, so the gate is non-vacuous." },
+    { "id": "SG-16", "strategy": "Hybrid (optional item 5c)", "command": "... -k tombstone_db_failure", "observed": "1 passed, 636 deselected — reproduced cleanly 3 separate times", "expected": "1 passed", "result": "PASS", "matchesExecuteReport": true, "note": "Implemented, so the plan's 'accepted known-gap if not implemented' fallback does not apply. Also observed intermittent fixture-setup ERROR (never a test FAILURE) in windows contaminated by a concurrent session — see contamination section." }
+  ],
+
+  "regressionLanes": [
+    { "lane": "tests/integration/test_graph_erasure_flow.py", "command": ".venv/bin/python3.11 -m pytest tests/integration/test_graph_erasure_flow.py -q", "collected": 14, "observed": "14 passed (on a genuinely fresh test DB)", "expected": "14", "result": "PASS", "matchesExecuteReport": true },
+    { "lane": "tests/unit/test_graph_erasure.py (full file)", "command": ".venv/bin/python3.11 -m pytest tests/unit/test_graph_erasure.py -q", "observed": "28 passed", "result": "PASS" }
+  ],
+
+  "executeReportCrossCheck": {
+    "verdict": "NO DISCREPANCY — every count the execute report claimed was independently reproduced",
+    "claimsVerified": [
+      "SG-1 2801 passed, 2 skipped, 0 failed — reproduced exactly",
+      "SG-2 3 passed — reproduced exactly",
+      "SG-3..SG-10 each 1 passed — reproduced exactly, each selecting exactly 1 (630 deselected)",
+      "SG-11 20 passed, 0 failed — reproduced exactly",
+      "SG-15 1 passed, 27 deselected (not 0-selected) — reproduced exactly",
+      "SG-16 1 passed — reproduced exactly",
+      "Regression tests/integration/test_graph_erasure_flow.py 14 passed — reproduced exactly"
+    ],
+    "unclaimedFindingByThisRun": "The execute report does not disclose that the integration lane is highly state-sensitive and can produce fixture-setup ERRORs when another process shares the test database. Documented below as a test-infra gap, not a source defect."
+  },
+
+  "concurrentSessionContamination": {
+    "severity": "environmental — invalidates contaminated runs only, not the confirmed results",
+    "discovery": "During this confirmation run a DIFFERENT Claude session (CK_SESSION_ID a8b14e49-927c-45f2-87c0-b66f87528910; this run is 38a03315-c768-46c3-ac14-2e13af62b6c2) was concurrently executing `.venv/bin/python3.11 -m pytest tests/ -m integration -q` (PID 58506) in the SAME worktree, and its wrapper issued `DROP DATABASE IF EXISTS retarget_agent_test WITH (FORCE); CREATE DATABASE retarget_agent_test` against the SAME database this run's Hybrid gates use.",
+    "symptomsExplained": [
+      "`idle in transaction` backends holding relation locks while another session's teardown blocked forever on `DROP TABLE conversions` / `DROP TABLE engagement_attributions`",
+      "asyncpg UniqueViolationError on `CREATE TYPE platform` (leftover ENUM from a teardown that never completed)",
+      "asyncpg UndefinedTableError: table `engagement_attributions` does not exist",
+      "SG-16 alternating pass/ERROR across consecutive runs",
+      "SG-11 degrading from a clean 20 passed to '2 failed, 8 passed, 12 errors' and later '4 passed, 18 errors' as contention accumulated"
+    ],
+    "proofItIsNotSupplementInduced": [
+      "An UNTOUCHED control file (tests/integration/test_beam_identity.py, not modified by the supplement) reproduced the identical `DROP TABLE engagement_attributions` lock block and hang.",
+      "All observed integration ERRORs occur at pytest FIXTURE SETUP (conftest test_engine schema create/drop), strictly before any code-under-test executes.",
+      "The blocking tables (conversions, conversion_goals, engagement_attributions) and the colliding ENUM (platform) have no relationship to identity-coop.",
+      "When the database was genuinely uncontended, every supplement gate and both regression lanes ran green and matched the execute report exactly."
+    ],
+    "handling": "The concurrent session's run was NOT killed and its data was NOT deleted (not this run's to terminate). Results reported above are exclusively from clean, uncontended windows.",
+    "reproducibilityCaveat": "A re-run of the Hybrid gates while another integration lane is executing in this worktree WILL produce spurious setup errors. Serialize integration runs per worktree."
+  },
+
+  "testInfraGapsFound": [
+    "Integration conftest schema setup/teardown is not resilient to a second process sharing retarget_agent_test: `DROP TABLE` blocks indefinitely behind an `idle in transaction` peer, and a partially-completed teardown leaves ENUM types (e.g. `platform`) behind that make the next `CREATE TYPE` fail with UniqueViolationError. Pre-existing; reproduced on an untouched control file. Related to the already-tracked conftest isolation gap in backlog/post-docker-gate-followups_NOTE_24-07-26.md.",
+    "There is no worktree-level lock preventing two agent sessions from running the integration lane against the same database concurrently."
+  ],
+
+  "knownGapsUnchanged": [
+    "Multi-process concurrency for the H2 fix (two processes racing enqueue and resolve) remains the plan's explicitly accepted known-gap. SG-6 proves the sequential window only. Unchanged by this confirmation run.",
+    "NB-6: coop_terms_version is a PLACEHOLDER policy digest requiring legal review and re-pin before either flag is enabled."
+  ],
+
+  "safetyAssertions": {
+    "sourceFilesEdited": 0,
+    "gitMutatingCommandsRun": 0,
+    "harnessFilesModified": "none — review-decision.json and adversarial-validation.json were READ ONLY",
+    "resultsTsvWritten": false,
+    "remoteDatabaseTouched": false,
+    "additiveOnly": "This file is new and additive; no existing harness artifact was altered."
+  }
+}

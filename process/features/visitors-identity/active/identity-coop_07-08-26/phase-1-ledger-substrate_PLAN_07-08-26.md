@@ -1152,3 +1152,748 @@ facts follow, neither of which is a gate deviation:
    V1 against the corrected plan — or marks "n/a", in which case V1 auto-proceeds on this contract.
    Either path reaches EXECUTE without another BLOCKED verdict, because no behavioural defect
    remains open.
+
+---
+
+## Post-Audit Fix Supplement (16-08-26)
+
+**TL;DR** — The 16-08-26 adversarial re-audit of the already-executed Phase 1 found 3 real defects
+(2 HIGH, 1 MEDIUM-live-on-prod), 1 test-coverage hole, and 1 bookkeeping error. The human reviewer
+**REJECTED** the evidence pack pending these fixes. This supplement is a scoped fix list — it does
+not re-open the Phase 1 design, does not add a schema change, and keeps every flag default OFF.
+
+| ID | Sev | Defect | Chosen fix shape |
+|---|---|---|---|
+| H1 | HIGH | Site delete cascade omits the 3 co-op tables → deleting + re-creating the same `site_id` resurrects spendable balance | DELETE `identity_contribution_events` + `identity_credit_ledger` with the site; **RETAIN** `identity_contribution_consent_acceptances` (rationale below) |
+| H2 | HIGH | Erasure enqueue→sweep window (default 5 min) lets a re-resolve mint a permanent co-op bidx row + credit for an erased person | **Shape (a)**: write the suppression tombstone inside `enqueue_erasure`'s own transaction. Shape (b) rejected — rationale below |
+| M2 | MED (live on prod) | `update_site` allows `contribution_enabled=True` gated only on terms-digest, NOT on `settings.identity_coop_enabled` | Gate the True-flip on `identity_coop_enabled` (422, matching the sibling guard); digest re-pin reset becomes a runbook line |
+| M3 | MED | Resolver hook wiring has zero test execution — `maybe_record_contribution` happy path never runs | Add 1 unit-lane hook test (flag patched True) + 1 integration test (both flags ON, real accrual row) |
+| L1 | LOW | `harness/adversarial-validation.json` cites mock tripwires that can never fire | Correct the non-vacuity claims to cite the real load-bearing signal; retire the F14 third leg as vacuous |
+| R1 | — | `harness/review-decision.json` still reads `PENDING USER APPROVE/REJECT` | Record the human's actual verdict: `rejected` |
+
+---
+
+### Design decision H1-D — consent acceptances are RETAINED on site delete
+
+`identity_contribution_consent_acceptances` is an **append-only legal audit trail**: it is the only
+evidence that a site owner lawfully opted into the co-op at a specific terms digest and time.
+Deleting a consent record is itself a legal/policy act, and destroying the proof-of-lawful-basis
+alongside the data it authorised is the wrong default — if a contribution's lawfulness is ever
+challenged, the acceptance row is the defence.
+
+**Resurrection risk is already closed by existing code, not by deletion.** A re-created `Site` row
+starts with `contribution_enabled=False` (column default), and turning it ON requires a *fresh*
+acceptance row written in the same transaction as the flip (`update_site`, AC-10). An inherited
+acceptance row is therefore inert — it can never by itself enable contribution. Retention costs
+nothing operationally and preserves the audit chain.
+
+**Rejected alternative:** delete acceptances with the site. Rejected because it destroys the audit
+trail for contributions that were *already made and already credited to other tenants* — those
+contributions do not disappear when the contributing site is deleted, so their lawful-basis record
+must not either. **Rejected alternative 2:** retention with a site-tombstone marker column. Rejected
+as unnecessary schema churn — `sites` row absence is already the tombstone, derivable by join.
+
+The two *spendable* tables (`identity_contribution_events`, `identity_credit_ledger`) ARE deleted:
+a deleted site's credits must not be re-spendable by a re-created site, and the partial-unique
+suppression state (`D-E`) must not silently suppress a legitimate new accrual.
+
+### Design decision H2-D — close the window at enqueue, not repair it at sweep
+
+**Shape (a) — tombstone inside `enqueue_erasure`'s transaction — CHOSEN.**
+
+Blast-radius analysis of moving the tombstone from post-sweep to at-request, across all
+`is_email_suppressed_any` callers: every caller uses suppression to *withhold* an action (skip
+outreach, skip resolution, skip graph write). Writing the tombstone earlier therefore only ever
+suppresses **more**, **sooner**, and only ever in response to an explicit erasure request from the
+data subject's site. The change is strictly in the fail-safe direction; there is no caller for whom
+"suppressed earlier than before" is a regression.
+
+It is also idempotent: `_tombstone_stmt` already uses `on_conflict_do_nothing(["email_hash","scope"])`,
+so the sweep's existing write becomes a harmless no-op rather than a conflict. `enqueue_erasure`
+already commits its own transaction (documented: the queued request must survive a partially-failed
+caller deletion) — the tombstone rides that same commit, so "request queued but not suppressed"
+becomes structurally impossible. **No schema change.**
+
+**Shape (b) — add co-op tables to `ERASURE_TARGETS` — REJECTED for this supplement.** Rationale:
+(i) with (a) the window is closed *prospectively*, so there is nothing left for a retroactive
+repair to fix; (ii) both co-op flags have always been default OFF and neither migration is live on
+prod, so **zero pre-existing co-op rows exist anywhere** that would need repairing; (iii) (b)
+requires defining credit-reversal semantics, which is a real design question (a REVERSAL ledger row
+preserving the append-only invariant — never a DELETE of an accrual — plus a Phase 2 spend-gate
+interaction), and that belongs to Phase 2's spend surface, not to a Phase 1 hotfix.
+
+**Deferred, not dropped:** a backlog note must record the reversal-semantics design (`REVERSE` ledger
+kind offsetting an `ACCRUE` lot, never deleting it) as a Phase 2 prerequisite, so that if co-op
+rows ever exist before an erasure path changes again, the repair shape is already specified.
+
+**Invariant restored:** with (a), "no permanent record of an erased person" holds for the co-op
+tables without those tables needing to be erasure targets — because the row is never minted in the
+first place.
+
+### Design decision M2-D — 422, not 404
+
+`update_site` already raises `422` for the terms-digest mismatch on the same field in the same
+branch. The new global-flag guard is the same class of failure (the request is well-formed but the
+requested state is not currently reachable) and must read identically. `404` is reserved in this
+router for tenancy leaks (unknown/foreign `site_id`) — using it here would be a category error and
+would make a legitimate owner's request look like a missing site. Turning the flag **OFF** stays
+unconditional and ungated, unchanged.
+
+---
+
+## Implementation Checklist (Supplement)
+
+### S1 — H1: site delete cascade
+
+1. In `apps/api/routers/sites.py`, add `"identity_contribution_events"` and
+   `"identity_credit_ledger"` to the direct-`site_id` delete tuple (~:311-341), appended after
+   `"ad_connections"` with a comment naming the resurrection gap they close.
+2. Do **not** add `identity_contribution_consent_acceptances` — add an explicit inline comment
+   stating it is deliberately retained as a legal audit trail, citing decision H1-D, so a future
+   reader does not "fix" the apparent omission.
+3. Confirm both new tables appear in the `deleted` dict passed to the `site_deleted` log event (the
+   existing loop already assigns `deleted[table] = r.rowcount`, so no code change should be needed).
+   **`delete_site` returns `Response(status_code=204)` with no body — the `deleted` dict is log-only.
+   Do NOT add a response body or a response model.** (SUP-C4.)
+
+### S2 — H2: close the enqueue→sweep window
+
+4. In `apps/api/services/graph_erasure.py`, inside `enqueue_erasure` (~:182-225): after `db.add(row)`
+   and **before** `await db.commit()`, execute `_tombstone_stmt(bidx)` when `bidx` is non-empty.
+   Same transaction, same commit — the queued request and the suppression tombstone become atomic.
+5. Guard the empty case: skip the statement entirely when `bidx` is falsy (mirrors the existing
+   `_identity_signals_delete_stmt` empty-list guard).
+5a. **(SUP-C5 + SUP2-F1 — mandatory, do not skip. A bare `try/except` is NOT acceptable here.)**
+   The tombstone `execute` MUST run inside a **SAVEPOINT** — `async with db.begin_nested():` — and
+   that savepoint block is what the `except` wraps. Exact required shape:
+
+   ```python
+   if bidx:
+       try:
+           async with db.begin_nested():
+               await db.execute(_tombstone_stmt(bidx))
+       except Exception:  # noqa: BLE001
+           logger.warning("tombstone_write_failed", site_id=site_id)  # no PII
+   await db.commit()
+   ```
+
+   **Why a bare `try/except` fails (do not "simplify" this back):** `AsyncSession.execute()`
+   **autoflushes**, so `db.add(row)`'s `ErasureRequest` INSERT is emitted into the SAME transaction
+   immediately before the tombstone statement. A DB-level tombstone failure (deadlock, statement
+   timeout, connection loss — `on_conflict_do_nothing` removes only the unique-violation case)
+   **aborts the whole Postgres transaction**; catching the Python exception does not un-abort it.
+   The following `await db.commit()` then either raises `PendingRollbackError` (SQLAlchemy requires
+   a rollback before the session is usable again) or is discarded by Postgres as a ROLLBACK — either
+   way the flushed `ErasureRequest` row is lost. If it raises, `routers/visitors.py:434-446` rolls
+   back and **still** deletes the visitor rows that `_collect_match_keys` names as the ONLY source of
+   the match keys, making the erasure permanently unrecoverable. If it does not raise,
+   `enqueue_erasure` returns a row id for a row that was never persisted — a **false compliance
+   receipt**. Both outcomes are strictly worse than today.
+
+   With the savepoint, a tombstone failure rolls back **only the savepoint**; the outer transaction
+   stays usable, the `ErasureRequest` insert and its commit proceed untouched, and behaviour degrades
+   to exactly today's (the sweep writes the tombstone later). The "degrades to today's behaviour"
+   claim is true **only** with the savepoint.
+
+   Repo idiom — this is the established pattern for "inner statement may fail, outer work must
+   survive": `apps/api/services/identity_coop.py:175` and `apps/api/routers/sites.py:206`.
+   Budget: ~11 touched lines in `graph_erasure.py`, inside the existing ≤18 budget.
+5b. **(SG-15 — must be able to fail against a bare-`try/except` implementation.)** Add the unit gate
+   in `tests/unit/test_graph_erasure.py` using the repo's **fake-savepoint** pattern
+   (`tests/unit/test_site_limit.py:100-114` — a no-op async CM returned by
+   `db.begin_nested = Mock(return_value=_Savepoint())`; see also
+   `tests/unit/test_identity_coop.py:105`). The test must:
+   - patch the tombstone `execute` to raise;
+   - assert **`db.begin_nested` was called** (i.e. the savepoint was entered) — this assertion is
+     what makes the gate red against a bare-`try/except` implementation, which never enters one;
+   - assert the `ErasureRequest` was still `db.add`-ed **and** `db.commit()` was awaited afterwards
+     (the request survives), and that no exception escapes `enqueue_erasure`.
+   A plain "patched raise did not escape" assertion is **vacuous** — against a fake session a Python
+   raise never aborts a real transaction, so it passes with or without the savepoint. Do not ship the
+   vacuous form.
+5c. **(Optional, high-risk-class minimum — Hybrid.)** If a DB-level failure can be forced cheaply
+   (e.g. a statement-level failure injected inside the tombstone statement against PG :5433), add a
+   Hybrid leg asserting the `ErasureRequest` row is still present after `enqueue_erasure` returns.
+   Recorded as a known-gap if not implemented — see Test Gates (Supplement).
+6. Add a docstring line to `enqueue_erasure` stating the invariant: *"the tombstone is written here,
+   not at sweep, so no re-resolve can slip through the sweep-interval window."*
+6a. **(SUP-C6 + SUP2-C3.)** Correct **both** falsified sentences in the `"erased"` scope docstring
+   at `apps/api/models/suppression.py:23-28`. Today it reads: *"Written by the erasure sweep
+   (services/graph_erasure.py) using the stored blind index directly as email_hash, so no plaintext
+   is ever needed. Durable audit marker: it records that a person's shared-graph rows were
+   hard-deleted."* S2 falsifies the **first** clause (the write now happens at enqueue) **and** the
+   **second** (at enqueue time nothing has been deleted yet — the rows are hard-deleted later, by the
+   sweep). Replace the whole two-sentence tail with:
+
+   > *"Written at enqueue time by `enqueue_erasure` (services/graph_erasure.py) using the stored
+   > blind index directly as email_hash, so no plaintext is ever needed; the sweep's later write is
+   > an idempotent no-op via `on_conflict_do_nothing`. Durable audit marker: it records that an
+   > erasure was **requested** for this person — the shared-graph rows are hard-deleted by the
+   > sweep."*
+
+   Adjust the line-wrapping to match the surrounding docstring's indentation; keep the meaning and
+   both corrections. Also add a one-line comment at the operator audit lookup
+   (`graph_erasure.py` ~:563-575) noting that `erased_tombstone: True` now means **erasure requested
+   or completed**, not completed-only. Documentation only — no behaviour change. Budget for
+   `suppression.py`: ≤8 touched lines (raised from ≤3 — the "Written by" clause alone spans 3 lines
+   and the "hard-deleted" sentence adds ~3 more).
+7. Leave `_process_claimed`'s tombstone write in place unchanged — it is now an idempotent no-op via
+   the existing `on_conflict_do_nothing`, and it remains the correct behaviour for rows enqueued by
+   any older code path.
+8. Write the backlog note deferring shape (b): `process/features/visitors-identity/backlog/
+   coop-credit-reversal-semantics_NOTE_16-08-26.md` — records the `REVERSE`-ledger-row design, the
+   append-only invariant, and that it is a Phase 2 spend-gate prerequisite.
+
+### S3 — M2: gate the contribution opt-in flip
+
+9. In `apps/api/routers/sites.py` `update_site` (~:417-438): inside `if body.contribution_enabled:`,
+   **before** the terms-digest comparison, raise `HTTPException(422, detail="identity co-op is not
+   enabled on this deployment")` when `not settings.identity_coop_enabled`.
+9a. **(SUP-F1 — mandatory; S3 is not complete without it.)** S3 turns an existing GREEN gate RED:
+    `tests/integration/test_identity_coop_contribution.py::test_flag_on_requires_acceptance` step 4
+    (~:493-500) PATCHes `contribution_enabled=True` and asserts **200**, but the file never
+    monkeypatches `settings.identity_coop_enabled` (it asserts `is False` at :93). Fix in the same
+    commit as the guard:
+    - monkeypatch `settings.identity_coop_enabled = True` for the **WHOLE test function**
+      `test_flag_on_requires_acceptance` (function-scoped `monkeypatch` fixture / `setattr` at the
+      top of the test) — **NOT** "the 200-path steps only". **(SUP2-C1.)** Rationale: S3's guard is
+      inserted **before** the terms-digest comparison (`routers/sites.py:419-434`), so with the
+      global flag left OFF the three existing digest legs (lines ~470-489, including the one the test
+      itself labels "the vacuous-guard case the plan called out by name" at ~:476) would
+      short-circuit on the new global-flag 422 and **never reach the digest branch at all**. They
+      would stay green while proving nothing — they would still pass with the entire digest block
+      deleted. That is a silent coverage regression on AC-10's consent gate. Whole-function scoping
+      is also the natural pytest shape (`monkeypatch` is function-scoped; "step 4 only" requires
+      manual setattr/restore). With it, all five legs keep their original meaning: steps 1-3 reach
+      and exercise the digest comparison, step 4 gets 200, step 5's opt-out is ungated either way.
+    - **Do not** weaken or delete the existing opt-out leg inside this test — but note it is NOT
+      selectable by SG-10's `-k`, so SG-10 needs its own function (item 15e below).
+    - **add a NEW, separate negative test function** (its own `def`, named
+      `test_contribution_flip_gated_on_global_flag`) asserting **422** when
+      `settings.identity_coop_enabled` is False and a *valid* current digest is supplied — this is
+      the newly-declared contract change, it is what SG-9 proves, and it is the only place the
+      flag-OFF contract is covered once the flag is patched True for the whole function above.
+    After this item, SG-1 and SG-11 (`0 failed`) are both satisfiable again.
+10. Leave the OFF path untouched and unconditional (opting out is never gated).
+11. Add the operator runbook line to the plan's own runbook surface (or a new
+    `coop-terms-repin_RUNBOOK_16-08-26.md` in this task folder): *"at any re-pin of
+    `coop_terms_version`, run `UPDATE sites SET contribution_enabled=false;` — the digest change
+    invalidates all prior acceptances, and every owner must re-accept."* No code needed for the
+    reset — the flip guard plus digest comparison already blocks re-enable without fresh consent.
+
+### S4 — M3: prove the resolver hook actually runs
+
+12. Add `tests/unit/test_identity_coop_hook.py`: patch `settings.identity_coop_enabled=True`, drive
+    `IdentityResolver._save_identified` with a fake `AsyncSession` and a visitor/data pair that
+    produces `wrote_graph is True`, assert `maybe_record_contribution` was invoked with the expected
+    `(db, visitor, data, provider)`. Add the mirror case (`wrote_graph is False` → not invoked) and
+    the flag-OFF case (flag False → not invoked even when `wrote_graph is True`). Fake session is
+    acceptable for this decision half.
+**File decision (SUP-F2) — settled once, applies to every S4/S5 item and every SG gate below:**
+`tests/integration/test_identity_coop.py` **does not exist**. All new integration legs go **INTO the
+existing `tests/integration/test_identity_coop_contribution.py`** (550 lines today, already
+`pytestmark = pytest.mark.integration`, already holds the co-op fixtures these legs need). Every
+earlier reference to `test_identity_coop.py` in this supplement is superseded by this line.
+**Single narrow exception (SUP2-C2 split escape hatch):** if adding the 9 required legs pushes that
+file past ~1000 lines, the remainder MAY go into a new `tests/integration/test_identity_coop_supplement.py`.
+That is the ONLY permitted second file, and it costs nothing gate-wise — the `...` shorthand runs
+over the `tests/integration` **directory**, so every `-k` selector still resolves; only SG-11 must
+then name both files. Under ~1000 lines, keep everything in the one existing file.
+
+13. Add integration test function **`test_end_to_end_accrual`** (SG-3) in
+    `tests/integration/test_identity_coop_contribution.py`: both `identity_coop_enabled` and
+    `site.contribution_enabled` ON, drive a real resolve through `_save_identified` against the real
+    DB, assert exactly one `identity_contribution_events` row and one `identity_credit_ledger` ACCRUE
+    row land, with the expected `site_id` and non-null `email_bidx`. This is the first end-to-end
+    proof the hook mints anything.
+
+**Test-count decision (SUP2-C2) — settled once, authoritative for S4/S5:** the **Test Gates
+(Supplement) table's `-k` selectors are authoritative for test count and naming.** Nine (9) distinct
+integration test functions are required — one per selector — because a `-k` selector that matches no
+function silently selects 0 tests and the gate passes vacuously. The 9 required function names are:
+
+| # | Test function | Gate |
+|---|---|---|
+| 1 | `test_end_to_end_accrual` | SG-3 |
+| 2 | `test_site_delete_removes_coop` | SG-4 |
+| 3 | `test_site_delete_retains_consent` | SG-5 |
+| 4 | `test_erasure_window_race_blocked` | SG-6 |
+| 5 | `test_erasure_window_race_control` | SG-6b |
+| 6 | `test_enqueue_writes_tombstone` | SG-7 |
+| 7 | `test_sweep_tombstone_idempotent` | SG-8 |
+| 8 | `test_contribution_flip_gated_on_global_flag` | SG-9 |
+| 9 | `test_contribution_optout_never_gated` | SG-10 |
+
+Naming note: SG-6/SG-6b were renamed from `erasure_window_race` / `erasure_window_race_positive_control`
+to `..._blocked` / `..._control` so neither `-k` selector substring-matches the other; each gate's
+expected count is now exactly 1 passed. Every name above must be unique enough that its `-k` selects
+exactly one function.
+
+### S5 — H1/H2 regression coverage
+
+**One test function per gate — see the SUP2-C2 table above. Do not merge two gates into one
+function: a single function cannot substring-match two different `-k` selectors.**
+
+14. **H1 — two separate functions** (item 14 previously described one; that was unsatisfiable):
+14a. `test_site_delete_removes_coop` (SG-4): delete a site that has co-op rows; assert
+     `identity_contribution_events` and `identity_credit_ledger` both have **0** rows for that
+     `site_id`.
+14b. `test_site_delete_retains_consent` (SG-5): same delete; assert the
+     `identity_contribution_consent_acceptances` row **is still present** (so a future "cleanup" that
+     deletes acceptances goes red — proves the second half of H1-D).
+15. **H2 — four separate functions** (item 15 previously said "the H2 window-race integration test",
+    singular, for four selectors):
+15a. `test_erasure_window_race_blocked` (SG-6): both flags patched ON, `enqueue_erasure` for the
+     email FIRST, then a full resolve through `_save_identified` **before any sweep run**; assert 0
+     event rows and 0 ledger rows for that email.
+15b. `test_erasure_window_race_control` (SG-6b): identical setup and resolve **without** the
+     preceding `enqueue_erasure`; assert exactly 1 event row and exactly 1 ACCRUE ledger row. This is
+     the positive control that makes 15a's zero non-vacuous.
+15c. `test_enqueue_writes_tombstone` (SG-7): assert a `suppression_list` row with scope `erased`
+     exists immediately after `enqueue_erasure` returns, sweep not yet run (assert via the
+     `SuppressionEntry` ORM model).
+15d. `test_sweep_tombstone_idempotent` (SG-8): run the sweep after enqueue; assert it raises nothing
+     and leaves exactly 1 suppression row.
+15e. `test_contribution_optout_never_gated` (SG-10): with the global flag OFF, PATCH
+     `contribution_enabled=False`; assert **200** and the flag flips to False. **(SUP2-C2 — SG-10
+     previously had no checklist item; the existing opt-out leg lives inside
+     `test_flag_on_requires_acceptance` and is not selectable by SG-10's `-k`.)**
+     Note `test_contribution_flip_gated_on_global_flag` (SG-9) is created by item 9a.
+
+### S6 — L1: correct the bookkeeping
+
+16. Edit `harness/adversarial-validation.json`: rewrite ADV-1 and ADV-2 non-vacuity claims to cite
+    the **real** load-bearing signals — the `wrote is False` / `wrote is True` identity assertions
+    against `_upsert_beam_identity`'s `-> bool` return (genuinely red against the prior `None`-returning
+    code), and the Hybrid integration legs. Remove the claim that armed mocks on `record_contribution`
+    or `session.added` inspection prove anything: the mocks are unreachable from the tested call path
+    and `session.added` cannot observe `execute()`-path writes.
+17. In the same file, mark the F14 third leg `"status": "vacuous-and-retired"` with a one-line reason.
+
+### S7 — R1: record the human verdict
+
+18. Edit `harness/review-decision.json`: set `"decision": "rejected"`,
+    `"reviewer": "Julley Thai (via orchestrator session 16-08-26)"`, `"reviewedAt": "2026-08-16"`.
+    Replace `decisionEnumNote` with a note that the rejection is a real human verdict (the validator
+    now passes on a valid enum value), that the rejection is scoped to this supplement's 6 defects,
+    and that re-approval is expected once every gate in the table below is green.
+19. Add a `blockingFindings` entry for each of H1, H2, M2, M3 referencing this supplement's section
+    IDs. Do **not** self-approve — the `decision` field stays `rejected` until a human re-reviews.
+
+---
+
+## Blast Radius (Supplement)
+
+| File | Fix | Diff budget | Notes |
+|---|---|---|---|
+| `apps/api/routers/sites.py` | S1 (2 table names + comment), S3 (4-line guard) | ≤ 12 touched lines | ⚠️ **carries UNCOMMITTED edits from a concurrent site-analysis workstream** — see hazard below |
+| `apps/api/services/graph_erasure.py` | S2 (guarded tombstone call inside `db.begin_nested()` savepoint + except + docstring + audit-lookup comment) | ≤ 18 touched lines (~11 expected **with** the savepoint — SUP2-F1 costs no extra budget) | Existing `_tombstone_stmt` reused verbatim |
+| `tests/unit/test_identity_coop_hook.py` | S4 (new file) | new, ~90 lines | 3 cases |
+| `tests/integration/test_identity_coop_contribution.py` | S4, S5, S3 item 9a (**9 new test functions** + 1 whole-function monkeypatch on an existing test) | **≤ 480 added lines** (raised from ≤190 per SUP2-C2: 9 DB-integration tests × ~50 lines each ≈ 450, matching the file's existing 550 lines / 11 tests average) | **existing file, additive** — path per SUP-F2. **Split escape hatch:** if this file exceeds ~1000 lines, the remaining legs MAY go into a second file `tests/integration/test_identity_coop_supplement.py`; if that happens, the `...` gate shorthand (defined in Test Gates below) already runs over `tests/integration` as a directory so every `-k` gate still resolves, and SG-11 must name **both** files. |
+| `tests/unit/test_graph_erasure.py` | S2 item 5b (SG-15 tombstone-failure leg) | ≤ 30 added lines | existing file, additive |
+| `harness/adversarial-validation.json` | S6 | ≤ 25 touched lines | bookkeeping only |
+| `harness/review-decision.json` | S7 | ≤ 30 touched lines | bookkeeping only |
+| `process/features/visitors-identity/backlog/coop-credit-reversal-semantics_NOTE_16-08-26.md` | S2 item 8 | new | |
+| `.../identity-coop_07-08-26/coop-terms-repin_RUNBOOK_16-08-26.md` | S3 item 11 | new | |
+
+| `apps/api/models/suppression.py` | S2 item 6a (docstring only — **both** falsified sentences) | **≤ 8 touched lines** (raised from ≤3 per SUP2-C3) | **comment/docstring only — no column, no schema change** |
+
+**Not touched:** `apps/api/models/*` **except the `suppression.py` docstring above** (no schema change anywhere), `apps/api/services/identity_coop.py`,
+`apps/api/services/identity_resolver.py`, `apps/api/config.py`, any Alembic migration.
+
+### ⚠️ Concurrent-workstream hazard (read before editing)
+
+`apps/api/routers/sites.py` and `apps/api/models/site.py` currently carry **UNCOMMITTED** edits from
+a concurrent site-analysis workstream. The execute agent MUST:
+
+- make every edit **purely additive** (append 2 strings to an existing tuple; insert one new `if`
+  branch) — never rewrite or reformat surrounding blocks;
+- **never** run `git checkout`, `git stash`, `git stash pop`, `git restore`, or any rebase on these
+  files (a prior session lost work exactly this way — see the concurrent-session-rebase memory note);
+- verify with `git diff apps/api/routers/sites.py` after editing that the concurrent workstream's
+  hunks are still present and unmodified, and record that verification in the phase report;
+- treat any disappearance of those hunks as an immediate STOP + report, not something to fix forward.
+
+---
+
+## Constraints (Supplement)
+
+1. **All flags stay default OFF.** `identity_coop_enabled` and `site.contribution_enabled` defaults
+   are unchanged. M2's fix makes the opt-in *harder*, never easier.
+2. **No schema change.** Neither chosen fix shape requires one. If execution discovers one is
+   unavoidable, STOP and re-plan — do not improvise a migration. Should a migration ever become
+   necessary: re-derive the live head with `alembic -c apps/api/alembic.ini heads` (believed
+   `d7e2b4c81f93`, but re-derive — heads move) and chain on the derived value, never the written one.
+3. **`DATABASE_URL` must be pinned to `localhost:5433` for every alembic/DB command.** The repo
+   `.env` points at Supabase PROD and `migrations/env.py` has no local-host guard.
+4. **No self-approval.** `harness/review-decision.json` `decision` stays `rejected`. Only a human may
+   change it.
+5. **Scope fence:** this supplement fixes the 6 listed defects. It does not re-open D-A..D-E, does
+   not touch Phase 2/3 plans, and does not add co-op tables to `ERASURE_TARGETS`.
+
+---
+
+## Test Gates (Supplement)
+
+**Path note (SUP-F2 + SUP2-C2):** every `...` shorthand below expands to
+`.venv/bin/python3.11 -m pytest tests/integration -q` — the **directory**, so each `-k` selector
+resolves whether or not the split escape hatch in Blast Radius is used. The 9 selectors below are
+authoritative for test naming; every one MUST select **exactly one** function (a selector matching 0
+functions passes vacuously).
+
+| # | Gate / Scenario | Strategy | Command | Expected | Proves |
+|---|---|---|---|---|---|
+| SG-1 | Unit lane green, no regression | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit -q` | 0 failed; count ≥ prior baseline + new hook tests | no regression from S1-S4 |
+| SG-2 | Hook fires when flag ON and graph write happened | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_identity_coop_hook.py -q` | 3 passed | M3 (decision half) |
+| SG-3 | End-to-end accrual row lands in a real DB | Hybrid (needs PG :5433) | `... -k end_to_end_accrual` | 1 passed; exactly 1 event row + 1 ACCRUE ledger row | M3 (DB half) |
+| SG-4 | Site delete removes co-op events + ledger | Hybrid | `... -k site_delete_removes_coop` | passed; both tables 0 rows for the deleted `site_id` | H1 |
+| SG-5 | Site delete RETAINS the consent acceptance row | Hybrid | `... -k site_delete_retains_consent` | passed; acceptance row still present | H1-D (guards against a future over-delete) |
+| SG-6 | **Window race (non-vacuous)** — test fn `test_erasure_window_race_blocked`: with **BOTH** `settings.identity_coop_enabled` **and** `site.contribution_enabled` patched **ON**, enqueue erasure for the email FIRST, then drive a full resolve through `_save_identified` **before any sweep run** | Hybrid | `... -k erasure_window_race_blocked` | passed; **0** `identity_contribution_events` rows and **0** `identity_credit_ledger` rows for that email | H2 (the core fix) |
+| SG-6b | **Positive control for SG-6** — test fn `test_erasure_window_race_control` — identical setup and identical resolve, but **WITHOUT** the preceding `enqueue_erasure` | Hybrid | `... -k erasure_window_race_control` | passed; **exactly 1** `identity_contribution_events` row **and exactly 1** ACCRUE ledger row | proves SG-6's zero is caused by the S2 fix, not by an inert hook (closes SUP-C2 vacuity) |
+| SG-7 | Tombstone is written at enqueue, not at sweep | Hybrid | `... -k enqueue_writes_tombstone` | passed; a **`suppression_list`** row (table name per `models/suppression.py:31`; assert via the `SuppressionEntry` ORM model) with scope `erased` exists immediately after `enqueue_erasure` returns, sweep not yet run | H2 mechanism (non-vacuity for SG-6) |
+| SG-8 | Sweep tombstone write is still idempotent | Hybrid | `... -k sweep_tombstone_idempotent` | passed; running the sweep after enqueue raises nothing and leaves exactly 1 suppression row | H2 no-regression on `_process_claimed` |
+| SG-9 | `contribution_enabled=True` rejected when global flag OFF | Hybrid (needs PG :5433 — re-tiered per SUP-C3; `PATCH /sites` coverage lives only in the integration-marked file) | `... -k contribution_flip_gated_on_global_flag` | 422 with the new detail string; `site.contribution_enabled` unchanged | M2 |
+| SG-10 | `contribution_enabled=False` still ungated | Hybrid (needs PG :5433 — re-tiered per SUP-C3) | `... -k contribution_optout_never_gated` | 200 with global flag OFF; flag flips to False | M2 (opt-out never blocked) |
+| SG-11 | Coop integration lane green | Hybrid | `.venv/bin/python3.11 -m pytest tests/integration/test_identity_coop_contribution.py -q` (**if the split escape hatch was used, name both files**: `... test_identity_coop_contribution.py tests/integration/test_identity_coop_supplement.py -q`) | 0 failed (requires S3 item 9a — the monkeypatch + new 422 leg — or `test_flag_on_requires_acceptance` goes red) | H1+H2+M3 combined |
+| SG-12 | Concurrent workstream hunks intact | Agent-Probe | `git diff apps/api/routers/sites.py` | site-analysis hunks present and unmodified alongside the additive co-op edits | concurrent-edit hazard |
+| SG-13 | Evidence-pack bookkeeping is honest | Agent-Probe | read `harness/adversarial-validation.json` | ADV-1/ADV-2 cite `wrote is False/True` + integration legs only; F14 third leg marked vacuous-and-retired | L1 |
+| SG-14 | Review verdict recorded faithfully | Agent-Probe | read `harness/review-decision.json` | `decision: "rejected"`, reviewer + reviewedAt set, no self-approval | R1 |
+| SG-15 | **Tombstone failure never loses the erasure request — and the SAVEPOINT is entered** | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_graph_erasure.py -q -k tombstone_write_failure` | passed; using the fake-savepoint pattern (`tests/unit/test_site_limit.py:100-114`): `db.begin_nested` **was called**, the tombstone execute raised, the `ErasureRequest` was still added and `db.commit()` awaited afterwards, and nothing escaped | SUP-C5 + **SUP2-F1** — the `begin_nested` assertion is what makes this gate RED against a bare-`try/except` implementation; without it the gate is vacuous |
+| SG-16 | *(optional, item 5c)* Real DB-level tombstone failure leaves the `ErasureRequest` intact | Hybrid (needs PG :5433) | forced statement failure inside the tombstone statement, then assert the `ErasureRequest` row exists | SUP2-F1 high-risk-class minimum. **If not implemented, this is an accepted known-gap** — SG-15 proves the savepoint is entered, not that Postgres honours it |
+
+**Known gap (accepted):** no gate proves the H2 fix under real concurrency (two processes racing
+enqueue and resolve). SG-6 proves the sequential window, which is the actual reported defect; a true
+concurrency probe needs multi-process orchestration outside this supplement's scope. Recorded, not
+silently dropped.
+
+---
+
+## Verification Evidence (Supplement)
+
+| Gate / Scenario | Strategy | Proves SPEC criterion |
+|---|---|---|
+| SG-4, SG-5 | Hybrid | H1 — deleting a site does not leave spendable credit behind, and does not destroy the consent audit trail |
+| SG-6, SG-6b, SG-7, SG-8 | Hybrid | H2 — "no permanent record of an erased person" holds across the enqueue→sweep window; SG-6b is the positive control that makes SG-6's zero non-vacuous |
+| SG-15 | Fully-Automated | SUP-C5 + SUP2-F1 — the tombstone write is savepoint-scoped, so a tombstone failure degrades to today's behaviour and never discards the `ErasureRequest` row |
+| SG-16 (optional) | Hybrid | SUP2-F1 — the savepoint holds against a real DB-level failure (known-gap if not implemented) |
+| SG-9, SG-10 | Hybrid (re-tiered, SUP-C3) | M2 — co-op opt-in is unreachable while the deployment flag is OFF; opt-out is never gated |
+| SG-2, SG-3 | Fully-Automated + Hybrid | M3 — the resolver hook is executed, not merely wired |
+| SG-1, SG-11 | Fully-Automated + Hybrid | no regression across unit and co-op integration lanes |
+| SG-12 | Agent-Probe | concurrent site-analysis workstream survives this edit |
+| SG-13, SG-14 | Agent-Probe | L1 + R1 — evidence-pack claims and the human verdict are recorded honestly |
+
+---
+
+## Test Infra Improvement Notes (Supplement)
+
+- The unit lane cannot assert DB-enforced semantics (partial unique index, `ON CONFLICT`), so the
+  hook's decision half and its persistence half are proven in different lanes. Disclosed, not hidden.
+- No harness exists for multi-process concurrency probes; the H2 concurrency gap above is a direct
+  consequence. Candidate future investment.
+- The unit lane cannot abort a real transaction, so SG-15 can only prove the savepoint is *entered*
+  (via the fake-savepoint pattern), not that Postgres honours it. A cheap statement-level
+  failure-injection helper for the integration lane would close that gap (SG-16). **(SUP2-F1.)**
+- SG-9/SG-10 were re-tiered Fully-Automated → Hybrid (SUP-C3): `PATCH /api/v1/sites/{site_id}` has no
+  unit-lane harness, so router-contract gates cannot run without PG. A fake-session unit harness for
+  `update_site` is a candidate future investment that would let contract guards run in the fast lane.
+- `tests/integration` remains sensitive to the known conftest DB/Redis isolation gap — if SG-3/4/5/6
+  flake, bisect in a clean worktree before attributing the failure to this supplement.
+
+---
+
+## Resume and Execution Handoff (Supplement)
+
+1. **Selected plan file:** `process/features/visitors-identity/active/identity-coop_07-08-26/phase-1-ledger-substrate_PLAN_07-08-26.md` (this file; execute the `## Post-Audit Fix Supplement (16-08-26)` section only).
+2. **Last completed step:** Phase 1 EXECUTE complete; evidence pack **REJECTED** by human review 16-08-26. This supplement is the fix list.
+3. **Validate-contract status:** `## Validate Contract (Supplement — S1–S7) — PVL cycle 2` below returned `Gate: BLOCKED` on 16-08-26 (SUP2-F1 + SUP2-C1/C2/C3). **PVL-supplement cycle 3 applied 16-08-26** — all 4 gaps addressed: SUP2-F1 (item 5a rewritten to mandate `db.begin_nested()`; 5b/SG-15 strengthened with the fake-savepoint assertion; optional 5c/SG-16 Hybrid leg), SUP2-C1 (item 9a monkeypatches the whole test function; SG-9 gets its own function), SUP2-C2 (9 named integration test functions enumerated, SG-10 given item 15e, item 14 split into 14a/14b, item 15 split into 15a-15e, SG-6/SG-6b renamed to non-overlapping selectors, integration budget ≤190 → ≤480 with a split escape hatch), SUP2-C3 (item 6a corrects both falsified sentences; `suppression.py` budget ≤3 → ≤8). Inner PVL must now **re-run from V1** against this updated supplement before EXECUTE. The original `2026-08-07 (outer-pvl)` contract still covers original Phase 1 scope only.
+4. **Supporting context loaded:** `process/context/all-context.md`; `apps/api/routers/sites.py`; `apps/api/services/graph_erasure.py`; `apps/api/models/erasure_request.py`; `apps/api/services/identity_coop.py`; `apps/api/models/identity_coop.py`; `apps/api/services/identity_resolver.py`; `harness/review-decision.json`.
+5. **Next step for a fresh agent:** route to VALIDATE for this supplement's scope, then EXECUTE S1→S7 in order. Read the concurrent-workstream hazard above **before** touching `apps/api/routers/sites.py`.
+
+
+---
+
+## Validate Contract (Supplement — S1–S7) — PVL cycle 3
+
+Status: CONDITIONAL
+Date: 16-08-26
+date: 2026-08-16
+generated-by: inner-pvl: phase-1-supplement
+supersedes: 2026-08-16 (inner-pvl: phase-1-supplement, cycle 2) — cycle 3 re-validated the
+twice-repaired supplement from V1 against the live working tree and has current evidence. Scope is
+unchanged: `## Post-Audit Fix Supplement (16-08-26)` (checklist S1–S7, gates SG-1…SG-16) ONLY. The
+`2026-08-07 (outer-pvl)` contract above remains authoritative for original Phase 1 scope (EXECUTED +
+EVL green + re-audited green 16-08-26) and is NOT overwritten.
+
+Parallel strategy: sequential (single-context pass)
+Rationale: 7-signal score **4/7** — S2 (GDPR-erasure + credit-accrual surface), S4 (phase-program
+membership), S6 (high-risk class), S7 (10-file blast radius). Score 4 → HIGH → the from-scratch
+recommendation is workflow or agent-team. Deviation stated explicitly: this agent has no Agent tool
+grant, so Layer 1 (4 dimensions) and Layer 2 (8 supplement sections) ran as ONE sequential pass.
+Every finding below comes from a live command or a direct read of the working tree.
+
+**Contract-staleness note (closes the cycle-2 hazard):** the cycle-2 contract's own gate table was
+stale after the SG-6/SG-6b rename and the `...` shorthand redefinition. That contract is **replaced
+in full** by this one, and every gate below was **re-derived from the plan's `## Test Gates
+(Supplement)` table**, which is authoritative.
+
+### Cycle-2 closure verdict (the reason this pass exists)
+
+| Cycle-2 gap | Closed? | Evidence (live source walk, 16-08-26) |
+|---|---|---|
+| **SUP2-F1** — bare `try/except` cannot preserve the `ErasureRequest`; SG-15 vacuous | **YES — mechanism verified in the pinned SQLAlchemy source** | Item 5a now mandates `async with db.begin_nested():`. Walked `sqlalchemy==2.0.35` (`.venv/.../orm/session.py:1084-1089`): `SessionTransaction.__init__` runs `self.session.flush()` whenever the origin is NOT `BEGIN`/`AUTOBEGIN` — a SAVEPOINT (`BEGIN_NESTED`) therefore **flushes pending state BEFORE the SAVEPOINT is emitted**. So `db.add(row)`'s `ErasureRequest` INSERT lands in the outer transaction *ahead of* the savepoint, and `ROLLBACK TO SAVEPOINT` cannot discard it; the outer transaction stays usable and `await db.commit()` proceeds. The "degrades to exactly today's behaviour" claim is now **true as written**, and only with the savepoint. Repo idiom citations verified exact: `services/identity_coop.py:175` and `routers/sites.py:206` are both `async with db.begin_nested():`. Autoflush premise verified: `async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)` (`models/database.py:78`) leaves `autoflush=True`, so the bare-`try/except` failure chain item 5a documents is real. |
+| **SUP2-F1 (b)** — SG-15 must be able to fail against a bare `try/except` | **YES** | The fake-savepoint pattern is real and reusable: `tests/unit/test_site_limit.py:99-114` defines a no-op async CM `_Savepoint` and installs it via `db.begin_nested = Mock(return_value=_Savepoint())` at :114; a second, richer idiom exists at `tests/unit/test_identity_coop.py:105` (`def begin_nested(self)`). Distinguishing power walked: against the bare-`try/except` implementation `db.begin_nested` is **never called**, so SG-15's mandated `assert db.begin_nested was called` goes RED; against the savepoint implementation the no-op CM lets the patched raise propagate to the `except`, the warning is logged, and `db.commit()` is awaited — GREEN. The two implementations are genuinely separable by the assertion set item 5b lists. Budget: the required shape is 7 code lines + item 6's docstring line + item 6a's audit comment ≈ 9-11 touched lines vs the ≤18 `graph_erasure.py` budget — **achievable**. |
+| **SUP2-C1** — "200-path steps only" monkeypatch voids 3 digest legs | **YES** | Guard position re-verified: `routers/sites.py:417` `if body.contribution_enabled is not None:` → `:418` `if body.contribution_enabled:` → `:419` `tv = body.terms_version` → digest 422 at `:421-434` → `record_consent_acceptance` `:435-437` → flip at `:438`. Item 9's insertion point ("inside `if body.contribution_enabled:`, before the terms-digest comparison") is exact. With the flag patched True for the **whole** `test_flag_on_requires_acceptance`, all five legs keep their original meaning: step 1 (`:470`, no `terms_version`) → digest 422; step 2 (`:476`, the named vacuous-guard case) → digest 422; step 3 (`:483`, wrong 64-hex) → digest 422; step 4 (`:491`, pinned) → 200 + 1 acceptance row; step 5 (`:516`, opt-out) → 200, ungated either way. No cross-test damage: the `assert settings.identity_coop_enabled is False` at `:93` lives inside a **different** function (`test_flag_off_produces_zero_contributions`, `:76-122`), and a function-scoped `monkeypatch` restores on teardown. |
+| **SUP2-C1 (b)** — new SG-9 contract consistent with the guard position | **YES** | SG-9's test (`test_contribution_flip_gated_on_global_flag`) asserts **422 with a *valid* current digest while the global flag is OFF**. Because the new guard sits strictly *before* the digest comparison, a valid digest removes the digest branch as an alternative explanation — the 422 can only come from the new global-flag guard. Non-vacuous, and it is the only remaining coverage of the flag-OFF contract once the flag is patched True for the whole neighbouring function. |
+| **SUP2-C2** — selector/checklist/budget mismatch | **YES — all four sub-parts verified** | (i) **Selector→item coverage:** every `-k` in the authoritative table has exactly one checklist item — SG-3→13, SG-4→14a, SG-5→14b, SG-6→15a, SG-6b→15b, SG-7→15c, SG-8→15d, SG-9→item 9a, SG-10→15e (SG-10 was itemless in cycle 2; item 15e now exists). (ii) **Collision sweep run live** — `grep -rn "def test_.*<selector>" tests/` returns **0 existing matches for all nine** selectors, so each selects exactly one *new* function; the renamed `erasure_window_race_blocked` / `erasure_window_race_control` are mutually non-substring. (iii) **Budget arithmetic sane:** the existing file is 550 lines with 10 test functions and ~75 lines of header/fixtures ⇒ ~47 body-lines per DB-integration test; 9 × 47 ≈ 430 against the ≤480 budget. (iv) **Both file outcomes resolve:** the `...` shorthand now expands to `pytest tests/integration -q` (the **directory**), so every `-k` gate resolves whether the legs stay in `test_identity_coop_contribution.py` or the split hatch to `test_identity_coop_supplement.py` fires; SG-11 is the only gate naming files literally and it already carries the "name both files" clause. |
+| **SUP2-C3** — docstring correction incomplete + budget short | **YES** | `models/suppression.py:23-28` re-read verbatim; item 6a's quoted "today it reads" text matches the source **exactly**, and the replacement corrects **both** falsified claims: the *writer* ("Written at enqueue time by `enqueue_erasure` … the sweep's later write is an idempotent no-op via `on_conflict_do_nothing`") and the *meaning* ("it records that an erasure was **requested** … the shared-graph rows are hard-deleted by the sweep"). Both are accurate to post-S2 semantics — the enqueue-time write is what S2 adds, and `_process_claimed`'s later write (`graph_erasure.py:370`) is a no-op via `on_conflict_do_nothing(index_elements=["email_hash","scope"])` at `:327`, matching the unique index `uq_suppression_hash_scope` (`suppression.py:33`). Length: the replacement is ~60 words ⇒ ~6-7 wrapped docstring lines against the raised **≤8** budget, replacing the 5 source lines 24-28. Fits. The companion audit-lookup comment lands at `graph_erasure.py:563-575` (`erased = False` … `scalar_one_or_none() is not None`), verified present. |
+
+### Cross-reference / staleness sweep (V3 new-gap pass)
+
+- **No residual bad file targets.** The only occurrences of `test_identity_coop.py` in the supplement are (a) the paragraph declaring the *integration* file nonexistent and superseding earlier references, and (b) a citation of the genuinely-existing **unit** file `tests/unit/test_identity_coop.py:105`. Different files; not a contradiction.
+- **SUP-F2 vs the split escape hatch — no contradiction.** SUP-F2 says "all new integration legs go into the existing file"; the hatch is introduced in the same paragraph as an explicitly-labelled "single narrow exception", is repeated identically in the Blast Radius row, and is gate-neutral because the shorthand runs the directory. Both statements are reconciled in place, not left in tension.
+- **Renames fully propagated.** `erasure_window_race_positive_control` survives only inside the explanatory naming note; no gate, checklist item, or blast-radius row still uses the old names. The superseded `≤190` figure likewise appears only inside the "raised from ≤190" audit trail.
+- **Numbering is consistent.** Items 1-19 with sub-items 5a/5b/5c, 6a, 9a, 14a/14b, 15a-15e; every sub-item is referenced by the section that owns it, and S5's header now carries the "one function per gate" rule that item 14/15's splits implement.
+- **All file anchors re-verified live** against the dirty working tree: `routers/sites.py` delete tuple ends `"ad_connections"` at `:340`, `deleted[table] = r.rowcount` at `:346`, `return Response(status_code=204)` at `:379`; `graph_erasure.enqueue_erasure` at `:182-224` with `db.add(row)` at `:214` immediately preceding `await db.commit()` at `:215`; `_tombstone_stmt` at `:308` taking a `list[str]` (and `bidx` **is** a list); the co-op table names in `models/identity_coop.py` are `identity_contribution_events` (`:77`), `identity_credit_ledger` (`:127`), `identity_contribution_consent_acceptances` (`:172`) — exactly as S1 items 1-2 name them.
+- **Plan-artifact validator:** `validate-plan-artifact.mjs` → **0 failures** (3 pre-existing legacy-shape warnings only).
+- **Concurrent-workstream hazard still live and still non-overlapping.** `git status` confirms `apps/api/routers/sites.py` and `apps/api/models/site.py` carry uncommitted edits from the site-analysis workstream. SG-12's baseline is unchanged; the purely-additive edit rule and the never-`git-checkout`/`stash` rule remain mandatory.
+
+### Prior confirmations carried forward (NOT re-derived — no cycle-3 edit touched their premises)
+
+| Property | Source of truth | Why not re-derived |
+|---|---|---|
+| **H2-D fail-safe direction** — every `is_email_suppressed*` caller *withholds* an action, and `("erased","do_not_process")` never reaches the `do_not_email`/`do_not_sell` callers (wildcarding is `"all"` only) | cycle-1 + cycle-2 contracts (11 call sites walked) | Cycle 3 changed only *when* the tombstone is written mechanically (savepoint), not *which* scopes it uses |
+| **Conflict target / `_process_claimed` untouched** — Boundary-2 ordering and `tests/unit/test_graph_erasure.py:355-401` unaffected | cycle-2 contract | Item 7 is unchanged this cycle |
+| **H1-D independence** — an inherited acceptance row is inert (`Site.contribution_enabled` is `default=False, server_default="false"`, `SiteCreate` does not expose it, `routers/sites.py:438` is the only write path) | cycle-1 + cycle-2 contracts | Cycle 3 did not touch S1 |
+| **M2 non-bypassability** — no other write path can flip `contribution_enabled` True | cycle-2 contract | Re-confirmed incidentally: `:438` is still the single assignment |
+| **SG-6/SG-6b non-vacuity mechanism** — `GRAPH_WRITE_BLOCKING_SCOPES == _TOMBSTONE_SCOPES`, blocked `_upsert_beam_identity` returns `False`, hook at `identity_resolver.py:1310` never fires; without S2 the write succeeds and mints 1 event + 1 ACCRUE, so SG-6's zero goes RED | cycle-2 contract §"SG-6/SG-6b non-vacuity proof" | The cycle-3 edit renamed the `-k` selectors only. **A test-function rename cannot change the code path being exercised**, so the proof transfers verbatim; only the selector strings changed, and those were re-verified collision-free above |
+
+### Net Gate Derivation
+
+**Layer 1 dimensions**
+
+| Layer 1 dimensions | Status |
+|---|---|
+| Infra fit | PASS |
+| Test coverage | CONCERN |
+| Breaking changes | PASS |
+| Security surface | PASS |
+
+**Layer 2 sections**
+
+| Layer 2 sections | Status |
+|---|---|
+| S1 — H1 site delete cascade | PASS |
+| S2 — H2 close the enqueue→sweep window | PASS (SUP2-F1 closed — savepoint shape verified against SQLAlchemy 2.0.35 source; SUP2-C3 closed) |
+| S3 — M2 gate the contribution opt-in flip | PASS (SUP2-C1 closed — all five legs keep their meaning) |
+| S4 — M3 prove the resolver hook runs | PASS |
+| S5 — H1/H2 regression coverage | PASS (SUP2-C2 closed — 9 selectors, 9 items, 0 collisions) |
+| S6 — L1 correct the bookkeeping | PASS |
+| S7 — R1 record the human verdict | PASS |
+| Test Gates table SG-1…SG-16 | CONCERN (N-A: SG-15's unit function name is unspecified; N-B: the `test_graph_erasure.py` ≤30-line budget is optimistic) |
+
+**Totals: 0 FAILs / 2 CONCERNs / 7 PASSes** (all 4 cycle-2 gaps confirmed closed and source-verified)
+
+**→ Net Gate: CONDITIONAL**
+
+Net-gate vacuous-green check (Step A1): every developed behavior in this supplement has at least one
+Fully-Automated or Hybrid gate that can fail when the behavior is absent — H1 (SG-4/SG-5), H2 window
+(SG-6 with SG-6b as positive control), H2 mechanism (SG-7/SG-8), the tombstone fail-safe (SG-15,
+now non-vacuous via the `begin_nested` assertion), M2 (SG-9/SG-10), M3 (SG-2/SG-3). **No behavior
+rests on Known-Gap alone.** The two named residuals (SG-16 Postgres-honours-the-savepoint, and
+multi-process concurrency) are carried as named residuals with written justification, gap-resolution
+D — not as the silent reason anything passes.
+
+### CONCERNs (residual, cycle 3 — all closable by execute-agent instruction; none require a plan edit)
+
+**N-A — SG-15's unit test function name is not specified anywhere, so its `-k` currently selects
+zero functions. (CONCERN, LOW — loud failure mode.)**
+
+SUP2-C2's fix enumerated the nine *integration* function names but left SG-15's *unit* function
+unnamed: item 5b says only "add the unit gate in `tests/unit/test_graph_erasure.py`", while the gate
+runs `-k tombstone_write_failure`. Verified live: `pytest tests/unit/test_graph_erasure.py -q -k
+tombstone_write_failure` today gives `27 deselected`, **exit code 5**. Mitigating factor (and why
+this is not a FAIL): the failure mode is *loud*, not silent — exit 5 is non-zero, so a
+name mismatch cannot be mistaken for a green gate by an exit-code check. Closed by instruction E-S1.
+
+**N-B — the `tests/unit/test_graph_erasure.py` ≤30-added-line budget is optimistic (~35-42
+realistic). (CONCERN, LOW — advisory budget, no STOP rule attached.)**
+
+`enqueue_erasure` has **no existing unit harness** (grep: the only references in that file are
+`inspect.getsource` code-shape assertions at `:485` and `:510`), and the file's shared
+`_scalar_result` helper (`:47-51`) exposes `scalar_one_or_none`/`scalar` but **not** `.scalars().all()`
+— which `_collect_match_keys` requires at `graph_erasure.py:155`. So SG-15's test must add: a
+`_Savepoint` no-op CM (~5 lines), a fake session whose `_execute` discriminates the tombstone
+statement by SQL text *and* returns a non-empty email list for the `visitor_emails` select (~14
+lines), and the test body (~14 lines). The supplement carries no budget-breach STOP rule (the only
+STOP rules are the concurrent-hazard and the no-migration rule), so an overshoot is a bookkeeping
+correction, not a blocker. Closed by instruction E-S2.
+
+*Non-vacuity note that protects N-B:* if the fake returns an empty `bidx`, `enqueue_erasure` skips
+the tombstone branch entirely and `db.begin_nested` is never called — SG-15's own mandated assertion
+then goes RED rather than passing vacuously. The assertion set is self-protecting.
+
+### Informational notes (no action required, not counted toward the gate)
+
+- **N-C (rationale imprecision):** the plan asserts "a `-k` selector that matches no function silently
+  selects 0 tests and the gate passes vacuously". Measured: pytest returns **exit code 5** on total
+  deselection, so it is loud to an exit-code check (though a human skimming `-q` output sees no
+  "failed" line). The enumeration fix is correct and worth keeping regardless; only the stated
+  rationale is stronger than the mechanism warrants.
+- **N-D (arithmetic nit):** the Blast Radius row cites "550 lines / 11 tests"; the file actually has
+  **10** test functions. Using body-lines-per-test (~47) rather than raw file lines, the ≤480 budget
+  still holds with ~50 lines of margin. Conclusion unchanged.
+- **N-E (doc-sync, outside this agent's write scope):** `## Resume and Execution Handoff (Supplement)`
+  item 3 still describes cycle 2's `Gate: BLOCKED` as the current state. It is now superseded by this
+  contract. Orchestrator or plan-agent should refresh that line; no gate depends on it.
+
+### Dimension findings
+
+- **Infra fit: PASS** — every anchor re-verified live against the CURRENT dirty working tree (see the
+  cross-reference sweep above). The savepoint shape is not merely idiomatic but **mechanically
+  correct on the pinned stack**, proven by reading `sqlalchemy/orm/session.py:1084-1089` rather than
+  by analogy. Diff budgets: `sites.py` ~10-11 vs ≤12 (tight, achievable), `graph_erasure.py` ~9-11 vs
+  ≤18 **with** the savepoint, `suppression.py` ~7 vs the raised ≤8, integration ~430 vs ≤480. Only
+  `test_graph_erasure.py`'s ≤30 is optimistic (N-B). No schema change is required by any fix shape,
+  so Constraint 2 holds. Plan-artifact validator: 0 failures.
+- **Test coverage: CONCERN** — the SUP2-C2 class is genuinely closed for the integration lane (9
+  selectors ↔ 9 checklist items, 0 collisions verified live, both file outcomes resolve), and SG-15
+  is now non-vacuous by construction. The residual is that the same "name the function behind the
+  selector" discipline was not applied to SG-15 itself (N-A), plus the N-B budget. Independently
+  correct: SG-2's "3 passed" matches item 12's three cases; SG-6b remains a true positive control;
+  the multi-process concurrency known-gap is correctly named rather than silently dropped; SG-16 is
+  correctly declared optional-with-known-gap rather than assumed.
+- **Breaking changes: PASS** — SUP2-C1's closure removes the last contract hazard: with the
+  whole-function monkeypatch, `test_flag_on_requires_acceptance` keeps all five legs meaningful while
+  the new 422 contract gets its own dedicated function (SG-9), so SG-1 and SG-11 are jointly
+  satisfiable. Everything else stays contract-safe: S1 appends to an internal tuple and item 3
+  forbids adding a 204 body; S2 adds a write inside an existing transaction with no signature change;
+  item 7 leaves `_process_claimed` untouched, so the module's Boundary-2 contract and
+  `tests/unit/test_graph_erasure.py:355-401` are unaffected. **Boundary 1** (`enqueue_erasure` commits
+  its own insert so the queued request survives a partially-failed caller deletion) is now
+  *preserved* by the prescribed shape — the property cycle 2 found broken.
+- **Security surface: PASS** — the supplement's compliance fail-safe now holds as written on the GDPR
+  erasure path, and the plan's claim about it is true rather than aspirational. Carried forward
+  un-re-derived (premises untouched): H2-D's fail-safe direction across all eleven
+  `is_email_suppressed*` call sites; H1-D's inertness; M2's non-bypassability; `verify_site_access`
+  firing 404 first for a foreign site. The scope fence holds — no schema change, `ERASURE_TARGETS`
+  untouched, all flags default OFF, and `harness/review-decision.json` stays `rejected` (no
+  self-approval).
+
+### Execute-agent instructions
+
+| # | Instruction | Trigger condition |
+|---|---|---|
+| E-S1 | **Name SG-15's unit test so its selector matches exactly one function.** Use `test_tombstone_write_failure_preserves_erasure_request` (contains the `tombstone_write_failure` substring SG-15's `-k` requires). Before reporting SG-15 green, confirm the run reports `1 passed`, not `N deselected` — an unmatched `-k` exits 5 with zero tests run. (Closes N-A.) | S2 item 5b |
+| E-S2 | **The `tests/unit/test_graph_erasure.py` ≤30-line budget may be exceeded up to ~45 added lines; record the actual figure in the phase report instead of reshaping the test to fit.** The overshoot is structural: `_scalar_result` (`:47-51`) has no `.scalars().all()`, which `_collect_match_keys` needs at `graph_erasure.py:155`, and no fake session covers `enqueue_erasure`. Do NOT weaken any of SG-15's four assertions to save lines. (Closes N-B.) | S2 item 5b |
+| E-S3 | **Use the function-scoped `monkeypatch` fixture — not a bare `settings.identity_coop_enabled = True` `setattr`** — for item 9a's whole-function patch. `monkeypatch` restores on teardown; a bare setattr leaks the flag ON into `test_contribution_flip_gated_on_global_flag` (SG-9) and `test_contribution_optout_never_gated` (SG-10), both of which require the global flag **OFF**, silently inverting them. Item 9a's parenthetical offers both; only the fixture form is safe here. | S3 item 9a |
+| E-S4 | **The savepoint in item 5a is load-bearing and must not be "simplified".** `async with db.begin_nested():` is what flushes the `ErasureRequest` INSERT *ahead of* the SAVEPOINT (SQLAlchemy 2.0.35, `orm/session.py:1084-1089`), so a savepoint rollback cannot discard it. Reverting to a bare `try/except` re-opens SUP2-F1 (false compliance receipt / permanent match-key loss). If a reviewer asks for the simpler form, STOP and cite this line. | S2 item 5a |
+| E-S5 | **Re-run the collision sweep before writing tests if the tree has moved.** `grep -rn "def test_.*<selector>" tests/` must return 0 for each of the 9 selectors before you add the functions, and exactly 1 afterwards. Record the post-write counts in the phase report. | S4/S5 entry |
+| E-S6 | **Concurrent-workstream hazard is still live.** `apps/api/routers/sites.py` and `apps/api/models/site.py` carry uncommitted third-party edits. Every S1/S3 edit must be purely additive; never run `git checkout`/`stash`/`stash pop`/`restore`/rebase on these files; verify with `git diff apps/api/routers/sites.py` afterwards and record the verification (SG-12). | S1 / S3 entry |
+| E-S7 | **Pin `DATABASE_URL=postgresql+asyncpg://…@localhost:5433/…` for every Hybrid gate and any DB command.** The repo `.env` points at Supabase PROD and `migrations/env.py` has no local-host guard. | Any Hybrid gate |
+
+### Test gates (C3 5-column table — ADDITIVE; the legacy line form follows)
+
+Re-derived from the plan's `## Test Gates (Supplement)` table (authoritative). `...` = `.venv/bin/python3.11 -m pytest tests/integration -q` (the **directory**, so every selector resolves under either file outcome).
+
+| criterion id | behavior | strategy | proving test | gap-resolution |
+|---|---|---|---|---|
+| SG-1 | No regression in the unit lane after S1–S4 | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit -q` → 0 failed, count ≥ baseline + new hook tests | B |
+| SG-2 | Resolver hook fires iff flag ON **and** graph write happened | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_identity_coop_hook.py -q` → 3 passed | B |
+| SG-3 | Hook actually mints an accrual against a real DB | Hybrid (PG :5433) | `... -k end_to_end_accrual` → 1 passed; exactly 1 event + 1 ACCRUE row | B |
+| SG-4 | Site delete removes co-op events + ledger | Hybrid (PG :5433) | `... -k site_delete_removes_coop` → both tables 0 rows for the deleted `site_id` | B |
+| SG-5 | Site delete RETAINS the consent acceptance row (H1-D) | Hybrid (PG :5433) | `... -k site_delete_retains_consent` → acceptance row still present | B |
+| SG-6 | Erasure enqueued before a resolve blocks the accrual (the H2 fix) | Hybrid (PG :5433) | `... -k erasure_window_race_blocked` → 0 event rows, 0 ledger rows | B |
+| SG-6b | Positive control: same resolve without the enqueue DOES mint | Hybrid (PG :5433) | `... -k erasure_window_race_control` → exactly 1 event + 1 ACCRUE row | B |
+| SG-7 | The tombstone exists at enqueue, before any sweep | Hybrid (PG :5433) | `... -k enqueue_writes_tombstone` → `suppression_list` row, scope `erased`, via the `SuppressionEntry` ORM | B |
+| SG-8 | The sweep's later tombstone write stays idempotent | Hybrid (PG :5433) | `... -k sweep_tombstone_idempotent` → sweep raises nothing, exactly 1 suppression row | B |
+| SG-9 | `contribution_enabled=True` is rejected while the deployment flag is OFF | Hybrid (PG :5433) | `... -k contribution_flip_gated_on_global_flag` → 422 + flag unchanged, with a **valid** digest supplied | B |
+| SG-10 | Opting OUT is never gated | Hybrid (PG :5433) | `... -k contribution_optout_never_gated` → 200 with global flag OFF; flag flips False | B |
+| SG-11 | Co-op integration lane green (requires item 9a) | Hybrid (PG :5433) | `.venv/bin/python3.11 -m pytest tests/integration/test_identity_coop_contribution.py -q` (+ `tests/integration/test_identity_coop_supplement.py` if the split hatch fired) → 0 failed | B |
+| SG-12 | Concurrent site-analysis hunks survive the S1/S3 edits | Agent-Probe | `git diff apps/api/routers/sites.py` — site-analysis hunks present and unmodified alongside the additive co-op edits | B |
+| SG-13 | Evidence-pack non-vacuity claims are honest | Agent-Probe | read `harness/adversarial-validation.json` — ADV-1/ADV-2 cite `wrote is False/True` + integration legs only; F14 third leg `vacuous-and-retired` | B |
+| SG-14 | The human verdict is recorded faithfully, with no self-approval | Agent-Probe | read `harness/review-decision.json` — `decision: "rejected"`, reviewer + reviewedAt set | B |
+| SG-15 | A tombstone failure never loses the `ErasureRequest`, **and the SAVEPOINT is entered** | Fully-Automated | `.venv/bin/python3.11 -m pytest tests/unit/test_graph_erasure.py -q -k tombstone_write_failure` → 1 passed; asserts `db.begin_nested` **was called**, the tombstone execute raised, the `ErasureRequest` was still added, `db.commit()` was awaited, nothing escaped | B (name the function per E-S1) |
+| SG-16 | Postgres actually honours the savepoint under a real DB-level failure | Hybrid (PG :5433) | forced statement failure inside the tombstone statement, then assert the `ErasureRequest` row exists | **D** — named residual; SG-15 proves the savepoint is *entered*, not that the server honours it |
+
+gap-resolution legend: A — proven now; B — gate added by this plan's checklist; C — deferred to a
+named later phase; D — backlog test-building stub (named residual; keep-active; continue).
+
+Legacy line form (retained so existing validate-contract consumers still parse):
+
+- Unit lane / hook decision half: [Fully-automated: `.venv/bin/python3.11 -m pytest tests/unit -q`] | [Fully-automated: `.venv/bin/python3.11 -m pytest tests/unit/test_identity_coop_hook.py -q`]
+- Tombstone fail-safe: [Fully-automated: `.venv/bin/python3.11 -m pytest tests/unit/test_graph_erasure.py -q -k tombstone_write_failure`]
+- Co-op DB behavior (H1/H2/M2/M3): [hybrid: `.venv/bin/python3.11 -m pytest tests/integration -q -k <selector>` + precondition: Postgres on :5433, `DATABASE_URL` pinned local]
+- Co-op integration lane: [hybrid: `.venv/bin/python3.11 -m pytest tests/integration/test_identity_coop_contribution.py -q` + precondition: PG :5433]
+- Concurrent-edit + evidence-pack honesty: [agent-probe: `git diff apps/api/routers/sites.py`; read `harness/adversarial-validation.json`; read `harness/review-decision.json`]
+- Savepoint honoured by the server: [known-gap: documented — SG-16 optional, named residual]
+
+### Failing stubs (Fully-Automated rows only)
+
+SG-2:
+
+```
+test("should invoke maybe_record_contribution with (db, visitor, data, provider) when the flag is ON and wrote_graph is True", () => { throw new Error("NOT IMPLEMENTED — TDD stub: hook fires when flag ON and graph write happened") })
+test("should NOT invoke maybe_record_contribution when wrote_graph is False", () => { throw new Error("NOT IMPLEMENTED — TDD stub: hook mirror case") })
+test("should NOT invoke maybe_record_contribution when the global flag is OFF even if wrote_graph is True", () => { throw new Error("NOT IMPLEMENTED — TDD stub: hook flag-OFF case") })
+```
+
+SG-15:
+
+```
+test("should enter db.begin_nested, keep the ErasureRequest added, and still await db.commit() when the tombstone execute raises", () => { throw new Error("NOT IMPLEMENTED — TDD stub: tombstone failure never loses the erasure request") })
+```
+
+SG-1 is a lane gate (no scenario-level stub). Hybrid, Agent-Probe, and Known-Gap rows do not receive
+stubs.
+
+### Open gaps
+
+- **SG-16 (optional item 5c): known-gap — accepted, named residual.** SG-15 proves the savepoint is
+  *entered*; it cannot prove Postgres honours it, because the unit lane cannot abort a real
+  transaction. Resolution D. Recorded in `## Test Infra Improvement Notes (Supplement)` as the
+  candidate statement-level failure-injection helper.
+- **Multi-process concurrency on the H2 window: known-gap — accepted, pre-declared.** SG-6 proves the
+  sequential window, which is the actual reported defect; a true two-process race needs orchestration
+  outside this supplement's scope.
+- **N-A / N-B: open but instruction-closed** (E-S1, E-S2). Neither requires a plan edit.
+- **N-E: doc-sync only** — the Resume/Handoff line still cites cycle 2's BLOCKED state; superseded by
+  this contract. Outside this agent's write scope.
+- **The high-risk evidence pack remains REJECTED and un-re-reviewed.** S6/S7 correct its bookkeeping;
+  they do not and must not change the human verdict.
+
+### What this coverage does NOT prove
+
+- **SG-1 / SG-11 (lane gates)** prove no *collected* test regressed. They do not prove any new
+  behavior exists — a lane can be green with zero new tests written.
+- **SG-2 (unit, fake session)** proves the hook's *decision* logic. It does not prove any row is
+  persisted, does not exercise the partial unique index, and does not prove `ON CONFLICT` semantics.
+- **SG-3 / SG-4 / SG-5 / SG-6 / SG-6b / SG-7 / SG-8** prove single-process, sequential DB behavior on
+  a local Postgres. They do not prove behavior under concurrency, under a different `search_path`, or
+  on Supabase prod (where neither co-op migration is live).
+- **SG-6b** proves the mint path is live in that fixture. It does not prove the mint path is live in
+  *production* configuration — both flags are default OFF.
+- **SG-9 / SG-10** prove the router contract through the integration client. They do not prove any UI
+  or client behavior, and they do not prove the runbook reset (`UPDATE sites SET
+  contribution_enabled=false` at a terms re-pin) is ever actually run — that is an operator action
+  with no gate.
+- **SG-15** proves the savepoint is *entered* against a fake session and that the request survives in
+  that fake. It does **not** prove Postgres rolls back only the savepoint under a real deadlock,
+  statement timeout, or connection loss — that is SG-16, a named residual.
+- **SG-12 / SG-13 / SG-14** are Agent-Probe reads. They prove a human-or-agent looked and reported;
+  they are not mechanically enforced and can be reported green in error.
+- **No gate proves the diff budgets.** ≤12 `sites.py`, ≤18 `graph_erasure.py`, ≤8 `suppression.py`,
+  ≤480 integration, ≤30 (likely ~45) `test_graph_erasure.py` are estimates; only the real diff proves
+  them.
+- **Nothing here proves prod behaviour.** Both co-op flags remain default OFF and neither co-op
+  migration is live on prod. M2's fix makes the opt-in strictly harder, never easier. Enabling either
+  flag stays a separate, explicit operator action gated on legal review and a terms-digest re-pin.
+
+Gate: CONDITIONAL
+
+Accepted by: **NOT YET ACCEPTED — pending orchestrator/user decision.** This validating agent does
+not self-accept its own CONDITIONAL verdict. The concerns offered for acceptance, by name: **N-A**
+(SG-15's unit test function is unnamed; closed by execute-agent instruction E-S1) and **N-B** (the
+`test_graph_erasure.py` ≤30-line budget is optimistic; closed by E-S2). Both are execute-agent-
+instruction class — **no further plan supplement cycle is required**, and no SUPPLEMENT REQUEST is
+issued this cycle. The pre-declared known-gaps offered alongside them: **SG-16** (Postgres honours
+the savepoint) and **multi-process concurrency on the H2 window**.

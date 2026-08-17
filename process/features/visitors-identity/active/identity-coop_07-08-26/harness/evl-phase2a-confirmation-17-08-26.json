@@ -1,0 +1,222 @@
+{
+  "artifact": "evl-phase2a-confirmation",
+  "date": "2026-08-17",
+  "phase": "identity-coop Phase 2a — consumption + FIFO lot accounting + expiry sweep",
+  "plan": "process/features/visitors-identity/active/identity-coop_07-08-26/phase-2-consumption-spend_PLAN_07-08-26.md",
+  "contract": "live `## Validate Contract` (inner-pvl, cycle 4, 17-08-26); ARCHIVED contracts ignored",
+  "run_type": "EVL independent confirmation run (vc-tester). Prior execute-agent evidence treated as UNCONFIRMED and fully re-run.",
+  "runner": "/Users/apple/getbeam/.venv/bin/python3.11 -m pytest",
+  "environment": {
+    "docker_cli": "/Applications/Docker.app/Contents/Resources/bin/docker (off PATH)",
+    "postgres_dev": "infra-postgres-1 :5433",
+    "redis": "infra-redis-1 :6379",
+    "disposable_pg": "evl2a-pg (postgres:16-alpine) :55499 — created and destroyed by this run",
+    "safety": "DATABASE_URL pinned to localhost on EVERY alembic/DB command; bare alembic never invoked (.env points at Supabase PROD)",
+    "git": "READ-ONLY — no stash/rebase/checkout/commit. Mutation probes were file edits reverted byte-exact."
+  },
+
+  "gates": [
+    {
+      "id": "G-11",
+      "behavior": "unit-lane regression, :6379 CLOSED (S-23)",
+      "command": ".venv/bin/python3.11 -m pytest tests/unit -q",
+      "precondition_verification": "infra-redis-1 stopped; `lsof -nP -iTCP -sTCP:LISTEN | grep -E '5433|6379'` returned ONLY the :5433 line — :6379 absent. Redis restarted afterwards (leave-as-found), re-verified LISTENING.",
+      "result": "2926 passed, 2 skipped, 0 failed, 16 warnings in 13.80s",
+      "expected": "2926 passed / 2 skipped / 0 failed",
+      "status": "PASS"
+    },
+    {
+      "id": "G-12",
+      "behavior": "integration-lane regression (SERIALIZED)",
+      "command": ".venv/bin/python3.11 -m pytest tests/ -m integration -q",
+      "result": "1 failed, 660 passed, 3003 deselected, 26 warnings in 1754.50s (29:14)",
+      "failure": "tests/integration/test_ip_org_pipeline.py::TestLockSerialization::test_a_second_refresh_backs_off_while_the_shared_lock_is_held — RuntimeError: Event loop is closed",
+      "attribution": "PRE-EXISTING cross-event-loop flake on the GLOBAL async_session engine. NOT attributable to Phase 2a. See `attribution_evidence` below — proven by isolation runs, not asserted.",
+      "status": "DONE_WITH_CONCERNS (1 pre-existing unrelated flake; zero co-op failures)"
+    },
+    {
+      "id": "G-13",
+      "behavior": "zero new write surface on the resolver",
+      "command": "git diff HEAD --quiet --exit-code -- apps/api/services/identity_resolver.py",
+      "result": "exit 0 (empty diff)",
+      "status": "PASS"
+    },
+    {
+      "id": "G-13b",
+      "behavior": "2a/2b boundary — no spend wiring leak",
+      "command": "git diff HEAD --quiet --exit-code -- apps/api/services/billing.py apps/api/routers/billing.py",
+      "result": "exit 0 (empty diff)",
+      "status": "PASS"
+    },
+    {
+      "id": "G-15b",
+      "behavior": "MANDATORY E2 migration; partial unique index drops+recreates",
+      "commands": [
+        "DATABASE_URL='postgresql+asyncpg://postgres:postgres@localhost:5433/retarget_agent' .venv/bin/python3.11 -m alembic -c apps/api/alembic.ini heads",
+        "DATABASE_URL='...localhost:5433...' .venv/bin/python3.11 -m alembic -c apps/api/alembic.ini upgrade a8c2f47e91b6:b7e4d21a9c58 --sql",
+        "DATABASE_URL='postgresql+asyncpg://postgres:postgres@localhost:55499/evl2a' .venv/bin/python3.11 -m alembic -c apps/api/alembic.ini upgrade head",
+        "... downgrade -1",
+        "... upgrade head"
+      ],
+      "result": {
+        "heads": "b7e4d21a9c58 (head) — SINGLE head, no branching",
+        "offline_range": "exit 0; emitted `CREATE UNIQUE INDEX uq_coop_ledger_expire_per_lot ON identity_credit_ledger (lot_id) WHERE entry_type = 'EXPIRE';` inside BEGIN/COMMIT",
+        "live_up_from_empty": "full chain applied EMPTY -> b7e4d21a9c58 on disposable PG; index present: `CREATE UNIQUE INDEX uq_coop_ledger_expire_per_lot ON public.identity_credit_ledger USING btree (lot_id) WHERE ((entry_type)::text = 'EXPIRE'::text)`",
+        "live_down": "downgrade b7e4d21a9c58 -> a8c2f47e91b6 clean; pg_indexes query returned EMPTY (index dropped)",
+        "live_reup": "upgrade back to b7e4d21a9c58 clean; index RECREATED byte-identical; alembic_version = b7e4d21a9c58"
+      },
+      "status": "PASS — created, dropped, recreated, proven live"
+    },
+    {
+      "id": "G-23b",
+      "behavior": "scheduler registration present",
+      "command": "grep -n 'id=\"coop_expiry_sweep\"' apps/api/jobs/scheduler.py",
+      "result": "1 hit — line 748",
+      "status": "PASS"
+    },
+    {
+      "id": "G-23c",
+      "behavior": "add_job sits inside the identity_coop_enabled guard (Agent-Probe, lexical scope)",
+      "method": "direct read of apps/api/jobs/scheduler.py lines 741-753",
+      "verbatim": "    # Startup gate (Phase 2a, L-1): a flag-OFF process registers NO co-op expiry\n    # job at all. The wrapper carries the same check for the runtime-flip case.\n    if settings.identity_coop_enabled:\n        scheduler.add_job(\n            _coop_expiry_sweep_job,\n            \"interval\",\n            minutes=settings.coop_expiry_sweep_interval_minutes,\n            id=\"coop_expiry_sweep\",\n            replace_existing=True,\n            jitter=90,\n            misfire_grace_time=300,\n        )",
+      "judgment": "INSIDE the guard. Proven by indentation contrast: every sibling scheduler.add_job( in this function begins at 8-space indent (e.g. _cadence_bot_flag_sweep_job immediately before, _ws2_classifier_sweep_job immediately after); the coop add_job begins at 12-space indent directly under `if settings.identity_coop_enabled:` at 8-space. No dedent occurs between the `if` and the closing `)` of the add_job call.",
+      "status": "PASS"
+    }
+  ],
+
+  "selectors": {
+    "note": "Each selector run individually against the full test root. Selected/deselected counts recorded verbatim. Total corpus = 3664 tests.",
+    "collection_check": "all 9 resolve 1:1 — `1/3664 tests collected (3663 deselected)` each, every hit in tests/integration/test_identity_coop_ledger.py",
+    "results": [
+      { "gate": "G-3",   "selector": "coop_consumption_count_per_live_site",               "counts": "1 passed, 3663 deselected in 18.97s", "status": "PASS" },
+      { "gate": "G-9",   "selector": "coop_ledger_reconciles_exactly",                     "counts": "1 passed, 3663 deselected in 27.44s", "status": "PASS" },
+      { "gate": "G-17",  "selector": "coop_consumption_naive_tz_bounds",                   "counts": "1 passed, 3663 deselected in 17.12s", "status": "PASS" },
+      { "gate": "G-18",  "selector": "coop_expiry_never_negative",                         "counts": "1 passed, 3663 deselected in 10.61s", "status": "PASS" },
+      { "gate": "G-19",  "selector": "coop_erased_row_excluded_from_consumption",          "counts": "1 passed, 3663 deselected in 21.74s", "status": "PASS" },
+      { "gate": "G-20",  "selector": "coop_expiry_sweep_entrypoint_runs_twice",            "counts": "1 passed, 3663 deselected in 9.78s",  "status": "PASS" },
+      { "gate": "G-21",  "selector": "coop_duplicate_expire_rejected_by_db",               "counts": "1 passed, 3663 deselected in 6.31s",  "status": "PASS" },
+      { "gate": "G-22",  "selector": "coop_contribution_count_excludes_excluded_reason",   "counts": "1 passed, 3663 deselected in 6.23s",  "status": "PASS" },
+      { "gate": "G-23a", "selector": "coop_spendable_lots_fifo_order_and_drawn_subtraction","counts": "1 passed, 3663 deselected in 9.76s", "status": "PASS" }
+    ],
+    "note_on_12": "The gate table names 9 distinct `-k` selectors for Phase 2a behaviors (G-3, G-9, G-17, G-18, G-19, G-20, G-21, G-22, G-23a). The remaining Phase-2a gates are command/diff gates (G-11, G-12, G-13, G-13b, G-23b) and an Agent-Probe (G-23c), not `-k` selectors. All were run."
+  },
+
+  "phase_1_regression": {
+    "command": ".venv/bin/python3.11 -m pytest tests/integration/test_identity_coop_contribution.py -q",
+    "result": "20 passed in 58.41s",
+    "expected": "20/20",
+    "frozen_spendable_balance_test": "test_spendable_balance_respects_hold_and_expiry present at line ~380 and passing — spendable_balance semantics unchanged by 2a",
+    "status": "PASS"
+  },
+
+  "mutation_probes": {
+    "policy": "Independently re-done by the EVL tester, not taken on trust. Each mutation reverted byte-exact; `git diff --numstat -- apps/api/services/identity_coop.py` returned to 339/4 after every revert and both mutated gates were re-confirmed green.",
+    "baseline_numstat": "339\t4\tapps/api/services/identity_coop.py",
+    "probes": [
+      {
+        "id": "MP-1",
+        "target": "apps/api/services/identity_coop.py :: consumption_count",
+        "mutation": "removed the line `ApiUsageLog.provider == \"beam_identity_network\",` from the WHERE clause",
+        "gate_probed": "G-3 (coop_consumption_count_per_live_site)",
+        "observed": "FAILED — `assert await coop.consumption_count(test_db, site1) == 1` -> `assert 3 == 1` at tests/integration/test_identity_coop_ledger.py:219",
+        "verdict": "NON-VACUOUS. The provider predicate is load-bearing and gated. E-10's seeding fix is real: rows (b)/(c) ARE joinable, so dropping the predicate over-counts by exactly 2. This independently confirms the execute-agent's E-10 claim.",
+        "revert": "byte-exact; numstat back to 339/4"
+      },
+      {
+        "id": "MP-2",
+        "target": "apps/api/services/identity_coop.py :: _lot_remaining",
+        "mutation": "made the SUM window-AWARE by adding `CreditLedgerEntry.expires_at > datetime.now(timezone.utc)` to the WHERE clause",
+        "gate_probed": "G-18 (coop_expiry_never_negative)",
+        "observed": "FAILED — `assert written == 3` -> `assert 0 == 3` at tests/integration/test_identity_coop_ledger.py:505",
+        "verdict": "NON-VACUOUS, and the failure shape is EXACTLY the one _lot_remaining's docstring predicts: a window-aware remainder reads a lapsed lot's ACCRUE as out-of-window, computes remaining==0, hits the skip, and writes ZERO rows forever. G-18 leg 5 (positive expiry proof) is what catches it. The window-blind SUM is confirmed load-bearing.",
+        "revert": "byte-exact; numstat back to 339/4"
+      },
+      {
+        "id": "MP-3",
+        "target": "apps/api/services/identity_coop.py :: record_contribution",
+        "mutation": "inserted `from apps.api.models.suppression import SuppressionEntry` + `_probe = SuppressionEntry` inside the function body",
+        "gate_probed": "tests/unit/test_identity_coop.py::test_coop_module_imports_no_suppression_scope (the NARROWED tripwire)",
+        "observed": "FAILED — `assert not any(\"suppression\" in m for m in imported)` -> AssertionError showing {'SuppressionEntry', 'apps.api.models.suppression', ...} at tests/unit/test_identity_coop.py:566",
+        "verdict": "The 17-08-26 user-authorized NARROWING STILL BITES. A write-path suppression reference is caught. Tripwire is not vacuous.",
+        "revert": "byte-exact; no `_probe` text remains (grep clean)"
+      }
+    ],
+    "post_probe_reconfirm": ".venv/bin/python3.11 -m pytest tests/ -m integration -q -k \"coop_consumption_count_per_live_site or coop_expiry_never_negative\" -> 2 passed, 3662 deselected in 7.29s"
+  },
+
+  "narrowing_review": {
+    "question": "Did the 17-08-26 narrowing of test_coop_module_imports_no_suppression_scope over-relax the ban?",
+    "verdict": "NO — the narrowing is sound and mechanically real.",
+    "checks": [
+      { "requirement": "ban covers IMPORTS inside the write path", "evidence": "lines 550-554 collect ast.ImportFrom/ast.Import; asserted at 566-568 (module substring, SuppressionEntry, GRAPH_WRITE_BLOCKING_SCOPES)", "status": "COVERED" },
+      { "requirement": "ban covers REFERENCES inside the write path", "evidence": "lines 555-558 collect ast.Name.id and ast.Attribute.attr; asserted at 571-572", "status": "COVERED — this is the half that matters now, since Phase 2a's import is function-local to consumption_count and a module-level scan alone would be trivially satisfiable" },
+      { "requirement": "ban covers SCOPE LITERALS inside the write path", "evidence": "lines 559-564 collect ast.Constant str values excluding the function's OWN docstring; asserted at 575 against {'erased','do_not_process','all'}", "status": "COVERED" },
+      { "requirement": "a rename must fail LOUDLY, not silently scan nothing", "evidence": "lines 539-541: `assert {n.name for n in write_path} == set(_COOP_WRITE_PATH_FUNCS)` — set EQUALITY, not subset. Renaming either function yields a mismatched set and an immediate AssertionError listing what was found.", "status": "COVERED" }
+    ],
+    "scope": "_COOP_WRITE_PATH_FUNCS = ('record_contribution', 'maybe_record_contribution') — exactly the two write-path functions. consumption_count (the READ path, which legitimately uses SuppressionEntry(scope='erased') to EXCLUDE erased identities) is correctly outside the ban.",
+    "direction_check": "Phase 2a's use is privacy-STRENGTHENING (strictly fewer rows counted, co-op can never overcharge) — the opposite direction from what the tripwire guards. Narrowing restores the tripwire's stated Phase 1 intent rather than relaxing it.",
+    "residual_observation": "ast.walk(func) also descends into nested function definitions, so the ban is if anything slightly BROADER than the two top-level bodies. Not a gap."
+  },
+
+  "flag_and_constant_verification": {
+    "identity_coop_enabled": "apps/api/config.py:480 -> `identity_coop_enabled: bool = False` — OFF",
+    "coop_expiry_sweep_interval_minutes": "apps/api/config.py:496 -> 60 (inert while the flag is OFF)",
+    "Site.contribution_enabled": "apps/api/models/site.py:38-40 -> `mapped_column(default=False, nullable=False, server_default=\"false\")` — OFF at both ORM and DB tiers",
+    "LEDGER_ENTRY_TYPES": "apps/api/models/identity_coop.py:57 -> ('ACCRUE', 'SPEND', 'EXPIRE') — EXACTLY three, unchanged; no SPEND-adjacent or REVERSE type leaked in from 2b",
+    "runtime_flag_check_present": "apps/api/jobs/scheduler.py _coop_expiry_sweep_job has `if not settings.identity_coop_enabled: return` (K-5 — present but executed by no tier, accepted residual)",
+    "status": "PASS — zero runtime behavior change in any deployed process"
+  },
+
+  "attribution_evidence": {
+    "failing_test": "tests/integration/test_ip_org_pipeline.py::TestLockSerialization::test_a_second_refresh_backs_off_while_the_shared_lock_is_held",
+    "symptom": "RuntimeError: Event loop is closed, raised from asyncpg connection.close() -> _cancel_current_command -> loop.create_task on an already-closed loop",
+    "isolation_runs": [
+      { "run": "A — failing test ALONE", "command": ".venv/bin/python3.11 -m pytest '<nodeid>' -q", "result": "1 passed in 13.97s", "meaning": "the test is not intrinsically broken" },
+      { "run": "B — failing test's file + the NEW Phase 2a file together", "command": ".venv/bin/python3.11 -m pytest tests/integration/test_ip_org_pipeline.py tests/integration/test_identity_coop_ledger.py -q", "result": "33 passed in 224.14s", "meaning": "co-location with the new Phase 2a test file does NOT reproduce the failure — the new file is not the trigger" },
+      { "run": "C — full integration lane WITHOUT the new Phase 2a file", "command": ".venv/bin/python3.11 -m pytest tests/ -m integration -q --ignore=tests/integration/test_identity_coop_ledger.py", "result": "2 failed, 647 passed, 3003 deselected in 1609.03s (26:49) — FAILED tests/integration/test_outcome_digest.py::TestWeeklyDigest::test_sends_once_stamps_and_throttles AND FAILED tests/integration/test_referrals.py::TestActivation::test_activation_awards_both_sides_exactly_once", "meaning": "DECISIVE. With the Phase 2a test file entirely REMOVED the lane still fails, and the victim SHIFTED to two completely different tests in different files — neither of them the ip_org test that failed in the full run. This is the textbook order-dependent event-loop flake signature and it is definitively NOT caused by Phase 2a. Note the direction: 1 failure WITH the new file vs 2 failures WITHOUT it." }
+    ],
+    "domain_argument": "test_ip_org_pipeline exercises ip_org ingest + a shared advisory lock on ip_org tables. It shares NO table, service, model or fixture with identity_coop. The only shared surface is the GLOBAL async_session engine that conftest reuses across event loops — the documented flake vector.",
+    "prior_baseline": "The pre-EVL baseline run with the new file ignored failed two DIFFERENT tests — the victim-shifts signature of an order-dependent event-loop flake rather than a deterministic defect.",
+    "conclusion": "PRE-EXISTING, NOT Phase 2a. Recorded as a known-gap, not a Phase 2a defect. Zero identity_coop tests failed in any run."
+  },
+
+  "worktree_integrity": {
+    "dirty_entries_before": 65,
+    "dirty_entries_after": 65,
+    "git_operations_performed": "NONE — no stash, rebase, checkout, commit, or reset. `git stash list` unchanged (11); no rebase in progress.",
+    "source_files_permanently_modified_by_this_run": "NONE — all three mutation probes reverted byte-exact and verified via git diff --numstat",
+    "files_written_by_this_run": ["process/features/visitors-identity/active/identity-coop_07-08-26/harness/evl-phase2a-confirmation-17-08-26.json"],
+    "files_deliberately_NOT_touched": ["harness/review-decision.json (human-only)", "harness/verification.json", "harness/adversarial-validation.json", "all 65 pre-existing dirty entries from other workstreams"],
+    "disposable_container": "evl2a-pg created and removed by this run; infra-redis-1 stopped for G-11 and restarted (leave-as-found, re-verified LISTENING)"
+  },
+
+  "known_gaps_carried_unchanged": [
+    "K-2 — multi-process concurrency on the H2 enqueue->sweep window (no gate)",
+    "K-3 — no live flag-on gate anywhere (blocked by the coop_terms_version legal re-pin); monkeypatch is the sanctioned substitute",
+    "K-5 — _coop_expiry_sweep_job()'s runtime identity_coop_enabled check is executed by no tier (resolution D, revisit in 2b)",
+    "G-20 residual (i) — lock ACQUISITION is ungated; a no-lock implementation passes both legs. INDEPENDENTLY RE-CONFIRMED by reading coop_expiry_sweep.py: the gate asserts only the post-condition.",
+    "G-20 residual (ii) — release proven in the test topology only, not the pooled production shape (routed via S-27)",
+    "G-20 residual (iii) — aborted-transaction exception path defeating the finally-unlock",
+    "K-1 / K-4 — REVERSE-clawback semantics and orphan-lot/site_id-reuse for the SPEND writer: out of 2a scope by design"
+  ],
+
+  "gates_NOT_re_run_by_this_confirmation": [
+    {
+      "id": "G-4",
+      "behavior": "aggregation query plan / conditional-E1 trigger — EXPLAIN on disposable PG with >=100k rows seeded via seed_api_usage_logs",
+      "status": "NOT RE-RUN by this EVL confirmation",
+      "why": "Requires seeding >=100k api_usage_logs rows on a disposable Postgres. Its only deliverable is the CONDITIONAL-E1 decision, which is already settled and recorded in-tree: b7e4d21a9c58 states verbatim that the A4/S-9 EXPLAIN evidence showed no seq scan on api_usage_logs and therefore no E1 covering index was added. Reported honestly as unconfirmed rather than claimed.",
+      "risk": "LOW — E1 is a performance index, not a correctness surface. If a future EXPLAIN does show a seq scan, the E1 index is folded into this same migration file per the plan's one-file rule."
+    },
+    {
+      "id": "G-15",
+      "behavior": "conditional E1 migration round-trip",
+      "status": "N/A BY DESIGN — E1 was never created (see G-4). G-15b (the MANDATORY E2 half) WAS run and passed."
+    }
+  ],
+
+  "new_gaps_found_by_this_confirmation_run": [
+    "None attributable to Phase 2a. The single integration failure is the pre-existing global-async_session event-loop flake, now DEFINITIVELY proven pre-existing by attribution run C (victim shifted to two different tests with the Phase 2a file removed).",
+    "Coverage gap in this confirmation itself: G-4 was not re-run (see gates_NOT_re_run_by_this_confirmation)."
+  ]
+}

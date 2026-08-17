@@ -123,7 +123,7 @@ Hard safety constraints (non-negotiable, per phase):
 SESSION GOAL: visitors-identity — Identity Co-op (opt-in contribution + spendable credit ledger)
 Ref: process/features/visitors-identity/active/identity-coop_07-08-26/identity-coop-umbrella_PLAN_07-08-26.md
 
-TARGET: Complete Phases 1→2→3 until:
+TARGET: Complete Phases 1→2a→2b→3 until: (Phase 2 was SPLIT 17-08-26; 2b is entry-gated on 2a LIVE)
 - All 12 SPEC ACs are proven or explicitly recorded as known-gaps with backlog stubs
 - Every phase has a written (non-placeholder) validate-contract and a green exit gate
 - All program flags remain default OFF; no production enablement
@@ -259,14 +259,16 @@ uses the corrected table.
 |---|---|---|---|
 | 0 (pre-program) | this file | Program artifacts created; upstream dependency status confirmed | — |
 | 1 — Ledger + contribution substrate | `.../identity-coop_07-08-26/phase-1-ledger-substrate_PLAN_07-08-26.md` | 3 new tables, `Site.contribution_enabled` (7-layer), 2-line hook at `_save_identified`, `identity_coop.py` service, fraud gate on `is_abuse_flagged`, erased-row exclusion. No dashboard. | vocab-reconcile PASS + SPEC A LIVE |
-| 2 — Consumption aggregation + spend | `.../identity-coop_07-08-26/phase-2-consumption-spend_PLAN_07-08-26.md` | Read-only consumption aggregation over `api_usage_logs`, FIFO lot expiry sweep, spend-against-`monthly_limit` wiring, AC-8 exact-reconciliation test. | Phase 1 exit gate |
-| 3 — Contributor surface + opt-in UX | `.../identity-coop_07-08-26/phase-3-contributor-surface_PLAN_07-08-26.md` | Self-scoped stats endpoint, opt-in prompt + model policy language + acceptance flow, dashboard visibility. | Phase 2 exit gate |
+| 2a — Consumption aggregation + FIFO expiry | `.../identity-coop_07-08-26/phase-2-consumption-spend_PLAN_07-08-26.md` (retitled in place to Phase 2a) | Read-only consumption aggregation over `api_usage_logs`, FIFO lot accounting, explicit idempotent EXPIRE sweep with lot-symmetric stamping, AC-8 exact-reconciliation test. **No spend wiring, no REVERSE.** | Phase 1 exit gate |
+| 2b — Spend wiring | `.../identity-coop_07-08-26/phase-2b-spend-wiring_PLAN_16-08-26.md` | Read credits in `check_usage_allowed`, write the FIFO SPEND row in `increment_usage` on a savepoint, per-user blocking advisory lock, dashboard/gate limit parity. | **Phase 2a LIVE** |
+| 3 — Contributor surface + opt-in UX | `.../identity-coop_07-08-26/phase-3-contributor-surface_PLAN_07-08-26.md` | Self-scoped stats endpoint, opt-in prompt + model policy language + acceptance flow, dashboard visibility. | **Phase 2b exit gate** |
 
 ### Join Conditions
 
 - Phase 1 MUST NOT start until BOTH upstream dependencies clear (vocab-reconcile PASS/descoped, SPEC A LIVE).
-- Phase 2 MUST NOT start until Phase 1 exit gate passes (tables + hook + accrual proven).
-- Phase 3 MUST NOT start until Phase 2 exit gate passes (a stats surface with no spend/expiry behind it would show numbers that later change meaning).
+- Phase 2a MUST NOT start until Phase 1 exit gate passes (tables + hook + accrual proven).
+- **Phase 2b MUST NOT start until Phase 2a is LIVE** (its SPEND writer inherits 2a's lot-symmetric stamping contract from shipped code; building it against an unshipped 2a re-opens F-1).
+- Phase 3 MUST NOT start until Phase 2b exit gate passes (a stats surface with no spend/expiry behind it would show numbers that later change meaning).
 
 ---
 
@@ -480,9 +482,9 @@ classes requiring at minimum a Hybrid test gate per phase.
 
 ## Current Execution State
 
-Last updated: 07-08-26 (PVL supplement cycle 2)
+Last updated: 17-08-26 (Phase 2 SPLIT into 2a + 2b — explicit user decision)
 Completed phases: Phase 0 (Planning)
-Current phase: Phase 1 of 3 — Ledger + contribution substrate
+Current phase: Phase 1 of 4 — Ledger + contribution substrate
 Current phase status: ⏳ PLANNED — **entry gate CLEARED 07-08-26; EXECUTE authorized**
   1. `identity-vocab-reconcile_07-08-26` — CLEARED: `Gate: CONDITIONAL`, user-accepted at supplement
      cycle 9, EXECUTED and merged. Intent satisfied (resolver churn settled and shipped); the literal
@@ -499,9 +501,12 @@ Phase 1 report: not yet written (destination
   `process/features/visitors-identity/active/identity-coop_07-08-26/phase-1-ledger-substrate_REPORT_07-08-26.md`)
 Validate-contract status: **written 2026-08-07 for Phase 1 — `Gate: CONDITIONAL`, accepted**
   (3rd outer-PVL pass; supersedes the 2nd pass's BLOCKED). Zero behavioural FAILs; the five
-  remaining concerns N1-N5 were doc-sync items and are now applied. Phases 2 and 3: none written.
+  remaining concerns N1-N5 were doc-sync items and are now applied. **Phase 2a: every prior
+  contract SUPERSEDED by the 17-08-26 split — PVL re-runs from V1. Phase 2b: never validated,
+  placeholder contract. Phase 3: none written.**
 Program Net Gate: PENDING
-Next phase: Phase 2 — Consumption + spend (blocked until Phase 1 reaches EVL green)
+Next phase: Phase 2a — Consumption aggregation + FIFO expiry (blocked until Phase 1 reaches EVL green;
+  entry gate itself PASSED 16-08-26, but PVL must re-run from V1 against the narrowed 2a scope)
 Latest validator run: 07-08-26 — see Phase 0 report
 
 Loop step values: RESEARCH | INNOVATE | PLAN-SUPPLEMENT | PVL | EXECUTE | EVL | UPDATE-PROCESS

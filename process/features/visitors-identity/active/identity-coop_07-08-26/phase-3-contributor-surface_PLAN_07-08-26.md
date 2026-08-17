@@ -423,3 +423,7 @@ What this coverage does NOT prove:
 
 Gate: CONDITIONAL
 Accepted by: PENDING
+
+---
+
+**Phase 2 split addendum (17-08-26):** the expiry reporting rule for this phase's dashboard is **"EXPIRE" only** — Phase 2a ships no `REVERSE` entry type (`LEDGER_ENTRY_TYPES` stays `("ACCRUE","SPEND","EXPIRE")`; REVERSE moved wholesale to `backlog/coop-credit-reversal-semantics_NOTE_16-08-26.md`), so the "you lost N credits on D" figure reads EXPIRE rows **without** the `spendable_balance` window predicate and must not reference or branch on REVERSE. This phase's entry gate is now **Phase 2b** exit, not Phase 2.
