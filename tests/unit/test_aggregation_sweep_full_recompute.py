@@ -50,11 +50,14 @@ def captured(monkeypatch):
         calls.append((site_id, since))
         return 1
 
-    async def _acquire(key, ttl):
+    async def _acquire(key, ttl, token="1"):
         return True
 
-    async def _release(key):
+    async def _release(key, token=None, **kwargs):
         return None
+
+    async def _extend(key, token, ttl):
+        return True
 
     monkeypatch.setattr(
         "apps.api.services.visitor_aggregator.aggregate_visitors_for_site",
@@ -64,6 +67,7 @@ def captured(monkeypatch):
         "apps.api.services.aggregation_debounce.try_acquire", _acquire
     )
     monkeypatch.setattr("apps.api.services.aggregation_debounce.release", _release)
+    monkeypatch.setattr("apps.api.services.aggregation_debounce.extend", _extend)
     monkeypatch.setattr(
         scheduler, "async_session", lambda: _FakeSession([("site-a",), ("site-b",)])
     )
@@ -107,6 +111,11 @@ class TestSourceLevelGuards:
 
     def test_sweep_does_not_read_the_watermark(self):
         assert "get_aggregation_watermark" not in self._source()
+
+    def test_sweep_does_not_stamp_the_watermark(self):
+        src = inspect.getsource(scheduler._sweep_one_site)
+        assert "advance_watermark" not in src
+        assert "_advance_watermark" not in src
 
     def test_sweep_is_sequential_no_parallel_fanout(self):
         """11d pool-awareness: 5 connections shared with request traffic."""

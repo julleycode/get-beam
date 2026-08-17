@@ -456,7 +456,8 @@ async def ingest_events(
             # it (SPEC AC-7). Whitelisted/bounded by the schema validator before
             # it reaches here — never the raw client object.
             agent_sig=event.agent_sig,
-            created_at=event.ts.replace(tzinfo=None) if event.ts.tzinfo else event.ts,
+            # F2 / Validation S1: aggregation window is server now(), never event.ts.
+            created_at=datetime.utcnow(),
         )
         for event in batch.events
     ]
@@ -906,26 +907,31 @@ async def _process_signal_events(
 async def _background_aggregate(site_id: str) -> None:
     """Run visitor aggregation in a background task with its own DB session.
 
-    Capacity-hardening Phase 3 (W1) checklist item 7 + instruction E16(b). Two
-    coordination checks run BEFORE any DB work, both against Redis so they hold
-    across containers (the in-memory `_aggregating` set above is only a cheap
-    per-process first layer and cannot dedup N containers):
+    Capacity-hardening Phase 3 (W1) checklist item 7 + instruction E16(b), plus
+    Phase 1 F6/F7/F8. Two coordination checks run BEFORE any DB work, both
+    against Redis so they hold across containers (the in-memory `_aggregating`
+    set above is only a cheap per-process first layer and cannot dedup N
+    containers):
 
     1. `agg:sweep_pending:{site_id}` — the repair sweep's yield marker. When it is
        set the sweep is waiting for the debounce key so it can run a FULL
        recompute, which is a strict superset of this run's work. We stand down and
        deliberately do NOT take the debounce key; taking it is exactly what
        starves the sweep on a continuously-ingesting site.
-    2. `agg:debounce:{site_id}` — `SET NX EX aggregation_min_interval_seconds`.
-       Already held means another run covers these events.
+    2. `agg:debounce:{site_id}` — mutex held until ``release`` in ``finally``
+       (F8). Already held means another run covers these events.
 
-    If Redis is degraded we FAIL OPEN to today's behavior (the in-memory guard
-    alone) — this path must never fail the 204.
+    Redis degraded (``acquired is None``): flag ON → SKIP agg (F7, same as
+    sweep); flag OFF → fail open so the 204 contract is unchanged.
     """
+    lock = None
     try:
+        from sqlalchemy import text
+
         from apps.api.config import settings as _s
         from apps.api.services import aggregation_debounce as _dbnc
         from apps.api.services.visitor_aggregator import (
+            advance_watermark,
             aggregate_visitors_for_site,
             get_aggregation_watermark,
         )
@@ -935,20 +941,35 @@ async def _background_aggregate(site_id: str) -> None:
             logger.info("aggregation_yielded_to_sweep", site_id=site_id)
             return
 
-        acquired = await _dbnc.try_acquire(
-            _dbnc.debounce_key(site_id), _s.aggregation_min_interval_seconds
-        )
+        lock = _dbnc.RunLock(site_id, _s.aggregation_min_interval_seconds)
+        acquired = await lock.acquire()
         if acquired is False:
             logger.info("aggregation_debounced", site_id=site_id)
             return
-        # acquired is None → Redis degraded → fall through (fail open).
+        if acquired is None:
+            if _s.aggregation_incremental_enabled:
+                logger.warning(
+                    "aggregation_ingest_skipped_redis_degraded", site_id=site_id
+                )
+                return
+            logger.info(
+                "aggregation_ingest_redis_degraded_proceeding", site_id=site_id
+            )
 
         async with async_session() as db:
             since = None
+            run_started_at = None
             if _s.aggregation_incremental_enabled:
                 # A NULL watermark means "never aggregated" → full recompute,
-                # which then stamps the watermark for subsequent runs.
+                # then stamp from the clock taken BEFORE the read (F6).
                 since = await get_aggregation_watermark(db, site_id)
+                if since is None:
+                    run_started_at = (await db.execute(text("SELECT now()"))).scalar()
             await aggregate_visitors_for_site(db, site_id, since=since)
+            if run_started_at is not None:
+                await advance_watermark(db, site_id, run_started_at)
     except Exception as e:
         logger.warning("background_aggregate_failed", error=str(e), site_id=site_id)
+    finally:
+        if lock is not None:
+            await lock.release()

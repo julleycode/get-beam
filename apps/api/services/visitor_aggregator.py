@@ -537,7 +537,7 @@ async def aggregate_visitors_for_site(
     # half-open window next time; because the window is `created_at > watermark`
     # and never a rolling "last N hours", a re-read can never double-merge.
     if since is not None and run_started_at is not None:
-        await _advance_watermark(db, site_id, run_started_at)
+        await advance_watermark(db, site_id, run_started_at)
 
     # Phase 4: Resolve IP → company domain for visitors that don't have one yet.
     # This already ran AFTER the commit above, so nothing needs "moving"; the
@@ -557,8 +557,13 @@ async def aggregate_visitors_for_site(
     return count
 
 
-async def _advance_watermark(db: AsyncSession, site_id: str, stamp: datetime) -> None:
-    """Stamp `sites.last_aggregated_at` post-commit. Never fails the run."""
+async def advance_watermark(db: AsyncSession, site_id: str, stamp: datetime) -> None:
+    """Stamp `sites.last_aggregated_at` post-commit. Never fails the run.
+
+    Public so ingest/bootstrap can stamp after a successful *full* run without
+    duplicating SQL. ``aggregate_visitors_for_site`` still stamps only when
+    ``since is not None`` — a full aggregator call (``since=None``) does not.
+    """
     from apps.api.models.site import Site
 
     try:

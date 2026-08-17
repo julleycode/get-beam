@@ -1,0 +1,18 @@
+{
+  "task": "phase-01-incremental-aggregation-soak-and-prod-flag",
+  "planPath": "plans/260818-0032-scale-ready-getbeam/phase-01-incremental-aggregation-soak-and-prod-flag.md",
+  "reviewer": "vc-code-reviewer",
+  "decision": "approved-with-concerns",
+  "rationale": "Phase 1 blast-radius code meets F2/F6/F7/F8/F9 and keeps ingest 204 plus flag default False. No blocking production-readiness defect in the listed files. Concerns: integration/soak unrun; F9 is operator-invoked and can skip hot sites without a yield marker; Python utcnow() vs Postgres now() clock skew.",
+  "timestamp": "2026-08-18T01:20:00+07:00",
+  "blockingFindings": [],
+  "nonBlockingFindings": [
+    "F9 run_aggregation_watermark_bootstrap is not registered in start_scheduler (intentional vs 24 add_job AST gate). Operator must invoke it and re-run until every site with events has last_aggregated_at. Hot sites can be skipped: F9 waits TTL+5 then returns contended and does not set the sweep yield marker.",
+    "Integration tests (test_visitor_aggregation_incremental, test_aggregation_debounce, test_aggregation_watermark_bootstrap) did not run: localhost:5433 and :6379 not listening.",
+    "Prod soak canary and Railway AGGREGATION_INCREMENTAL_ENABLED=true are operator leftovers, not proven by this review.",
+    "F2 writes Event.created_at = datetime.utcnow() (API process clock). Watermark stamps use SELECT now() (Postgres timestamptz, then _strip_tz). Small skew can drop events from the incremental window until the hourly full SET sweep.",
+    "RunLock leftover cooldown after a short run preserves flag-OFF debounce tests. This is compatible with F8 (mutex held during the run via refresh). After a run longer than TTL, cooldown is 0 so the next ingest may fire immediately.",
+    "F2 unit coverage is structural (source string). Behavioral proof lives in TestFutureEventTs, which is integration-gated and unrun."
+  ],
+  "notes": "High-risk pack classes (auth/billing/schema/public-API/deploy/trust-boundary) are not in this blast radius. Pixel ingest 204 happy-path is unchanged. adversarial-validation.json is not required. Flip the Railway flag only after F9 reports no remaining NULL watermarks on sites that have events."
+}

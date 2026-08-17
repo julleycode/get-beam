@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy import select
+from sqlalchemy import exists, select, text
 
 from apps.api.config import settings
 from apps.api.models.database import async_session
@@ -452,10 +452,10 @@ async def _sweep_one_site(
     from apps.api.services import aggregation_debounce as dbnc
     from apps.api.services.visitor_aggregator import aggregate_visitors_for_site
 
-    key = dbnc.debounce_key(site_id)
     marker = dbnc.sweep_pending_key(site_id)
+    lock = dbnc.RunLock(site_id, settings.aggregation_min_interval_seconds)
 
-    acquired = await dbnc.try_acquire(key, settings.aggregation_min_interval_seconds)
+    acquired = await lock.acquire()
 
     # End-of-pass retry (E16c): the yield marker is already set, so no NEW
     # per-ingest run may take the key — it therefore frees within one TTL. Poll
@@ -465,9 +465,7 @@ async def _sweep_one_site(
         deadline = asyncio.get_running_loop().time() + wait_seconds
         while acquired is False and asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(1)
-            acquired = await dbnc.try_acquire(
-                key, settings.aggregation_min_interval_seconds
-            )
+            acquired = await lock.acquire()
 
     if acquired is None:
         if settings.aggregation_incremental_enabled:
@@ -497,14 +495,17 @@ async def _sweep_one_site(
             # explicitly and unconditionally; the incremental branch is never
             # taken, whatever aggregation_incremental_enabled says. This job is
             # the sole writer of avg_time_on_page and intent_score under D7.
+            # MUST NOT stamp last_aggregated_at (F6).
             count = await aggregate_visitors_for_site(db, site_id, since=None)
         return ("ran", count)
     except Exception:
         logger.exception("aggregation_sweep_site_failed", site_id=site_id)
         return ("skipped", 0)
     finally:
-        # E16(d) — clear the marker whether the site succeeded or failed, so a
-        # crash can never wedge every per-ingest trigger for that site.
+        # F8 — release the debounce mutex (leftover cooldown applied inside
+        # RunLock). E16(d) — clear the marker whether the site succeeded or
+        # failed, so a crash can never wedge every per-ingest trigger.
+        await lock.release()
         await dbnc.release(marker)
 
 
@@ -568,6 +569,108 @@ async def _aggregation_sweep_job() -> None:
         )
     except Exception:
         logger.exception("aggregation_sweep_crashed")
+
+
+async def _bootstrap_one_site(site_id: str) -> tuple[str, int]:
+    """Full recompute + stamp for one site. Sequential fleet bootstrap (F9).
+
+    Shares ``debounce_key(site_id)`` with ingest and sweep. Unlike the sweep,
+    this path MUST stamp ``last_aggregated_at`` from the clock taken before
+    the read (half-open ``created_at > wm``).
+    """
+    from apps.api.services import aggregation_debounce as dbnc
+    from apps.api.services.visitor_aggregator import (
+        advance_watermark,
+        aggregate_visitors_for_site,
+        get_aggregation_watermark,
+    )
+
+    lock = dbnc.RunLock(site_id, settings.aggregation_min_interval_seconds)
+    acquired = await lock.acquire()
+    if acquired is False:
+        wait_seconds = settings.aggregation_min_interval_seconds + 5
+        deadline = asyncio.get_running_loop().time() + wait_seconds
+        while acquired is False and asyncio.get_running_loop().time() < deadline:
+            await asyncio.sleep(1)
+            acquired = await lock.acquire()
+
+    if acquired is None:
+        if settings.aggregation_incremental_enabled:
+            logger.warning(
+                "aggregation_bootstrap_skipped_redis_degraded", site_id=site_id
+            )
+            return ("skipped", 0)
+        logger.info("aggregation_bootstrap_redis_degraded_proceeding", site_id=site_id)
+    elif acquired is False:
+        logger.warning("aggregation_bootstrap_site_contended", site_id=site_id)
+        return ("skipped", 0)
+
+    try:
+        async with async_session() as db:
+            existing = await get_aggregation_watermark(db, site_id)
+            if existing is not None:
+                return ("skipped", 0)
+            run_started_at = (await db.execute(text("SELECT now()"))).scalar()
+            count = await aggregate_visitors_for_site(db, site_id, since=None)
+            if run_started_at is not None:
+                await advance_watermark(db, site_id, run_started_at)
+        return ("ran", count)
+    except Exception:
+        logger.exception("aggregation_bootstrap_site_failed", site_id=site_id)
+        return ("skipped", 0)
+    finally:
+        await lock.release()
+
+
+async def run_aggregation_watermark_bootstrap() -> dict:
+    """Sequential full+stamp for every site that has events and a NULL watermark.
+
+    F9 — operator-invoked BEFORE flipping ``AGGREGATION_INCREMENTAL_ENABLED``.
+    Does not change the flag. Callable from the scheduler process or a one-shot
+    (``asyncio.run(run_aggregation_watermark_bootstrap())``). Not registered in
+    ``start_scheduler`` so the job-count AST gate stays at 24 add_job calls.
+    Sites are processed strictly sequentially (same pool-awareness as the sweep).
+    """
+    from apps.api.models.event import Event
+    from apps.api.models.site import Site
+
+    ran = 0
+    skipped = 0
+    visitors = 0
+    try:
+        async with async_session() as db:
+            result = await db.execute(
+                select(Site.site_id).where(
+                    Site.last_aggregated_at.is_(None),
+                    exists().where(Event.site_id == Site.site_id),
+                )
+            )
+            site_ids = [row[0] for row in result.all()]
+
+        for site_id in site_ids:
+            outcome, count = await _bootstrap_one_site(site_id)
+            if outcome == "ran":
+                ran += 1
+                visitors += count
+            else:
+                skipped += 1
+
+        logger.info(
+            "aggregation_watermark_bootstrap_complete",
+            sites=len(site_ids),
+            aggregated=ran,
+            skipped=skipped,
+            visitors=visitors,
+        )
+    except Exception:
+        logger.exception("aggregation_watermark_bootstrap_crashed")
+        raise
+    return {
+        "sites": ran + skipped,
+        "aggregated": ran,
+        "skipped": skipped,
+        "visitors": visitors,
+    }
 
 
 def start_scheduler() -> None:
