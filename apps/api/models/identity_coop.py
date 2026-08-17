@@ -129,6 +129,20 @@ class CreditLedgerEntry(Base):
         Index("idx_coop_ledger_site_id", "site_id"),
         Index("idx_coop_ledger_lot_id", "lot_id"),
         Index("idx_coop_ledger_expires_at", "expires_at"),
+        # Phase 2a (E2): at most ONE EXPIRE row per lot, enforced at the DB tier.
+        # Duplicates are BALANCE-INVISIBLE under the lot-symmetric stamping rule
+        # below, so no balance assertion at any tier could ever see them — while
+        # Phase 3's dashboard reads EXPIRE rows WITHOUT the balance window and
+        # would report double the credits lost. Same principle as
+        # uq_coop_accrued_site_email: the index, not service code, is the
+        # enforcement. Mirrored here (not only in the migration) because the
+        # integration schema is built by Base.metadata.create_all, never alembic.
+        Index(
+            "uq_coop_ledger_expire_per_lot",
+            "lot_id",
+            unique=True,
+            postgresql_where=text("entry_type = 'EXPIRE'"),
+        ),
     )
 
     site_id: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -141,11 +155,18 @@ class CreditLedgerEntry(Base):
     lot_id: Mapped[uuid.UUID | None] = mapped_column(
         PGUUID(as_uuid=True), nullable=True
     )
-    # ACCRUE only — created_at + coop_credit_hold_hours (provisional hold).
+    # ACCRUE: created_at + coop_credit_hold_hours (provisional hold).
+    # Every NON-ACCRUE row (EXPIRE here in Phase 2a; SPEND in Phase 2b) copies
+    # this value VERBATIM from its source lot (P2-D5 lot-symmetric stamping), so
+    # an offsetting row enters and leaves spendable_balance's window in lockstep
+    # with the +N it offsets. NULL on a non-ACCRUE row is a DEFECT, not a
+    # default: it would make the row "always count" and drive the balance to −N.
     spendable_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    # ACCRUE only — created_at + coop_credit_expiry_days.
+    # ACCRUE: created_at + coop_credit_expiry_days.
+    # Non-ACCRUE rows copy the source lot's value verbatim — same P2-D5 stamping
+    # rule and the same NULL-is-a-defect contract as spendable_at above.
     expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

@@ -491,6 +491,9 @@ class Settings(BaseSettings):
     coop_terms_version: str = (
         "c655274f585ef9b515688e9d4572f7cd64b8ed2fed8ebe6602e0040ecf73d7eb"
     )
+    # Phase 2a: FIFO lot-expiry sweep cadence. Inert while identity_coop_enabled
+    # is False — the job is not even registered (jobs/scheduler.py).
+    coop_expiry_sweep_interval_minutes: int = 60
 
     # ─── Agent gateway (agent-gateway Phase 1+2) ───
     # When true, the public per-site agent-facing read surface is served:

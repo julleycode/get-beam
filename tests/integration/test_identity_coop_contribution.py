@@ -441,12 +441,22 @@ async def owner_client(test_client, sessions):
 
 
 @pytest.mark.asyncio
-async def test_flag_on_requires_acceptance(owner_client, sessions):
+async def test_flag_on_requires_acceptance(owner_client, sessions, monkeypatch):
     """422 without / with a bad terms_version; 200 + exactly one acceptance row.
 
     The acceptance row and the flag flip share one transaction, so "flag ON but no
     audit row" is not a state this endpoint can produce.
+
+    The global flag is patched ON for the WHOLE function (supplement item 9a /
+    SUP2-C1), not just the 200 path: the M2 guard sits BEFORE the digest
+    comparison, so with the flag OFF all three digest legs below would
+    short-circuit on the global-flag 422 and stay green while proving nothing —
+    they would still pass with the entire digest block deleted. The flag-OFF
+    contract has its own function (test_contribution_flip_gated_on_global_flag).
+    The `monkeypatch` fixture is mandatory here (E-S3): a bare setattr would leak
+    the flag ON into the two tests that require it OFF and silently invert them.
     """
+    monkeypatch.setattr(settings, "identity_coop_enabled", True)
     url = f"/api/v1/sites/{SITE_ON}"
 
     async def flag() -> bool:
@@ -548,3 +558,491 @@ async def test_foreign_site_is_404_not_403(test_client, sessions):
         assert r.status_code == 404
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+
+
+# ═══════════════════════ Post-audit fix supplement (16-08-26) ═══════════════════
+#
+# S3/S4/S5 legs for the 16-08-26 supplement: H1 (site delete cascade), H2 (the
+# erasure enqueue→sweep window), M2 (the opt-in flip guard), M3 (the resolver
+# hook actually executes). One function per gate — a single function cannot
+# substring-match two different `-k` selectors.
+
+SITE_SUP = "site_coop_sup"
+SUP_EMAIL = "supplement.person@example.com"
+
+
+@pytest_asyncio.fixture
+async def coop_on(monkeypatch):
+    """Global co-op flag ON for the duration of one test (restored on teardown)."""
+    monkeypatch.setattr(settings, "identity_coop_enabled", True)
+    return True
+
+
+@pytest_asyncio.fixture
+async def no_mx(monkeypatch):
+    """Deterministic email validation — the real one does a live MX lookup."""
+    from apps.api.services import email_validator
+
+    async def _ok(email: str):
+        return True, ""
+
+    monkeypatch.setattr(email_validator, "validate_email", _ok)
+    return True
+
+
+async def _seed_contributing_site(
+    s: AsyncSession, site_id: str, visitor_id: str, *, contribution_enabled: bool = True
+) -> None:
+    """A site opted into the co-op plus one visitor ready to be identified."""
+    from apps.api.models.visitor import Visitor
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    s.add(
+        Site(
+            site_id=site_id,
+            user_id=uuid.uuid4(),
+            name="Sup",
+            url=f"https://{site_id}.example.com",
+            contribution_enabled=contribution_enabled,
+        )
+    )
+    s.add(
+        Visitor(
+            site_id=site_id,
+            visitor_id=visitor_id,
+            fingerprint=f"fp_{visitor_id}",
+            first_seen=now,
+            last_seen=now,
+        )
+    )
+    await s.commit()
+
+
+async def _resolve(s: AsyncSession, site_id: str, visitor_id: str, email: str):
+    """Drive the REAL _save_identified path — graph write and co-op hook included."""
+    from sqlalchemy import select as _select
+
+    from apps.api.models.visitor import Visitor
+    from apps.api.services.identity_resolver import IdentityResolver
+
+    visitor = (
+        await s.execute(
+            _select(Visitor).where(
+                Visitor.site_id == site_id, Visitor.visitor_id == visitor_id
+            )
+        )
+    ).scalar_one()
+    resolver = IdentityResolver(s, redis_client=None)
+    return await resolver._save_identified(
+        visitor, {"email": email, "full_name": "Sup Person"}, "pdl"
+    )
+
+
+async def _ledger_accrue_count(s: AsyncSession, site_id: str) -> int:
+    return (
+        await s.execute(
+            select(func.count())
+            .select_from(CreditLedgerEntry)
+            .where(
+                CreditLedgerEntry.site_id == site_id,
+                CreditLedgerEntry.entry_type == "ACCRUE",
+            )
+        )
+    ).scalar_one()
+
+
+# ───────────────────── SG-3 — M3: the hook really mints ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_end_to_end_accrual(sessions, coop_on, no_mx):
+    """SG-3 — both flags ON ⇒ a real resolve lands exactly 1 event + 1 ACCRUE row.
+
+    The first end-to-end proof the resolver hook mints anything: the unit lane
+    (SG-2) only proves the hook is CALLED.
+    """
+    site, vid = f"{SITE_SUP}_e2e", "v-e2e"
+    async with sessions() as s:
+        await _seed_contributing_site(s, site, vid)
+        await _resolve(s, site, vid, SUP_EMAIL)
+
+    async with sessions() as s:
+        events, ledger = await _counts(s, site)
+        assert (events, ledger) == (1, 1), (
+            f"expected exactly 1 event + 1 ledger row, got {events} + {ledger}"
+        )
+        assert await _ledger_accrue_count(s, site) == 1
+
+        ev = (
+            await s.execute(
+                select(ContributionEvent).where(ContributionEvent.site_id == site)
+            )
+        ).scalar_one()
+        assert ev.site_id == site
+        assert ev.email_bidx == email_hash(SUP_EMAIL)
+        assert ev.email_bidx is not None
+        assert ev.accrued is True
+
+
+# ───────────────────── SG-4 / SG-5 — H1: site delete cascade ─────────────────
+
+
+@pytest_asyncio.fixture
+async def delete_client(test_client, sessions):
+    """An owner client for a site that already carries co-op rows of all 3 kinds."""
+    user_id = uuid.uuid4()
+    now = datetime.now(timezone.utc)
+    async with sessions() as s:
+        s.add(
+            Site(
+                site_id=SITE_SUP,
+                user_id=user_id,
+                name="Delete me",
+                url="https://delete.example.com",
+                contribution_enabled=True,
+            )
+        )
+        await s.commit()
+        s.add_all(
+            [
+                ContributionEvent(
+                    site_id=SITE_SUP,
+                    email_bidx=email_hash(SUP_EMAIL),
+                    contributed_on=date.today(),
+                    source_provider="pdl",
+                    accrued=True,
+                ),
+                CreditLedgerEntry(
+                    site_id=SITE_SUP,
+                    entry_type="ACCRUE",
+                    amount=1,
+                    reason="contribution",
+                    spendable_at=now,
+                    expires_at=now + timedelta(days=30),
+                ),
+                ContributionConsentAcceptance(
+                    site_id=SITE_SUP,
+                    terms_version=settings.coop_terms_version,
+                    accepted_by_user_id=user_id,
+                    accepted_at=now,
+                ),
+            ]
+        )
+        await s.commit()
+    app.dependency_overrides[get_current_user] = lambda: User(
+        id=user_id, email="deleter@getbeam.fyi"
+    )
+    yield test_client
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+async def _acceptance_count(s: AsyncSession, site_id: str) -> int:
+    return (
+        await s.execute(
+            select(func.count())
+            .select_from(ContributionConsentAcceptance)
+            .where(ContributionConsentAcceptance.site_id == site_id)
+        )
+    ).scalar_one()
+
+
+@pytest.mark.asyncio
+async def test_site_delete_removes_coop(delete_client, sessions):
+    """SG-4 (H1) — deleting a site removes its spendable co-op rows.
+
+    Without this, deleting and re-creating a site with the same site_id
+    resurrected the old site's balance and its accrual suppression state.
+    """
+    async with sessions() as s:
+        assert await _counts(s, SITE_SUP) == (1, 1), "fixture did not seed co-op rows"
+
+    r = await delete_client.delete(f"/api/v1/sites/{SITE_SUP}")
+    assert r.status_code == 204, r.text
+
+    async with sessions() as s:
+        assert await _counts(s, SITE_SUP) == (0, 0), (
+            "co-op events/ledger survived the site delete — spendable credit is "
+            "resurrectable by re-creating the same site_id"
+        )
+
+
+@pytest.mark.asyncio
+async def test_site_delete_retains_consent(delete_client, sessions):
+    """SG-5 (H1-D) — the consent acceptance row is DELIBERATELY retained.
+
+    It is the append-only legal proof of lawful opt-in for contributions already
+    credited to other tenants. This gate goes red if a future "cleanup" adds
+    identity_contribution_consent_acceptances to the delete cascade.
+    """
+    async with sessions() as s:
+        assert await _acceptance_count(s, SITE_SUP) == 1
+
+    r = await delete_client.delete(f"/api/v1/sites/{SITE_SUP}")
+    assert r.status_code == 204, r.text
+
+    async with sessions() as s:
+        assert await _acceptance_count(s, SITE_SUP) == 1, (
+            "the consent audit trail was destroyed with the site (see H1-D)"
+        )
+
+
+# ─────────────── SG-6 / SG-6b — H2: the enqueue→sweep window ────────────────
+
+
+@pytest_asyncio.fixture
+async def sweep_sessions(test_engine, monkeypatch):
+    """Session factory + the sweep pointed at it (the sweep owns its session)."""
+    from apps.api.services import graph_erasure as ge
+
+    factory = async_sessionmaker(
+        test_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    monkeypatch.setattr(ge, "async_session", factory)
+    monkeypatch.setattr(ge.settings, "graph_erasure_sweep_enabled", True)
+    return factory
+
+
+async def _seed_match_key_email(s: AsyncSession, site_id: str, visitor_id: str, email: str):
+    """A first-party email so _collect_match_keys finds a blind index to erase.
+
+    Deliberately a VisitorEmail, NOT an IdentifiedVisitor: an existing
+    IdentifiedVisitor row sends _save_identified down its conflict-upsert branch,
+    which returns BEFORE the graph write and the co-op hook — the positive
+    control (SG-6b) could then never mint, making SG-6's zero vacuous.
+    _collect_match_keys reads both tables, so either yields the same bidx.
+    """
+    from apps.api.models.visitor_email import VisitorEmail
+
+    s.add(
+        VisitorEmail(
+            site_id=site_id, visitor_id=visitor_id, email=email, source="form"
+        )
+    )
+    await s.commit()
+
+
+@pytest.mark.asyncio
+async def test_erasure_window_race_blocked(sweep_sessions, coop_on, no_mx):
+    """SG-6 (H2, the core fix) — an erasure enqueued before a resolve blocks accrual.
+
+    Before S2 the tombstone was only written by the sweep, so a re-resolve inside
+    the sweep interval minted a PERMANENT cross-tenant row and a credit for a
+    person who had already asked to be forgotten. NO SWEEP IS RUN here — that is
+    the whole point.
+    """
+    from apps.api.services import graph_erasure as ge
+
+    site, vid = f"{SITE_SUP}_race", "v-race"
+    email = "race.erased@example.com"
+    async with sweep_sessions() as s:
+        await _seed_contributing_site(s, site, vid)
+        await _seed_match_key_email(s, site, vid, email)
+        await ge.enqueue_erasure(s, site_id=site, visitor_id=vid)
+
+    async with sweep_sessions() as s:
+        await _resolve(s, site, vid, email)
+
+    async with sweep_sessions() as s:
+        events, ledger = await _counts(s, site)
+        assert events == 0, "a contribution event was minted for an erased person"
+        assert ledger == 0, "credit was minted for an erased person"
+
+
+@pytest.mark.asyncio
+async def test_erasure_window_race_control(sweep_sessions, coop_on, no_mx):
+    """SG-6b — positive control: identical resolve WITHOUT the enqueue DOES mint.
+
+    Without this, SG-6's zero could be produced by an inert hook rather than by
+    the S2 fix.
+    """
+    site, vid = f"{SITE_SUP}_ctl", "v-ctl"
+    email = "race.control@example.com"
+    async with sweep_sessions() as s:
+        await _seed_contributing_site(s, site, vid)
+        await _seed_match_key_email(s, site, vid, email)
+
+    async with sweep_sessions() as s:
+        await _resolve(s, site, vid, email)
+
+    async with sweep_sessions() as s:
+        events, ledger = await _counts(s, site)
+        assert events == 1, f"the mint path is inert — SG-6 would be vacuous ({events})"
+        assert await _ledger_accrue_count(s, site) == 1
+        assert ledger == 1
+
+
+# ─────────────── SG-7 / SG-8 — H2 mechanism + sweep idempotency ─────────────
+
+
+async def _suppression_rows(s: AsyncSession, email: str, scope: str) -> list:
+    from apps.api.models.suppression import SuppressionEntry
+
+    return list(
+        (
+            await s.execute(
+                select(SuppressionEntry).where(
+                    SuppressionEntry.email_hash == email_hash(email),
+                    SuppressionEntry.scope == scope,
+                )
+            )
+        ).scalars().all()
+    )
+
+
+@pytest.mark.asyncio
+async def test_enqueue_writes_tombstone(sweep_sessions):
+    """SG-7 — the `erased` tombstone exists the moment enqueue_erasure returns.
+
+    This is the mechanism behind SG-6: no sweep has run at assertion time.
+    """
+    from apps.api.services import graph_erasure as ge
+
+    site, vid = f"{SITE_SUP}_tomb", "v-tomb"
+    email = "tombstone.now@example.com"
+    async with sweep_sessions() as s:
+        await _seed_contributing_site(s, site, vid, contribution_enabled=False)
+        await _seed_match_key_email(s, site, vid, email)
+        await ge.enqueue_erasure(s, site_id=site, visitor_id=vid)
+
+    async with sweep_sessions() as s:
+        rows = await _suppression_rows(s, email, "erased")
+        assert len(rows) == 1, (
+            f"no `erased` tombstone at enqueue time (got {len(rows)}) — the "
+            "sweep-interval window is still open"
+        )
+        assert rows[0].reason == "graph_erasure"
+
+
+@pytest.mark.asyncio
+async def test_sweep_tombstone_idempotent(sweep_sessions):
+    """SG-8 — the sweep's own tombstone write is now a harmless no-op.
+
+    _process_claimed is deliberately unchanged; on_conflict_do_nothing makes its
+    write idempotent against the row enqueue already inserted.
+    """
+    from apps.api.services import graph_erasure as ge
+
+    site, vid = f"{SITE_SUP}_idem", "v-idem"
+    email = "tombstone.idem@example.com"
+    async with sweep_sessions() as s:
+        await _seed_contributing_site(s, site, vid, contribution_enabled=False)
+        await _seed_match_key_email(s, site, vid, email)
+        await ge.enqueue_erasure(s, site_id=site, visitor_id=vid)
+
+    await ge.run_graph_erasure_sweep()  # must not raise
+
+    async with sweep_sessions() as s:
+        assert len(await _suppression_rows(s, email, "erased")) == 1, (
+            "the sweep duplicated the enqueue-time tombstone"
+        )
+
+
+# ─────────────────── SG-16 — the savepoint against a REAL Postgres ──────────
+
+
+@pytest.mark.asyncio
+async def test_tombstone_db_failure_preserves_erasure_request(
+    sweep_sessions, monkeypatch
+):
+    """SG-16 (item 5c) — a genuine DB-level failure inside the tombstone statement
+    rolls back ONLY the savepoint; the ErasureRequest row still commits.
+
+    SG-15 proves the savepoint is ENTERED against a fake session. This proves
+    Postgres HONOURS it: `SELECT 1/0` raises division_by_zero, which aborts the
+    enclosing (sub)transaction for real. Against a bare try/except the outer
+    transaction would be aborted too and the commit would lose the request.
+    """
+    from apps.api.models.erasure_request import ErasureRequest
+    from apps.api.services import graph_erasure as ge
+
+    site, vid = f"{SITE_SUP}_dbfail", "v-dbfail"
+    email = "tombstone.dbfail@example.com"
+    async with sweep_sessions() as s:
+        await _seed_contributing_site(s, site, vid, contribution_enabled=False)
+        await _seed_match_key_email(s, site, vid, email)
+
+    monkeypatch.setattr(ge, "_tombstone_stmt", lambda bidx: text("SELECT 1/0"))
+
+    async with sweep_sessions() as s:
+        row = await ge.enqueue_erasure(s, site_id=site, visitor_id=vid)
+        assert row is not None
+
+    async with sweep_sessions() as s:
+        queued = (
+            await s.execute(
+                select(func.count())
+                .select_from(ErasureRequest)
+                .where(ErasureRequest.requesting_site_id == site)
+            )
+        ).scalar_one()
+        assert queued == 1, (
+            "the ErasureRequest was lost when the tombstone statement failed — "
+            "a false compliance receipt (SUP2-F1)"
+        )
+        # …and the tombstone genuinely did not land, so this is not a no-op test.
+        assert await _suppression_rows(s, email, "erased") == []
+
+
+# ─────────────────── SG-9 / SG-10 — M2: the opt-in flip guard ───────────────
+
+
+@pytest.mark.asyncio
+async def test_contribution_flip_gated_on_global_flag(owner_client, sessions):
+    """SG-9 (M2) — opting IN is 422 while the deployment flag is OFF.
+
+    A VALID, current digest is supplied deliberately: the new guard sits strictly
+    before the digest comparison, so a valid digest removes the digest branch as
+    an alternative explanation for the 422.
+    """
+    assert settings.identity_coop_enabled is False, "this gate requires the flag OFF"
+
+    r = await owner_client.patch(
+        f"/api/v1/sites/{SITE_ON}",
+        json={
+            "contribution_enabled": True,
+            "terms_version": settings.coop_terms_version,
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "not enabled on this deployment" in r.json()["detail"]
+
+    async with sessions() as s:
+        flag = (
+            await s.execute(
+                select(Site.contribution_enabled).where(Site.site_id == SITE_ON)
+            )
+        ).scalar_one()
+        assert flag is False, "the flag flipped ON with the deployment flag OFF"
+        # No acceptance row either — the guard fires before record_consent_acceptance.
+        assert await _acceptance_count(s, SITE_ON) == 0
+
+
+@pytest.mark.asyncio
+async def test_contribution_optout_never_gated(owner_client, sessions, monkeypatch):
+    """SG-10 (M2) — opting OUT is never gated, even with the deployment flag OFF.
+
+    Opting out of a data co-op must never be blocked by anything.
+    """
+    # Start from ON (set directly — the API path is gated by design).
+    async with sessions() as s:
+        await s.execute(
+            text("UPDATE sites SET contribution_enabled = true WHERE site_id = :sid"),
+            {"sid": SITE_ON},
+        )
+        await s.commit()
+
+    assert settings.identity_coop_enabled is False, "this gate requires the flag OFF"
+
+    r = await owner_client.patch(
+        f"/api/v1/sites/{SITE_ON}", json={"contribution_enabled": False}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["contribution_enabled"] is False
+
+    async with sessions() as s:
+        flag = (
+            await s.execute(
+                select(Site.contribution_enabled).where(Site.site_id == SITE_ON)
+            )
+        ).scalar_one()
+        assert flag is False, "opting out was blocked"

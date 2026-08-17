@@ -486,48 +486,92 @@ async def test_maybe_record_contribution_respects_per_site_flag(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+#: The co-op WRITE path. The D-B suppression ban below is scoped to exactly
+#: these two functions — see the docstring for why it is not the whole module.
+_COOP_WRITE_PATH_FUNCS = ("record_contribution", "maybe_record_contribution")
+
+
 def test_coop_module_imports_no_suppression_scope():
     """D-B: the single source of truth for suppression stays in the resolver.
 
-    If this module ever re-lists a scope literal, the erased-only-narrowness bug
-    class reopens. A tripwire, not a style check.
+    Scoped to the co-op WRITE path (`record_contribution`,
+    `maybe_record_contribution`) — NOT the whole module. Narrowed 17-08-26
+    (Phase 2a, user-authorized). Read this before "restoring" the broad ban:
+
+    * The tripwire's original Phase 1 purpose was to prove the co-op WRITE path
+      does not build or widen a privacy gate of its own. It relies on the
+      resolver's boundary, which has already cleared `do_not_resolve` and every
+      blocking scope BEFORE the contribution hook fires. A second, independently
+      maintained scope list on that path is how the erased-only-narrowness bug
+      class reopens.
+    * Phase 2a's A2 is a READ-path exclusion: `consumption_count` uses
+      `SuppressionEntry(scope="erased")` to REMOVE erased identities FROM a
+      count. That is privacy-STRENGTHENING — strictly fewer rows counted, so the
+      co-op can never overcharge — i.e. the opposite direction from what this
+      tripwire guards.
+    * Narrowing therefore RESTORES the tripwire's stated intent rather than
+      relaxing it. The write-path ban stays strictly enforced.
+
+    Mechanically real, not a comment: the ban covers imports AND references
+    inside those two function bodies. References matter because Phase 2a's
+    import is function-local to `consumption_count`, so a module-level import
+    scan alone would now be trivially satisfiable — and a tripwire that cannot
+    fail is worse than none. Same spirit as the claim-path-scoped
+    `throttle_flagged` tripwire in `test_graph_erasure.py`.
 
     AST-based on purpose: a plain substring scan would trip on the module's own
-    docstring, which legitimately *names* these symbols to explain why it must not
-    import them. Only real imports and real string literals count.
+    docstring, which legitimately *names* these symbols to explain why the write
+    path must not use them. Only real imports, references and string literals count.
     """
     import ast
     from pathlib import Path
 
     tree = ast.parse(Path("apps/api/services/identity_coop.py").read_text())
 
+    write_path = [
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and n.name in _COOP_WRITE_PATH_FUNCS
+    ]
+    # Guard the guard: if either function is renamed away, this test must fail
+    # loudly rather than silently scanning nothing.
+    assert {n.name for n in write_path} == set(_COOP_WRITE_PATH_FUNCS), [
+        n.name for n in write_path
+    ]
+
     imported: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            imported.add(node.module or "")
-            imported.update(a.name for a in node.names)
-        elif isinstance(node, ast.Import):
-            imported.update(a.name for a in node.names)
+    referenced: set[str] = set()
+    literals: set[str] = set()
+
+    for func in write_path:
+        own_docstring = ast.get_docstring(func)
+        for node in ast.walk(func):
+            if isinstance(node, ast.ImportFrom):
+                imported.add(node.module or "")
+                imported.update(a.name for a in node.names)
+            elif isinstance(node, ast.Import):
+                imported.update(a.name for a in node.names)
+            elif isinstance(node, ast.Name):
+                referenced.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                referenced.add(node.attr)
+            elif (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and node.value != own_docstring
+            ):
+                literals.add(node.value)
 
     assert not any("suppression" in m for m in imported), imported
     assert "SuppressionEntry" not in imported
     assert "GRAPH_WRITE_BLOCKING_SCOPES" not in imported
 
-    # No suppression-scope literal may be re-listed in executable code.
-    docstrings = {
-        ast.get_docstring(n)
-        for n in ast.walk(tree)
-        if isinstance(
-            n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-        )
-    }
-    literals = {
-        n.value
-        for n in ast.walk(tree)
-        if isinstance(n, ast.Constant)
-        and isinstance(n.value, str)
-        and n.value not in docstrings
-    }
+    # A local import is only half the surface — a reference is the other half.
+    assert "SuppressionEntry" not in referenced, referenced
+    assert "GRAPH_WRITE_BLOCKING_SCOPES" not in referenced, referenced
+
+    # No suppression-scope literal may be re-listed in write-path executable code.
     assert not {"erased", "do_not_process", "all"} & literals, literals
 
 

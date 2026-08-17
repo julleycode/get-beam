@@ -297,6 +297,33 @@ async def _cadence_bot_flag_sweep_job() -> None:
         logger.exception("cadence_bot_flag_sweep_crashed")
 
 
+async def _coop_expiry_sweep_job() -> None:
+    """Periodic job: expire lapsed identity co-op credit lots (Phase 2a).
+
+    run_coop_expiry_sweep owns the advisory lock; expire_lapsed_lots owns the
+    per-lot loop, its per-lot commit and its per-lot fail-open isolation. This
+    wrapper only opens the session and swallows any top-level crash.
+
+    The enabled-check lives here AND around the registration below, and the
+    duplication is deliberate rather than redundant: identity_coop_enabled is a
+    hard kill-switch on a billing surface, so a process that boots flag-OFF should
+    register no job at all ("no job exists" is stronger than "the job runs and
+    returns early"). This in-wrapper check is what catches a RUNTIME flip to OFF
+    in a process that booted flag-ON — it is not dead code, do not delete it.
+    """
+    from apps.api.config import settings
+
+    if not settings.identity_coop_enabled:
+        return
+    try:
+        from apps.api.services.coop_expiry_sweep import run_coop_expiry_sweep
+
+        async with async_session() as db:
+            await run_coop_expiry_sweep(db)
+    except Exception:
+        logger.exception("coop_expiry_sweep_crashed")
+
+
 async def _ws2_classifier_sweep_job() -> None:
     """Periodic job: agent-OPERATED session detection (WS2 session classifier).
 
@@ -711,6 +738,18 @@ def start_scheduler() -> None:
         jitter=90,
         misfire_grace_time=300,
     )
+    # Startup gate (Phase 2a, L-1): a flag-OFF process registers NO co-op expiry
+    # job at all. The wrapper carries the same check for the runtime-flip case.
+    if settings.identity_coop_enabled:
+        scheduler.add_job(
+            _coop_expiry_sweep_job,
+            "interval",
+            minutes=settings.coop_expiry_sweep_interval_minutes,
+            id="coop_expiry_sweep",
+            replace_existing=True,
+            jitter=90,
+            misfire_grace_time=300,
+        )
     scheduler.add_job(
         _ws2_classifier_sweep_job,
         "interval",

@@ -177,7 +177,12 @@ class TestAC13IntervalJobHardening:
         assert [c for c in cron if "jitter" in _kwargs(c)] == []
 
     def test_the_asserted_set_is_derived_not_hardcoded(self):
-        """E20 arithmetic: 24 total / 21 interval / 3 cron — all AST-derived.
+        """E20 arithmetic: 26 total / 22 interval / 3 cron — all AST-derived.
+
+        Was 25/21/3; +1 interval job for coop_expiry_sweep (identity-coop Phase 2a
+        — FIFO credit-lot expiry sweep; flag-gated OFF on identity_coop_enabled,
+        advisory-locked, and additionally gated at the registration site so a
+        flag-OFF process registers no job at all).
 
         Was 23/21/2; +1 CRON job for reengagement_sweep (inactivity lifecycle —
         remind an idle owner at 7d, auto-pause tracking at 14d, one-time install
@@ -223,8 +228,8 @@ class TestAC13IntervalJobHardening:
         """
         calls = _add_job_calls()
         interval = [c for c in calls if _is_interval(c)]
-        assert len(calls) == 25, f"expected 25 add_job calls, found {len(calls)}"
-        assert len(interval) == 21, (
-            f"expected 21 interval calls, found {len(interval)}; if a job was "
+        assert len(calls) == 26, f"expected 26 add_job calls, found {len(calls)}"
+        assert len(interval) == 22, (
+            f"expected 22 interval calls, found {len(interval)}; if a job was "
             "added or removed, update E20's arithmetic — do not relax this gate"
         )
