@@ -37,7 +37,10 @@
       "Bash(cat next.config.mjs)",
       "Bash(cat next.config.js)",
       "Bash(cat next.config.ts)",
-      "Bash(nimble search *)"
+      "Bash(nimble search *)",
+      "Bash(grep -c 'Gate: PASS' process/features/visitors-identity/active/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger_PLAN_09-08-26.md)",
+      "Bash(grep -n 'Gate: BLOCKED\\\\|Gate: CONDITIONAL' process/features/visitors-identity/active/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger_PLAN_09-08-26.md)",
+      "Bash(.venv/bin/python3.11 -)"
     ]
   }
 }
