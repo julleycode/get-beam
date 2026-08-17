@@ -141,17 +141,6 @@
     if (left && cc) return left + ' · ' + cc;
     return left || cc;
   }
-  // Mirrors formatConfidenceNote in src/lib/canary-format.ts. Renders only when
-  // the backend measured a real disagreement between two geo providers and
-  // therefore sent city/region as empty strings — without it a city-less pin
-  // reads as a failure rather than as a deliberately wider claim.
-  function formatConfidenceNote(geo) {
-    if (!geo || geo.confidence !== 'low') return '';
-    const km = Math.round(geo.disagree_km || 0);
-    return km > 0
-      ? 'two IP databases put you ' + km + 'km apart, so this is a region, not a pin.'
-      : 'the IP databases disagree about your city, so this is a region, not a pin.';
-  }
   function formatNetwork(net) {
     if (!net) return null;                       // omit the line entirely rather
     const label = (net.label || '').trim();      // than print "Unknown ISP"
@@ -183,15 +172,77 @@
     if (!isFinite(g.lat) || !isFinite(g.lng)) return false;
     return !(g.lat === 0 && g.lng === 0);
   }
-  /** 'map' | 'text' | 'skip' — mirrors src/lib/canary-reveal-mode.ts. */
+  /**
+   * 'map' | 'country' | 'text' | 'skip'.
+   *
+   * POLICY SYNC FENCE — this precedence is duplicated verbatim from
+   * chooseRevealMode in src/lib/canary-reveal-mode.ts. This file is served from
+   * /public and cannot import from src/, so the two must be changed together.
+   *
+   * The SERVER decides (D8): it has already stripped anything the chosen mode
+   * may not claim, so the only client-side degrade left is a tile failure.
+   */
   function chooseRevealMode(res, tilesFailed) {
     if (!res) return 'skip';
     const geoOk = hasUsableGeo(res);
     const hasPages = !!(res.pages && res.pages.length);
     const hasNetwork = !!(res.network && res.network.label);
+
+    const serverMode = res.display_mode;
+    if (serverMode === 'none') {
+      // No location claim — a journey or a network label is still worth showing.
+      return (hasPages || hasNetwork) ? 'text' : 'skip';
+    }
+    if (serverMode === 'country') return 'country';   // no tiles are used
+    if (serverMode === 'map') return tilesFailed ? 'text' : 'map';
+
+    // No display_mode at all: an older server. Legacy geo-presence logic.
     if (!geoOk && !hasPages && !hasNetwork) return 'skip';
     if (geoOk && !tilesFailed) return 'map';
     return 'text';
+  }
+
+  /**
+   * COPY SYNC FENCE — mirrored VERBATIM from src/lib/canary-format.ts. Change
+   * one, change both. No automated gate scans these strings.
+   */
+  const COUNTRY_NOTE_UNCERTAIN =
+    "your internet provider only tells me the country, not the city — so that's all i'll claim.";
+  const COUNTRY_NOTE_MOBILE =
+    "you're on a phone connection — those move around, so i'll only claim the country.";
+  const COUNTRY_NOTE_VPN =
+    "you're browsing through something that hides your location — this is where it says it is, probably not where you are.";
+  const NO_CLAIM_NOTE =
+    "i couldn't read anything from your connection this time. it happens.";
+
+  /** '🇻🇳 Vietnam'. Falls back to the bare code rather than inventing a name. */
+  function formatCountryName(cc) {
+    const code = (cc || '').trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(code)) return '';
+    const flag = String.fromCodePoint(
+      0x1f1e6 + code.charCodeAt(0) - 65,
+      0x1f1e6 + code.charCodeAt(1) - 65
+    );
+    let name = code;
+    try {
+      if (typeof Intl !== 'undefined' && Intl.DisplayNames) {
+        name = new Intl.DisplayNames(['en'], { type: 'region' }).of(code) || code;
+      }
+    } catch (e) { name = code; }
+    return flag + ' ' + name;
+  }
+
+  /**
+   * Selection is MODE-derived, not mobile-derived: `mobile` is never sent to
+   * the client. The only connections reaching a country card at high
+   * confidence are mobile downgrades and relay/datacenter, and those two are
+   * separable by network.kind.
+   */
+  function formatCountryCardNote(res) {
+    const kind = ((res.network && res.network.kind) || '').toLowerCase();
+    if (kind === 'relay' || kind === 'datacenter' || kind === 'cdn') return COUNTRY_NOTE_VPN;
+    if (res.geo && res.geo.confidence === 'high') return COUNTRY_NOTE_MOBILE;
+    return COUNTRY_NOTE_UNCERTAIN;
   }
 
   // The IP-level-estimate caption was removed by product decision. The accuracy
@@ -443,11 +494,14 @@
         await ob.bot(`got you.`, { delay: 300 });
       } else {
         await ob.bot(`didn't catch your visit — adblocker, DNT/GPC (we honor both), or the tab never loaded.`, { delay: 300 });
-        await ob.bot(`but here's what your IP alone says:`);
+        await ob.bot(`but here's what your connection alone says:`);
       }
 
-      const place = formatPlace(res.geo);
-      const confidenceNote = formatConfidenceNote(res.geo);
+      const revealMode = chooseRevealMode(res, false);
+      // 25b: in `country` mode formatPlace returns a bare country code, which
+      // would claim the country twice — once here behind a ◎ and once in the
+      // country card. Mirrors the React suppression in canary-reveal.tsx.
+      const place = revealMode === 'country' ? '' : formatPlace(res.geo);
       const network = formatNetwork(res.network);
       const pages = (res.pages || []);
       const pagesHtml = pages.length
@@ -456,15 +510,26 @@
           `</span></div>`
         : '';
 
-      const wantsMap = chooseRevealMode(res, false) === 'map';
+      const wantsMap = revealMode === 'map';
+      const countryHtml = revealMode === 'country'
+        ? '<div class="ob-country-card" data-testid="canary-country-card">' +
+          (formatCountryName(res.geo && res.geo.country_code)
+            ? '<div class="ob-country-name">' + _esc(formatCountryName(res.geo.country_code)) + '</div>'
+            : '') +
+          '<p class="ob-map-note">' + _esc(formatCountryCardNote(res)) + '</p></div>'
+        : '';
+      const noClaimHtml = (res.display_mode === 'none' && revealMode === 'text')
+        ? '<p class="ob-map-note" data-testid="canary-no-claim">' + _esc(NO_CLAIM_NOTE) + '</p>'
+        : '';
       const card = await ob.bot(`
+        ${countryHtml}
+        ${noClaimHtml}
         ${wantsMap ? '<div class="ob-map" id="ob-map" role="region" aria-label="Approximate location on a map"></div>' : ''}
         <div class="ob-meta">
           ${place ? '<div class="mrow"><span class="ic" aria-hidden="true">◎</span><span>' + _esc(place) + '</span></div>' : ''}
           ${network ? '<div class="mrow"><span class="ic" aria-hidden="true">⌁</span><span>' + _esc(network) + '</span></div>' : ''}
           ${pagesHtml}
         </div>
-        ${confidenceNote ? '<p class="ob-map-note">' + _esc(confidenceNote) + '</p>' : ''}
         <p class="ob-map-note" id="ob-map-note" hidden></p>`,
         { cls: 'rich card', typing: false });
 
@@ -529,14 +594,20 @@
               region: geo ? geo.region : null,
               country_code: geo ? geo.country_code : null,
               // Rounded: this is a feedback record, not a location store.
-              lat: geo ? Math.round(geo.lat * 100) / 100 : null,
-              lng: geo ? Math.round(geo.lng * 100) / 100 : null,
+              // Coordinate-optional-safe, mirroring the byte-identical React
+              // expression: in `country` mode `geo` is truthy but the
+              // coordinates were never sent, so `geo.lat * 100` is NaN.
+              lat: typeof (geo && geo.lat) === 'number' ? Math.round(geo.lat * 100) / 100 : null,
+              lng: typeof (geo && geo.lng) === 'number' ? Math.round(geo.lng * 100) / 100 : null,
               org: net ? net.label : null,
               kind: net ? net.kind : null,
               // Whether the reveal had already hedged. A wrong_city report
               // against `high` means two providers agreed and were both wrong —
               // a worse failure than one against `unverified`.
               confidence: geo ? (geo.confidence || null) : null,
+              // Which card was actually shown. The server overwrites this —
+              // sent for payload-shape parity with the React reveal.
+              display_mode: res.display_mode || null,
             },
           }).catch(() => {});
           // _esc is mandatory here, not cosmetic: ob.answer -> ob.user assigns

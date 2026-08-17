@@ -38,9 +38,10 @@ from apps.api.config import settings
 
 logger = structlog.get_logger()
 
-# (lat, lon, city) — the city rides along so `crosscheck_geo` can name the
-# disagreeing answer in a log line without a second cache.
-_L1: dict[str, tuple[float, float, str] | None] = {}
+# (lat, lon, city, country) — the city rides along so `crosscheck_geo` can name
+# the disagreeing answer in a log line without a second cache; the country is the
+# D4 hardening input (a country card must be ~100% right when we show one).
+_L1: dict[str, tuple[float, float, str, str] | None] = {}
 _L1_MAX = 500
 _REDIS_PREFIX = "geoipx:"  # third key namespace; see geoip.py's CACHE KEY SPLIT
 _REDIS_TTL = 86400
@@ -57,7 +58,14 @@ class CrossCheck:
     not upgrade its confidence on the strength of it.
     """
 
-    __slots__ = ("checked", "agreed", "distance_km", "second_city")
+    __slots__ = (
+        "checked",
+        "agreed",
+        "distance_km",
+        "second_city",
+        "second_country",
+        "country_agreed",
+    )
 
     def __init__(
         self,
@@ -65,11 +73,18 @@ class CrossCheck:
         agreed: bool = False,
         distance_km: float | None = None,
         second_city: str = "",
+        second_country: str = "",
+        country_agreed: bool | None = None,
     ) -> None:
         self.checked = checked
         self.agreed = agreed
         self.distance_km = distance_km
         self.second_city = second_city
+        # "" = unknown second-provider country.
+        self.second_country = second_country
+        # None = unknown (allowed — see the plan's accepted residual risk);
+        # False = a POSITIVE disagreement, which suppresses the country card.
+        self.country_agreed = country_agreed
 
     def to_dict(self) -> dict:
         return {
@@ -77,6 +92,8 @@ class CrossCheck:
             "agreed": self.agreed,
             "distance_km": self.distance_km,
             "second_city": self.second_city,
+            "second_country": self.second_country,
+            "country_agreed": self.country_agreed,
         }
 
     def __eq__(self, other: object) -> bool:  # tests compare by value
@@ -120,16 +137,37 @@ async def crosscheck_geo(ip: str, primary) -> CrossCheck:
         # provider works keyless offline, and a mock that manufactured a
         # disagreement would make the local demo permanently render the
         # degraded copy.
+        # second_country matches `_mock_geo.country_code` ("US") so the mock
+        # fixture keeps landing on the map path (plan Section E / AC-13).
         return CrossCheck(checked=True, agreed=True, distance_km=0.0,
-                          second_city="Mountain View")
+                          second_city="Mountain View",
+                          second_country="US", country_agreed=True)
 
     second = await _lookup_second(ip)
     if second is None:
         return CrossCheck()
 
-    second_lat, second_lon, second_city = second
+    second_lat, second_lon, second_city, second_country = second
     distance = haversine_km(float(lat), float(lon), second_lat, second_lon)
     agreed = distance <= max(1, settings.geo_crosscheck_disagree_km)
+
+    # D4 country hardening. Compared only when BOTH sides are non-empty: an
+    # unknown country is `None` (= allowed), never a disagreement. Blocking on a
+    # missing second opinion would gut the country-card fallback path entirely.
+    primary_country = str(getattr(primary, "country_code", "") or "").strip().upper()
+    second_country_norm = str(second_country or "").strip().upper()
+    if primary_country and second_country_norm:
+        country_agreed: bool | None = primary_country == second_country_norm
+    else:
+        country_agreed = None
+
+    if country_agreed is False:
+        logger.info(
+            "geo_country_disagreement",
+            ip=ip[:8],
+            primary_country=primary_country,
+            second_country=second_country_norm,
+        )
 
     if not agreed:
         # Truncated IP only — the same PII posture as the rest of this surface.
@@ -147,10 +185,12 @@ async def crosscheck_geo(ip: str, primary) -> CrossCheck:
         agreed=agreed,
         distance_km=distance,
         second_city=second_city,
+        second_country=second_country_norm,
+        country_agreed=country_agreed,
     )
 
 
-async def _lookup_second(ip: str) -> tuple[float, float, str] | None:
+async def _lookup_second(ip: str) -> tuple[float, float, str, str] | None:
     """ipinfo.io coordinates for ``ip``. ``None`` on any failure.
 
     ipinfo answers WITHOUT a token (rate-limited, ~1k/day/IP), which is why this
@@ -202,7 +242,13 @@ async def _lookup_second(ip: str) -> tuple[float, float, str] | None:
         await redis.setex(
             _REDIS_PREFIX + ip,
             _REDIS_TTL,
-            json.dumps({"loc": data.get("loc"), "city": data.get("city") or ""}),
+            # NO key-namespace bump: a pre-existing cache line simply has no
+            # "country", which `_point_from` degrades to "" = unknown = allowed.
+            json.dumps({
+                "loc": data.get("loc"),
+                "city": data.get("city") or "",
+                "country": data.get("country") or "",
+            }),
         )
     except Exception:
         pass
@@ -210,7 +256,7 @@ async def _lookup_second(ip: str) -> tuple[float, float, str] | None:
     return point
 
 
-def _point_from(data: dict) -> tuple[float, float, str] | None:
+def _point_from(data: dict) -> tuple[float, float, str, str] | None:
     """ipinfo returns geo as one ``"20.8648,106.6834"`` string, not two floats."""
     loc = (data or {}).get("loc") or ""
     if not isinstance(loc, str) or "," not in loc:
@@ -224,10 +270,14 @@ def _point_from(data: dict) -> tuple[float, float, str] | None:
     # would manufacture a ~10,000 km disagreement for every unknown IP.
     if lat == 0.0 and lon == 0.0:
         return None
-    return (lat, lon, str((data or {}).get("city") or "")[:100])
+    # ipinfo returns a 2-letter code in "country". Absent / non-str degrades to
+    # "" = unknown, which the caller reads as `country_agreed=None` (allowed).
+    raw_country = (data or {}).get("country")
+    country = raw_country.strip().upper()[:2] if isinstance(raw_country, str) else ""
+    return (lat, lon, str((data or {}).get("city") or "")[:100], country)
 
 
-def _store(ip: str, point: tuple[float, float, str] | None) -> None:
+def _store(ip: str, point: tuple[float, float, str, str] | None) -> None:
     if len(_L1) >= _L1_MAX:
         _L1.clear()
     _L1[ip] = point

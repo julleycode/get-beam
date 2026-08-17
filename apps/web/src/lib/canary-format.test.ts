@@ -1,11 +1,17 @@
 import { describe, it, expect } from "vitest";
+import * as canaryFormat from "@/lib/canary-format";
 import {
-  formatConfidenceNote,
+  COUNTRY_NOTE_MOBILE,
+  COUNTRY_NOTE_UNCERTAIN,
+  COUNTRY_NOTE_VPN,
+  formatCountryCardNote,
+  formatCountryName,
   formatPlace,
   formatNetwork,
   formatPageLine,
   isUserOwnedNetwork,
   type CanaryGeo,
+  type CanaryResponse,
 } from "@/lib/canary-format";
 
 const geo = (over: Partial<CanaryGeo> = {}): CanaryGeo => ({
@@ -135,51 +141,117 @@ describe("formatPageLine", () => {
   });
 });
 
-describe("formatConfidenceNote", () => {
-  it("says nothing when the providers agreed", () => {
-    expect(formatConfidenceNote(geo({ confidence: "high" }))).toBe("");
-  });
-
-  it("says nothing when there was no second opinion", () => {
-    // `unverified` is today's single-provider behaviour, not a known failure —
-    // captioning it would apologise on every request in an env without ipinfo.
-    expect(formatConfidenceNote(geo({ confidence: "unverified" }))).toBe("");
-  });
-
-  it("says nothing for a payload written before the cross-check shipped", () => {
-    expect(formatConfidenceNote(geo())).toBe("");
-    expect(formatConfidenceNote(null)).toBe("");
-    expect(formatConfidenceNote(undefined)).toBe("");
-  });
-
-  it("reports the measured disagreement on a low-confidence pin", () => {
-    const note = formatConfidenceNote(
-      geo({ confidence: "low", city: "", region: "", disagree_km: 93 }),
-    );
-    expect(note).toContain("93km");
-    expect(note).toContain("region, not a pin");
-  });
-
-  it("still explains itself when the distance is missing", () => {
-    const note = formatConfidenceNote(geo({ confidence: "low", city: "" }));
-    expect(note).toContain("disagree");
-    expect(note).not.toContain("0km");
-  });
-
-  it("never names the rejected cities", () => {
-    // Offering "Hanoi or Haiphong?" invites the user to pick and re-lands us
-    // on the coin flip the cross-check exists to remove.
-    const note = formatConfidenceNote(
-      geo({ confidence: "low", city: "", region: "", disagree_km: 1150 }),
-    );
-    expect(note).not.toMatch(/hanoi|haiphong/i);
-  });
-});
-
 describe("formatPlace under a low-confidence cross-check", () => {
   it("degrades to the country when the server stripped city and region", () => {
     expect(
       formatPlace(geo({ confidence: "low", city: "", region: "" })),
     ).toBe("VN");
+  });
+});
+
+describe("formatCountryName", () => {
+  it("renders a flag and a country name", () => {
+    const out = formatCountryName("VN");
+    expect(out).toContain("🇻🇳");
+    expect(out.toLowerCase()).toContain("viet");
+  });
+
+  it("is case and whitespace tolerant", () => {
+    expect(formatCountryName(" vn ")).toBe(formatCountryName("VN"));
+  });
+
+  it("returns nothing rather than inventing a name", () => {
+    expect(formatCountryName("")).toBe("");
+    expect(formatCountryName(null)).toBe("");
+    expect(formatCountryName("XYZ")).toBe("");
+    expect(formatCountryName("1A")).toBe("");
+  });
+});
+
+describe("formatCountryCardNote — selection is mode-derived, not mobile-derived", () => {
+  const resp = (
+    kind: string | null,
+    confidence: CanaryGeo["confidence"],
+  ): CanaryResponse => ({
+    landed: true,
+    pages: [],
+    geo: { city: "", region: "", country_code: "VN", confidence },
+    network: kind ? { label: "Some Net", kind } : null,
+    display_mode: "country",
+  });
+
+  it.each(["relay", "datacenter", "cdn"])("uses the vpn line for %s", (kind) => {
+    expect(formatCountryCardNote(resp(kind, "high"))).toBe(COUNTRY_NOTE_VPN);
+  });
+
+  it("vpn line wins even at low confidence", () => {
+    expect(formatCountryCardNote(resp("relay", "low"))).toBe(COUNTRY_NOTE_VPN);
+  });
+
+  it("high confidence on a user-owned network can only be a mobile downgrade", () => {
+    expect(formatCountryCardNote(resp("isp", "high"))).toBe(COUNTRY_NOTE_MOBILE);
+  });
+
+  it.each(["low", "unverified"] as const)(
+    "%s confidence gets the uncertain line, mobile or not",
+    (confidence) => {
+      expect(formatCountryCardNote(resp("isp", confidence))).toBe(
+        COUNTRY_NOTE_UNCERTAIN,
+      );
+    },
+  );
+
+  it("an absent network label falls through to the confidence test", () => {
+    expect(formatCountryCardNote(resp(null, "high"))).toBe(COUNTRY_NOTE_MOBILE);
+    expect(formatCountryCardNote(resp(null, "low"))).toBe(COUNTRY_NOTE_UNCERTAIN);
+  });
+});
+
+describe("D6 copy register — no tech jargon in any user-facing string", () => {
+  /**
+   * Scan semantics are normative, not inferred:
+   *  - `IP` / `ASN`  — case-SENSITIVE whole-token. A case-insensitive scan
+   *    false-positives on ordinary words ("equipment", "description").
+   *  - the rest      — case-INSENSITIVE substring.
+   */
+  const WHOLE_TOKEN_BANNED = ["IP", "ASN"];
+  const SUBSTRING_BANNED = ["geolocation", "database", "crosscheck"];
+
+  const copyStrings = (): string[] => {
+    const out: string[] = [];
+    for (const value of Object.values(canaryFormat)) {
+      if (typeof value === "string") out.push(value);
+    }
+    // Every string these functions can emit, not just the exported constants.
+    for (const kind of ["relay", "cdn", "datacenter", "hosting", "vpn", "company", "isp", "eyeball", "weird"]) {
+      const net = formatNetwork({ label: "Acme", kind });
+      if (net) out.push(net.description);
+    }
+    for (const kind of ["relay", "datacenter", "isp"]) {
+      for (const confidence of ["high", "low", "unverified"] as const) {
+        out.push(
+          formatCountryCardNote({
+            landed: true,
+            pages: [],
+            geo: { city: "", region: "", country_code: "VN", confidence },
+            network: { label: "Acme", kind },
+          }),
+        );
+      }
+    }
+    return out;
+  };
+
+  it("scans a non-empty set of strings", () => {
+    expect(copyStrings().length).toBeGreaterThan(5);
+  });
+
+  it.each(WHOLE_TOKEN_BANNED)("contains no bare %s token", (token) => {
+    const re = new RegExp(`\\b${token.replace("&", "\\&")}\\b`);
+    for (const s of copyStrings()) expect(s).not.toMatch(re);
+  });
+
+  it.each(SUBSTRING_BANNED)("contains no %s", (token) => {
+    for (const s of copyStrings()) expect(s.toLowerCase()).not.toContain(token);
   });
 });

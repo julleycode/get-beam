@@ -245,8 +245,12 @@ export function OnboardingFlow() {
             region: geo?.region ?? null,
             country_code: geo?.country_code ?? null,
             // Rounded: this is a feedback record, not a location store.
-            lat: geo ? Math.round(geo.lat * 100) / 100 : null,
-            lng: geo ? Math.round(geo.lng * 100) / 100 : null,
+            // Coordinate-optional-safe: in `country` mode `geo` is truthy but
+            // the coordinates were never sent. `geo.lat * 100` would be NaN,
+            // which JSON.stringify silently serialises as `null` — the right
+            // value for the wrong reason. Check the type, not the object.
+            lat: typeof geo?.lat === "number" ? Math.round(geo.lat * 100) / 100 : null,
+            lng: typeof geo?.lng === "number" ? Math.round(geo.lng * 100) / 100 : null,
             org: network?.label ?? null,
             kind: network?.kind ?? null,
             // Whether the reveal had already hedged. A `wrong_city` report
@@ -254,6 +258,9 @@ export function OnboardingFlow() {
             // were BOTH wrong — a different (and worse) failure than one
             // against `unverified`, and indistinguishable without this field.
             confidence: geo?.confidence ?? null,
+            // Which card the complainer actually saw. The server overwrites
+            // this — sent for payload-shape parity with the public funnel.
+            display_mode: state.canary?.display_mode ?? null,
           },
           site_id: state.siteId,
           fingerprint: state.fingerprint,
@@ -266,7 +273,7 @@ export function OnboardingFlow() {
         payload.actualCity
           ? `${payload.actualCity} it is — that correction is worth more than the guess was.`
           : payload.reasons.includes("wrong_city")
-            ? "noted — 'wrong city' goes straight to the team that tunes IP geo."
+            ? "noted — 'wrong city' goes straight to the team that tunes location guessing."
             : "noted, thanks — that goes straight to the team that tunes this.",
       );
       dispatch({ type: "GOTO", step: "site" });

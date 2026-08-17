@@ -416,11 +416,37 @@ async def demo_canary(request: Request, body: CanaryPublicBody = CanaryPublicBod
 
         cross = await crosscheck_geo(ip, geo_raw)
 
-    geo = build_geo(geo_raw, crosscheck=cross)
+    # Display policy v2: the SERVER picks map / country / none and strips
+    # anything the chosen mode may not claim before it is serialised. Identical
+    # block in routers/onboarding.py — the two must not diverge (D7).
+    from apps.api.services.mobile_carrier import is_mobile_carrier
+    from apps.api.services.onboarding_canary import (
+        apply_display_mode,
+        choose_display_mode,
+    )
+
+    mobile = is_mobile_carrier(ip, geo_raw) if geo_raw is not None else False
+    geo = build_geo(
+        geo_raw,
+        crosscheck=cross,
+        country_agreed=getattr(cross, "country_agreed", None),
+    )
     network = build_network(ip, geo_raw) if geo_raw is not None else None
+    display_mode = choose_display_mode(geo, network, mobile=mobile)
+    geo = apply_display_mode(geo, display_mode)
+
+    # `provider_unavailable` (no geo at all) and `country_disagreement` (geo
+    # withheld because the two providers named different countries) are
+    # otherwise indistinguishable — both arrive as `geo is None`.
+    if geo_raw is None:
+        reason = "provider_unavailable"
+    elif geo is None and getattr(cross, "country_agreed", None) is False:
+        reason = "country_disagreement"
 
     logger.info(
         "demo_canary",
+        display_mode=display_mode,
+        mobile=mobile,
         ip=ip[:8],
         fp=fp[:12],
         pages=len(pages),
@@ -437,6 +463,7 @@ async def demo_canary(request: Request, body: CanaryPublicBody = CanaryPublicBod
         "pages": pages,
         "geo": geo,
         "network": network,
+        "display_mode": display_mode,
     }
     if reason:
         result["reason"] = reason
@@ -485,7 +512,13 @@ async def demo_identity_feedback(request: Request, body: CanaryFeedbackBody) -> 
     # Server-owned, not client-supplied — the family must be trustworthy for the
     # v4-vs-v6 comparison to mean anything.
     shown = dict(body.shown) if isinstance(body.shown, dict) else {}
-    shown["ip_family"] = _ip_family(resolve_client_ip(request))
+    client_ip = resolve_client_ip(request)
+    shown["ip_family"] = _ip_family(client_ip)
+    # Which card did the complainer actually SEE? Server-owned for the same
+    # reason as ip_family — the client's value is an overwritten input.
+    from apps.api.services.onboarding_canary import derive_display_mode
+
+    shown["display_mode"] = await derive_display_mode(client_ip)
 
     try:
         async with async_session() as db:

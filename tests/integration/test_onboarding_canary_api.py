@@ -738,3 +738,146 @@ async def test_stats_breaks_corrections_down_by_family(admin, flag_on, test_engi
             "count": 1,
         }
     ]
+
+
+# ── Display policy v2 — per-mode payload shape on BOTH surfaces ──────────────
+#
+# The unit lane proves the pure decider. These prove the ROUTERS call it and
+# that what goes on the wire is actually stripped — a client cannot leak a name
+# it was never sent, but only if the server really never sends it.
+
+_ROUTES = ["/api/v1/onboarding/canary", "/api/v1/demo/canary"]
+
+
+def _patch_geo(monkeypatch, geo, *, cross=None):
+    """Patch both routers identically — D7 means there is no divergence to test."""
+    async def _fake(_ip):
+        return geo
+
+    for mod in ("onboarding", "demo"):
+        monkeypatch.setattr(f"apps.api.routers.{mod}.resolve_geoip_full", _fake)
+    monkeypatch.setattr("apps.api.services.asn_lookup.lookup_asn", lambda _ip: (None, None))
+    if cross is not None:
+        async def _cross(_ip, _primary):
+            return cross
+
+        monkeypatch.setattr("apps.api.services.geoip_crosscheck.crosscheck_geo", _cross)
+        monkeypatch.setattr("apps.api.routers.onboarding.crosscheck_geo", _cross)
+
+
+def _cc(**kw):
+    from apps.api.services.geoip_crosscheck import CrossCheck
+
+    base = dict(checked=True, agreed=True, distance_km=1.0, second_city="Hanoi",
+                second_country="VN", country_agreed=True)
+    base.update(kw)
+    return CrossCheck(**base)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", _ROUTES)
+async def test_map_mode_carries_the_full_payload(authed, flag_on, monkeypatch, route):
+    _patch_geo(monkeypatch, _GEO, cross=_cc())
+    r = await authed.post(route, json={"fingerprint": FP})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["display_mode"] == "map"
+    assert body["geo"]["lat"] == pytest.approx(21.03)
+    assert body["geo"]["city"] == "Hanoi"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", _ROUTES)
+async def test_country_mode_omits_coordinates_on_the_wire(
+    authed, flag_on, monkeypatch, route
+):
+    """AC-6: the client cannot leak a name it was never sent."""
+    # A relay network routes to `country` regardless of confidence.
+    relay_geo = GeoResult(
+        country_code="VN", region="Hanoi", city="Hanoi", lat=21.03, lon=105.85,
+        isp="Cloudflare WARP", org="Cloudflare, Inc.", as_str="AS13335 Cloudflare",
+    )
+    _patch_geo(monkeypatch, relay_geo, cross=_cc())
+    monkeypatch.setattr(
+        "apps.api.services.onboarding_canary.classify_org_kind", lambda *_a, **_k: "cdn"
+    )
+    r = await authed.post(route, json={"fingerprint": FP})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["display_mode"] == "country"
+    assert "lat" not in body["geo"]
+    assert "lng" not in body["geo"]
+    assert "accuracy_km" not in body["geo"]
+    assert body["geo"]["city"] == ""
+    assert body["geo"]["region"] == ""
+    assert body["geo"]["country_code"] == "VN"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", _ROUTES)
+async def test_low_confidence_is_country_not_a_wide_map(
+    authed, flag_on, monkeypatch, route
+):
+    _patch_geo(monkeypatch, _GEO, cross=_cc(agreed=False, distance_km=93.0))
+    body = (await authed.post(route, json={"fingerprint": FP})).json()
+    assert body["display_mode"] == "country"
+    assert "lat" not in body["geo"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", _ROUTES)
+async def test_country_disagreement_is_none_with_its_own_reason(
+    authed, flag_on, monkeypatch, route
+):
+    """Row 7. The ONLY place it is distinguishable from row 8."""
+    _patch_geo(monkeypatch, _GEO, cross=_cc(second_country="CN", country_agreed=False))
+    body = (await authed.post(route, json={"fingerprint": FP})).json()
+    assert body["display_mode"] == "none"
+    assert body["geo"] is None
+    assert body["reason"] == "country_disagreement"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", _ROUTES)
+async def test_provider_failure_is_none_with_the_other_reason(
+    authed, flag_on, monkeypatch, route
+):
+    """Row 8 — the companion of the case above."""
+    _patch_geo(monkeypatch, None)
+    body = (await authed.post(route, json={"fingerprint": FP})).json()
+    assert body["display_mode"] == "none"
+    assert body["geo"] is None
+    assert body["reason"] == "provider_unavailable"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", _ROUTES)
+async def test_no_mode_ever_leaks_an_identifier(authed, flag_on, monkeypatch, route):
+    _patch_geo(monkeypatch, _GEO, cross=_cc())
+    raw = (await authed.post(route, json={"fingerprint": FP})).text
+    for banned in ("site_id", "visitor_id", "fingerprint", '"ip"'):
+        assert banned not in raw
+
+
+@pytest.mark.asyncio
+async def test_client_cannot_forge_the_display_mode(
+    authed, flag_on, test_engine, monkeypatch
+):
+    """`shown["display_mode"]` is server-owned — same posture as ip_family."""
+    _patch_geo(monkeypatch, _GEO, cross=_cc())
+    monkeypatch.setattr(
+        "apps.api.routers.onboarding.resolve_client_ip", lambda _r: "42.117.132.191"
+    )
+    r = await authed.post(
+        "/api/v1/onboarding/identity-feedback",
+        json={"reasons": ["wrong_city"], "shown": {"display_mode": "totally-fake"}},
+    )
+    assert r.status_code == 204
+
+    factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as s:
+        row = (await s.execute(select(IdentityFeedback))).scalars().one()
+    assert row.shown["display_mode"] in {"map", "country", "none"}
+    assert row.shown["display_mode"] != "totally-fake"
+    # AC-14: the pre-existing stamp is preserved alongside the new one.
+    assert row.shown["ip_family"] == "v4"

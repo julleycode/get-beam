@@ -86,6 +86,8 @@ export function CanaryListen({
     // NEVER fake a detection. If the visit didn't land we say so — but geo
     // comes from the caller's own IP and is not gated on the visit, so a
     // VPN/adblocker/DNT user still gets a real reveal instead of nothing.
+    // `!== "skip"` deliberately, not `=== "map" || === "text"`: `RevealMode` was
+    // widened with `"country"`, and a country card is a real reveal.
     if (data && chooseRevealMode(data) !== "skip") {
       onResult("geo_only", data);
     } else {

@@ -54,8 +54,20 @@ const TILE_ERROR_THRESHOLD = 4;
 const TILE_ERROR_WINDOW_MS = 2500;
 const TILE_LOAD_DEADLINE_MS = 4000;
 
+/**
+ * Coordinates are OPTIONAL on `CanaryGeo` because `country` mode omits them.
+ * The map narrows them back to required: a payload without coordinates must not
+ * be able to reach Leaflet at all. The map is only rendered in `map` mode, so
+ * the narrowing is satisfiable at the call site.
+ */
+export type CanaryMapGeo = CanaryGeo & {
+  lat: number;
+  lng: number;
+  accuracy_km: number;
+};
+
 export interface CanaryMapProps {
-  geo: CanaryGeo;
+  geo: CanaryMapGeo;
   /**
    * Fired when the tile host is unreachable (corporate firewall, uBlock — the
    * most likely visible field failure). The parent swaps to the text reveal: a

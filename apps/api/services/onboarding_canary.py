@@ -265,7 +265,103 @@ def build_network(ip: str, geo) -> dict | None:
     return {"label": label[:120], "kind": kind}
 
 
-def build_geo(geo, *, crosscheck=None) -> dict | None:
+_COUNTRY_ONLY_KINDS = frozenset({"relay", "datacenter", "cdn"})
+
+
+def choose_display_mode(geo: dict | None, network: dict | None, *, mobile: bool) -> str:
+    """Pick the ONE thing the reveal is allowed to claim. Pure.
+
+    Returns ``"map"`` | ``"country"`` | ``"none"``. Pure so the policy table below
+    is an exhaustive unit test rather than something only observable by holding a
+    VPN in the right city.
+
+    | # | geo_usable | confidence  | kind                | mobile | -> mode   |
+    |---|------------|-------------|---------------------|--------|-----------|
+    | 1 | T          | high        | isp/company/network | F      | map       |
+    | 2 | T          | high        | isp/company/network | T      | country   |
+    | 3 | T          | high        | relay/datacenter    | any    | country   |
+    | 4 | T          | unverified  | isp/company/network | F      | country   |
+    | 5 | T          | unverified  | relay/datacenter    | any    | country   |
+    | 6 | T          | low         | any                 | any    | country   |
+    | 7 | T          | any         | any                 | any    | none      |
+    |   |   (country disagreement — collapses to `geo is None` in `build_geo`)   |
+    | 8 | F          | any         | any                 | any    | none      |
+    | 9 | T          | high        | None (rung-5 empty) | F      | map       |
+
+    Row 7 is NOT decided here: a positive country disagreement makes ``build_geo``
+    return ``None``, so it arrives as row 8. The routers tell the two apart via
+    ``reason``. ``cdn`` is a permanently dead branch — ``build_network`` re-maps
+    ``cdn`` -> ``relay`` — kept as harmless defensive breadth.
+    """
+    if not geo:
+        return "none"
+
+    kind = (network or {}).get("kind")
+    # Checked BEFORE mobile, so a VPN on a phone reads as a VPN.
+    if kind in _COUNTRY_ONLY_KINDS:
+        return "country"
+    if mobile:
+        return "country"
+    if geo.get("confidence") != "high":
+        return "country"
+    return "map"
+
+
+def apply_display_mode(geo: dict | None, mode: str) -> dict | None:
+    """Strip everything the chosen mode may not claim, BEFORE it is serialised.
+
+    D8: a name that must not be shown must not be sent. Leaving the stripping to
+    the client means the next surface to read this payload reprints it.
+    """
+    if mode == "none":
+        return None
+    if mode != "country" or not geo:
+        return geo
+
+    stripped: dict = {
+        "city": "",
+        "region": "",
+        "country_code": geo.get("country_code", ""),
+        "confidence": geo.get("confidence", "unverified"),
+    }
+    if "disagree_km" in geo:
+        stripped["disagree_km"] = geo["disagree_km"]
+    # lat / lng / accuracy_km are ABSENT, not null — the client cannot draw a pin
+    # from a key it never received.
+    return stripped
+
+
+async def derive_display_mode(ip: str) -> str:
+    """Re-derive the mode the caller was just shown, from the server's own view.
+
+    Used by the feedback routes so ``shown["display_mode"]`` is server-owned in
+    exactly the sense ``shown["ip_family"]`` already is: the client's value is an
+    input we overwrite, never a fact we trust. Both provider lookups are Redis-
+    cached, so the feedback POST that follows a reveal re-reads the same cached
+    answers rather than paying for them twice. Never raises — an unknown mode
+    ("none") is a truthful absence, not a fabricated claim.
+    """
+    from apps.api.services.geoip import resolve_geoip_full
+    from apps.api.services.geoip_crosscheck import crosscheck_geo
+    from apps.api.services.mobile_carrier import is_mobile_carrier
+
+    try:
+        geo_raw = await resolve_geoip_full(ip)
+        if geo_raw is None:
+            return "none"
+        cross = await crosscheck_geo(ip, geo_raw)
+        geo = build_geo(
+            geo_raw,
+            crosscheck=cross,
+            country_agreed=getattr(cross, "country_agreed", None),
+        )
+        network = build_network(ip, geo_raw)
+        return choose_display_mode(geo, network, mobile=is_mobile_carrier(ip, geo_raw))
+    except Exception:  # noqa: BLE001 — feedback must never 500 on instrumentation
+        return "none"
+
+
+def build_geo(geo, *, crosscheck=None, country_agreed: bool | None = None) -> dict | None:
     """Public geo payload, or None when unusable.
 
     Rejects lat==lon==0.0 — Null Island is the classic version of this bug and
@@ -287,8 +383,18 @@ def build_geo(geo, *, crosscheck=None) -> dict | None:
     On ``low`` the radius becomes the measured disagreement (capped), so the
     circle genuinely contains both candidate answers instead of drawing a 25 km
     promise around one of them.
+
+    ``country_agreed`` is the D4 hardening input: ``False`` (a POSITIVE
+    second-provider country disagreement) returns ``None`` outright. ``None``
+    means unknown, which is ALLOWED — blocking on a missing second opinion would
+    gut the country-card fallback path that most traffic lands on.
     """
     if geo is None:
+        return None
+    # D4 row 7: the two providers disagree on the COUNTRY. Not even a country
+    # card is honest here, so the whole payload is withheld and the routers
+    # report `reason: "country_disagreement"`.
+    if country_agreed is False:
         return None
     lat = getattr(geo, "lat", None)
     lon = getattr(geo, "lon", None)

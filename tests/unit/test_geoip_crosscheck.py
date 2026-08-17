@@ -82,9 +82,19 @@ class TestHaversine:
 
 class TestPointParsing:
     def test_parses_ipinfo_loc_string(self):
-        assert _point_from({"loc": "20.8648,106.6834", "city": "Haiphong"}) == (
-            20.8648, 106.6834, "Haiphong",
-        )
+        assert _point_from(
+            {"loc": "20.8648,106.6834", "city": "Haiphong", "country": "VN"}
+        ) == (20.8648, 106.6834, "Haiphong", "VN")
+
+    def test_parses_country_upper_cased(self):
+        assert _point_from({"loc": "1,2", "country": " vn "})[3] == "VN"
+
+    def test_missing_country_is_empty_not_none(self):
+        """A pre-existing geoipx: cache line has no country — degrade, do not crash."""
+        assert _point_from({"loc": "1,2", "city": "X"})[3] == ""
+
+    def test_non_str_country_is_empty(self):
+        assert _point_from({"loc": "1,2", "country": 42})[3] == ""
 
     def test_missing_loc(self):
         assert _point_from({"city": "Haiphong"}) is None
@@ -126,7 +136,7 @@ class TestCrossCheckGeo:
 
     @pytest.mark.asyncio
     async def test_agreement_within_threshold(self):
-        near = (HANOI[0] + 0.05, HANOI[1] + 0.05, "Hanoi")
+        near = (HANOI[0] + 0.05, HANOI[1] + 0.05, "Hanoi", "VN")
         with _settings(), patch(
             "apps.api.services.geoip_crosscheck._lookup_second",
             AsyncMock(return_value=near),
@@ -139,13 +149,64 @@ class TestCrossCheckGeo:
     async def test_the_real_incident_disagrees(self):
         with _settings(), patch(
             "apps.api.services.geoip_crosscheck._lookup_second",
-            AsyncMock(return_value=(*HAIPHONG, "Haiphong")),
+            AsyncMock(return_value=(*HAIPHONG, "Haiphong", "VN")),
         ):
             result = await crosscheck_geo("42.117.132.191", _geo())
         assert result.checked is True
         assert result.agreed is False
         assert 80 < result.distance_km < 100
         assert result.second_city == "Haiphong"
+        # Same country — a city disagreement is not a country disagreement.
+        assert result.country_agreed is True
+
+
+class TestCountryHardening:
+    """D4: the country card must be ~100% right, so a POSITIVE disagreement kills it."""
+
+    @pytest.mark.asyncio
+    async def test_positive_country_disagreement_is_false(self):
+        with _settings(), patch(
+            "apps.api.services.geoip_crosscheck._lookup_second",
+            AsyncMock(return_value=(*HAIPHONG, "Haiphong", "CN")),
+        ):
+            result = await crosscheck_geo("42.117.132.191", _geo())
+        assert result.country_agreed is False
+        assert result.second_country == "CN"
+
+    @pytest.mark.asyncio
+    async def test_unknown_second_country_is_none_not_false(self):
+        """Accepted residual: unknown country is ALLOWED, never a disagreement."""
+        with _settings(), patch(
+            "apps.api.services.geoip_crosscheck._lookup_second",
+            AsyncMock(return_value=(*HAIPHONG, "Haiphong", "")),
+        ):
+            result = await crosscheck_geo("42.117.132.191", _geo())
+        assert result.country_agreed is None
+
+    @pytest.mark.asyncio
+    async def test_unknown_primary_country_is_none(self):
+        with _settings(), patch(
+            "apps.api.services.geoip_crosscheck._lookup_second",
+            AsyncMock(return_value=(*HANOI, "Hanoi", "VN")),
+        ):
+            result = await crosscheck_geo("1.2.3.4", _geo(country_code=""))
+        assert result.country_agreed is None
+
+    @pytest.mark.asyncio
+    async def test_comparison_is_case_and_space_insensitive(self):
+        with _settings(), patch(
+            "apps.api.services.geoip_crosscheck._lookup_second",
+            AsyncMock(return_value=(*HANOI, "Hanoi", " vn ")),
+        ):
+            result = await crosscheck_geo("1.2.3.4", _geo())
+        assert result.country_agreed is True
+
+    @pytest.mark.asyncio
+    async def test_mock_branch_carries_us_country(self):
+        with _settings(mock_external_apis=True):
+            result = await crosscheck_geo("1.2.3.4", _geo())
+        assert result.second_country == "US"
+        assert result.country_agreed is True
 
     @pytest.mark.asyncio
     async def test_second_provider_down_is_unchecked_not_disagreed(self):

@@ -97,3 +97,85 @@ describe("chooseRevealMode — tile failure downgrade", () => {
     ).toBe("skip");
   });
 });
+
+describe("chooseRevealMode honours the server's display_mode", () => {
+  const withMode = (
+    display_mode: "map" | "country" | "none",
+    over: Partial<CanaryResponse> = {},
+  ): CanaryResponse => ({
+    landed: true,
+    pages: [{ path: "/pricing" }],
+    geo: { city: "Hanoi", region: "Hanoi", country_code: "VN", confidence: "high" },
+    network: { label: "FPT", kind: "isp" },
+    display_mode,
+    ...over,
+  });
+
+  it("map mode renders the map", () => {
+    expect(chooseRevealMode(withMode("map"), "ok")).toBe("map");
+    expect(chooseRevealMode(withMode("map"), "pending")).toBe("map");
+  });
+
+  it("map mode degrades to text when the tiles are blocked", () => {
+    expect(chooseRevealMode(withMode("map"), "failed")).toBe("text");
+  });
+
+  it("country mode ignores tile state entirely — no tiles are used", () => {
+    expect(chooseRevealMode(withMode("country"), "failed")).toBe("country");
+    expect(chooseRevealMode(withMode("country"), "ok")).toBe("country");
+    expect(chooseRevealMode(withMode("country"), "pending")).toBe("country");
+  });
+
+  it("country mode holds even though the server sent no coordinates", () => {
+    const r = withMode("country", {
+      geo: { city: "", region: "", country_code: "VN", confidence: "high" },
+    });
+    expect(chooseRevealMode(r, "ok")).toBe("country");
+  });
+
+  it("none mode still shows the journey when there is one", () => {
+    expect(chooseRevealMode(withMode("none", { geo: null }), "ok")).toBe("text");
+  });
+
+  it("none mode shows a network-only reveal", () => {
+    const r = withMode("none", { geo: null, pages: [] });
+    expect(chooseRevealMode(r, "ok")).toBe("text");
+  });
+
+  it("none mode with nothing at all skips", () => {
+    const r = withMode("none", { geo: null, pages: [], network: null });
+    expect(chooseRevealMode(r, "ok")).toBe("skip");
+  });
+
+  it("an absent display_mode falls back to the legacy geo-presence logic", () => {
+    const legacy: CanaryResponse = {
+      landed: true,
+      pages: [{ path: "/pricing" }],
+      geo: {
+        lat: 21.03,
+        lng: 105.85,
+        accuracy_km: 25,
+        city: "Hanoi",
+        region: "Hanoi",
+        country_code: "VN",
+      },
+      network: { label: "FPT", kind: "isp" },
+    };
+    expect(chooseRevealMode(legacy, "ok")).toBe("map");
+    expect(chooseRevealMode(legacy, "failed")).toBe("text");
+    expect(chooseRevealMode({ ...legacy, geo: null }, "ok")).toBe("text");
+    expect(
+      chooseRevealMode({ ...legacy, geo: null, pages: [], network: null }, "ok"),
+    ).toBe("skip");
+  });
+
+  it("never returns country without the server asking for it", () => {
+    const legacy: CanaryResponse = {
+      landed: true,
+      pages: [],
+      geo: null,
+      network: { label: "FPT", kind: "isp" },
+    };
+    expect(chooseRevealMode(legacy, "ok")).not.toBe("country");
+  });
+});

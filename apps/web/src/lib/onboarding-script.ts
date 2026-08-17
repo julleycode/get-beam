@@ -84,7 +84,8 @@ export const REVEAL_GEO_ONLY: Line[] = [
     text: "didn't catch your visit — adblocker, DNT/GPC (we honor both), or the tab never loaded.",
     lead: true,
   },
-  { text: "but here's what your IP alone says:" },
+  // Byte-identical to onboarding-steps.js:446 — see the COPY SYNC FENCE.
+  { text: "but here's what your connection alone says:" },
 ];
 
 export function revealLines(landed: boolean): Line[] {

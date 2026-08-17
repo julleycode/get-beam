@@ -25,9 +25,14 @@ export type GeoConfidence = "high" | "unverified" | "low";
 
 /** Mirrors `build_geo` in apps/api/services/onboarding_canary.py. */
 export interface CanaryGeo {
-  lat: number;
-  lng: number;
-  accuracy_km: number;
+  /**
+   * OPTIONAL BY DESIGN: `country` mode omits coordinates entirely rather than
+   * sending them and trusting the client to hide them (D8). A required
+   * declaration here would be a lie the compiler propagates.
+   */
+  lat?: number;
+  lng?: number;
+  accuracy_km?: number;
   city: string;
   region: string;
   country_code: string;
@@ -54,12 +59,25 @@ export interface CanaryPage {
   at?: string | null;
 }
 
+/**
+ * What the server decided this reveal may claim. Authoritative — the client's
+ * only permitted degrade is a tile failure.
+ *
+ * - `map`      city + pin. Only when the cross-check agrees, the network is
+ *              user-owned, and it is not a phone connection.
+ * - `country`  country card, no coordinates. The server already omitted them.
+ * - `none`     no location claim at all.
+ */
+export type DisplayMode = "map" | "country" | "none";
+
 export interface CanaryResponse {
   landed: boolean;
   pages: CanaryPage[];
   geo: CanaryGeo | null;
   network: CanaryNetwork | null;
   reason?: string | null;
+  /** Absent when talking to a server older than the display policy. */
+  display_mode?: DisplayMode;
 }
 
 /** Kinds we must never describe as belonging to the user. */
@@ -149,24 +167,62 @@ export function formatNetwork(
 }
 
 /**
- * The one line that keeps a disagreed pin honest, or "" when none is needed.
- *
- * WHY IT IS NOT OPTIONAL COPY: with the city stripped, a bare pin plus a large
- * circle reads as "we didn't bother" rather than "we checked twice and the
- * sources conflict". The measured disagreement is the whole credibility of the
- * moment — a reveal that admits its own error bar survives being wrong; one
- * that states Hanoi to a reader sitting in Ho Chi Minh City does not.
- *
- * Deliberately does NOT name the rejected cities. Printing "Hanoi or Haiphong?"
- * invites the user to pick one and re-lands us on a coin flip.
+ * COPY SYNC FENCE — every string below is mirrored VERBATIM in
+ * apps/web/public/beam/onboarding-steps.js, which is plain JS served from
+ * /public and cannot import from src/. Change one, change both. No automated
+ * gate scans the funnel copy; this comment plus review at exit is the guard.
  */
-export function formatConfidenceNote(geo: CanaryGeo | null | undefined): string {
-  if (!geo || geo.confidence !== "low") return "";
-  const km = Math.round(geo.disagree_km ?? 0);
-  if (km > 0) {
-    return `two IP databases put you ${km}km apart, so this is a region, not a pin.`;
+export const COUNTRY_NOTE_UNCERTAIN =
+  "your internet provider only tells me the country, not the city — so that's all i'll claim.";
+export const COUNTRY_NOTE_MOBILE =
+  "you're on a phone connection — those move around, so i'll only claim the country.";
+export const COUNTRY_NOTE_VPN =
+  "you're browsing through something that hides your location — this is where it says it is, probably not where you are.";
+export const NO_CLAIM_NOTE =
+  "i couldn't read anything from your connection this time. it happens.";
+
+const REGION_NAMES =
+  typeof Intl !== "undefined" && "DisplayNames" in Intl
+    ? new Intl.DisplayNames(["en"], { type: "region" })
+    : null;
+
+/**
+ * `"🇻🇳 Vietnam"`. Falls back to the bare code rather than inventing a name.
+ * No dependency: the flag is derived arithmetically from the two letters.
+ */
+export function formatCountryName(countryCode: string | null | undefined): string {
+  const cc = (countryCode || "").trim().toUpperCase();
+  if (cc.length !== 2 || !/^[A-Z]{2}$/.test(cc)) return "";
+  const flag = String.fromCodePoint(
+    0x1f1e6 + cc.charCodeAt(0) - 65,
+    0x1f1e6 + cc.charCodeAt(1) - 65,
+  );
+  let name = cc;
+  try {
+    name = REGION_NAMES?.of(cc) || cc;
+  } catch {
+    name = cc;
   }
-  return "the IP databases disagree about your city, so this is a region, not a pin.";
+  return `${flag} ${name}`;
+}
+
+/**
+ * The one line under the country card.
+ *
+ * SELECTION IS MODE-DERIVED, NOT MOBILE-DERIVED. `mobile` is never sent to the
+ * client, so it must not appear in any condition here. The only connections
+ * that reach a country card at `high` confidence are mobile downgrades and
+ * relay/datacenter — and those two are separable by `network.kind`. A low- or
+ * unverified-confidence mobile connection is indistinguishable from any other
+ * uncertain one and correctly gets the uncertain line.
+ */
+export function formatCountryCardNote(response: CanaryResponse): string {
+  const kind = (response.network?.kind || "").toLowerCase();
+  if (kind === "relay" || kind === "datacenter" || kind === "cdn") {
+    return COUNTRY_NOTE_VPN;
+  }
+  if (response.geo?.confidence === "high") return COUNTRY_NOTE_MOBILE;
+  return COUNTRY_NOTE_UNCERTAIN;
 }
 
 /** `"/pricing · 42s"`. Seconds omitted when unknown or zero. */

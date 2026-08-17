@@ -3,13 +3,14 @@
 import { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import {
-  formatConfidenceNote,
+  NO_CLAIM_NOTE,
   formatNetwork,
   formatPageLine,
   formatPlace,
   type CanaryResponse,
 } from "@/lib/canary-format";
 import { chooseRevealMode, type TileState } from "@/lib/canary-reveal-mode";
+import { CanaryCountryCard } from "@/components/onboarding/canary-country-card";
 import { ChatControls, ObButton } from "@/components/onboarding/chat-controls";
 
 /**
@@ -43,20 +44,42 @@ export function CanaryReveal({
   const [tileState, setTileState] = useState<TileState>("pending");
 
   const mode = chooseRevealMode(response, tileState);
-  const place = formatPlace(response.geo);
-  const confidenceNote = formatConfidenceNote(response.geo);
+  // Suppressed in `country` mode: with city/region blanked, `formatPlace`
+  // returns a bare country code, which would claim the country twice — once
+  // here behind a ◎ and once in the country card below.
+  const place = mode === "country" ? "" : formatPlace(response.geo);
   const network = useMemo(() => formatNetwork(response.network), [response.network]);
   const pages = response.pages ?? [];
+  // The server made no location claim, but we still have a journey or a network
+  // label to show. Say so in the same words the public funnel uses (D7).
+  const showNoClaim = response.display_mode === "none" && mode === "text";
 
   return (
     <ChatControls wide>
       <div className="ob-card" data-testid="canary-reveal">
-        {mode === "map" && response.geo && (
+        {mode === "map" &&
+          response.geo &&
+          typeof response.geo.lat === "number" &&
+          typeof response.geo.lng === "number" &&
+          typeof response.geo.accuracy_km === "number" && (
           <CanaryMap
-            geo={response.geo}
+            geo={{
+              ...response.geo,
+              lat: response.geo.lat,
+              lng: response.geo.lng,
+              accuracy_km: response.geo.accuracy_km,
+            }}
             onTileOk={() => setTileState("ok")}
             onTileFailure={() => setTileState("failed")}
           />
+        )}
+
+        {mode === "country" && <CanaryCountryCard response={response} />}
+
+        {showNoClaim && (
+          <p className="ob-map-note" data-testid="canary-no-claim">
+            {NO_CLAIM_NOTE}
+          </p>
         )}
 
         <div className="ob-meta">
@@ -98,17 +121,6 @@ export function CanaryReveal({
             </div>
           )}
         </div>
-
-        {/* The honesty caption was removed by product decision for the CONFIDENT
-            case and must stay removed there. This one is different: it only
-            renders when the backend measured a real disagreement between two
-            providers, and without it a city-less pin looks like a failure
-            rather than like a deliberately wider claim. */}
-        {confidenceNote && (
-          <p className="ob-map-note" data-testid="canary-confidence-note">
-            {confidenceNote}
-          </p>
-        )}
 
         {mode === "text" && response.geo && (
           <p className="ob-map-note">{TILE_FAILURE_NOTE}</p>
