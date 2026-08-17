@@ -193,6 +193,14 @@ async def generate_new_draft(
     if not draft_results:
         raise HTTPException(status_code=500, detail="Failed to generate any drafts")
 
+    # Resolve the site key once for the whole batch. This path constructs drafts
+    # with NO visitor_id, so derivation can only reach precedence step 2 (the
+    # user owns exactly one site); a multi-site user resolves to None and every
+    # consumer fails closed. Documented limit, not a silent guess.
+    from apps.api.services.engagement_tracker import derive_draft_site_id
+
+    derived_site_id = await derive_draft_site_id(db, user_id=current_user.id)
+
     # Save all drafts to DB
     saved_drafts: list[DraftResponse] = []
     for dr in draft_results:
@@ -205,6 +213,7 @@ async def generate_new_draft(
             ai_content=dr["content"],
             status=DraftStatus.pending,
             strategy=dr["strategy"],
+            site_id=derived_site_id,
         )
         db.add(draft)
         saved_drafts.append(

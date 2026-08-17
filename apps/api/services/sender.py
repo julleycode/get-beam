@@ -1,5 +1,6 @@
 """Sender service: posts approved drafts to the target platform."""
 
+import re
 from datetime import datetime, timezone
 
 import structlog
@@ -8,11 +9,28 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.draft import Draft, DraftStatus
 from apps.api.models.post import Post
+from apps.api.models.site import Site
 from apps.api.models.social_account import SocialAccount
+# CHAR_LIMITS is imported as the module-level constant, never copied: a utm
+# rewrite lengthens the raw string AFTER ai_reply already truncated to the cap at
+# generation time, so both sides must agree on one number.
+#
+# CROSS-MODULE CONTRACT: `ai_reply.CHAR_LIMITS` now has a second consumer. It may
+# not be changed unilaterally — a raised limit here would let the send path post
+# past a platform cap. Import verified free of circular import: `ai_reply` pulls
+# only `config` and `models.social_account`.
+from apps.api.services.ai_reply import CHAR_LIMITS
+from apps.api.services.detection_scanner import _host_of
 from apps.api.services.encryption import decrypt_token, encrypt_token
+from apps.api.services.engagement_tracker import EngagementTracker, make_utm_tag
 from apps.api.services.platforms import get_platform_service
 
 logger = structlog.get_logger()
+
+# Deliberately permissive: we only ever ACT on a match whose host equals the
+# site's, so over-matching costs nothing while under-matching would silently skip
+# a legitimate mint.
+_URL_RE = re.compile(r"https?://[^\s<>\"']+")
 
 
 class SocialTokenExpiredError(Exception):
@@ -151,6 +169,43 @@ async def _refresh_if_expired(
     return new_tokens.access_token
 
 
+def mint_attribution_tag(content: str, site: Site) -> tuple[str, str | None, str]:
+    """Rewrite a SITE-OWNED link in `content` with a fresh attribution tag.
+
+    Returns `(content, tag_or_None, reason)` where reason is `minted` or `none`.
+    Pure apart from the random tag: no DB, no network.
+
+    Two hard rules:
+
+    - **A link is NEVER appended.** If the approved text contains no site-owned
+      link there is nothing to tag, so the content comes back byte-identical with
+      `("none")`. Adding a link would change what a human approved into something
+      they never saw.
+    - **Ownership is HOST EQUALITY, never a substring match.** `_host_of` (shared
+      with the detection scanner) normalizes and strips `www.`; a substring test
+      would tag `evil-example.com.attacker.net` as belonging to `example.com`.
+
+    Only the FIRST site-owned link is rewritten — one tag per posted reply is
+    what the attribution row models, and tagging several would make the ROI read
+    ambiguous.
+    """
+    site_host = _host_of(site.url or "")
+    if not site_host:
+        return content, None, "none"
+
+    for match in _URL_RE.finditer(content):
+        # Trailing sentence punctuation is not part of the URL.
+        raw = match.group(0).rstrip(".,;:!?)]}\"'")
+        if _host_of(raw) != site_host:
+            continue
+        tag = make_utm_tag()
+        sep = "&" if "?" in raw else "?"
+        tagged = f"{raw}{sep}utm_source={tag}"
+        return content.replace(raw, tagged, 1), tag, "minted"
+
+    return content, None, "none"
+
+
 async def send_draft(db: AsyncSession, draft: Draft) -> bool:
     """Send an approved draft to the platform.
 
@@ -207,6 +262,54 @@ async def send_draft(db: AsyncSession, draft: Draft) -> bool:
             await db.commit()
             raise
 
+        # ─── Server-side attribution mint (Phase 1, Step C) ───
+        # Runs BEFORE post_comment because the tag has to be inside the posted
+        # text. The attribution row is only STAGED here; it commits below in the
+        # same transaction as status=sent, so a failed post leaves no orphan row.
+        #
+        # FAIL-CLOSED on a NULL site_id: with no site key there is no
+        # EngagementAttribution.site_id to write (the column is NOT NULL) and no
+        # way to know whose site a link belongs to, so the mint is skipped
+        # entirely rather than guessed.
+        attribution_reason = "no_site"
+        if draft.site_id:
+            site = (
+                await db.execute(select(Site).where(Site.site_id == draft.site_id))
+            ).scalar_one_or_none()
+            if site is None:
+                attribution_reason = "no_site"
+            else:
+                new_content, utm_tag, attribution_reason = mint_attribution_tag(
+                    content, site
+                )
+                if utm_tag:
+                    # Post-rewrite length re-validation. ai_reply truncates to the
+                    # cap at GENERATION time using raw len(); the utm parameter
+                    # makes the string longer, and sender posts verbatim. Over the
+                    # cap we send the ORIGINAL rather than mutate past it — never
+                    # truncate a human-approved reply, never fail the send.
+                    limit = CHAR_LIMITS.get(draft.platform)
+                    if limit is not None and len(new_content) > limit:
+                        attribution_reason = "skipped_length"
+                    else:
+                        content = new_content
+                        EngagementTracker(db).stage_engagement(
+                            user_id=draft.user_id,
+                            site_id=draft.site_id,
+                            platform=draft.platform.value,
+                            engagement_type="comment",
+                            utm_tag=utm_tag,
+                            post_url=post.post_url,
+                            draft_id=draft.id,
+                        )
+        # The posted text may now differ from the human-approved text. That is a
+        # real (declared) contract change, so it is never silent.
+        logger.info(
+            "attribution_link_rewritten",
+            draft_id=str(draft.id),
+            reason=attribution_reason,
+        )
+
         service = get_platform_service(draft.platform)
         try:
             comment_id = await service.post_comment(
@@ -216,6 +319,16 @@ async def send_draft(db: AsyncSession, draft: Draft) -> bool:
             draft.sent_at = datetime.now(timezone.utc)
             draft.failure_reason = None  # clear any reason from a prior failed try
             post.commented = True
+            # Persist the platform's id for this reply in the SAME transaction as
+            # status=sent — the join key every downstream outcome depends on.
+            # A falsy id leaves the column NULL and logs: telemetry must never
+            # fail a post that actually succeeded.
+            if comment_id:
+                draft.platform_comment_id = str(comment_id)[:64]
+            else:
+                logger.warning(
+                    "draft_sent_without_comment_id", draft_id=str(draft.id)
+                )
             await db.commit()
             logger.info(
                 "draft_sent",

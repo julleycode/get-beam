@@ -1461,6 +1461,26 @@ class Settings(BaseSettings):
     # the identity co-op's `contribution_enabled` (purpose limitation).
     campaign_benchmark_enabled: bool = False
 
+    # ─── Engage outcome capture (Phase 1) ───
+    # Master flag for the two new outcome-capture jobs (reply-back correlation
+    # sweep + public-metrics poller). Default OFF: both make outward READ calls
+    # to the X API, and the live tier/rate-limit budget for that read volume is
+    # an open question (OQ-1, needs-live-provider). Flipping this ON is a
+    # deliberate operator action after the migration is applied.
+    #
+    # NOT gated by this flag: persisting `Draft.platform_comment_id` on a
+    # successful send. That is unconditional data capture, not gated behavior —
+    # without it, turning the flag on later would have no history to measure.
+    engage_outcome_capture_enabled: bool = False
+    engage_outcome_sweep_interval_minutes: int = 30
+    engage_metrics_poll_interval_minutes: int = 60
+    # Hard ceiling on outward X calls per poller sweep (≤100 ids per call, so
+    # ~1000 replies/sweep). The 429 backoff handles rate-limit *responses*; this
+    # bounds call VOLUME, which a growing reply corpus would otherwise inflate
+    # without limit. On hitting the ceiling the sweep STOPS and logs the
+    # remaining backlog — never loops unbounded.
+    engage_metrics_poll_max_calls_per_sweep: int = 10
+
     # ─── Rate limits ───
     default_daily_resolution_budget: int = 50   # Free tier: 50 visitor identifications/day per site (BYOK = unlimited)
     # Days a failed paid-provider attempt locks the visitor against retry.

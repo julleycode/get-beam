@@ -60,6 +60,33 @@ class Draft(Base):
     sent_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # ─── engage-learning-agent Phase 1 (signal acquisition) ───
+    # The platform's own id for the reply we posted. Without it a sent reply is
+    # unmeasurable afterwards: it is the join key for the reply-back correlation
+    # sweep and the public-metrics poller. Persisted in the SAME transaction as
+    # status=sent, but NEVER allowed to fail a successful post — a missing id
+    # leaves this NULL and logs. INTERNAL: do not add to a response schema.
+    platform_comment_id: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True
+    )
+    # The site this draft is attributed to. `String(50)` referencing the unique
+    # `sites.site_id` SLUG — NOT the UUID PK — matching every other site-keyed
+    # consumer in the repo (visitors.site_id, events.site_id,
+    # engagement_attributions.site_id). Downstream joins go to `sites.site_id`
+    # directly, never `sites.id`.
+    #
+    # Nullable, and NULL is a real outcome rather than an error: one user may own
+    # many sites, and the manual "Generate Reply" path carries no visitor_id to
+    # disambiguate. Every consumer FAILS CLOSED on NULL (no attribution mint, no
+    # autonomy eligibility, excluded from site aggregates) — see
+    # `models/engage_outcome.py`. Historical rows stay NULL by design.
+    # INTERNAL: do not add to a response schema.
+    site_id: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        ForeignKey("sites.site_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

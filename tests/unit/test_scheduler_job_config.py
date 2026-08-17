@@ -177,7 +177,22 @@ class TestAC13IntervalJobHardening:
         assert [c for c in cron if "jitter" in _kwargs(c)] == []
 
     def test_the_asserted_set_is_derived_not_hardcoded(self):
-        """E20 arithmetic: 26 total / 22 interval / 3 cron — all AST-derived.
+        """E20 arithmetic: 28 total / 24 interval / 3 cron — all AST-derived.
+
+        Re-derived 17-08-26 against the live scheduler in the same change that
+        added the jobs (engage-learning-agent Phase 1), per this gate's own
+        standing instruction: when a job is added, recompute the arithmetic here.
+        Never relax the assertion — a relaxed count is how an unregistered or
+        double-registered sweep ships unnoticed.
+
+        Was 26/22/3; +2 interval jobs for engage outcome capture
+        (engage-learning-agent Phase 1): engage_outcome_sweep (reply-back
+        correlation) and engage_metrics_poll (public-metrics snapshots). Both are
+        flag-gated OFF on engage_outcome_capture_enabled INSIDE the sweep body
+        rather than at the registration site, so the registered count is stable
+        whether the flag is on or off; both carry literal jitter (45 / 75) and
+        misfire_grace_time, and deliberately NO next_run_time — aggregation_sweep's
+        90s boot offset must remain strictly the largest.
 
         Was 25/21/3; +1 interval job for coop_expiry_sweep (identity-coop Phase 2a
         — FIFO credit-lot expiry sweep; flag-gated OFF on identity_coop_enabled,
@@ -228,8 +243,8 @@ class TestAC13IntervalJobHardening:
         """
         calls = _add_job_calls()
         interval = [c for c in calls if _is_interval(c)]
-        assert len(calls) == 26, f"expected 26 add_job calls, found {len(calls)}"
-        assert len(interval) == 22, (
-            f"expected 22 interval calls, found {len(interval)}; if a job was "
+        assert len(calls) == 28, f"expected 28 add_job calls, found {len(calls)}"
+        assert len(interval) == 24, (
+            f"expected 24 interval calls, found {len(interval)}; if a job was "
             "added or removed, update E20's arithmetic — do not relax this gate"
         )

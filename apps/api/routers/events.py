@@ -541,6 +541,67 @@ async def ingest_events(
                 db, site_id=batch.site_id, visitor_id=batch.visitor_id, marker=_marker
             )
 
+    # Engagement attribution (engage-learning-agent Phase 1, AC-4): a visit
+    # carrying a `beam_` utm_source came from a link Beam itself tagged when it
+    # posted a reply. This block is the ONLY producer of the `attributed_visit`
+    # outcome — without it the Phase 3a positive-rate half is permanently empty,
+    # and `EngagementTracker.attribute_visitor` has no caller at all.
+    #
+    # Placement (deliberate, recorded): AFTER the event-insert commit above, and
+    # OUTSIDE `_process_signal_events`. Three reasons:
+    #   1. `attribute_visitor` commits internally; run inside the batched insert
+    #      it would commit mid-batch, and inside `_process_signal_events` it would
+    #      flush that function's still-pending fingerprint/svid updates.
+    #   2. The event-row build is a list comprehension — no `await` is legal there.
+    #   3. This is attribution/analytics, not signal extraction: the same
+    #      reasoning the in-file convention comment applies to the marker handoff.
+    #
+    # ONE call per DISTINCT utm_source in the batch, not one per event — N SELECTs
+    # per pageview on the hot path is how this repo has repeatedly regressed.
+    # Fail-open unconditionally: attribution must never fail or delay ingest.
+    try:
+        _beam_tags = {
+            e.utm.source
+            for e in batch.events
+            if e.utm and e.utm.source and e.utm.source.startswith("beam_")
+        }
+        if _beam_tags:
+            from apps.api.models.engage_outcome import record_outcome
+            from apps.api.models.engagement_attribution import EngagementAttribution
+            from apps.api.services.engagement_tracker import EngagementTracker
+
+            _tracker = EngagementTracker(db)
+            for _tag in _beam_tags:
+                # Site-scoped inside the tracker, so a tag replayed at another
+                # tenant matches nothing and writes nothing.
+                await _tracker.attribute_visitor(batch.site_id, _tag)
+
+                _attr = (
+                    await db.execute(
+                        select(EngagementAttribution).where(
+                            EngagementAttribution.utm_tag == _tag,
+                            EngagementAttribution.site_id == batch.site_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+                if _attr is None or _attr.draft_id is None:
+                    continue
+                await record_outcome(
+                    db,
+                    draft_id=_attr.draft_id,
+                    site_id=batch.site_id,
+                    outcome_type="attributed_visit",
+                    # The visit reference. Per-visitor rather than per-event so a
+                    # returning visitor on the same tagged link is one outcome.
+                    platform_ref=f"{_tag}:{batch.visitor_id}"[:128],
+                )
+                await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logger.warning(
+            "engagement_attribution_failed", error_type=type(exc).__name__
+        )
+
     # Conversion goal matching (best-effort — never blocks the 204). Runs AFTER
     # signal processing so a landing pageview that carries _tp has its
     # campaign_clicks link committed before attribution looks for it.

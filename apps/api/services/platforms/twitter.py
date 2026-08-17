@@ -12,6 +12,7 @@ from apps.api.services.platforms.base import (
     OAuthTokens,
     PlatformService,
     post_retry,
+    read_retry,
 )
 from apps.api.services.platforms.pkce import (
     generate_code_verifier,
@@ -310,6 +311,66 @@ class TwitterService(PlatformService):
         except Exception:
             logger.warning("twitter_write_probe_failed")
             return None
+
+    # ── Outcome reads (engage-learning-agent Phase 1) ─────
+    @read_retry
+    async def fetch_reply_mentions(
+        self, access_token: str, *, limit: int = 50
+    ) -> list[dict]:
+        """Recent mentions as RAW tweet dicts carrying author_id + referenced_tweets.
+
+        `referenced_tweets` is requested here for the first time anywhere in this
+        repo — it is what makes the reply-back linkage EXACT (which of our replies
+        was replied to) instead of a temporal guess. `_parse_tweets` is deliberately
+        NOT reused: `FeedPost` drops both `referenced_tweets` and `author_id`.
+        """
+        headers = {"Authorization": f"Bearer {access_token}"}
+        me = await self._get_me(access_token)
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{_TWITTER_API}/tweets/search/recent",
+                headers=headers,
+                params={
+                    "query": f"@{me['username']} -is:retweet",
+                    "max_results": max(10, min(limit, 100)),
+                    "tweet.fields": "created_at,author_id,referenced_tweets",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        return [t for t in (data.get("data") or []) if isinstance(t, dict)]
+
+    @read_retry
+    async def get_tweets_metrics(
+        self, access_token: str, ids: list[str]
+    ) -> dict[str, dict[str, int]]:
+        """Batched public_metrics read. Caller must pass <= 100 ids per call."""
+        if not ids:
+            return {}
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(
+                f"{_TWITTER_API}/tweets",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={
+                    "ids": ",".join(ids[:100]),
+                    "tweet.fields": "public_metrics",
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        out: dict[str, dict[str, int]] = {}
+        for tweet in data.get("data") or []:
+            metrics = tweet.get("public_metrics") or {}
+            # X's REAL field names. Passed through verbatim — no aliasing, so a
+            # field X renames shows up as a missing key rather than a silent zero.
+            out[str(tweet.get("id"))] = {
+                k: v
+                for k, v in metrics.items()
+                if k in ("like_count", "retweet_count", "quote_count", "reply_count")
+                and isinstance(v, int)
+            }
+        return out
 
     # ── Helpers ──────────────────────────────────────────
     async def _get_me(self, access_token: str) -> dict:

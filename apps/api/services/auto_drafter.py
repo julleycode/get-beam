@@ -116,6 +116,15 @@ class AutoDrafter:
 
         context_summary = f"Re: {post_content[:100]}"
 
+        # Resolve the site key at creation time. On this path the visitor is
+        # always known, so precedence step 1 normally settles it; None is still
+        # accepted and every consumer fails closed on it.
+        from apps.api.services.engagement_tracker import derive_draft_site_id
+
+        site_id = await derive_draft_site_id(
+            self.db, user_id=user.id, visitor_id=visitor.visitor_id
+        )
+
         draft = Draft(
             user_id=user.id,
             type=DraftType.comment,
@@ -125,6 +134,7 @@ class AutoDrafter:
             auto_generated=True,
             visitor_id=visitor.visitor_id,
             context_summary=context_summary,
+            site_id=site_id,
         )
         self.db.add(draft)
         await self.db.commit()

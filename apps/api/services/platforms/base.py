@@ -22,6 +22,37 @@ def _is_write_retryable(exc: BaseException) -> bool:
     return False
 
 
+def _is_read_retryable(exc: BaseException) -> bool:
+    """Retry policy for READ ops (metrics / mentions polling).
+
+    Reads have no double-write hazard, so this is deliberately wider than
+    `_is_write_retryable`: 429 (rate-limited) plus 5xx plus connection/read
+    timeouts are all retryable. `post_retry` is WRITE-only and does not cover
+    these calls at all, which is why a separate policy exists rather than
+    reusing it.
+    """
+    if isinstance(
+        exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)
+    ):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        return status == 429 or 500 <= status < 600
+    return False
+
+
+# Shared retry policy for platform READ ops (outcome metrics + reply mentions).
+# Longer backoff ceiling than the write policy because a 429 on X's read tier can
+# mean a multi-minute window, and these calls run in a background sweep where
+# waiting is free.
+read_retry = retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=2, max=30),
+    retry=retry_if_exception(_is_read_retryable),
+    reraise=True,
+)
+
+
 # Shared retry policy for platform write ops (post_comment): 3 attempts,
 # exponential backoff (1→10s). Only retries failures where no write could have
 # happened, so a retry never double-posts.
@@ -105,6 +136,40 @@ class PlatformService(ABC):
     ) -> list[InboxMessage]:
         """Fetch recent DMs. Default: not supported (Phase 2)."""
         return []
+
+    # ── Outcome reads (engage-learning-agent Phase 1) ────
+    # NON-abstract on purpose: an @abstractmethod here would break all five
+    # existing subclasses the moment this file changed. A platform that has not
+    # implemented outcome capture raises, and the sweep skips it.
+
+    async def fetch_reply_mentions(
+        self, access_token: str, *, limit: int = 50
+    ) -> list[dict]:
+        """Recent inbound mentions, as RAW platform dicts.
+
+        Returns raw dicts rather than `FeedPost` deliberately: `FeedPost` carries
+        neither `referenced_tweets` (the exact-linkage key — which reply of ours
+        was replied to) nor `author_id` (needed to exclude the site's own posting
+        account). Normalizing here would throw away both fields the caller exists
+        to read.
+
+        Each dict MUST carry at least `id`, `author_id`, and `referenced_tweets`.
+        """
+        raise NotImplementedError(
+            "reply-mention reads not supported on this platform"
+        )
+
+    async def get_tweets_metrics(
+        self, access_token: str, ids: list[str]
+    ) -> dict[str, dict[str, int]]:
+        """Public engagement counters for our OWN posts, keyed by platform id.
+
+        Values use the platform's REAL field names (for X: `like_count`,
+        `retweet_count`, `quote_count`, `reply_count`). Inventing a plausible
+        snake_case alias is the documented failure mode that produced a 100%
+        silent skip elsewhere in this repo — map, never guess.
+        """
+        raise NotImplementedError("metrics reads not supported on this platform")
 
     # ── Write ────────────────────────────────────────────
     @abstractmethod

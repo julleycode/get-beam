@@ -253,6 +253,38 @@ async def _handoff_correlation_sweep_job() -> None:
         logger.exception("handoff_correlation_sweep_crashed")
 
 
+async def _engage_outcome_sweep_job() -> None:
+    """Periodic job: correlate inbound replies to replies Beam posted (AC-2).
+
+    run_engage_outcome_sweep owns the advisory lock, the per-row fail-open
+    iteration, and the flag short-circuit; this wrapper only opens the session and
+    swallows a top-level crash. Never touches the ingest hot path.
+    """
+    try:
+        from apps.api.services.engage_outcome_sweep import run_engage_outcome_sweep
+
+        async with async_session() as db:
+            await run_engage_outcome_sweep(db)
+    except Exception:
+        logger.exception("engage_outcome_sweep_crashed")
+
+
+async def _engage_metrics_poll_job() -> None:
+    """Periodic job: snapshot public metrics on replies Beam posted (AC-3).
+
+    Its own job rather than a chain off the correlation sweep: the two have
+    different cadences (30 vs 60 min) and different failure modes, and chaining
+    would make a mentions-read failure silently skip metrics too.
+    """
+    try:
+        from apps.api.services.engage_metrics_poll import run_engage_metrics_poll
+
+        async with async_session() as db:
+            await run_engage_metrics_poll(db)
+    except Exception:
+        logger.exception("engage_metrics_poll_crashed")
+
+
 async def _intent_signal_sweep_job() -> None:
     """Periodic job: live commercial-page intent alerts + spike detection (H3).
 
@@ -728,6 +760,33 @@ def start_scheduler() -> None:
         replace_existing=True,
         jitter=60,
         misfire_grace_time=300,
+    )
+    # ─── engage-learning-agent Phase 1 (outcome capture) ───
+    # Both jobs join the shared 5-connection pool (pool_size=3 + max_overflow=2),
+    # so each opens exactly ONE session and holds it only for the sweep body.
+    # Spread is by `jitter` ONLY — deliberately no `next_run_time`: the
+    # aggregation_sweep boot offset (90s) must stay strictly the largest, and a
+    # new job at >=90s would break that assertion. Distinct jitter literals so the
+    # two never land together. Both short-circuit internally when
+    # engage_outcome_capture_enabled is False, so registration is unconditional
+    # and the inventory count is stable regardless of the flag.
+    scheduler.add_job(
+        _engage_outcome_sweep_job,
+        "interval",
+        minutes=settings.engage_outcome_sweep_interval_minutes,
+        id="engage_outcome_sweep",
+        replace_existing=True,
+        jitter=45,
+        misfire_grace_time=300,
+    )
+    scheduler.add_job(
+        _engage_metrics_poll_job,
+        "interval",
+        minutes=settings.engage_metrics_poll_interval_minutes,
+        id="engage_metrics_poll",
+        replace_existing=True,
+        jitter=75,
+        misfire_grace_time=600,
     )
     scheduler.add_job(
         _cadence_bot_flag_sweep_job,
