@@ -33,7 +33,7 @@ to close 8 identified defect classes. It touches only `tests/`, `scripts/`, and 
 
 Testing context: `process/context/tests/all-tests.md` is the routing entry point for this work;
 follow its downstream chain (container/e2e docs, debugging gotchas) before writing any lane test.
-Post-phase testing is defined in the Verification Evidence table below (DE-1 through DE-20) and in
+Post-phase testing is defined in the Verification Evidence table below (DE-1 through DE-21) and in
 Phase Completion Rules.
 
 ---
@@ -170,7 +170,7 @@ This plan exposes **no new runtime contract**. It creates one **developer-facing
 |---|---|---|
 | `scripts/e2e-disposable.sh <lane-name>` | prints `DATABASE_URL=...` and `REDIS_URL=...` on stdout, exits non-zero and prints nothing on refusal; unconditional teardown on any exit | new; treat as stable once merged |
 | `tests/e2e_disposable/conftest.py` session-scoped `disposable_engine` fixture | owns `DROP TABLE IF EXISTS alembic_version` → `alembic upgrade head` → engine creation; lane-local, never imported by the root conftest | new (supersedes the withdrawn `E2E_DISPOSABLE_ALEMBIC` root-conftest branch, F-4) |
-| `pyproject.toml` `addopts = "-m 'not disposable'"` | the default `pytest` invocation no longer collects or imports `tests/e2e_disposable/` | new; **changes the default invocation for every suite in the repo** — DE-1 must run AFTER this lands, not before |
+| `pyproject.toml` `addopts = "--ignore=tests/e2e_disposable"` (+ registered `disposable` marker, + module-level `pytestmark` in every lane spec) | the default `pytest` invocation **does not collect or import** `tests/e2e_disposable/`, because the exclusion is **path-based**. (E-4: a `-m 'not disposable'` marker filter would NOT achieve this — `-m` deselects *after* collection, so every lane module is still imported; the marker is retained for selection and as defence in depth only.) | new; **changes the default invocation for every suite in the repo** — DE-1 must run AFTER this lands, not before |
 
 **Explicit non-contract:** nothing in `apps/api/**` changes. `identity_coop_enabled` and every
 other repo-default-OFF flag stays OFF in `.env`; the lane sets flags per-process/per-test only.
@@ -186,7 +186,7 @@ surface.
 | File | Diff budget | Constraint |
 |---|---|---|
 | `tests/conftest.py` | **0 added, 0 removed, 0 modified** | Not touched. The alembic build lives in the lane conftest (F-4). Enforced mechanically by DE-1 (`git diff --numstat` = 0/0). |
-| `pyproject.toml` | **≤ 3 lines** (marker registration + `addopts`) | Real exclusion, not marker-only (F-5). Changes the default invocation repo-wide. |
+| `pyproject.toml` | **≤ 4 lines** (marker registration + `addopts` + the `asgi-lifespan` entry in the existing `test` extra, C-17) | Real exclusion, not marker-only (F-5). Changes the default invocation repo-wide. |
 | `scripts/e2e-disposable.sh` | new, ≤ 150 lines | must refuse non-localhost DSN |
 | `tests/e2e_disposable/conftest.py` | new, ≤ 250 lines | lane-scoped; must not import from the root conftest's engine fixture. Owns the session-scoped alembic build AND the in-process DSN guard (C-10). |
 | `tests/e2e_disposable/test_migration_truth.py` | new, ≤ 150 lines | items 2, 3 |
@@ -249,8 +249,12 @@ surface.
 10. **(F-4 — supersedes the withdrawn root-conftest branch.)** Do **not** edit `tests/conftest.py`
     at all. Add a **session-scoped** `disposable_engine` fixture in
     `tests/e2e_disposable/conftest.py` that owns the whole schema build:
-    (a) `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` **or**, at minimum,
-    `DROP TABLE IF EXISTS alembic_version` plus the model `drop_all`;
+    (a) `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` — **(C-12) this is mandatory and the
+    only accepted implementation.** Do **not** substitute the weaker `DROP TABLE IF EXISTS
+    alembic_version` plus model `drop_all`: that removes only tables present in the ORM metadata, so
+    any table a migration creates but the ORM never declares survives and makes the next
+    `upgrade head` fail on an existing object. (Verified safe: `grep -rn "CREATE EXTENSION"
+    apps/api/migrations/versions/` returns **zero** matches, so no extension is dropped.)
     (b) `alembic -c apps/api/alembic.ini upgrade head` as a subprocess with `DATABASE_URL` pinned
     inline to the disposable DSN; (c) create the lane engine.
     **(F-3 — why (a) is mandatory.)** `alembic_version` is created by alembic's own DDL and appears
@@ -273,6 +277,14 @@ surface.
     `pytest tests/e2e_disposable/` directly falls through to `conftest.py:24`'s `setdefault`, hits
     the shared local dev DB on `:5433` (or, with the repo dotenv, Supabase PROD), and the fixture
     then `drop_all`s it. Unparseable DSN ⇒ refuse.
+    **(C-15 — make the ordering explicit.)** Declare the lane engine fixture as
+    `def disposable_engine(_dsn_guard): ...` so the guard-before-engine dependency is explicit rather
+    than resting on pytest's default autouse ordering (which does place a session-scoped autouse
+    fixture first today, but a future refactor could silently invert it). Note the guard fires at
+    fixture time — i.e. **after** `tests/conftest.py:24`'s `setdefault` and after
+    `models/database.py`'s import-time `create_async_engine`. That is harmless (engine creation is
+    lazy; no connection is opened at import) and the guard still precedes every destructive
+    statement.
 13. Add `tests/e2e_disposable/test_migration_truth.py`: assert that after `upgrade head`, both
     `uq_coop_accrued_site_email` and `uq_coop_ledger_expire_per_lot` exist in `pg_indexes`, **and**
     assert behaviorally that a duplicate insert violating each one raises `IntegrityError`.
@@ -285,6 +297,13 @@ surface.
     revision below `b7e4d21a9c58`), insert rows that would **violate** the new unique index, then
     `upgrade head` and assert a **clean abort** — the transaction rolls back with no partial state
     (index absent, rows unchanged, alembic version unchanged).
+    **(C-11 — mandatory restore to head.)** `disposable_engine` builds the schema **once per
+    session**, so a clean abort by definition leaves the DB **at the downgraded revision**. Every
+    test collected after DE-11 in that session would then run without
+    `uq_coop_ledger_expire_per_lot`, silently turning DE-2/DE-9b/DE-10-shaped assertions vacuous.
+    DE-11 and DE-12 must therefore restore `upgrade head` in an explicit teardown, or use a
+    dedicated function-scoped rebuild fixture used by those two tests only. State the restore
+    explicitly in the test file — never rely on collection order.
 16. Add the happy-path counterpart: populated-but-valid DB migrates cleanly and the index appears.
 17. Where an offline `--sql` check is used anywhere in this lane, always pass an explicit
     `<from>:<to>` range (`b7d3e9f1a4c2_add_ad_connections.py` calls `sa.inspect(bind)` and breaks
@@ -292,7 +311,8 @@ surface.
 
 ### Section C — Real-process lifespan harness (item 4)
 
-18. Add `asgi-lifespan` to `requirements.txt`.
+18. Add `asgi-lifespan` to `requirements.txt`, annotated inline as test-only, **and also add it to
+    the existing `[project.optional-dependencies] test` extra in `pyproject.toml`** (C-17).
 19. **(C-3 — corrected.)** Only **`DATABASE_URL`** (and `REDIS_URL`) genuinely must precede import:
     the global engine is built at import time in `models/database.py`, so it cannot be retrofitted.
     Both must be **exported before the pytest process starts** (the helper prints them); the lane
@@ -330,6 +350,14 @@ surface.
     fixed `T` — one patch covers both call sites because both live in that module — seed
     `expires_at = T`, then assert swept (`<= T` true) **and** excluded from spendable (`> T` false),
     with no window in which it is counted twice or dropped by both.
+    **(C-14 — seed `spendable_at` in the past, or the gate passes for the wrong reason.)**
+    `spendable_balance` (`identity_coop.py:254-261`) excludes a lot when `spendable_at > now` **as
+    well as** when `expires_at <= now`. A lot seeded with `expires_at = T` and the default hold
+    (`created_at + coop_credit_hold_hours`) is excluded from the balance because it is still *held*,
+    not because it expired — so the "excluded from spendable" half would be green even under a broken
+    expiry predicate (the service docstring warns about exactly this). Seed `spendable_at` in the
+    past (or monkeypatch `coop_credit_hold_hours` to 0) so the expiry predicate is the only remaining
+    discriminator.
 27. Add the **mid-run crash** scenario: kill/abort the sweep after N lots are committed; assert the
     already-processed lots are durable (per-lot `commit()` at `:588-602`) and the next tick resumes
     from the remainder without reprocessing.
@@ -354,6 +382,11 @@ surface.
     must be exactly 0 for the loser).
     `_LOCK_KEY` MUST be imported from `services/coop_expiry_sweep.py`, never re-spelled in the test
     — the module docstring already warns that re-spelling makes the gate pass unconditionally.
+    **(C-13 — remove the timing dependency; do not rely on catching a live sweep mid-hold.)** A probe
+    that runs after release returns TRUE and fails the assertion — flaky-RED, not vacuous-GREEN, but
+    still unacceptable. Construct it deterministically instead: acquire the lock **directly in the
+    test** on connection 1 via `pg_try_advisory_lock(hashtext(_LOCK_KEY))` (with `_LOCK_KEY`
+    imported), run `run_coop_expiry_sweep` on connection 2, and probe from connection 3. No race.
     *Why the original wording failed:* `coop_expiry_sweep.py` states the lock is **EFFICIENCY-ONLY**
     and that correctness comes from `uq_coop_ledger_expire_per_lot`. With the lock stubbed out, the
     second sweep runs, every INSERT hits `ON CONFLICT (lot_id) WHERE entry_type='EXPIRE' DO NOTHING`,
@@ -363,11 +396,32 @@ surface.
     without taking a lock; confirm DE-6 goes **RED** under the item-32 formulation; revert and
     re-run GREEN.
 34. **(F-2 + orchestrator correction — split into two distinct scenarios.)**
-    (a) **Orphan-guard scenario (the real DE-16).** The `WHERE EXISTS` guard at
-    `services/identity_coop.py:522-527` tests for the **ACCRUE ledger row**, not for the site. So
-    the mutation must delete the **ACCRUE lot row** (`identity_credit_ledger WHERE id = lot_id AND
-    entry_type = 'ACCRUE'`) between lot selection and lot processing; assert no orphan EXPIRE row
-    is written and the sweep does not raise. Removing the guard must turn this RED.
+    (a) **Orphan-guard scenario (the real DE-16a). (E-1 — do NOT implement the earlier
+    "delete the ACCRUE lot row" formulation; it is vacuous.)** `_lot_remaining`
+    (`identity_coop.py:479-498`) is a raw `SUM(amount) WHERE lot_id = :lot_id`, and an ACCRUE row
+    **is its own lot** (`ledger.lot_id = ledger.id`, `:202`; model comment
+    `models/identity_coop.py` "ACCRUE: own id"). Deleting the ACCRUE lot row therefore drives
+    `SUM = 0` → `remaining = max(0, 0) = 0` → the **`continue` at `:589-590`** fires and
+    `_EXPIRE_INSERT_SQL` is **never executed at all**, so no orphan EXPIRE row appears **with or
+    without** the `WHERE EXISTS` guard and removing the guard leaves the gate GREEN.
+    *Required implementation:* the mutation must keep `SUM(amount) > 0` for the lot while making the
+    `EXISTS` predicate FALSE. Use a **mid-flight `site_id` rewrite** (no schema or enum change
+    needed):
+    1. Monkeypatch `apps.api.services.identity_coop._lot_remaining` with a wrapper that, on first
+       call, issues `UPDATE identity_credit_ledger SET site_id = 'e2e-moved' WHERE id = :lot_id`
+       **and commits on a separate connection**, then delegates to the real `_lot_remaining` (which
+       still returns +N, because `lot_id` is untouched).
+    2. The sweep's `:site_id` bind is the snapshot taken by the set-level SELECT **before** the
+       update, so `EXISTS (... AND site_id = CAST(:site_id AS varchar))` is now FALSE while
+       `remaining > 0`.
+    3. Assert `SELECT count(*) ... WHERE lot_id = X AND entry_type = 'EXPIRE'` is **0** and the sweep
+       did not raise.
+    4. Mutation probe: delete the `WHERE EXISTS (...)` clause from `_EXPIRE_INSERT_SQL` → the count
+       becomes 1 → DE-16a **RED**. Revert and re-confirm GREEN.
+    *Do not pre-mutate before the sweep starts:* changing `site_id` beforehand makes the snapshot
+    carry the NEW value (the lapsed SELECT has no site filter), and changing `entry_type` beforehand
+    removes the row from the lapsed set (`:571` filters `entry_type == "ACCRUE"`). Both pre-mutations
+    are themselves vacuous. The mutation must be mid-flight.
     (b) **Site-deleted scenario (separate, re-labelled).** Delete the site and assert the sweep does
     not raise. This proves robustness, **not** the orphan guard — deleting a `Site` row directly
     leaves the ledger intact (there is no ForeignKey on `identity_credit_ledger.site_id`;
@@ -386,11 +440,21 @@ surface.
     different RED conditions; do not conflate them.)**
     (a) **one-winner half:** `_replica_child.py` MUST print a machine-readable
     `acquired=<bool> written=<n>` line; assert `sum(acquired) == 1`. **Only this half is falsified
-    by removing the lock.**
-    (b) **no-duplicate-rows half:** assert exactly one EXPIRE row per lot. This half is guaranteed
-    by `uq_coop_ledger_expire_per_lot` + `ON CONFLICT DO NOTHING` **with or without the lock**, so
-    its RED condition is "removing `uq_coop_ledger_expire_per_lot`", not "removing the lock"
-    (again: row counts are lock-blind). Closes class 8 / K-2.
+    by removing the lock.** **(C-13 — add a start barrier.)** Two children that do not genuinely
+    overlap both acquire and `sum(acquired) == 2` (flaky-RED). Gate the children on a shared start
+    barrier (a shared row/file or `multiprocessing.Barrier`) and seed enough lots that the critical
+    section outlasts child startup.
+    (b) **no-duplicate-rows half:** assert exactly one EXPIRE row per lot. **(E-3 — the previously
+    stated falsifier is false.)** `pg_try_advisory_lock` is session-scoped and the two children hold
+    two separate connections, so with the lock intact exactly one child ever enters
+    `expire_lapsed_lots` (`coop_expiry_sweep.py:76-82`) and the loser writes nothing — removing
+    `uq_coop_ledger_expire_per_lot` **alone** therefore still yields exactly one EXPIRE row per lot
+    and leaves DE-9b **GREEN**. The index is a *backstop* that is only observable once the lock is
+    disabled. Its RED condition is therefore **"remove `uq_coop_ledger_expire_per_lot` *while* the
+    advisory lock is stubbed out"**, and DE-9b's falsification MUST be run in that deliberate
+    lock-disabled configuration. It is **not** "removing the lock" on its own (row counts are
+    lock-blind). DE-9a keeps its own stated RED condition ("removing the lock"). Closes class 8 /
+    K-2.
 37. Add the two-process **accrual race**: both children accrue for the same `(site, email)`;
     assert `uq_coop_accrued_site_email` collapses them to one row and neither process crashes
     with an unhandled `IntegrityError`.
@@ -410,13 +474,24 @@ surface.
     ORM per-row).
 40. Measure and record: total sweep wall-clock, DB round-trip count, and maximum connection hold
     duration. The sweep selects **every** lapsed lot globally with no site filter, no LIMIT and no
-    batching (`:563-576`), then does SELECT + INSERT + `commit()` **per lot** (`:588-602`) — so
-    round-trips are expected to be O(3n).
-41. **(C-5 — the threshold is specified here, in the plan, not deferred to EXECUTE.)** The hard
-    FAIL is **structural and environment-independent**: **DB round-trips MUST be ≤ 3n + 10**
-    (≤ **30,010** at n = 10,000). Derivation: one set-level SELECT (`identity_coop.py:563-576`)
-    plus, per lot, `_lot_remaining` SELECT + INSERT + `commit()` (`:588-602`). Measure with a
-    SQLAlchemy `before_cursor_execute` event counter registered on the lane engine.
+    batching (`:563-576`), then does SELECT + INSERT + `commit()` **per lot** (`:588-602`) — so the
+    work is O(3n) per-lot operations, of which only **2n** are visible to `before_cursor_execute`
+    (COMMIT is not; see item 41 / E-2). Commits are counted separately.
+41. **(C-5 threshold, corrected by E-2 — specified here in the plan, not deferred to EXECUTE.)**
+    The hard FAIL is **structural and environment-independent**: **DB round-trips MUST be
+    ≤ 2n + 10** (≤ **20,010** at n = 10,000). Derivation: `before_cursor_execute` fires only for
+    statements executed through the DBAPI **cursor**; `session.commit()` goes through the DBAPI
+    connection's `commit()` (and asyncpg's `BEGIN` through its transaction API), so **COMMIT is
+    invisible to the counter**. The real measured shape is therefore `1` set-level SELECT
+    (`identity_coop.py:563-576`) + `2` per lot (`_lot_remaining` SELECT + `_EXPIRE_INSERT_SQL`,
+    `:588-602`) = **2n + 1 ≈ 20,001**, not 3n + 1. The former `3n + 10 = 30,010` ceiling left ~10,000
+    of slack, so an entire extra per-lot round-trip (2n+1 → 3n+1 = 30,001) still PASSED — exactly the
+    regression DE-18 names as its RED condition. Measure with a SQLAlchemy `before_cursor_execute`
+    event counter registered on the lane engine, and record in the test docstring that COMMIT is not
+    counted by it. **Additionally** count commits separately via SQLAlchemy's `ConnectionEvents.commit`
+    hook, asserting **commits ≤ n + 5**. **Scope the counter to the sweep window**: reset it
+    immediately before `run_coop_expiry_sweep` and read it immediately after, so the 10k-row bulk seed
+    and the assertion queries are not counted.
     Wall-clock is environment-dependent: record it with a generous ceiling of **120 s** at
     n = 10,000 on a local container, as an **observation, not the gate**. Max single-connection hold
     equals the whole sweep by construction (one session throughout) — record it, do not gate it.
@@ -439,9 +514,22 @@ surface.
     only silences the unknown-marker warning — a bare `pytest` still **collects and imports** every
     module under `tests/e2e_disposable/` (firing the `asgi-lifespan` import and any module-level env
     manipulation inside the normal unit lane). Therefore do BOTH: register the marker AND add a real
-    exclusion — `addopts = "-m 'not disposable'"` (or `--ignore=tests/e2e_disposable`, or
-    `collect_ignore_glob` in the root conftest). Because `addopts` changes the default invocation for
-    **every** suite in the repo, DE-1 must be run **after** this change lands, never before.
+    exclusion. **(E-4 — `-m` is the WRONG primary mechanism; do not implement it as such.)** pytest
+    applies `-m` as a **deselection filter applied after collection**, and collection imports every
+    module under `testpaths = ["tests"]` — including `tests/e2e_disposable/conftest.py` and every lane
+    spec. Two consequences: (i) module-level side effects in the lane still fire during a bare
+    `pytest`; (ii) the exclusion silently depends on **every future lane file remembering the
+    marker** — a file that omits it is collected *and executed* in the default run.
+    *Required implementation:* make the **path-based** exclusion primary —
+    `addopts = "--ignore=tests/e2e_disposable"` (or `collect_ignore_glob` — which must live in
+    `pyproject.toml`, not the root conftest, since `tests/conftest.py` is 0/0/0). Keep the
+    `disposable` marker registration for **selection**, and add `pytestmark = pytest.mark.disposable`
+    at module level in **every** lane spec as defence in depth. Because `addopts` changes the default
+    invocation for **every** suite in the repo, DE-1 must be run **after** this change lands, never
+    before. DE-1(b) alone cannot detect a lane leak — `pytest tests/unit` / `pytest tests/integration`
+    are path-scoped and would never collect `tests/e2e_disposable/` regardless — so DE-1 also carries
+    a third leg: a bare `.venv/bin/python3.11 -m pytest --collect-only -q` from the repo root must
+    list **zero** items under `tests/e2e_disposable/`.
 45b. **(C-7 — the helper's own gates had no home and no run step.)** Add
     `tests/e2e_disposable/test_helper_guard.py` (≤ 120 lines) that invokes
     `scripts/e2e-disposable.sh` via subprocess and asserts DE-19 + DE-20: a remote DSN without
@@ -480,7 +568,7 @@ named structlog event) — never on how many rows appeared.
 
 ### Gate-ID renumbering (C-9)
 
-This plan's gates are prefixed **`DE-`** (`DE-1` … `DE-20`) to end the collision with identity-coop
+This plan's gates are prefixed **`DE-`** (`DE-1` … `DE-21`) to end the collision with identity-coop
 **Phase 2a's** own `DE-1` … `DE-23` — both plans are cited in the same documents, and
 `services/coop_expiry_sweep.py`'s `_LOCK_KEY` comment refers to a *different* `DE-20`. Mapping is
 identity: `DE-N` ≡ this plan's former `G-N`. Any bare `G-N` in the `## Validate Contract` section
@@ -488,7 +576,7 @@ below predates the renumbering and means `DE-N` unless explicitly written "Phase
 
 | Gate / Scenario | Strategy | Proves SPEC criterion | Goes RED against |
 |---|---|---|---|
-| **DE-1** Default lane unchanged — **two legs** (C-1): (a) mechanical: `git diff --numstat tests/conftest.py` reports **0 additions and 0 deletions**; (b) behavioral: `pytest tests/unit -q` and `pytest tests/integration -q` both green, run **after** the `pyproject.toml` `addopts` change lands | **Hybrid** (integration lane needs PG/Redis — it was mis-tiered Fully-Automated) | D-E2E-2 (default byte-identical) | any edit to `tests/conftest.py` at all; any `addopts` change that swallows existing suites |
+| **DE-1** Default lane unchanged — **three legs** (C-1 + E-4): (a) mechanical: `git diff --numstat tests/conftest.py` reports **0 additions and 0 deletions**; (b) behavioral: `pytest tests/unit -q` and `pytest tests/integration -q` both green, run **after** the `pyproject.toml` `addopts` change lands; (c) collection: a bare `.venv/bin/python3.11 -m pytest --collect-only -q` from the repo root lists **zero** items under `tests/e2e_disposable/` — leg (b) is path-scoped and cannot detect a lane leak at all (E-4) | **Hybrid** (integration lane needs PG/Redis — it was mis-tiered Fully-Automated) | D-E2E-2 (default byte-identical) | any edit to `tests/conftest.py` at all; any `addopts` change that swallows existing suites |
 | **DE-2** Index parity: `uq_coop_ledger_expire_per_lot` + `uq_coop_accrued_site_email` exist after `alembic upgrade head` and reject duplicates | Hybrid (disposable PG) | class 1 — model/migration divergence | **mutation probe**: delete `op.create_index(...)` from `b7e4d21a9c58` ⇒ must FAIL |
 | **DE-3** Coop job registered with correct interval/jitter/misfire after real lifespan boot | Hybrid | class 3 — job never registers | **mutation probe**: comment out `add_job` at `scheduler.py:744-752` ⇒ must FAIL |
 | **DE-4** Boot-OFF: zero coop jobs when `identity_coop_enabled=false` before import | Hybrid | `scheduler.py:743` boot gate | removing the `if settings.identity_coop_enabled:` guard |
@@ -498,17 +586,17 @@ below predates the renumbering and means `DE-N` unless explicitly written "Phase
 | **DE-7** Advisory lock observed held/free from a **different** connection | Hybrid | class 5 | a lock scoped to the session rather than the connection |
 | **DE-8** Scenario 43 (D-E2E-1): lot expires despite `contribution_enabled=False`; new accrual refused | **Hybrid** (needs a live PG for the ledger write) | D-E2E-1 | any implementation that skips lots for opted-out sites (the exploit) |
 | **DE-9a** Two processes, **one winner**: `sum(acquired) == 1` from `_replica_child.py`'s `acquired=<bool> written=<n>` line | Hybrid (2 OS procs) | class 8 / K-2 — N replicas ⇒ N schedulers | removing the advisory lock (this half only) |
-| **DE-9b** Two processes, **no duplicate rows**: exactly one EXPIRE row per lot | Hybrid (2 OS procs) | class 8 | removing `uq_coop_ledger_expire_per_lot`. **NOT** falsified by removing the lock (C-2) |
+| **DE-9b** Two processes, **no duplicate rows**: exactly one EXPIRE row per lot | Hybrid (2 OS procs) | class 8 | removing `uq_coop_ledger_expire_per_lot` **while the advisory lock is stubbed out** — with the lock intact only one child ever enters the sweep, so removing the index alone leaves this GREEN (E-3). **NOT** falsified by removing the lock alone (C-2) |
 | **DE-10** Two-process accrual race collapses to one row, no unhandled `IntegrityError` | Hybrid | class 8 | missing unique index or unhandled conflict |
 | **DE-11** Non-empty-DB migration aborts cleanly on violating rows — no partial state | Hybrid | class 2 | a migration that leaves a half-applied schema |
 | **DE-12** Populated-but-valid DB migrates cleanly | Hybrid | class 2 | over-strict migration that fails on legitimate data |
 | **DE-13** Boundary `expires_at == now` (constructed by monkeypatching `apps.api.services.identity_coop.datetime` to a fixed `T` — C-6): expired by sweep **and** excluded from spendable balance | **Hybrid** (needs the ledger write) | class 7 | `<`/`>=` predicate drift creating a double-count or drop-by-both window |
 | **DE-14** Mid-run crash: processed lots durable, next tick resumes, no reprocessing | Hybrid | class 7 | a single wrapping transaction instead of per-lot commit |
 | **DE-15** Aborted transaction still releases the lock (`finally` survives) | Hybrid | class 7 | an exception path that bypasses the unlock ⇒ lock held forever |
-| **DE-16a** Orphan guard: the **ACCRUE lot row** is deleted between selection and processing ⇒ no orphan EXPIRE row, no raise | Hybrid | `services/identity_coop.py:522-527` | removing the `WHERE EXISTS` guard. (The original "delete the Site" mutation left this GREEN either way — there is no FK on `identity_credit_ledger.site_id` — F-2) |
+| **DE-16a** Orphan guard: a **mid-flight `site_id` rewrite** (via a `_lot_remaining` wrapper that `UPDATE`s + commits on a separate connection) makes the `EXISTS` predicate FALSE while `SUM(amount) > 0` ⇒ no orphan EXPIRE row, no raise (E-1) | Hybrid | `services/identity_coop.py:522-527` | removing the `WHERE EXISTS` clause from `_EXPIRE_INSERT_SQL`. (Both earlier mutations were vacuous: "delete the Site" left it GREEN because there is no FK on `identity_credit_ledger.site_id` (F-2); "delete the ACCRUE lot row" drives `_lot_remaining` to 0 so the `continue` at `:589-590` fires and the INSERT never runs at all (E-1)) |
 | **DE-16b** Site row deleted mid-sweep ⇒ sweep does not raise | Hybrid | robustness only — explicitly **not** an orphan-guard proof | an unguarded attribute/row access on the missing site |
 | **DE-17** Site deleted **via `routers/sites.py` `delete_site`** then re-created with the same `site_id` ⇒ balance is zero, nothing resurrects | Hybrid | class 7 (uncovered leg) | a `delete_site` that stops deleting `identity_credit_ledger` / `identity_contribution_events` (Phase 1's H1 fix, `sites.py:341-345`). **Expected GREEN** — see the pre-declared-findings note |
-| **DE-18** Scale: 10k lapsed lots — hard FAIL at **round-trips > 3n + 10** (> 30,010), measured via a `before_cursor_execute` counter. Wall-clock (ceiling 120 s) and connection hold are **recorded observations, not gates** | Hybrid | class 6 | any change adding a per-lot round-trip (e.g. an extra SELECT in the loop) |
+| **DE-18** Scale: 10k lapsed lots — hard FAIL at **round-trips > 2n + 10** (> 20,010), measured via a `before_cursor_execute` counter **scoped to the sweep window**, plus a separate `ConnectionEvents.commit` counter asserting **commits ≤ n + 5** (COMMIT is invisible to `before_cursor_execute`; real shape is 2n+1, so the former 3n+10 ceiling let a whole extra per-lot round-trip pass — E-2). Wall-clock (ceiling 120 s) and connection hold are **recorded observations, not gates** | Hybrid | class 6 | any change adding a per-lot round-trip (e.g. an extra SELECT in the loop) |
 | **DE-19** Helper refuses a non-localhost DSN without `--allow-remote`; unparseable host ⇒ refuse. **Home file: `tests/e2e_disposable/test_helper_guard.py`** (C-7) | Hybrid (docker daemon) | prod-safety constraint | a helper that would let an alembic command reach Supabase PROD |
 | **DE-20** Helper teardown is unconditional (containers gone after failure and after SIGINT). **Home file: `test_helper_guard.py`** | Hybrid (docker daemon) | resource-ceiling constraint | a teardown only on the success path |
 | **DE-21** In-process DSN guard (C-10): a direct `pytest tests/e2e_disposable/` against a non-localhost host, or against port 5432/5433/6543, **hard-fails at session setup before any `drop_all`** | Fully-Automated | prod-safety constraint | a lane that trusts `conftest.py:24`'s `setdefault` and wipes the shared dev DB |
@@ -524,7 +612,7 @@ Declared **now** so a RED result is a recorded expectation rather than a mid-EXE
 | Gate | Expectation | Why | Follow-up path on RED |
 |---|---|---|---|
 | **DE-13** (boundary) | may fire | the `<= now` / `> now` split is only correct if the two predicates are evaluated against the same instant; the monkeypatched-`datetime` construction is the first time this is checked at all | backlog NOTE in this task folder; no follow-up plan unless the window is real |
-| **DE-18** (scale) | may fire | the sweep selects **every** lapsed lot globally with no site filter, no LIMIT and no batching, then commits per lot — O(3n) round-trips is the *designed* shape, so the gate fires only on a regression past 3n + 10 | backlog NOTE; batching would be its own plan |
+| **DE-18** (scale) | may fire | the sweep selects **every** lapsed lot globally with no site filter, no LIMIT and no batching, then commits per lot — O(2n) *counted* round-trips (+ n commits, counted separately) is the *designed* shape, so the gate fires only on a regression past 2n + 10 (E-2) | backlog NOTE; batching would be its own plan |
 | **DE-7** (unlock on a recycled connection) | **likely to fire** | `coop_expiry_sweep.py`'s own docstring already records the accepted residual: the per-lot `commit()` can return the session's connection to the pool, so the unlock may run on a **different** connection and silently no-op. Section D's prod-parity `pool_size=3, max_overflow=2` pool is *exactly* the condition that surfaces it | record as a confirmed residual against the existing docstring; backlog NOTE |
 
 **Explicitly NOT pre-declared: DE-17.** An earlier reading concluded that deleting a Site orphans
@@ -594,11 +682,14 @@ conftest rather than duplicated per lane.)
   observation for the backlog; DE-17 covers the router path only.
 - **C-8 — `asgi-lifespan` ships in the production image.** `Dockerfile:10-11` installs
   `requirements.txt`, so adding a test-only dep there is a real (if tiny) deviation from "zero
-  production changes". The conventional home — `[project.optional-dependencies] test` in
-  `pyproject.toml` — is **not installable in this repo** (there is no `[project]` table with a
-  `name`, so `pip install .[test]` fails). Decision: keep it in `requirements.txt`, annotate it
-  inline as test-only, and record the deviation here so the "zero production changes" claim stays
-  honest.
+  production changes". **(C-17 — wording corrected; the conclusion is unchanged.)** `pyproject.toml`
+  **already has** a `[project.optional-dependencies] test` table (it lists
+  `pytest`/`pytest-asyncio`/`httpx`/`fakeredis`), so the earlier claim "there is no `[project]`
+  table" was imprecise. The extra is nonetheless **not installable in this repo**: there is no
+  `[project]` `name`/`version` and no `[build-system]`, so `pip install .[test]` fails. Decision:
+  keep `asgi-lifespan` in `requirements.txt`, annotate it inline as test-only, **and also add it to
+  that existing `test` extra** so the test-only intent is recorded where a future `[project]` fix
+  would pick it up. Record the deviation here so the "zero production changes" claim stays honest.
 - **C-4b / defect class 9 — production masks table-level migration divergence.** The `Dockerfile`
   runs `alembic upgrade head`, then `apps/api/main.py`'s lifespan runs `Base.metadata.create_all` on
   the global engine, silently re-creating any table a migration failed to create. Index-level
@@ -621,7 +712,7 @@ conftest rather than duplicated per lane.)
 | AC-7 | Two OS processes against one DB produce exactly one **lock winner** (DE-9a) and no duplicate rows (DE-9b) — the two halves have different RED conditions | DE-9a, DE-9b, DE-10 | Hybrid |
 | AC-8 | Scenario 43 (D-E2E-1) is gated: lots expire despite opt-out; new accrual is refused | DE-8 | Hybrid |
 | AC-9 | Boundary, mid-run crash, aborted-transaction, orphan (ACCRUE-row mutation), site-delete robustness, and site-recreate-via-router semantics are gated | DE-13, DE-14, DE-15, DE-16a, DE-16b, DE-17 | Hybrid |
-| AC-10 | Sweep scale is measured against the stated hard FAIL of round-trips ≤ 3n + 10 | DE-18 | Hybrid |
+| AC-10 | Sweep scale is measured against the stated hard FAIL of round-trips ≤ 2n + 10, plus commits ≤ n + 5 on a separate counter (E-2) | DE-18 | Hybrid |
 | AC-11 | The helper refuses non-localhost DSNs and tears down unconditionally, proven by a real test file | DE-19, DE-20 (`test_helper_guard.py`) | Hybrid |
 | AC-12 | A direct `pytest` invocation cannot reach the shared dev DB or PROD — the lane refuses at session setup | DE-21 | Fully-Automated |
 
@@ -678,252 +769,246 @@ test-infrastructure phase — but it must be recorded in the phase report and ro
 
 ## Validate Contract
 
-Status: BLOCKED
+Status: CONDITIONAL
 Date: 17-08-26
 date: 2026-08-17
 generated-by: inner-pvl: coop-disposable-e2e
+supersedes: 2026-08-17 (inner-pvl: coop-disposable-e2e — cycle 1, Gate: BLOCKED) — cycle 2 re-validation after supplement cycle 1 applied all 15 gaps
 
-Parallel strategy: sequential (Sections A→B→C), with parallel-subagents permitted for the
-independent leaf specs (D pool, F scale, G scenario-43) once Section A's helper exists.
-Rationale: signal score 2/7 (S6 high-risk class — migration files are temporarily edited by the
-mandatory mutation probes; S7 — 11 files in blast radius). Dominant signal: S7. Sections B→C→D→E
-are strictly sequential (each depends on the previous lane's container and conftest), so the
-MEDIUM threshold's default parallel-subagents recommendation is overridden by the dependency chain.
+PVL cycle: 2 (cycle 1 = BLOCKED, 5 FAILs + 10 CONCERNs; supplement cycle 1 applied 17-08-26)
+
+Parallel strategy: sequential (Sections A→B→C→D→E), with parallel-subagents permitted for the
+independent leaf specs (F scale, G scenario-43) once Section A's helper exists.
+Rationale: signal score 2/7 (S6 — migration files are temporarily edited by the mandatory mutation
+probes; S7 — 12 files in blast radius). Dominant signal: S7. The B→C→D→E dependency chain
+(container → conftest → lane engine) overrides the MEDIUM threshold's default parallel recommendation.
 Model: opus for every leg (source-adjacent test infrastructure).
 
 ### Net gate derivation
 
 | Layer 1 dimension | Status |
 |---|---|
-| Infra fit | FAIL |
-| Test coverage | FAIL |
+| Infra fit | CONCERN |
+| Test coverage | CONCERN |
 | Breaking changes | CONCERN |
-| Security surface | CONCERN |
+| Security surface | PASS |
 
 | Layer 2 section | Status |
 |---|---|
-| A — Disposable stack helper (item 1) | CONCERN |
-| B — Migration-truth lane (items 2+3) | FAIL |
+| A — Disposable stack helper (item 1) | PASS |
+| B — Migration-truth lane (items 2+3) | CONCERN |
 | C — Real-process lifespan harness (item 4) | CONCERN |
-| D — Pooled/multi-connection topology (item 5) | FAIL |
+| D — Pooled/multi-connection topology (item 5) | CONCERN |
 | E — Two-process replica (item 6) | CONCERN |
 | F — Scale fixture (item 7) | CONCERN |
 | G — Scenario 43 (item 8) | PASS |
-| H — Wiring and closeout | FAIL |
+| H — Wiring and closeout | CONCERN |
 
-**Totals: 5 FAILs / 5 CONCERNs / 1 PASS → Net Gate: BLOCKED**
+**Totals: 0 FAILs / 9 CONCERNs / 3 PASSes → Net Gate: CONDITIONAL**
 
-### FAILs (must be fixed in plan text before EXECUTE)
+Every cycle-1 FAIL (F-1 … F-5) is verified CLOSED (see §Cycle-1 fix verification). Cycle 2 found no
+new FAIL. It did find **four fresh instances of the program's recurring vacuous-gate class** — this
+is now the **eighth through eleventh** recurrence, and **three of the four live in text the cycle-1
+supplement itself wrote**. Each has a fully-specified mechanical correction (E-1 … E-4 below), so
+they are carried as binding execute-agent instructions rather than a third supplement cycle. **A
+gate listed in E-1 … E-4 MUST NOT be implemented as the plan currently words it.**
 
-**F-1 — G-6's mutation probe stays GREEN on the implementation it forbids (item 5 / checklist 32-33).**
-`services/coop_expiry_sweep.py` states verbatim that the lock is **EFFICIENCY-ONLY**: "The
-correctness boundary for duplicate EXPIRE rows is the `uq_coop_ledger_expire_per_lot` partial
-unique index." With the probe applied (`_try_acquire_lock` stubbed to return `True` without
-locking), the second concurrent sweep proceeds into `expire_lapsed_lots`, every INSERT hits
-`ON CONFLICT (lot_id) WHERE entry_type = 'EXPIRE' DO NOTHING`, `result.rowcount` is 0, and
-`run_coop_expiry_sweep` returns **0 rows written and no work observable** — which is exactly what
-G-6 asserts ("a concurrent sweep attempt is refused and does no work"). The gate cannot tell
-"skipped because the lock was held" from "ran and wrote nothing because the index rejected it".
-This is a fifth instance of the program's recurring failure class.
-*Required fix:* assert on the **lock itself**, from a third connection: `SELECT
-pg_try_advisory_lock(hashtext('coop_expiry_sweep'))` must return **false** while the winner holds
-it (release it if it returns true), AND assert the loser's `run_coop_expiry_sweep` took the
-`got is False` branch — observable via the `coop_expiry_sweep_skipped_locked` structlog event or a
-`_lot_remaining` call counter that must be 0 for the loser. `_LOCK_KEY` must be imported from the
-module, never re-spelled in the test (the module docstring already warns that re-spelling makes
-the gate pass unconditionally).
+### Cycle-1 fix verification (all five FAILs CLOSED)
 
-**F-2 — G-16's orphan-guard gate is vacuous: `identity_credit_ledger.site_id` has NO foreign key
-(checklist 34).** Model `models/identity_coop.py:148` and migration `e7b3d5f19c46:102` both declare
-`site_id` as a bare `sa.String(50)` — there is no `ForeignKey` and no `ondelete` anywhere on the
-coop ledger. Deleting a `Site` therefore does **not** cascade the ledger rows away (the
-`_EXPIRE_INSERT_SQL` comment claiming it does is wrong). The `WHERE EXISTS` guard at
-`identity_coop.py:522-527` tests for the **ACCRUE ledger row**, not the site. So "delete the site
-mid-sweep" leaves the EXISTS clause TRUE and an EXPIRE row is written **whether or not the guard
-exists** — removing the guard leaves G-16 green.
-*Required fix:* the mutation for G-16 must delete the **ACCRUE lot row** (`identity_credit_ledger`
-where `id = lot_id AND entry_type='ACCRUE'`) between lot selection and lot processing, not the
-site. Keep a separate site-delete scenario, but re-label it: it proves the sweep does not raise on
-a missing site, not that the orphan guard holds.
+| Cycle-1 FAIL | Verdict | Evidence |
+|---|---|---|
+| **F-1** — DE-6 lock probe vacuous | **CLOSED** | The new formulation is genuinely falsifiable in **both** legs. Verified against `services/coop_expiry_sweep.py`: `_LOCK_KEY = "coop_expiry_sweep"` (:29) and `pg_try_advisory_lock(hashtext(:key))` (:36). With acquisition stubbed to return `True` without locking: (a) the third-connection probe finds the key unheld → returns TRUE → the "MUST return false" assertion FAILS → RED; (b) no caller reaches `got is False` (:77) → `coop_expiry_sweep_skipped_locked` (:78) is never emitted → RED. `_LOCK_KEY` is importable (module-level name). `structlog` capture has three in-repo precedents (`tests/unit/test_site_analysis.py`, `tests/unit/test_graph_erasure.py`, `tests/integration/test_privacy_hold_clear.py`), so leg (b) is implementable today. |
+| **F-2** — DE-16 orphan gate vacuous | **CLOSED as stated, but the replacement is ALSO vacuous** — see **E-1**. The split into DE-16a (orphan guard) / DE-16b (robustness only) is correct and the re-labelling is right; the *mutation* chosen for DE-16a still cannot flip the gate. |
+| **F-3** — `alembic_version` survives `drop_all` | **CLOSED** | `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` removes `alembic_version` (it lives in `public` and appears nowhere in `Base.metadata`), leaving a true clean slate for a repeated `upgrade head`. No collateral hazard found: `grep -rn "CREATE EXTENSION" apps/api/migrations/versions/` returns **zero** matches, so no extension is dropped; the `cidr` GiST opclass used by ip-org is core PG, not an extension. `search_path` (`"$user", public`) still resolves. The disposable `postgres:16-alpine` superuser owns the recreated schema. Session-scoping is correct: `migrations/env.py:_do_run_migrations` wraps the whole chain in one `context.begin_transaction()`. Residual: **C-11** (DE-11 leaves the session schema downgraded) and **C-12** (the "at minimum" fallback). |
+| **F-4** — conftest 0-modified budget unachievable | **CLOSED** | Moving the build into `tests/e2e_disposable/conftest.py` as session-scoped `disposable_engine` makes the root-conftest budget 0/0/0 genuinely achievable, and removes the Blast-Radius contradiction (the lane conftest no longer needs the root engine fixture). Touchpoints, Blast Radius, DE-1(a) and the Resume section are mutually consistent on this. |
+| **F-5** — marker registration excludes nothing | **CLOSED in diagnosis, NOT in the chosen fix** — see **E-4**. The plan correctly identifies that a bare `pytest` imports the lane, then names `-m 'not disposable'` as the primary mechanism, which does not solve the problem it just described. |
 
-**F-3 — the alembic lane is unusable past the first test: `Base.metadata.drop_all` does not drop
-`alembic_version` (checklist 10).** `alembic_version` is created by alembic's own DDL and appears
-nowhere in `Base.metadata` (verified: zero matches under `apps/api/models/`). The fixture teardown
-at `conftest.py:138-141` drops every model table and leaves `alembic_version` **stamped at head**.
-The next invocation of the (function-scoped) fixture runs `alembic upgrade head`, alembic reads
-head-already-applied, applies **zero** revisions, and every test after the first runs against an
-empty schema. This is the exact shape recorded in memory `getbeam-local-dev-db-rebuild-recipe`
-("empty-but-stamped, so `upgrade head` silently no-ops; `stamp base` then `upgrade head`").
-*Required fix:* the lane must `DROP TABLE IF EXISTS alembic_version` (or `DROP SCHEMA public
-CASCADE; CREATE SCHEMA public;`) before each `upgrade head`, and the alembic build must be
-**session-scoped**, not per-test — the full chain runs in a single transaction
-(`migrations/env.py:_do_run_migrations` wraps `context.run_migrations()` in one
-`context.begin_transaction()`, no `transaction_per_migration`), so per-test rebuilds of 60+
-revisions are prohibitively slow.
+### CONCERNs — binding execute-agent instructions (E-1 … E-4 are mandatory)
 
-**F-4 — the `tests/conftest.py` diff budget (0 modified lines) is unachievable for checklist item
-10, and item 10 contradicts the Blast Radius entry for the lane conftest.** Making `test_engine`
-skip `create_all` requires **modifying** line 133 (`await conn.run_sync(Base.metadata.create_all)`)
-into a conditional — a modified line, which the budget forbids. Separately, Blast Radius says
-`tests/e2e_disposable/conftest.py` "must not import from the root conftest's engine fixture", which
-is incompatible with putting the alembic branch inside the root `test_engine`.
-*Required fix (resolves F-3 and F-4 and de-risks G-1 in one move):* move the alembic schema build
-**entirely into `tests/e2e_disposable/conftest.py`** as a session-scoped `disposable_engine`
-fixture that owns its own drop-schema → `upgrade head` → engine creation. Root
-`tests/conftest.py` then changes by **zero lines**, `E2E_DISPOSABLE_ALEMBIC` is no longer needed as
-a root-conftest branch, and G-1 becomes mechanically trivial (see C-1).
+**E-1 (highest priority) — DE-16a's mutation cannot flip the gate; the `remaining == 0`
+short-circuit masks the `WHERE EXISTS` guard entirely.** *(checklist 34(a), DE-16a row.)*
+`_lot_remaining` (`identity_coop.py:479-498`) is a raw `SUM(amount) WHERE lot_id = :lot_id`, and an
+ACCRUE row **is its own lot** (`ledger.lot_id = ledger.id`, `:202`; model comment
+`models/identity_coop.py` "ACCRUE: own id"). Deleting the ACCRUE lot row therefore drives
+`SUM = 0` → `remaining = max(0, 0) = 0` → **`continue` at `:589-590`** → `_EXPIRE_INSERT_SQL` is
+**never executed at all**. No orphan EXPIRE row appears **with or without** the `WHERE EXISTS`
+guard, so removing the guard leaves DE-16a GREEN. This is the same failure shape as cycle-1's F-2,
+one layer deeper.
+*Required implementation (do NOT implement item 34(a) as written):* the mutation must keep
+`SUM(amount) > 0` for the lot while making the `EXISTS` predicate FALSE. Use a **mid-flight
+`site_id` rewrite**, which needs no schema or enum change:
+1. Monkeypatch `apps.api.services.identity_coop._lot_remaining` with a wrapper that, on first call,
+   issues `UPDATE identity_credit_ledger SET site_id = 'e2e-moved' WHERE id = :lot_id` **and commits
+   on a separate connection**, then delegates to the real `_lot_remaining` (which still returns +N,
+   because `lot_id` is untouched).
+2. The sweep's `:site_id` bind is the snapshot taken by the set-level SELECT **before** the update,
+   so `EXISTS (... AND site_id = CAST(:site_id AS varchar))` is now FALSE while `remaining > 0`.
+3. Assert `SELECT count(*) ... WHERE lot_id = X AND entry_type = 'EXPIRE'` is **0** and the sweep did
+   not raise.
+4. Mutation probe: delete the `WHERE EXISTS (...)` clause from `_EXPIRE_INSERT_SQL` → the count
+   becomes 1 → DE-16a **RED**. Revert and re-confirm GREEN.
+*Do not pre-mutate before the sweep starts:* changing `site_id` beforehand makes the snapshot carry
+the NEW value (the lapsed SELECT has no site filter), and changing `entry_type` beforehand removes
+the row from the lapsed set (`:571` filters `entry_type == "ACCRUE"`). Both pre-mutations are
+themselves vacuous. The mutation must be mid-flight.
 
-**F-5 — registering a pytest marker does NOT exclude the lane from the default run (checklist 45 /
-Public Contracts row 3).** `pyproject.toml` sets `testpaths = ["tests"]` and has no `addopts`.
-Registering `disposable` in `markers = [...]` only silences the unknown-marker warning; a bare
-`pytest` will still **collect and import** every module under `tests/e2e_disposable/`, which is
-also where an `asgi-lifespan` import and any module-level env manipulation would fire during the
-normal unit lane.
-*Required fix:* add a real exclusion — `addopts = "-m 'not disposable'"` (or
-`--ignore=tests/e2e_disposable`, or `collect_ignore_glob` in the root conftest) — and add
-`pyproject.toml` to the Blast Radius table with a diff budget. Note that changing `addopts` alters
-the default invocation for every suite in the repo, so G-1 must run **after** this change, not
-before.
+**E-2 — DE-18's threshold is loose by ~n and is blind to its own stated RED condition.**
+*(checklist 41, DE-18 row.)* SQLAlchemy's `before_cursor_execute` fires only for statements executed
+through the DBAPI cursor. `session.commit()` goes through the DBAPI connection's `commit()` (and
+asyncpg's `BEGIN` goes through its transaction API), so **COMMIT is invisible to the counter**. The
+real measured shape is therefore `1` set-level SELECT + `2` per lot (`_lot_remaining` SELECT +
+`_EXPIRE_INSERT_SQL`) = **2n + 1 ≈ 20,001** at n = 10,000, not 3n + 1. Against a `3n + 10 = 30,010`
+ceiling that leaves ~10,000 of slack — an entire extra per-lot round-trip (2n+1 → 3n+1 = 30,001)
+still **PASSES**, which is exactly the regression DE-18 names as its RED condition.
+*Required implementation:* set the hard FAIL at **round-trips ≤ 2n + 10 (≤ 20,010 at n = 10,000)**,
+record in the test docstring that COMMIT is not counted by `before_cursor_execute`, and **additionally**
+count commits separately via SQLAlchemy's `ConnectionEvents.commit` hook, asserting commits ≤ n + 5.
+Also **scope the counter to the sweep window**: reset it immediately before `run_coop_expiry_sweep`
+and read it immediately after, so the 10k-row bulk seed and the assertion queries are not counted.
 
-### CONCERNs
+**E-3 — DE-9b's stated RED condition is false: with the lock intact, removing the unique index
+changes nothing.** *(checklist 36(b), DE-9b row.)* `pg_try_advisory_lock` is session-scoped and the
+two children hold two separate connections, so exactly one child ever enters `expire_lapsed_lots`
+(`coop_expiry_sweep.py:76-82`). The loser writes nothing. Removing `uq_coop_ledger_expire_per_lot`
+alone therefore still yields exactly one EXPIRE row per lot → DE-9b stays **GREEN**. The index is a
+*backstop* that is only observable once the lock is disabled.
+*Required implementation:* restate DE-9b's RED condition as **"removing `uq_coop_ledger_expire_per_lot`
+*while* the advisory lock is stubbed out"**, and run DE-9b's falsification in that deliberate
+lock-disabled configuration. DE-9a (`sum(acquired) == 1`) keeps its stated RED condition
+("removing the lock") — that one is verified correct.
 
-**C-1 — G-1 does not enforce what the Blast Radius says it enforces, and is mis-tiered.** "Full
-existing suite passes" proves *no observed regression*, not "executes the identical statements it
-does today"; a reordering or an equivalent-but-different default path passes it. It is also
-labelled Fully-Automated, but `test_engine` is used only by the **integration** lane, which needs
-Postgres — so G-1 is Hybrid. *Fix:* add a mechanical leg — `git diff --numstat tests/conftest.py`
-must report **0 deletions** (and, under the F-4 fix, 0 additions too); re-tier G-1 as Hybrid and
-name both the unit and integration commands.
+**E-4 — `addopts = "-m 'not disposable'"` does not prevent collection or import, and the Public
+Contracts row asserting that it does is factually wrong.** *(checklist 45, Public Contracts row 3.)*
+pytest applies `-m` as a **deselection filter after collection**; collection imports every module
+under `testpaths = ["tests"]`, including `tests/e2e_disposable/conftest.py` and every lane spec.
+Two consequences: (i) module-level side effects in the lane still fire during a bare `pytest`;
+(ii) the exclusion silently depends on **every future lane file remembering the marker** — a file
+that omits it is collected *and executed* in the default run.
+*Required implementation:* make the **path-based** exclusion primary — `--ignore=tests/e2e_disposable`
+in `addopts` (or `collect_ignore_glob = ["e2e_disposable/*"]` in the root conftest, which is
+0-diff-safe only if placed in `pyproject.toml` instead, since `tests/conftest.py` is 0/0/0). Keep
+the `disposable` marker registration for selection, and add `pytestmark = pytest.mark.disposable`
+at module level in **every** lane spec as defence in depth. Correct the Public Contracts row to say
+what the chosen mechanism actually does. Additionally, **DE-1(b) as written cannot detect this leak
+at all** — `pytest tests/unit -q` and `pytest tests/integration -q` are path-scoped and would never
+collect `tests/e2e_disposable/` regardless. Add a third DE-1 leg: a bare
+`.venv/bin/python3.11 -m pytest --collect-only -q` from the repo root must list **zero** items under
+`tests/e2e_disposable/`.
 
-**C-2 — G-9's stated RED condition is false (item 6 / checklist 36).** "Goes RED against: removing
-the advisory lock" is wrong for the same reason as F-1: `uq_coop_ledger_expire_per_lot` +
-`ON CONFLICT DO NOTHING` guarantee exactly one EXPIRE row per lot with or without the lock, so the
-row-count assertion stays green. *Fix:* restate G-9's RED condition as "removing
-`uq_coop_ledger_expire_per_lot`" for the row-count half, and have `_replica_child.py` print
-`acquired=<bool> written=<n>` so the "exactly one winner" half asserts on `acquired` count == 1 —
-that half, and only that half, is falsified by removing the lock.
+**C-11 — DE-11's downgrade mutates the session-scoped schema for every later test.** *(checklist 15.)*
+`disposable_engine` builds the schema **once per session**. DE-11 downgrades below `b7e4d21a9c58`,
+seeds violating rows, and asserts a clean abort — which by definition leaves the DB **at the
+downgraded revision**. Every test collected after DE-11 in that session then runs without
+`uq_coop_ledger_expire_per_lot`, silently turning DE-2/DE-9b/DE-10-shaped assertions vacuous.
+*Fix:* give the down/up tests (DE-11, DE-12) an explicit teardown that restores `upgrade head`, or a
+dedicated function-scoped rebuild fixture used by those two tests only. State the restore explicitly
+in the test file — do not rely on collection order.
 
-**C-3 — `IDENTITY_COOP_ENABLED` before import is unnecessary and makes G-3 and G-4 mutually
-exclusive in one process (checklist 19, 22).** `start_scheduler()` reads
-`settings.identity_coop_enabled` at **call time** (`scheduler.py:743`), and the wrapper re-reads it
-at run time (`:314-317`). The repo's own `coop_on` fixture
-(`test_identity_coop_contribution.py:575-579`) already monkeypatches the settings attribute. You
-cannot re-import `apps.api.config` with a different env in one process, so "false before import"
-for G-4 would force a second pytest process. *Fix:* monkeypatch `settings.identity_coop_enabled`
-for both G-3 and G-4. Only **`DATABASE_URL`** genuinely needs to precede import (the global engine
-is built at `models/database.py:59`) — and it must be exported **before the pytest process
-starts**, not in a fixture; the lane conftest should **assert** the value, not set it. (Verified:
-env vars beat dotenv in pydantic-settings, and `conftest.py:24` uses `setdefault`, so an exported
-`DATABASE_URL`/`REDIS_URL` does correctly rebind the global engine and the Redis client — the
-V-3 mitigations for hazards 1, 2 and 3 hold.)
+**C-12 — the "at minimum" fallback in checklist item 10(a) is strictly weaker and should be
+dropped.** `DROP TABLE IF EXISTS alembic_version` + `Base.metadata.drop_all` only removes tables
+present in the ORM metadata; any table a migration creates but the ORM does not declare survives and
+makes the next `upgrade head` fail on an existing object. Mandate the `DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;` form as the only accepted implementation.
 
-**C-4 — `main.py` lifespan runs `Base.metadata.create_all` on the global engine, and the plan never
-mentions it.** The lifespan handler create_all's the schema at every boot. Consequences: (a) if the
-lifespan lane and the migration-truth lane share one container, a lifespan boot **repairs
-table-level** migration divergence before the migration-truth assertions run (index-level
-divergence survives, since `create_all(checkfirst=True)` skips existing tables entirely — so the
-G-2 probe itself is safe); (b) production has the same masking, since the Dockerfile runs
-`alembic upgrade head` and then the app create_all's on top — arguably a 9th defect class worth
-recording. *Fix:* state that the migration-truth lane runs against its **own** container/DB with no
-lifespan boot, and record (b) as a finding in the phase report.
+**C-13 — DE-6(a) and DE-9a have no specified synchronisation, so both are timing-dependent.**
+DE-6(a) requires the third-connection probe to run **while** the winner holds the lock; DE-9a
+requires the two child processes to genuinely overlap. Neither the plan nor the checklist specifies
+a hold window or a barrier. Both failure modes are noisy-RED rather than vacuous-GREEN (a probe that
+runs after release returns TRUE and fails the assertion; two non-overlapping children both acquire
+and `sum(acquired) == 2`), so this is flakiness, not vacuity. *Fix:* for DE-6, acquire the lock
+**directly in the test** on connection 1 (`pg_try_advisory_lock(hashtext(_LOCK_KEY))` with `_LOCK_KEY`
+imported), run the sweep on connection 2, probe from connection 3 — fully deterministic, no race. For
+DE-9a, add a start barrier (both children wait on a row/file/`multiprocessing.Barrier`) and seed
+enough lots that the critical section outlasts child startup.
 
-**C-5 — G-18's failing threshold is unset, which makes the gate vacuous (checklist 41).** *Fix:*
-specify it in the plan, not at EXECUTE time, and make it a hard FAIL. Recommended, because it is
-structural and environment-independent: **round-trip count MUST be ≤ 3n + 10** (≤ 30,010 for
-n = 10,000), derived from the sweep's shape — one set SELECT plus, per lot, `_lot_remaining`
-SELECT + INSERT + `commit()` (`identity_coop.py:563-576`, `:588-602`). Measure with a
-`before_cursor_execute` event counter on the lane engine. Wall-clock is environment-dependent, so
-record it with a generous hard ceiling (suggest **120 s** for n = 10,000 on a local container) and
-treat the round-trip count as the real gate. Max single-connection hold will equal the whole sweep
-by construction (one session throughout) — record it, do not gate it.
+**C-14 — DE-13 must seed `spendable_at <= T` or it passes for the wrong reason.** *(checklist 26.)*
+`spendable_balance` (`identity_coop.py:254-261`) excludes a lot when `spendable_at > now` **as well
+as** when `expires_at <= now`. A lot seeded with `expires_at = T` and a default hold
+(`created_at + coop_credit_hold_hours`) is excluded from the balance because it is still *held*, not
+because it expired — so the "excluded from spendable" half would be green under a broken expiry
+predicate. The service docstring warns about exactly this. *Fix:* seed `spendable_at` in the past (or
+monkeypatch `coop_credit_hold_hours` to 0) so the only remaining discriminator is the expiry
+predicate. The `datetime` monkeypatch itself is verified sound: `identity_coop.py` does
+`from datetime import date, datetime, timedelta, timezone` at module level, and both call sites
+(`:254` and the sweep's `now` in `expire_lapsed_lots`) resolve through that one module attribute.
 
-**C-6 — G-13 is not mechanically constructible as written (checklist 26).** Both the sweep
-(`identity_coop.py:558`) and `spendable_balance` (`:254`) compute `now = datetime.now(timezone.utc)`
-**internally**; `spendable_balance(db, site_id)` takes no `now` parameter, and neither `freezegun`
-nor `time-machine` is installed. "A lot with `expires_at == now` exactly" cannot be arranged. *Fix:*
-monkeypatch `apps.api.services.identity_coop.datetime` to a fixed `T` — one patch covers both call
-sites, since both live in that module — seed `expires_at = T`, then assert swept (`<= T` true) and
-excluded from spendable (`> T` false). Analysis says this should be **GREEN** on current source
-(swept AND not spendable is the consistent outcome, with no double-count and no drop-by-both
-window), so the gate is cheap confirmation rather than a likely finding.
+**C-15 — DE-21's guard should depend on `disposable_engine` explicitly rather than on pytest's
+implicit autouse ordering.** *(checklist 12b.)* Default pytest behaviour does place a session-scoped
+autouse fixture before a session-scoped requested fixture, so the guard **does** fire before any
+`DROP SCHEMA` / `upgrade head` as designed — verified sound, not vacuous. But the ordering is
+implicit and a future refactor could silently invert it. *Fix (hardening):* declare
+`def disposable_engine(_dsn_guard): ...` so the dependency is explicit. Also note the guard fires at
+fixture time, i.e. **after** `tests/conftest.py:24`'s `setdefault` and after
+`models/database.py`'s import-time `create_async_engine` — that is harmless (engine creation is
+lazy, no connection is opened at import) and the guard still precedes every destructive statement.
 
-**C-7 — G-19 and G-20 have no home file and no checklist step that runs them.** The Blast Radius
-table budgets a file for items 2, 4, 5, 6, 7 and 8, but nothing for the helper's own gates, and
-Section A has no "run the gates" step. *Fix:* add `tests/e2e_disposable/test_helper_guard.py`
-(≤ 120 lines) invoking `scripts/e2e-disposable.sh` via subprocess: a remote DSN without
-`--allow-remote` must exit non-zero and print nothing; an unparseable host must refuse; a SIGINT
-mid-run must leave no `e2e-*` container. Also cite `scripts/e2e-local.sh` alongside
-`scripts/refresh_ip_org.py` — it is the closer precedent (a shell script that forces the local
-stack and hard-refuses anything remote).
+**C-16 — gate-count drift in prose.** §Overview ("DE-1 through DE-20"), the C-9 renumbering note
+("`DE-1` … `DE-20`") and the Autonomous Goal Block ("gates DE-1..DE-20") all understate the range;
+§Phase Completion Rules correctly says DE-1 … DE-21 (plus DE-5b, DE-9a/b, DE-16a/b). Cosmetic —
+reconcile to **DE-1 … DE-21** in all four places during EXECUTE.
 
-**C-8 — `requirements.txt` is a production artifact.** `Dockerfile:10-11` installs it into the prod
-image, so adding `asgi-lifespan` there contradicts "zero production changes". The
-`[project.optional-dependencies] test` extra in `pyproject.toml` is the conventional home but is
-currently **not installable** — there is no `[project]` table with a `name`, so `pip install .[test]`
-would fail. *Fix:* keep it in `requirements.txt` (pragmatic and correct for this repo) but state
-the rationale inline so the "zero production changes" claim stays honest, and note the dep is
-test-only.
+**C-17 — `pyproject.toml` already has a `[project.optional-dependencies] test` table.** C-8's
+rationale is materially correct (there is no `[project] name`/`version` and no `[build-system]`, so
+`pip install .[test]` fails), but the plan's wording "there is no `[project]` table" is imprecise —
+the `test` extra already lists `pytest`/`pytest-asyncio`/`httpx`/`fakeredis`. Keeping `asgi-lifespan`
+in `requirements.txt` remains the right call; also add it to that existing `test` extra so the
+test-only intent is recorded where a future `[project]` fix would pick it up.
 
-**C-9 — gate-ID collision with identity-coop Phase 2a.** This plan defines G-1…G-20 while also
-referring to "G-20 residual (i) from Phase 2a", and `coop_expiry_sweep.py`'s own `_LOCK_KEY`
-comment says "Probed directly by the G-20 lock-release gate" — a *different* G-20. *Fix:* renumber
-this plan's gates with a distinct prefix (e.g. `DE-1`…`DE-20`) or namespace every cross-plan
-reference as "Phase-2a G-20".
+### Verified-sound (no action) — checked this cycle, explicitly not findings
 
-**C-10 — no in-process fail-closed DSN guard.** All five safety MUSTs are correctly stated as
-non-negotiable in §Constraints (pinned `DATABASE_URL`, non-localhost refusal, unconditional
-`trap` teardown, max 2 pairs, never edits the repo dotenv, per-process flags) — verified present
-and mandatory. But the refusal lives **only** in the shell helper: a developer running
-`pytest tests/e2e_disposable/` directly falls through to `conftest.py:24`'s `setdefault` and hits
-the shared local dev DB on `:5433`, which the fixture then `drop_all`s (memory
-`getbeam-local-dev-db-rebuild-recipe`). *Fix:* add a session-scoped autouse guard in the lane
-conftest that hard-fails unless the resolved `settings.database_url` host is localhost **and** the
-port is not 5432/5433/6543.
-
-### Findings expected to go RED against current source (report, do not fix here)
-
-**R-1 (high confidence) — G-17 will fire, and it is a billing-surface defect.** With no foreign key
-on `identity_credit_ledger.site_id` (see F-2), deleting a `Site` leaves every ledger row intact,
-and `spendable_balance(db, site_id)` filters on `site_id` plus the time window with **no lifecycle
-discriminator**. A site deleted and re-created under the same `site_id` therefore inherits its full
-prior balance. Repo `site_id` values are deterministic slugs (e.g. `beam_getbeam_fyi`), so
-delete-then-re-add of the same domain reproduces it. The plan's split (report, do not fix) is
-correct for a test-infra phase, but the follow-up path must be **pre-declared**: on RED, write a
-backlog NOTE in this task folder and open a follow-up plan against `identity_coop.py` /
-`identity_credit_ledger` — this is ledger correctness, not a test-infra nit.
-
-**R-2 (moderate) — G-7's "free after" leg may legitimately fire.** `coop_expiry_sweep.py`'s own
-docstring records the accepted residual: the per-lot `commit()` can return the session's connection
-to the pool, so the unlock may run on a **different** connection and no-op. Section D deliberately
-pins the lane to the prod-parity `pool_size=3, max_overflow=2` with ≥2 concurrent sessions — the
-exact conditions that surface it. Pre-declare G-7 alongside G-13/G-17/G-18 as a possible finding.
-
-**R-3 (low) — G-13** is expected GREEN (see C-6).
+- **DE-17 is expected GREEN and is correctly NOT pre-declared.** Re-verified directly:
+  `apps/api/routers/sites.py` `delete_site` iterates a table list that explicitly includes
+  `identity_contribution_events` **and** `identity_credit_ledger`, issuing
+  `DELETE FROM {table} WHERE site_id = :sid` under the comment "H1: close the site_id-reuse gap for
+  spendable co-op credit". Phase 1's H1 fix is intact. Cycle 1's R-1 ("deleting a Site orphans the
+  ledger ⇒ billing defect") is **withdrawn and must not be re-propagated**. The absence of a
+  ForeignKey on `identity_credit_ledger.site_id` (`models/identity_coop.py`, bare `String(50)`) is
+  real but irrelevant to the router path; it stays a backlog hardening observation.
+- **DE-6's fix is genuinely non-vacuous** (both legs verified RED under the stub) — the single most
+  important cycle-1 repair, and it holds.
+- **DE-3 / DE-4 / DE-5b**: verified against source — boot gate `if settings.identity_coop_enabled:`
+  wrapping `scheduler.add_job(..., id="coop_expiry_sweep", jitter=90, misfire_grace_time=300)`, and
+  the wrapper's runtime re-check with its do-not-delete comment. C-3's monkeypatch-the-settings-attr
+  fix is correct: the flag is read at call time and at run time, never at import.
+- **C-4 verified**: `apps/api/main.py`'s lifespan runs `Base.metadata.create_all` on the global
+  engine at every boot ("harmless safety net" comment). The plan's mitigation — the migration-truth
+  lane gets its own container with no lifespan boot — is the right one, and defect class 9 is
+  correctly recorded as a finding rather than fixed here.
+- **`asgi-lifespan` is confirmed absent** from `requirements.txt`.
+- **Prod pool parity**: `models/database.py` uses `pool_size=settings.db_pool_size`,
+  `max_overflow=settings.db_max_overflow` (defaults 3/2), so the lane's 3+2 pin is correct parity.
+- **Section A (helper)** and **Section G (scenario 43)** pass unchanged from cycle 1.
+- **Structural validator**: `node .claude/skills/vc-generate-plan/scripts/validate-plan-artifact.mjs`
+  on this plan → **0 failures, 0 warnings** (1009 lines).
+- **Every path named in Touchpoints and Blast Radius resolves on disk** except the eleven files this
+  plan creates. Touchpoints ⇄ Blast Radius are consistent (both carry `pyproject.toml` and
+  `test_helper_guard.py`).
 
 ### Test gates
 
 | criterion id | behavior | strategy | proving test | gap-resolution |
 |---|---|---|---|---|
-| AC-1 | Default lane byte-identical after the change | Hybrid | `git diff --numstat tests/conftest.py` reports 0 deletions AND 0 additions; then `.venv/bin/python3.11 -m pytest tests/unit -q` and `.venv/bin/python3.11 -m pytest tests/integration -q` against the shared lane | B (C-1 + F-4) |
-| AC-2 | Model-declared index missing from its migration is detectable | Hybrid | `pytest tests/e2e_disposable/test_migration_truth.py -m disposable` + mutation probe on `b7e4d21a9c58` | B (F-3) |
-| AC-3 | Migrations correct on a non-empty DB (abort + happy path) | Hybrid | `pytest tests/e2e_disposable/test_migration_truth.py -m disposable` (G-11, G-12) | B (F-3) |
-| AC-4 | Coop job registers at boot with correct interval/jitter/misfire; not when flag off | Hybrid | `pytest tests/e2e_disposable/test_lifespan_scheduler.py -m disposable` + `add_job` mutation probe | B (C-3) |
-| AC-5 | Scheduler itself writes EXPIRE via the global session; runtime re-check short-circuits | Hybrid | same file (G-5, G-5b) | A |
-| AC-6 | Advisory lock proven **acquired** across connections | Hybrid | `pytest tests/e2e_disposable/test_pool_topology.py -m disposable` + stubbed-lock mutation probe | **B (F-1 — gate is vacuous as specified)** |
-| AC-7 | Two OS processes: one winner, no duplicate work | Hybrid | `pytest tests/e2e_disposable/test_two_process_replica.py -m disposable` | B (C-2) |
-| AC-8 | Scenario 43: lot expires despite opt-out; new accrual refused | Hybrid | `pytest tests/e2e_disposable/test_scenario_43.py -m disposable` | A |
-| AC-9 | Boundary / crash / aborted-txn / orphan / site-recreate semantics gated | Hybrid | `test_lifespan_scheduler.py` + `test_pool_topology.py` + `test_two_process_replica.py` | **B (F-2 orphan) / C (R-1 site-recreate → follow-up plan) / B (C-6 boundary)** |
-| AC-10 | Sweep scale measured against a stated failing threshold | Hybrid | `pytest tests/e2e_disposable/test_scale_sweep.py -m disposable`; hard FAIL at round-trips > 3n + 10 | B (C-5) |
-| AC-11 | Helper refuses non-localhost DSNs; teardown unconditional | Hybrid | `pytest tests/e2e_disposable/test_helper_guard.py -m disposable` (file does not yet exist) | B (C-7) |
+| AC-1 | Default lane byte-identical; lane never collected in the default run | Hybrid | `git diff --numstat tests/conftest.py` → 0/0; `.venv/bin/python3.11 -m pytest --collect-only -q` lists zero `tests/e2e_disposable/` items; `.venv/bin/python3.11 -m pytest tests/unit -q` and `... tests/integration -q` green | B (E-4) |
+| AC-2 | Model-declared index missing from its migration is detectable | Hybrid | `pytest tests/e2e_disposable/test_migration_truth.py` + mutation probe on `b7e4d21a9c58` | A |
+| AC-3 | Migrations correct on a non-empty DB (abort + happy path) | Hybrid | same file (DE-11, DE-12) | B (C-11 restore step) |
+| AC-4 | Coop job registers at boot with correct interval/jitter/misfire; not when flag off | Hybrid | `pytest tests/e2e_disposable/test_lifespan_scheduler.py` + `add_job` mutation probe | A |
+| AC-5 | Scheduler itself writes EXPIRE via the global session; runtime re-check short-circuits | Hybrid | same file (DE-5, DE-5b) | A |
+| AC-6 | Advisory lock proven **acquired** across connections, never by row count | Hybrid | `pytest tests/e2e_disposable/test_pool_topology.py` + stubbed-lock mutation probe | B (C-13 determinism) |
+| AC-7 | Two OS processes: exactly one lock winner (DE-9a) and no duplicate rows (DE-9b) | Hybrid | `pytest tests/e2e_disposable/test_two_process_replica.py` | B (E-3, C-13) |
+| AC-8 | Scenario 43: lot expires despite opt-out; new accrual refused | Hybrid | `pytest tests/e2e_disposable/test_scenario_43.py` | A |
+| AC-9 | Boundary / crash / aborted-txn / orphan / site-recreate semantics gated | Hybrid | `test_lifespan_scheduler.py` + `test_pool_topology.py` + `test_two_process_replica.py` | **B (E-1 orphan mutation, C-14 boundary seeding)** |
+| AC-10 | Sweep scale measured against a threshold that can actually fail | Hybrid | `pytest tests/e2e_disposable/test_scale_sweep.py`; hard FAIL at round-trips > 2n + 10 | **B (E-2)** |
+| AC-11 | Helper refuses non-localhost DSNs; teardown unconditional | Hybrid | `pytest tests/e2e_disposable/test_helper_guard.py` | A |
+| AC-12 | A direct `pytest` cannot reach the shared dev DB or PROD | Hybrid | `pytest tests/e2e_disposable/test_helper_guard.py` DE-21 leg (needs a live non-conforming DSN to assert the refusal) | B (C-15 explicit fixture dependency) |
 | K-3 | Deployed flag-ON proof | — | — | **D — known-gap residual; legally blocked pending the `coop_terms_version` re-pin** |
 
-gap-resolution legend: A = proven now · B = fixed in this plan · C = deferred to a named later
-plan · D = backlog test-building stub (named residual).
+gap-resolution legend: A = proven now · B = fixed in this plan (via E-1 … E-4 / C-11 … C-15) ·
+C = deferred to a named later plan · D = backlog test-building stub (named residual).
 
-Note: AC-8 was declared Fully-Automated in the plan but requires a live Postgres for the ledger
-write, so it is **Hybrid**. AC-1 is likewise Hybrid, not Fully-Automated (C-1). There are **no**
-truly Fully-Automated rows in this plan — every gate needs a container — so no TDD failing stubs
-are emitted (stubs are mandated for Fully-Automated rows only).
+Note on strategies: **no row is Fully-Automated.** AC-12/DE-21 was labelled Fully-Automated in the
+plan, but proving the guard *refuses* requires exporting a non-conforming DSN and observing a hard
+fail, which the lane can only stage alongside the helper — it is **Hybrid**. Consequently **no TDD
+failing stubs are emitted** (stubs are mandated for Fully-Automated rows only).
 
 Legacy line form:
 - migration truth: [hybrid: `pytest tests/e2e_disposable/test_migration_truth.py` + disposable PG container]
@@ -932,64 +1017,69 @@ Legacy line form:
 - two-process replica: [hybrid: `pytest tests/e2e_disposable/test_two_process_replica.py` + disposable PG container + 2 child procs]
 - scale: [hybrid: `pytest tests/e2e_disposable/test_scale_sweep.py` + disposable PG container]
 - scenario 43: [hybrid: `pytest tests/e2e_disposable/test_scenario_43.py` + disposable PG container]
-- helper guard: [hybrid: `pytest tests/e2e_disposable/test_helper_guard.py` + docker daemon]
-- default-lane regression: [hybrid: `pytest tests/unit -q` (fully-automated) + `pytest tests/integration -q` (needs PG/Redis)]
+- helper guard + DSN guard: [hybrid: `pytest tests/e2e_disposable/test_helper_guard.py` + docker daemon]
+- default-lane regression: [hybrid: `pytest --collect-only -q` (fully-automated) + `pytest tests/unit -q` (fully-automated) + `pytest tests/integration -q` (needs PG/Redis)]
 - deployed flag-ON: [known-gap: documented — K-3, blocked on `coop_terms_version` re-pin]
 
 Dimension findings:
-- Infra fit: FAIL — marker registration does not exclude the lane from `testpaths=["tests"]` (F-5); `alembic_version` survives `drop_all` so the lane dies after test #1 (F-3); the root-conftest 0-modified budget is unachievable for item 10 (F-4).
-- Test coverage: FAIL — G-6 and G-16 pass on the implementations they exist to forbid (F-1, F-2); G-9's stated RED condition is false (C-2); G-18's threshold is unset (C-5); G-13 is not constructible (C-6).
-- Breaking changes: CONCERN — `requirements.txt` ships to the prod image (C-8); a real default-run exclusion changes `addopts` for every suite (F-5).
-- Security surface: CONCERN — all five safety MUSTs are correctly non-negotiable, but the refusal guard exists only in the shell helper; a direct `pytest` invocation would `drop_all` the shared dev DB on :5433 (C-10).
-- Section A (helper): CONCERN — mechanically feasible (`e2e-local.sh` and `refresh_ip_org.py` are working precedents), but its own gates G-19/G-20 have no file and no run step (C-7).
-- Section B (migration truth): FAIL — F-3, F-4; the G-2 probe itself is genuinely falsifiable once the lane actually builds from alembic (`create_all(checkfirst=True)` skips existing tables, so a missing index is not silently repaired), and `env.py` wraps the chain in one transaction so G-11's clean-abort claim holds.
-- Section C (lifespan): CONCERN — the `LifespanManager` approach is sound and `asgi-lifespan` is correctly identified as absent from `requirements.txt`; G-4's "zero coop jobs" does correctly distinguish not-registered from registered-but-inert, and G-5b covers the inert case; but C-3 (flag mechanism) and C-4 (lifespan `create_all`) must be corrected.
-- Section D (pool topology): FAIL — F-1. The prod-parity pin (3+2) and the `asyncio.gather` precedent (`test_campaign_double_send.py`) are both verified correct.
-- Section E (two-process): CONCERN — C-2; `_replica_child.py` must emit acquisition status for the gate to mean anything.
-- Section F (scale): CONCERN — C-5.
-- Section G (scenario 43): PASS — `Site.contribution_enabled` exists (`models/site.py:38`) and is read by the accrual gate (`identity_coop.py:78`); both halves of G-8 are constructible and falsifiable.
-- Section H (wiring): FAIL — F-5; `pyproject.toml` is missing from the Blast Radius table.
+- Infra fit: CONCERN — F-3/F-4 verified closed (DROP SCHEMA is clean, no extensions in the repo, root conftest genuinely 0/0/0), but `-m` deselects without preventing import (E-4), DE-11's downgrade leaves the session-scoped schema off head (C-11), and the item-10 "at minimum" fallback is strictly weaker (C-12).
+- Test coverage: CONCERN — DE-6 is now genuinely falsifiable (F-1 closed), but DE-16a's mutation cannot flip its gate (E-1), DE-18's threshold is loose by ~n and blind to its stated RED condition (E-2), DE-9b's stated falsifier is wrong (E-3), DE-13 needs `spendable_at` seeding (C-14), and DE-6/DE-9a have no synchronisation (C-13).
+- Breaking changes: CONCERN — the `addopts` change alters the default invocation repo-wide and DE-1(b) as written cannot detect a lane leak (E-4); `requirements.txt` ships to the prod image (C-8, accepted with rationale; C-17 refines it).
+- Security surface: PASS — all five safety MUSTs remain non-negotiable in §Constraints; the shell-helper refusal plus the in-process session-scoped autouse DSN guard (localhost AND port ∉ {5432,5433,6543}) is genuine defence in depth, and it fires before any destructive statement. Worst case for a mis-invoked lane is a hard session-setup failure, not data loss. C-15 is hardening only.
+- Section A (helper): PASS — C-7 closed: `test_helper_guard.py` now has a home file, a Blast Radius budget, and a run step; refusal, unconditional `trap` teardown, and the 2-pair ceiling are all specified.
+- Section B (migration truth): CONCERN — C-11, C-12. The DE-2 probe itself is genuinely falsifiable once the lane builds from alembic.
+- Section C (lifespan): CONCERN — C-14. C-3 (monkeypatch the settings attribute; export only `DATABASE_URL`/`REDIS_URL` before the process starts) and C-4 (own container, no lifespan boot) are both verified correct against source.
+- Section D (pool topology): CONCERN — E-1 (DE-16a vacuous), C-13 (DE-6 timing). DE-6's core fix is sound; DE-16b is correctly re-labelled robustness-only.
+- Section E (two-process): CONCERN — E-3 (DE-9b falsifier), C-13 (overlap barrier). DE-9a's `sum(acquired) == 1` formulation and its stated RED condition are verified correct; specify how `_try_acquire_lock`'s `None` return maps into the printed `acquired=` value.
+- Section F (scale): CONCERN — E-2 (threshold and counter scope).
+- Section G (scenario 43): PASS — unchanged from cycle 1; both halves constructible and falsifiable.
+- Section H (wiring): CONCERN — E-4; `pyproject.toml` is now correctly present in both Touchpoints and Blast Radius.
 
 Open gaps:
 - K-3 (carried): no deployed flag-ON proof — known-gap: documented as NEW PLAN REQUIRED; legally blocked pending the `coop_terms_version` re-pin. This lane proves production *shape*, never production *deployment*.
-- Live `email_validator` MX behavior stays unproven (neutralised by the `no_mx` fixture, verified present at `test_identity_coop_contribution.py:583-590`).
+- Live `email_validator` MX behaviour stays unproven (neutralised by the `no_mx` fixture).
 - Redis is provisioned only to isolate the lane from a stray 6379; no Redis code path is under test.
-- G-18's ceiling is a stated lane ceiling, not a production SLO — production sweep volume is unmeasured.
-- Production masks table-level migration divergence via the lifespan `create_all` (C-4b) — record as a finding; out of scope here.
-- R-1 (site-recreate balance resurrection) needs a follow-up plan if G-17 fires as expected.
+- DE-18's ceiling is a stated lane ceiling, not a production SLO — production sweep volume is unmeasured.
+- Production masks table-level migration divergence via the lifespan `create_all` (C-4b / defect class 9) — record as a finding; out of scope here.
+- No ForeignKey on `identity_credit_ledger.site_id` — hardening observation for the backlog, **not** a live defect (DE-17 covers the router path and is expected GREEN).
+- Pre-declared findings remain **DE-13, DE-18, DE-7** only. **DE-17 is explicitly not pre-declared** and cycle 1's R-1 is withdrawn.
 
 What this coverage does NOT prove:
-- `pytest tests/e2e_disposable/*` proves behavior against a throwaway `postgres:16-alpine` on a
-  non-default port. It does **not** prove behavior against Supabase's pooler (transaction vs
-  session mode changes advisory-lock semantics materially — see the capacity-hardening
-  advisory-lock audit note), nor against prod's real connection counts, nor across a real
-  multi-container Railway deploy.
-- The two-process replica gate proves two OS processes against one DB. It does **not** prove N > 2
-  replicas, nor cross-container clock skew, nor a scheduler restarted mid-sweep by a rolling deploy.
-- The migration-truth gates prove the two coop indexes exist and reject duplicates after
-  `upgrade head` on an empty and on a populated DB. They do **not** prove any other model/migration
-  pair in the repo, and they do **not** detect table-level divergence in any lane that boots the
-  app (the lifespan `create_all` repairs it).
-- The scale gate proves round-trip count and wall-clock at n = 10,000 on a local container. It does
-  **not** prove production sweep volume, contention under real concurrent write load, or statement
-  timeout interaction.
-- The lock gates (once fixed per F-1) prove acquisition and refusal at the Postgres advisory-lock
-  tier. They do **not** prove the release leg survives connection recycling — that is the documented
-  accepted residual (R-2).
-- G-1 proves the existing suites stay green. It does **not** prove the default lane executes
-  byte-identical statements unless the mechanical `git diff --numstat` leg from C-1 is added.
-- Nothing here proves the coop feature works with `identity_coop_enabled=true` in a deployed
-  environment (K-3).
+- `pytest tests/e2e_disposable/*` proves behaviour against a throwaway `postgres:16-alpine` on an ephemeral port. It does **not** prove behaviour against Supabase's pooler — and DE-21 structurally forbids ports 5432/5433/6543, so the lane can never exercise the `DB_POOLER_MODE` branch or `build_connect_args`'s `"supabase" in url` prepared-statement disabling. Transaction- vs session-mode pooling changes advisory-lock semantics materially.
+- The two-process replica gate proves two OS processes against one DB. It does **not** prove N > 2 replicas, cross-container clock skew, or a scheduler restarted mid-sweep by a rolling deploy.
+- The migration-truth gates prove the two coop indexes exist and reject duplicates after `upgrade head` on an empty and a populated DB. They do **not** prove any other model/migration pair in the repo, and they do **not** detect table-level divergence in any lane that boots the app.
+- The scale gate proves round-trip and commit counts at n = 10,000 on a local container. It does **not** prove production sweep volume, contention under real concurrent write load, or statement-timeout interaction.
+- The lock gates prove acquisition and refusal at the Postgres advisory-lock tier. They do **not** prove the release leg survives connection recycling — the documented accepted residual (DE-7, pre-declared).
+- DE-16a (once corrected per E-1) proves the `WHERE EXISTS` guard blocks an orphan EXPIRE under an artificially divergent `site_id`. It does **not** prove the guard's *documented* scenario (a site delete cascading the ledger away), because that scenario is unreachable — there is no cascade, and deleting the ACCRUE row zeroes `_lot_remaining` before the guard is ever consulted.
+- DE-1 proves the existing suites stay green and the lane is not collected. It does **not** prove the default lane executes byte-identical statements beyond the mechanical `git diff --numstat` leg.
+- Nothing here proves the coop feature works with `identity_coop_enabled=true` in a deployed environment (K-3).
 
-Gate: BLOCKED (5 unresolved FAILs — F-1 … F-5)
-Accepted by: n/a — BLOCKED gates are not accepted; return to PLAN for one supplement cycle.
+Gate: CONDITIONAL
+
+This CONDITIONAL does **not** rest only on pre-declared known-gaps. It rests on:
+1. **Pre-declared known-gaps / residuals:** K-3 (deployed flag-ON, gap-resolution D), DE-13
+   (boundary), DE-18 (scale shape), DE-7 (unlock on a recycled connection), live MX behaviour,
+   Redis non-coverage, defect class 9, and the missing `identity_credit_ledger.site_id` FK.
+2. **Four binding execute-agent corrections — E-1, E-2, E-3, E-4 — which MUST be applied to the
+   plan text before the corresponding gate is implemented.** Each names a gate that, as currently
+   worded, passes on the implementation it exists to forbid. Implementing DE-16a, DE-18, DE-9b, or
+   the `addopts` exclusion as written would produce vacuous evidence, and the associated mutation
+   probe would record a false non-vacuity proof.
+3. **Six precision fixes — C-11 … C-17** (schema restore after DE-11, mandate DROP SCHEMA,
+   synchronisation for DE-6/DE-9a, `spendable_at` seeding for DE-13, explicit guard ordering,
+   DE-1…DE-21 prose reconciliation, the existing `test` extra).
+
+Accepted by: **PENDING** — not accepted by this agent. Per the cycle-2 STOP-BLOCK this agent does
+not self-accept its own CONDITIONAL verdict. The orchestrator/user must either (a) accept this
+CONDITIONAL with E-1 … E-4 carried as binding execute-agent instructions, or (b) run PVL supplement
+cycle 2 to fold E-1 … E-4 and C-11 … C-17 into the plan text and re-validate.
 
 ---
 
 ## Autonomous Goal Block
 
 ```
-SESSION GOAL: Build the disposable-container coop e2e lane (8 infra items, gates DE-1..DE-20) so identity-coop Phase 1 + Phase 2a are exercised in production shape — alembic-built schema, real ASGI lifespan, prod-parity pool, two OS processes.
+SESSION GOAL: Build the disposable-container coop e2e lane (8 infra items, gates DE-1..DE-21) so identity-coop Phase 1 + Phase 2a are exercised in production shape — alembic-built schema, real ASGI lifespan, prod-parity pool, two OS processes.
 Charter + umbrella plan: N/A — single plan, one phase (not a phase program). Sibling program umbrella: process/features/visitors-identity/active/identity-coop_07-08-26/identity-coop-umbrella_PLAN_07-08-26.md (informational only).
 Autonomy: standing consent for reversible test-infra edits under tests/, scripts/, requirements.txt, pyproject.toml. Auto-proceed on all gate/fix cycles. Blocked items -> backlog NOTE in this task folder, continue.
 Hard stop conditions / safety constraints:

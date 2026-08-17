@@ -104,11 +104,41 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
     `Site` has no `domain` col, needs `name`+`url`). Entry-gate for identity-coop still UNMET.
     Migration `d1a6c4e93f27` live round-trip IS closed (KG-5). See
     `backlog/docker-gate-run-findings_NOTE_07-08-26.md`.**
-  - `identity-coop_07-08-26` — Phase 1 **Dependency-BLOCKED** on graph-erasure reaching LIVE
-    (entry gate); plan converged via supplement (bool-return accrual gating,
-    write-nothing-when-blocked privacy invariant, site_id-only ledger, partial-unique dedup).
-    `backlog/identity-coop-entry-gate-spec-a-live_NOTE_07-08-26.md` tracks 4 clearing conditions;
-    phases 2-3 skipped.
+  - `identity-coop_07-08-26` — **Phase 1 + Phase 2a SHIPPED and human-approved 16/17-08-26;
+    committed `51fe0d5` + `3e7a420` + `c26c5d1`. Both flags remain OFF — production exposure is
+    NONE.** (Supersedes the earlier "Phase 1 Dependency-BLOCKED on graph-erasure" note: all four
+    clearing conditions in `backlog/identity-coop-entry-gate-spec-a-live_NOTE_07-08-26.md` were
+    met on 07-08-26 and the entry gate is closed.)
+    **Phase 1** (ledger substrate: `identity_contribution_events`, `identity_credit_ledger`,
+    `identity_contribution_consent_acceptances`, migrations `e7b3d5f19c46` + `f2c81a6b4d09`,
+    resolver hook gated on `_upsert_beam_identity` returning `True`) EVL-green 07-08-26. An
+    adversarial re-audit on 16-08-26 then found two HIGH defects that 16 green gates had missed —
+    site-delete resurrecting credit, and the erasure enqueue→sweep window minting permanent
+    credit — both fixed in a post-audit supplement (site-delete cascade now removes both spendable
+    tables; the suppression tombstone is written inside `enqueue_erasure`'s own transaction under a
+    `db.begin_nested()` savepoint) and re-approved.
+    **Phase 2a** (consumption aggregation + FIFO lot expiry: read-only `consumption_count` over
+    `api_usage_logs`, lot-symmetric stamping, idempotent `EXPIRE` sweep in
+    `services/coop_expiry_sweep.py`, scheduler wiring gated at BOTH registration and runtime,
+    migration `b7e4d21a9c58` adding the partial unique index `uq_coop_ledger_expire_per_lot`)
+    EVL-green 17-08-26. Verdict `approved-with-concerns` —
+    `harness/review-decision-phase2a.json` records the accepted gaps: K-2 partially closed (N=2
+    single-host only), G-20 residual (ii) still open, K-3 blocked on a legal re-pin of
+    `coop_terms_version`, G-4 unconfirmed.
+    **Phase 2b** (spend wiring: credit read in `check_usage_allowed`, `SPEND` write in
+    `increment_usage`) is PLANNED and entry-gated on 2a going LIVE —
+    `phase-2b-spend-wiring_PLAN_16-08-26.md`. Phase 3 unchanged. `REVERSE` semantics were
+    descoped to `backlog/coop-credit-reversal-semantics_NOTE_16-08-26.md`.
+    **Open production finding (F-B):** `_EXPIRE_INSERT_SQL`'s `ON CONFLICT (lot_id) WHERE
+    entry_type = 'EXPIRE'` needs `uq_coop_ledger_expire_per_lot` to exist; without it PostgreSQL
+    cannot infer an arbiter, every insert raises, the per-lot `except` swallows it, and **the sweep
+    silently expires nothing**. Migration `b7e4d21a9c58` has never been applied to production. Fix
+    plan: `active/coop-expiry-index-guard_17-08-26/`.
+    **Test infra:** a disposable-container e2e lane (`tests/e2e_disposable/`,
+    `scripts/e2e-disposable.sh`, gates DE-1…DE-21) was built 17-08-26 specifically because the
+    integration lane builds its schema with `Base.metadata.create_all` and NEVER runs alembic, and
+    because `httpx.ASGITransport` does not run lifespan so `start_scheduler()` was executed by no
+    test at any tier. See `active/coop-disposable-e2e_17-08-26/`.
   - `identity-coverage-pixel-fppro_02-08-26` — audit verdict 07-08-26: Ph.01 done (manual gate
     transferred to recovery program); Ph.02 SUPERSEDED by `plans/260805-1543-identity-coverage-recovery/`
     on branch `dev_nhantc2` (outside `process/`, invisible to plan-discovery); Ph.03 backlog

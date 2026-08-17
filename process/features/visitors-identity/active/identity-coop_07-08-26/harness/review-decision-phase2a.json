@@ -1,0 +1,93 @@
+{
+  "task": "identity-coop Phase 2a — consumption aggregation + FIFO lot expiry",
+  "planPath": "process/features/visitors-identity/active/identity-coop_07-08-26/phase-2-consumption-spend_PLAN_07-08-26.md",
+  "decision": "approved-with-concerns",
+  "decisionEnumNote": "REAL HUMAN VERDICT. The reviewer named below first WITHHELD sign-off on 2026-08-16, setting an explicit condition: approve only after a disposable-container e2e lane closed the K-2 and K-5 known-gaps. That lane was built and independently EVL-confirmed on 2026-08-17. The reviewer then set a second condition — that the lane's own flaky gate (DE-5) be root-caused before signing, on the grounds that a gate red ~10% of the time destroys the evidentiary value of the whole lane. DE-5 was root-caused and fixed on 2026-08-17. Both conditions are met; this is the resulting verdict. Only a HUMAN may change this field; no agent may self-approve, and none did.",
+  "reviewer": "Julley Thai (via orchestrator session 17-08-26)",
+  "reviewedAt": "2026-08-17",
+  "implementedBy": "vc-execute-agent 2026-08-16 (resumed twice: once after the parent process exited, once after a transient API 529); EVL confirmation by an independent vc-tester 2026-08-17",
+  "gapsClosedSinceFirstReview": [
+    {
+      "id": "K-5",
+      "was": "the scheduler wrapper's runtime identity_coop_enabled re-check was executed by NO test tier",
+      "now": "CLOSED",
+      "closedBy": "DE-5b in tests/e2e_disposable/test_lifespan_scheduler.py — the first tier in this repo's history to execute start_scheduler() through a real ASGI lifespan. The EVL agent mutation-probed it independently: deleting the guard turns it RED.",
+      "caveat": "DE-5b initially shared a helper with a submit-vs-complete race (see DE-5 below), giving it a narrow vacuity window in which `assert count == 0` could not distinguish 'the runtime flag check short-circuited' from 'the coroutine was cancelled before it wrote'. The same fix closed it. K-5 is therefore genuinely closed only as of the 17-08-26 DE-5 fix, not as of the original EVL run."
+    },
+    {
+      "id": "G-20 residual (i)",
+      "was": "lock ACQUISITION ungated — a no-lock implementation passed both legs",
+      "now": "CLOSED",
+      "closedBy": "DE-6 — proven from a third connection AND the loser's `got is False` skip branch, never by row count. Plan-mandated mutation probe re-run RED by the EVL agent."
+    },
+    {
+      "id": "G-20 residual (iii)",
+      "was": "aborted-transaction path ungated",
+      "now": "CLOSED",
+      "closedBy": "DE-15 — observed from a separate-pool probe engine; stubbing _release_lock to a no-op turns it RED."
+    }
+  ],
+  "concernsAccepted": [
+    {
+      "id": "K-2",
+      "severity": "partially-closed",
+      "finding": "Multi-process concurrency on the enqueue→sweep window. DE-9a closes it and is falsification-verified (lock stubbed ⇒ sum(acquired)==2, gate RED), but only for N=2 processes on a single host with a file-based start barrier. NOT proven: N>2 replicas, cross-host contention, or the sweep window under real connection-pool pressure.",
+      "whyAccepted": "Railway runs one uvicorn worker per container, so N=2 exercises the real replica shape; cross-host contention cannot be honestly simulated on one laptop, and pretending otherwise would be worse than declaring the gap."
+    },
+    {
+      "id": "G-20 residual (ii)",
+      "severity": "still-open",
+      "finding": "Advisory-lock release is proven only in the lane's test topology. The lane runs one sweep with no competing pool consumer, so the documented residual — another consumer taking the connection between per-lot commits, making the unlock a no-op — is not exercised. The lane BOUNDS the residual; it does not eliminate it.",
+      "whyAccepted": "The lock is efficiency-only by design; the partial unique index uq_coop_ledger_expire_per_lot is the correctness boundary, and it is independently proven by DE-21/G-21. Recorded in the sweep's own docstring and routed to the capacity-hardening advisory-lock audit note via S-27."
+    },
+    {
+      "id": "K-3",
+      "severity": "still-open",
+      "finding": "No gate runs with identity_coop_enabled ON in a deployed environment.",
+      "whyAccepted": "Not a technical blocker. coop_terms_version is a PLACEHOLDER digest; legal review and a re-pin are required before either flag is flipped anywhere. Until that happens no deployed flag-ON evidence can exist. See coop-terms-repin_RUNBOOK_16-08-26.md."
+    },
+    {
+      "id": "G-4",
+      "severity": "unconfirmed",
+      "finding": "The EXPLAIN gate over ≥100k seeded api_usage_logs rows was NOT re-run by the EVL confirmation.",
+      "whyAccepted": "Its only deliverable — the conditional-E1 index decision — is already settled in-tree (E1 correctly did not fire; the executing agent measured a Bitmap Index Scan, no seq scan). The EVL agent reported it as unconfirmed rather than counting it green, which is the correct posture."
+    },
+    {
+      "id": "flag-ON evidence",
+      "severity": "structural",
+      "finding": "Both identity_coop_enabled and Site.contribution_enabled remain default OFF; production exposure as shipped is NONE.",
+      "whyAccepted": "Deliberate. But note the repo's own memorized precedent: the icp_fit bulk write was a silent no-op that survived 4 PVL cycles and 2 EVL passes on flag-OFF-only evidence and fell the first time the flag-ON path met real infra. This phase's flag-ON path is now exercised by the disposable lane against a real Postgres, which is stronger than icp_fit ever had — but it is still not a deployed environment."
+    }
+  ],
+  "findingsRaisedDuringVerification": [
+    {
+      "id": "F-B",
+      "severity": "production robustness hole",
+      "finding": "_EXPIRE_INSERT_SQL ends with ON CONFLICT (lot_id) WHERE entry_type = 'EXPIRE' DO NOTHING. Without the partial unique index uq_coop_ledger_expire_per_lot, PostgreSQL cannot infer an arbiter and EVERY insert raises asyncpg InvalidColumnReferenceError. The mandated per-lot except swallows it, so the sweep completes 'successfully' having expired NOTHING — a silent failure on a billing surface, visible only as coop_expire_lot_failed log spam. Confirmed by mechanism twice (executing agent, then the EVL agent on a disposable Postgres with the index dropped). The index ships in migration b7e4d21a9c58, which has never been applied to production.",
+      "status": "own plan in flight — process/features/visitors-identity/active/coop-expiry-index-guard_17-08-26/",
+      "note": "NOT fixed under this phase's blast radius, deliberately. Reported rather than patched in place."
+    },
+    {
+      "id": "DE-5",
+      "severity": "flaky gate (test-only)",
+      "finding": "The lane's DE-5 gate failed ~7-15% of full-file runs. Root cause was NOT state bleed: _run_job_now() watched next_run_time, which APScheduler advances at job SUBMIT (base.py:1195 submit, :1228-1229 advance), not completion. The test then left the LifespanManager block, and AsyncIOExecutor.shutdown() cancels every in-flight coroutine unconditionally (upstream comment: 'There is no way to honor wait=True without converting this method into a coroutine method'), killing the sweep before its per-lot commit. Measured: sweep 58-250ms against a fixed 250ms poll tick.",
+      "status": "FIXED 2026-08-17 — waits on EVENT_JOB_EXECUTED instead. No retry, no sleep, no flaky marker; the deadline was deleted, not lengthened. 40/40 green; Mutation A (future expires_at) RED proves the assertion still carries signal; Mutation B (revert to sleep) reproduces 2/20 red proving the wait is load-bearing.",
+      "note": "Zero apps/api bytes changed. Production is unaffected and correct: a container shutdown mid-sweep cancels the job the same way, but per-lot commit makes partial progress durable and the next tick resumes — the designed-for case DE-14 already proves."
+    },
+    {
+      "id": "integration-lane flakes",
+      "severity": "pre-existing, not attributable",
+      "finding": "The integration lane carries order-dependent cross-event-loop flakes on the module-level async_session engine. Proven not attributable to this phase by A/B: a baseline run with only this phase's file --ignore'd failed a DIFFERENT set of tests, and every candidate passes in isolation.",
+      "status": "backlog candidate — root cause not investigated"
+    }
+  ],
+  "evidence": {
+    "evlPhase2aConfirmation": "process/features/visitors-identity/active/identity-coop_07-08-26/harness/evl-phase2a-confirmation-17-08-26.json",
+    "laneEvlConfirmation": "process/features/visitors-identity/active/coop-disposable-e2e_17-08-26/harness/evl-lane-confirmation-17-08-26.json",
+    "laneResultsLog": "process/features/visitors-identity/active/coop-disposable-e2e_17-08-26/results.tsv",
+    "phase2aGates": "15/15 co-op gates green under independent re-run; unit lane 2926 passed / 2 skipped / 0 failed with :6379 verified closed; Phase 1 regression 20/20; G-15b index round-trip proven live on a disposable Postgres; three mutation probes re-done independently by the EVL agent, all RED-on-defect, all reverted byte-exact.",
+    "laneGates": "DE-1…DE-21, 37 lane tests; six mutation probes recorded RED-then-reverted-GREEN, one of which exposed and fixed a vacuous gate of the executing agent's own making (same-pool advisory-lock probes are vacuous because pg_try_advisory_lock is re-entrant within one backend session)."
+  },
+  "commits": ["51fe0d5", "3e7a420", "c26c5d1"],
+  "date": "2026-08-17"
+}

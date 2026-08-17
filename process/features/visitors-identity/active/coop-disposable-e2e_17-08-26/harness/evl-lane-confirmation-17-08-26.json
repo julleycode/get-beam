@@ -1,0 +1,246 @@
+{
+  "artifact": "evl-lane-confirmation",
+  "date": "17-08-26",
+  "feature": "visitors-identity",
+  "plan": "process/features/visitors-identity/active/coop-disposable-e2e_17-08-26/coop-disposable-e2e_PLAN_17-08-26.md",
+  "role": "EVL Step 3 independent confirmation run (vc-tester). Execute-agent evidence treated as unconfirmed and re-run.",
+  "environment": {
+    "head": "de6261ccf1c9ac3cb8518003ac642f3c93f268fd",
+    "stash_entries_before": 11,
+    "stash_entries_after": 11,
+    "docker_server": "29.4.2",
+    "docker_cli": "/Applications/Docker.app/Contents/Resources/bin/docker",
+    "pytest": ".venv/bin/python3.11 -m pytest",
+    "shared_dev_pg": "localhost:5433 (infra-postgres-1) — used by tests/integration only, never exported by this agent",
+    "git_mutations": "file edits only, all reverted and sha256-verified; zero git state operations"
+  },
+  "gate_results": {
+    "DE-1a": {
+      "command": "git diff --numstat tests/conftest.py",
+      "observed": "empty output (0 added / 0 removed / 0 modified)",
+      "status": "PASS"
+    },
+    "DE-1b-unit": {
+      "command": ".venv/bin/python3.11 -m pytest tests/unit -q",
+      "observed": "2926 passed, 2 skipped, 16 warnings in 14.01s",
+      "status": "PASS"
+    },
+    "DE-1b-integration": {
+      "command": ".venv/bin/python3.11 -m pytest tests/integration -q",
+      "observed": "1 failed, 667 passed in 1325.32s; failure = test_ip_org_pipeline.py::TestLockSerialization::test_a_second_refresh_backs_off_while_the_shared_lock_is_held",
+      "status": "PASS_WITH_PREEXISTING_FLAKE",
+      "note": "Failure set is NOT the one execute-agent reported; see attribution section."
+    },
+    "DE-1c": {
+      "command": ".venv/bin/python3.11 -m pytest --collect-only -q",
+      "observed": "3664 tests collected; grep -c e2e_disposable = 0",
+      "status": "PASS"
+    },
+    "DE-2_DE-11_DE-12": {
+      "command": "./scripts/e2e-disposable.sh mig -- .venv/bin/python3.11 -m pytest tests/e2e_disposable/test_migration_truth.py -p no:randomly -q",
+      "observed": "5 passed in 31.05s",
+      "status": "PASS"
+    },
+    "DE-3_DE-4_DE-5_DE-5b_DE-13_DE-14_DE-15": {
+      "command": "./scripts/e2e-disposable.sh lifespan_scheduler -- .venv/bin/python3.11 -m pytest tests/e2e_disposable/test_lifespan_scheduler.py -p no:randomly -q",
+      "observed": "INTERMITTENT. First run: 1 failed, 6 passed (test_de5_scheduler_writes_expire_row). Re-runs: 7 passed x1, then 1 failed/6 passed x1, then 7 passed x1, then 6 consecutive full-file runs 7 passed, then 3 loaded runs 7 passed. Observed failure rate ~2/20 full-file runs (~10%).",
+      "status": "FAIL_INTERMITTENT",
+      "note": "Execute-agent reported 7 passed. Not reproducible on demand; root cause unconfirmed."
+    },
+    "DE-6_DE-7_DE-16a_DE-16b": {
+      "command": "./scripts/e2e-disposable.sh pool_topology -- .venv/bin/python3.11 -m pytest tests/e2e_disposable/test_pool_topology.py -p no:randomly -q",
+      "observed": "4 passed in 6.54s",
+      "status": "PASS"
+    },
+    "DE-9a_DE-9b_DE-10_DE-17": {
+      "command": "./scripts/e2e-disposable.sh two_process_replica -- .venv/bin/python3.11 -m pytest tests/e2e_disposable/test_two_process_replica.py -p no:randomly -q",
+      "observed": "3 passed in 12.73s",
+      "status": "PASS"
+    },
+    "DE-8": {
+      "command": "./scripts/e2e-disposable.sh scenario_43 -- .venv/bin/python3.11 -m pytest tests/e2e_disposable/test_scenario_43.py -p no:randomly -q",
+      "observed": "3 passed in 7.09s",
+      "status": "PASS"
+    },
+    "DE-18": {
+      "command": "./scripts/e2e-disposable.sh sc -- .venv/bin/python3.11 -m pytest tests/e2e_disposable/test_scale_sweep.py -p no:randomly -q -s",
+      "observed": "3 independent runs, IDENTICAL every time: written=10000 round_trips=20003 commits=10000; wall_clock 25.6s / 25.2s / 23.8s",
+      "status": "PASS",
+      "margin_stability": "DETERMINISTIC. round_trips fixed at 2n+3=20003 vs ceiling 20010 (margin 7); commits fixed at n=10000 vs ceiling 10005 (margin 5). Zero variance across runs — the counters are structural, not timing-dependent. NOT borderline-flaky."
+    },
+    "DE-19_DE-20_DE-21": {
+      "command": "./scripts/e2e-disposable.sh helper_guard -- .venv/bin/python3.11 -m pytest tests/e2e_disposable/test_helper_guard.py -p no:randomly -q",
+      "observed": "14 passed in 18.24s",
+      "status": "PASS"
+    }
+  },
+  "lane_test_counts": {
+    "test_migration_truth.py": 5,
+    "test_lifespan_scheduler.py": 7,
+    "test_pool_topology.py": 4,
+    "test_two_process_replica.py": 3,
+    "test_scenario_43.py": 3,
+    "test_scale_sweep.py": 1,
+    "test_helper_guard.py": 14,
+    "total": 37,
+    "confirmed": "37 collected; 36 stably green, 1 (DE-5) intermittently red"
+  },
+  "mutation_probes_rerun_by_tester": {
+    "DE-2_index_removed": {
+      "mutation": "deleted op.create_index(uq_coop_ledger_expire_per_lot, ...) from b7e4d21a9c58",
+      "red_observed": "2 failed, 1 passed, 2 errors — BOTH legs red (existence leg + behavioural duplicate-rejection leg 'DID NOT RAISE IntegrityError')",
+      "restore_verified": "sha256 ee7dd487726d0afcb0fdf3175d2b9676303ab120372d349e7744c2bc45ab4fcc, git status clean",
+      "green_reconfirmed": "5 passed in 12.68s",
+      "status": "PROBE_VALID"
+    },
+    "DE-6_lock_acquisition_stubbed": {
+      "mutation": "_try_acquire_lock returns True without taking a lock",
+      "red_observed": "AssertionError: assert 'coop_expiry_sweep_skipped_locked' in [] — the skip-branch leg fires",
+      "status": "PROBE_VALID",
+      "note": "Confirms F-1 is genuinely closed: the old row-count formulation passed under this same mutation."
+    },
+    "DE-7_DE-15_release_lock_noop": {
+      "mutation": "_release_lock returns immediately (no-op)",
+      "red_observed": "2 failed — DE-7 and DE-15 both red",
+      "probe_engine_inspection": "GENUINE. _probe_lock_is_free calls create_async_engine(dsn, pool_size=1, max_overflow=0) — a NEW engine with its own pool, therefore a distinct PG backend session. PG advisory locks are re-entrant within one backend, so a same-pool checkout could draw the lock-holding connection and report 'free'; the separate engine removes that. Verified by code inspection AND empirically (fixed gate goes red where execute-agent's first same-pool version stayed green).",
+      "restore_verified": "sha256 9e3a1c023153b9aadbceab4e9467cdefdfbdfd535af8aaf4ee9841802219fe08, git status clean",
+      "green_reconfirmed": "2 passed in 4.92s",
+      "status": "PROBE_VALID"
+    }
+  },
+  "falsification_matrix_rerun": {
+    "row_lock_stubbed": {
+      "expected": "sum(acquired)==2, duplicates 0, total 400 -> DE-9a RED",
+      "observed": "AssertionError: ['acquired=true written=231', 'acquired=true written=169'] assert 2 == 1. 231+169=400, zero duplicates.",
+      "verdict": "CONFIRMED_AS_SPECIFIED",
+      "note": "Also positively demonstrates the unique index doing real backstop work: two genuinely concurrent sweeps produced exactly 400 rows, no dupes."
+    },
+    "row_index_dropped_lock_intact": {
+      "expected": "total 0 -> DE-9b RED via the total-count leg, NOT via duplicates",
+      "observed": "DE-9b RED confirmed, but via asyncio TimeoutError after 303.90s — the children HANG, they do not complete-and-report-zero.",
+      "verdict": "RED_CONFIRMED_BUT_MECHANISM_DIFFERS",
+      "finding": "The gate does go red, but not through the stated assertion path. The total-count leg is never evaluated."
+    },
+    "row_index_dropped_and_lock_stubbed": {
+      "expected": "the plan's stated DE-9b falsifier — duplicate EXPIRE rows appear",
+      "observed": "Timed out at 400s with no output; children hang, as above.",
+      "verdict": "STATED_FALSIFIER_DOES_NOT_PRODUCE_DUPLICATES",
+      "finding": "Removing uq_coop_ledger_expire_per_lot does not permit duplicate rows — it breaks the ON CONFLICT inference outright (see F-B), so every insert fails. DE-9b's `dupes == 0` assertion therefore has NO known falsifier and is effectively unfalsified. Only its `total == _N_LOTS` companion assertion carries signal."
+    }
+  },
+  "F_B_independent_verification": {
+    "claim": "with uq_coop_ledger_expire_per_lot removed, the sweep writes 0 rows and emits coop_expire_lot_failed",
+    "method": "migration mutated to omit create_index; fresh disposable container; ran DE-7 (5 seeded lapsed lots) with --log-cli-level=INFO",
+    "observed": "structlog error event `coop_expire_lot_failed lot_id=5078734a-...` plus asyncpg InvalidColumnReferenceError: 'there is no unique or exclusion constraint matching the ON CONFLICT specification'",
+    "verdict": "CONFIRMED",
+    "mechanism": "_EXPIRE_INSERT_SQL's ON CONFLICT clause infers its arbiter from the partial unique index. With the index absent PG cannot resolve the arbiter and raises per lot; the per-lot except swallows it as coop_expire_lot_failed and continues, so the sweep completes 'successfully' having expired NOTHING.",
+    "production_significance": "Real robustness hole. If the index is ever absent (migration not applied, manual drop, restore from a pre-b7e4d21a9c58 dump) co-op credit expiry silently stops entirely on a billing surface, with only an error-level log line as signal. Fails silent, not loud."
+  },
+  "tester_designed_probes": {
+    "self_probe_1_DE-5b": {
+      "target_gate": "DE-5b (not mutation-probed by execute-agent)",
+      "mutation": "deleted the `if not settings.identity_coop_enabled: return` runtime re-check in apps/api/jobs/scheduler.py's _coop_expiry_sweep_job wrapper",
+      "result": "FAILED tests/e2e_disposable/test_lifespan_scheduler.py::test_de5b_runtime_flip_off_writes_nothing",
+      "verdict": "ANTI-VACUITY PASS — DE-5b genuinely detects removal of the K-5 runtime guard",
+      "restore_verified": "git status apps/api/ clean"
+    },
+    "self_probe_2_DE-8": {
+      "target_gate": "DE-8 (not mutation-probed by execute-agent)",
+      "mutation": "added `CreditLedgerEntry.site_id.in_(select(Site.site_id).where(Site.contribution_enabled.is_(True)))` to the lapsed-lot SELECT in identity_coop.expire_lapsed_lots — i.e. implemented the exact D-E2E-1 opt-out-preserves-credits exploit",
+      "result": "FAILED test_de8_lot_expires_even_after_site_opts_out — assert 0 == 1",
+      "verdict": "ANTI-VACUITY PASS — DE-8 genuinely forbids the exploit it exists to forbid",
+      "restore_verified": "git status apps/api/ clean; 3 passed on re-run"
+    },
+    "summary": "Neither self-designed probe found a vacuous gate. No new anti-vacuity finding."
+  },
+  "attribution_investigation": {
+    "execute_agent_claim": "2 pre-existing integration failures: test_outcome_digest.py::test_sends_once_stamps_and_throttles and test_referrals.py::TestActivation::test_no_events_no_reward, identical with and without the addopts change",
+    "tester_full_run": "1 failed, 667 passed — the single failure was test_ip_org_pipeline.py::TestLockSerialization::test_a_second_refresh_backs_off_while_the_shared_lock_is_held. DISJOINT from execute-agent's reported set.",
+    "isolation_runs": {
+      "test_outcome_digest::test_sends_once_stamps_and_throttles": "with addopts: 1 passed; -o addopts=: 1 passed",
+      "test_referrals::test_no_events_no_reward": "with addopts: 1 passed; -o addopts=: 1 passed",
+      "test_ip_org_pipeline::test_a_second_refresh_backs_off...": "with addopts: 1 passed; -o addopts=: 1 passed"
+    },
+    "full_lane_ab_comparison": {
+      "with_addopts": ".venv/bin/python3.11 -m pytest tests/integration -q -> 1 failed, 667 passed in 1325.32s; FAILED test_ip_org_pipeline.py::TestLockSerialization::test_a_second_refresh_backs_off_while_the_shared_lock_is_held",
+      "without_addopts": ".venv/bin/python3.11 -m pytest tests/integration -q -o addopts= -> 1 failed, 667 passed in 1357.45s; FAILED test_ip_org_pipeline.py::TestLockSerialization::test_a_second_refresh_backs_off_while_the_shared_lock_is_held",
+      "conclusion": "IDENTICAL failure, identical counts, with and without the addopts change. Decisive A/B non-attribution proof."
+    },
+    "structural_proof": {
+      "tests/integration collected WITH addopts": 668,
+      "tests/integration collected WITHOUT addopts": 668,
+      "tests/unit collected WITH addopts": 2928,
+      "tests/unit collected WITHOUT addopts": 2928,
+      "conclusion": "--ignore=tests/e2e_disposable is path-scoped and provably changes nothing about either lane's collection."
+    },
+    "verdict": "Execute-agent's CONCLUSION (not attributable to the addopts change) is PROVEN CORRECT. Its CHARACTERISATION (a stable 2-test pre-existing failure set) is DISPROVEN: the failing set is not reproducible and differs run-to-run. These are pre-existing order/concurrency-dependent flakes in tests/integration, unrelated to this plan."
+  },
+  "phase_2a_known_gap_mapping": {
+    "K-2": {
+      "verdict": "PARTIALLY CLOSED",
+      "closed_by": "DE-9a (sum(acquired)==1 across two real OS processes, falsification-verified: stubbing the lock yields sum==2)",
+      "still_open": "Only the enqueue-side dedup of the SWEEP is proven, and only at N=2 processes on one host with a file barrier. The accrual half is covered separately by DE-10. Not proven: N>2 replicas, cross-host contention, or the sweep window under real production pool pressure."
+    },
+    "K-5": {
+      "verdict": "CLOSED",
+      "closed_by": "DE-5b, executed through the REAL ASGI lifespan (LifespanManager), so the scheduler wrapper's runtime identity_coop_enabled re-check is executed by a tier for the first time.",
+      "tester_confirmation": "Independently mutation-probed by this agent (self-probe 1): deleting the runtime re-check turns DE-5b RED. The gate is non-vacuous."
+    },
+    "G-20_residual_i_lock_acquisition_ungated": {
+      "verdict": "CLOSED",
+      "closed_by": "DE-6 — acquisition observed from a third connection AND via the loser's `coop_expiry_sweep_skipped_locked` branch, never by row count.",
+      "tester_confirmation": "Plan-mandated mutation probe re-run: stubbing _try_acquire_lock to return True turns DE-6 RED. F-1 (the old row-count formulation passing under this mutation) is genuinely closed."
+    },
+    "G-20_residual_ii_release_proven_in_test_topology_only": {
+      "verdict": "STILL OPEN",
+      "reason": "DE-7 is GREEN, but green here only shows the unlock landed on the lock-holding connection in a lane that runs ONE sweep with no competing pool consumer, so the session reliably re-draws its own connection after each per-lot commit. The documented residual — that under real contention another consumer takes that connection between commits, so the unlock runs elsewhere and silently no-ops — is NOT exercised. The lane bounds the residual (not reproducible without concurrent pool pressure) but does not eliminate it. coop_expiry_sweep.py's own docstring still records it as accepted."
+    },
+    "G-20_residual_iii_aborted_transaction_path": {
+      "verdict": "CLOSED",
+      "closed_by": "DE-15 — an aborted session (SELECT 1/0) followed by a raise still leaves the lock free, observed from a SEPARATE-POOL probe engine.",
+      "tester_confirmation": "Mutation-probed: _release_lock no-op turns DE-15 RED. The separate-pool probe was inspected and is a genuinely distinct PG backend, so the re-entrancy vacuity that defeated the first version is closed."
+    }
+  },
+  "findings": [
+    {
+      "id": "EVL-F1",
+      "severity": "CONCERN",
+      "title": "DE-5 is an intermittent gate (~10% red)",
+      "detail": "test_de5_scheduler_writes_expire_row failed 2 of ~20 full-file runs, unloaded as well as loaded. Passes 6/6 when run alone. Execute-agent reported a clean 7/7. A latency probe measuring the EXPIRE row immediately after _run_job_now() returns found the row already present in 15/15 attempts, so the obvious submission-vs-completion race is NOT confirmed as the mechanism. Root cause unresolved.",
+      "impact": "A flaky gate in a lane whose entire purpose is trustworthy evidence. Any future EVL run has a ~10% chance of a spurious red on this gate."
+    },
+    {
+      "id": "EVL-F2",
+      "severity": "CONCERN",
+      "title": "DE-9b's duplicate-detection leg has no working falsifier",
+      "detail": "The plan's stated DE-9b falsifier (drop uq_coop_ledger_expire_per_lot while the lock is stubbed) does not produce duplicate rows. Removing the index breaks ON CONFLICT arbiter inference outright, so every insert errors (see F-B) and the children hang until timeout. The `dupes == 0` assertion is therefore unfalsified by any known mutation; only `total == _N_LOTS` carries signal.",
+      "impact": "Plan section E-3's reasoning is partly wrong. Documentation/contract defect, not a source defect."
+    },
+    {
+      "id": "EVL-F3",
+      "severity": "OBSERVATION",
+      "title": "F-B confirmed — missing index silently disables all credit expiry",
+      "detail": "Independently reproduced. See F_B_independent_verification.",
+      "impact": "Production robustness hole on a billing surface; fails silent."
+    },
+    {
+      "id": "EVL-F4",
+      "severity": "OBSERVATION",
+      "title": "Integration lane carries pre-existing flakes",
+      "detail": "Two independent full runs produced disjoint single-test failure sets; all candidates pass in isolation. Not attributable to this plan.",
+      "impact": "Pre-existing; out of scope here but pollutes DE-1(b)'s signal."
+    }
+  ],
+  "safety_compliance": {
+    "database_url_pinned": "Every alembic invocation went through the lane conftest's _alembic(), which pins DATABASE_URL inline. No bare alembic run by this agent.",
+    "prod_reached": false,
+    "shared_dev_db_dropped": false,
+    "git_operations": "none (no stash/rebase/checkout/commit/push)",
+    "head_unchanged": "de6261ccf1c9ac3cb8518003ac642f3c93f268fd",
+    "stash_unchanged": 11,
+    "forbidden_paths_untouched": true,
+    "containers_leaked": 0,
+    "max_concurrent_pairs": 1,
+    "source_files_permanently_modified": 0
+  }
+}
