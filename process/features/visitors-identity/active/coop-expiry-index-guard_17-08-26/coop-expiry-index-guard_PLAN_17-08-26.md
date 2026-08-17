@@ -14,7 +14,11 @@ two small fail-closed guards in the co-op service layer + four falsifiable gates
 flag flip, no new migration.
 
 **Date**: 17-08-26
-**Status**: PLANNED (not validated, not executed) — PVL supplement cycle 1 applied 17-08-26
+**Status**: PLANNED, VALIDATED, not executed — PVL is complete. Cycle-2 contract returned
+`Gate: CONDITIONAL`; its four CONCERNs (A caller-inventory accuracy, B raising-leg exception type,
+C G5 leg (a) DSN binding, D Goal 4 scoping) were transcribed into this plan body as E1-E5 by
+supplement cycle 2 on 17-08-26. **EXECUTE is licensed** on that accepted-CONDITIONAL basis; no
+source file has been touched yet.
 **Complexity**: SIMPLE — 8 checklist steps, 2 source files touched (+2 new test files), ~65 source lines.
 **Feature**: visitors-identity
 
@@ -241,7 +245,8 @@ handled correctly, and additionally: closes the pre-attempt-failure class, and m
    fault that occurs *before* the insert is attempted (D4).
 3. The healthy path is unchanged: same rows written, same return value, one extra catalog query per
    process.
-4. C-1's single-bad-lot isolation is preserved verbatim.
+4. C-1's single-bad-lot isolation **inside the loop** is preserved verbatim (rollback + log +
+   continue, unchanged); the all-processed-failed abort is a post-loop addition (D4).
 
 ## Non-Goals / Out of Scope
 
@@ -283,7 +288,7 @@ handled correctly, and additionally: closes the pre-attempt-failure class, and m
 | Config / flags | — | **unchanged**; no new setting | No |
 | Log events | `coop_expire_lot_failed` | + `coop_expiry_index_missing` (ERROR), + `coop_expiry_all_lots_failed` (ERROR) | Additive |
 
-**Full caller inventory of `run_coop_expiry_sweep` (enumerated, 15 call sites):**
+**Full caller inventory of `run_coop_expiry_sweep` (enumerated: 8 call statements, 7 non-scheduler):**
 
 | Caller | Schema source | Safe because |
 |---|---|---|
@@ -291,8 +296,7 @@ handled correctly, and additionally: closes the pre-attempt-failure class, and m
 | `tests/e2e_disposable/_replica_child.py:69` | `alembic upgrade head` | index present ⇒ guard is a no-op |
 | `tests/e2e_disposable/test_pool_topology.py:110`, `:157` | `alembic upgrade head` | same |
 | `tests/e2e_disposable/test_scale_sweep.py:88` | `alembic upgrade head` | same |
-| `tests/e2e_disposable/test_lifespan_scheduler.py:248` | `alembic upgrade head` | same |
-| `tests/e2e_disposable/test_diag_de5.py` | `alembic upgrade head` | same |
+| `tests/e2e_disposable/test_lifespan_scheduler.py:280` | `alembic upgrade head` | same |
 | `tests/integration/test_identity_coop_ledger.py:617`, `:634` | **`Base.metadata.create_all` — NOT alembic** | The partial unique index is **mirrored in the ORM** at `apps/api/models/identity_coop.py:141` (`__table_args__`, `postgresql_where=text("entry_type = 'EXPIRE'")`), so `create_all` does create it. **This, not "runs alembic", is the reason the integration lane is safe.** Removing that `Index(...)` from `__table_args__` would break this lane loudly — which is a feature, not a hazard. |
 
 New exception types are exported from their defining modules; nothing else imports them except the
@@ -367,7 +371,21 @@ new tests and (already-existing) generic `except Exception` handlers.
    it.
 
 7. **`tests/unit/test_coop_expiry_guard.py`** (new) — gate G3. No DB. Drive `expire_lapsed_lots` with
-   a stubbed session whose `execute` raises for a chosen subset of lots. **Five legs:**
+   a stubbed session whose `execute` raises for a chosen subset of lots.
+
+   **MANDATORY (E2) — typed assertions and a shape-aware stub; do not relax either:**
+   - **Every raising leg uses `pytest.raises(CoopExpirySystemicFailure)` explicitly — never bare
+     `Exception`.** This binds legs (b), (d) and (e), not only (b).
+   - **The stub must let the initial lapsed-lot `SELECT` succeed**, raising only from `_lot_remaining`
+     onward (three distinct `execute` shapes: lapsed-lot select `.all()`, `_lot_remaining`
+     `.scalar_one()`, the `text(_EXPIRE_INSERT_SQL)` insert `.rowcount`).
+   Why (so nobody relaxes it later): `expire_lapsed_lots` runs its lapsed-lot `SELECT` at
+   `identity_coop.py:563-576` **outside any try**, so a naive stub that raises on any `execute` raises
+   there and propagates a **raw** exception — and because `CoopExpirySystemicFailure` IS an
+   `Exception`, a leg written as `pytest.raises(Exception)` would pass against the exact FAIL-1 bug it
+   exists to forbid.
+
+   **Five legs:**
    (a) 3 lots, 1 EXPIRE insert fails ⇒ returns 2, **no** raise;
    (b) 3 lots, all 3 fail ⇒ raises `CoopExpirySystemicFailure`;
    (c) 0 lapsed lots ⇒ returns 0, no raise;
@@ -439,7 +457,7 @@ explicit mutation, and G1 and G4 are *mutation-proven*, not merely asserted. **N
 | **G2 — guard does NOT fire in the healthy case.** Same file, default (post-`upgrade head`) schema: seed one lapsed lot, call `run_coop_expiry_sweep`, assert it returns `1`, assert `expire_row_count(lot) == 1`, and assert the amount equals `-remaining`. Second leg: call it a second time and assert it returns `0` and still `expire_row_count == 1` (idempotence preserved). **Turns RED when:** the guard's `pg_indexes` predicate is wrong (e.g. `schemaname` pinned to a schema that does not exist, or `tablename` misspelled) so it raises on a healthy DB. **Second mutation:** flip the guard's hit/miss branches — must go RED. **Ordering note:** G2 must not be relied on to run after G1 — the autouse cold-cache fixture makes intra-file order irrelevant, which is the point of mandating it rather than trusting alphabetical collection. | Hybrid — same precondition | AC-2 |
 | **G3 — systemic abort discriminates all-failed from one-failed, all-skipped, mixed, and pre-attempt.** `tests/unit/test_coop_expiry_guard.py`, no DB. Stub session; **five** legs: (a) 3 lots / 1 raising ⇒ returns 2, no exception; (b) 3 lots / 3 raising ⇒ `pytest.raises(CoopExpirySystemicFailure)`; (c) 0 lapsed lots ⇒ returns 0, no exception; **(d) mixed batch — 1 lot with `remaining == 0` + 1 lot whose insert raises ⇒ MUST raise**; **(e) 2 lots whose `_lot_remaining` raises before any insert ⇒ MUST raise**. **Turns RED when:** the predicate is written as `failures >= 1` (leg (a) then wrongly raises); as `failures > processed` (leg (b) then wrongly passes); **when `skipped` is not subtracted — leg (d) then computes `processed = 2, failures = 1` and wrongly does NOT raise** (legs (a)-(c) all stay green under this bug, which is why (d) exists); or **when `attempted` is incremented after the `remaining == 0` continue — leg (e) then computes `processed = 0` and wrongly does NOT raise** (the FAIL-1 hole; every other leg stays green under it). Note the corrected direction: miscounting skips causes an **under**-fire, not a spurious raise. | Fully-Automated — `.venv/bin/python3.11 -m pytest tests/unit/test_coop_expiry_guard.py` | AC-3 |
 | **G4 — the two layers are independent.** Same disposable file, under `at_pre_expire_unique`, with the guard neutralised at a **named** site: `monkeypatch.setattr(coop_expiry_sweep, "assert_expire_index", _noop)` (module-global lookup at call time; alternatively poison the positive cache with `monkeypatch.setattr(coop_expiry_sweep, "_index_verified", True)` — state which one the test uses). Seed **2** lapsed lots, call `run_coop_expiry_sweep` inside `capture_logs()`, assert `pytest.raises(CoopExpirySystemicFailure)` **and** that `coop_expiry_all_lots_failed` was emitted. **This is the gate that proves the fix does not depend on a single point.** **Turns RED when:** the systemic counter is never incremented, the abort is placed inside the loop instead of after it, or the fix relies solely on the index guard. Asserting the exception *type* (not merely "something raised") is what catches a wrong patch site — a mis-patched guard raises `CoopExpiryIndexMissing` and the gate goes RED. **Mandatory mutation probe:** remove the `failures += 1` line and re-run — MUST go RED. | Hybrid — same precondition | AC-4 |
-| **G5 — no scheduler wedge + self-heal.** Same disposable file, cold cache. **Leg (a):** under `at_pre_expire_unique` with `coop_on`, wrap `await _coop_expiry_sweep_job()` in `structlog.testing.capture_logs()` (the pattern already used at `test_pool_topology.py:110`) and assert **both** `coop_expiry_index_missing` (proves the guard actually fired — not that the flag failed to take, not that the guard was deleted) **and** `coop_expiry_sweep_crashed` (proves the wrapper caught it rather than the job short-circuiting at its `if not settings.identity_coop_enabled: return`) are present, and that the call returned normally. A bare "did not raise" assertion here is forbidden — it passes under at least three implementations that prove nothing. **Leg (b):** within one process, call `run_coop_expiry_sweep` while downgraded (expect raise), then `alembic_or_raise(dsn, "upgrade", "head")`, then call again — it must now succeed, proving the **negative** result was not cached. **Turns RED when:** the miss result is cached (leg (b) keeps raising after the index is restored), the guard raise escapes the wrapper, or the guard never fired (leg (a)'s log assertion). | Hybrid — same precondition | AC-5 |
+| **G5 — no scheduler wedge + self-heal.** Same disposable file, cold cache. **Leg (a):** under `at_pre_expire_unique` with `coop_on`, **first assert that the engine behind `scheduler.async_session` resolves to the disposable DSN** (mandatory — do not invoke the wrapper without it: `_coop_expiry_sweep_job()` takes its session from `scheduler.async_session`, a binding no other gate in this plan uses and which the repo's unpinned-`DATABASE_URL`-reaches-Supabase-PROD foot-gun makes unsafe to assume), then wrap `await _coop_expiry_sweep_job()` in `structlog.testing.capture_logs()` (the pattern already used at `test_pool_topology.py:110`) and assert **both** `coop_expiry_index_missing` (proves the guard actually fired — not that the flag failed to take, not that the guard was deleted) **and** `coop_expiry_sweep_crashed` (proves the wrapper caught it rather than the job short-circuiting at its `if not settings.identity_coop_enabled: return`) are present, and that the call returned normally. A bare "did not raise" assertion here is forbidden — it passes under at least three implementations that prove nothing. **Leg (b):** within one process, call `run_coop_expiry_sweep` while downgraded (expect raise), then `alembic_or_raise(dsn, "upgrade", "head")`, then call again — it must now succeed, proving the **negative** result was not cached. **Turns RED when:** the miss result is cached (leg (b) keeps raising after the index is restored), the guard raise escapes the wrapper, or the guard never fired (leg (a)'s log assertion). | Hybrid — same precondition | AC-5 |
 | **G6 — frozen-surface check.** `git diff --stat -- apps/api/services/identity_resolver.py` is empty AND `git diff -U0 -- apps/api/services/identity_coop.py \| grep -c '^[+-].*spendable_balance'` returns 0. **`-U0` plus the `^[+-]` anchor are mandatory:** a plain `git diff \| grep -c` counts *context* lines, and `spendable_balance` sits at `identity_coop.py:547` inside the very docstring step 6 mandates editing — with default `-U3` a slightly different insertion point puts it in a context hunk and false-REDs the gate. **Turns RED when:** any edit lands in the resolver or actually adds/removes a line mentioning the balance query. | Fully-Automated — shell, no DB | AC-6 |
 | **G7 — no schema change.** `git status --porcelain apps/api/migrations/versions/` is empty, and `DATABASE_URL=<pinned-local> .venv/bin/python3.11 -m alembic -c apps/api/alembic.ini heads` reports the same single head as before the change. **Turns RED when:** a migration file is added. | Fully-Automated — **DATABASE_URL MUST be pinned** (see Safety) | AC-7 |
 | **G8 — regression: existing co-op suites unchanged.** Scope, corrected: **(i)** `tests/integration/test_identity_coop_ledger.py` (needs local PG on :5433) at baseline counts, and **(ii) a full disposable-lane re-run via `scripts/e2e-disposable.sh`** at baseline counts. **The disposable lane is mandatory here, not optional** — the tests most exposed to the D4 abort (`test_de16a`, `test_de14`, `test_de7`, `test_de8`) live there and nowhere else. **The unit leg (`pytest tests/unit/ -k coop`) is a cheap smoke ONLY and carries no regression value:** grep-verified, **no test under `tests/unit/` calls `expire_lapsed_lots` or `run_coop_expiry_sweep`**, so it structurally cannot regress the D4 change. **Turns RED when:** the systemic abort mis-fires against real fixtures. | Hybrid (integration on :5433) + Hybrid (full disposable-lane re-run); unit smoke is Fully-Automated but non-proving | AC-3 regression |
@@ -511,7 +529,7 @@ not. Legs (d) and (e) are the real falsifiers.
 | **Risk: stale positive cache makes a negative gate vacuous** | `_index_verified` is process-lifetime; G2 running before G1 in the same file would disarm G1 **and** its mutation probe. Closed by step 8's mandatory autouse cold-cache fixture. Do not rely on alphabetical collection order. |
 | **Risk: systemic abort mis-fires** | A legitimate single-processed-lot batch that fails for an unrelated reason now raises. Contained by the wrapper's `except`; surfaced by G8 regression. Accepted per D4. |
 | **Risk: direct callers** | Seven non-scheduler call sites exist (full inventory in Public Contracts). The disposable-lane callers run against `alembic upgrade head`; **the integration-lane callers (`test_identity_coop_ledger.py:617/634`) do NOT — that lane uses `Base.metadata.create_all`.** They are safe because the partial unique index is mirrored in the ORM at `apps/api/models/identity_coop.py:141`. G8's two mandatory legs (integration + full disposable re-run) confirm both. |
-| **Verified: no existing test breaks under D4** | Established by enumeration of all 15 call sites, not assumed. `test_de16a` (`test_pool_topology.py:185`) — the `WHERE EXISTS` block is a **rowcount-0 no-op, not an exception**, so `failures` stays 0 with `processed == 1` ⇒ no raise (this was the single most likely regression, and it is safe). `test_de14` (`test_lifespan_scheduler.py:190`) raises `KeyboardInterrupt`, a **BaseException** that escapes `except Exception` before any counter is touched; its resume leg has 3 successes. Idempotence re-runs (`integration:447/516`, `test_de7`) hit the `remaining == 0` skip for every lot ⇒ `processed == 0` ⇒ predicate false. `test_de6` returns at `got is False`, never entering the loop. |
+| **Verified: no existing test breaks under D4** | Established by enumeration of all 8 call statements (7 non-scheduler), not assumed. `test_de16a` (`test_pool_topology.py:185`) — the `WHERE EXISTS` block is a **rowcount-0 no-op, not an exception**, so `failures` stays 0 with `processed == 1` ⇒ no raise (this was the single most likely regression, and it is safe). `test_de14` (`test_lifespan_scheduler.py:190`) raises `KeyboardInterrupt`, a **BaseException** that escapes `except Exception` before any counter is touched; its resume leg has 3 successes. Idempotence re-runs (`integration:447/516`, `test_de7`) hit the `remaining == 0` skip for every lot ⇒ `processed == 0` ⇒ predicate false. `test_de6` returns at `got is False`, never entering the loop. `tests/integration/test_identity_coop_ledger.py:745` (randomised drift harness) — iteration k lapses one lot while every previously expired lot is still lapsed with `remaining == 0`, so `attempted = k`, `skipped = k-1`, `processed = 1`, `failures = 0` ⇒ no raise. **Safe.** |
 | **Rollback** | `git revert` the two source diffs. No data written, no schema touched, no migration, no flag flipped. Rollback is complete and instant. |
 
 ---
@@ -523,9 +541,19 @@ not. Legs (d) and (e) are the real falsifiers.
 2. **Last completed phase/step:** PLAN written 17-08-26; **PVL supplement cycle 1 applied 17-08-26**
    (FAIL-1…FAIL-3 + CONCERN-1…CONCERN-6 folded in). No source file has been touched. No gate has been
    run. Checklist steps 1–8 are all outstanding.
-3. **Validate-contract status:** **BLOCKED, awaiting re-validation from V1.** The `## Validate
-   Contract` section below is cycle-1's verdict and is now stale with respect to this plan body — it
-   must be regenerated by `vc-validate-agent`. Do **not** enter EXECUTE on it.
+3. **Validate-contract status:** **WRITTEN — `Gate: CONDITIONAL`, accepted; EXECUTE is licensed.**
+   The `## Validate Contract` section below is the cycle-2 verdict. **Accepted-CONDITIONAL basis
+   (stated here so the license is auditable rather than implied):**
+   - The four cycle-2 CONCERNs — **A** caller-inventory accuracy, **B** raising-leg exception type,
+     **C** G5 leg (a) DSN binding, **D** Goal 4 scoping — have each been transcribed into this plan
+     body as execute-agent instructions **E1-E5**; none remains merely advisory.
+   - The two pre-declared residuals both fail in the **safe direction**: an INVALID index
+     false-greens the guard, but every lot then fails so D4's systemic abort fires loudly; a
+     `pg_indexes` catalog-query error propagates **before** `_try_acquire_lock`, so it takes no
+     advisory lock and can leak none.
+   - The **flag-OFF-only known-gap stands**: `✅ VERIFIED` on this plan means *disposable-Postgres-
+     proven only*. Production behaviour on the first `identity_coop_enabled` flip remains unproven by
+     every tier here — that path belongs to the operator runbook, not this plan.
 4. **Supporting context loaded:** `apps/api/services/identity_coop.py` (`_EXPIRE_INSERT_SQL` 515-529,
    `expire_lapsed_lots` 532-609 — real loop shape re-read at supplement time),
    `apps/api/services/coop_expiry_sweep.py` (full),
@@ -535,8 +563,8 @@ not. Legs (d) and (e) are the real falsifiers.
    `tests/e2e_disposable/conftest.py` (fixture inventory),
    `tests/e2e_disposable/test_migration_truth.py` (`at_pre_expire_unique` pattern 145-166),
    `process/context/all-context.md`.
-5. **Next step for a fresh agent:** route to `vc-validate-agent` for PVL re-validation from V1. Do
-   **not** enter EXECUTE before a non-BLOCKED validate-contract exists. When EXECUTE starts: confirm
+5. **Next step for a fresh agent: EXECUTE.** PVL is complete and the accepted-CONDITIONAL contract
+   in item 3 licenses it; no further validate cycle is required. When EXECUTE starts: confirm
    the concurrent debugger investigation in `tests/e2e_disposable/` has finished, then work checklist
    steps 1→8 in order, running each gate at the end of its owning step rather than batching to the
    end. G1 and G4's **mandatory mutation probes are gating** — a gate that stays green under its named
@@ -992,18 +1020,16 @@ Hard stop conditions / safety constraints:
 - Use .venv/bin/python3.11 -m pytest, never .venv/bin/pytest (broken shebang).
 - Do not flip identity_coop_enabled. Do not add a migration. Do not touch identity_resolver.py.
 - A gate that stays green under its named mutation is invalid — rewrite it, never accept it.
-Next phase: PVL RE-VALIDATE — supplement cycle 1 is APPLIED (FAIL-1…FAIL-3, CONCERN-1…CONCERN-6
-folded into the plan body). Re-run VALIDATE from V1. EXECUTE is NOT licensed until the gate clears.
-Validate contract: inline in plan (## Validate Contract — cycle-1 verdict, now stale w.r.t. the
-supplemented plan body; must be regenerated)
-Execute start: BLOCKED — no execute start. After re-validation to PASS, the start commands are:
-fully-auto `.venv/bin/python3.11 -m pytest tests/unit/test_coop_expiry_guard.py`
+Next phase: EXECUTE — PVL is complete. Cycle-2 validation returned CONDITIONAL and supplement
+cycle 2 has folded E1-E5 into the plan body; no further PVL cycle is required.
+Validate contract: inline in plan (## Validate Contract — cycle-2 verdict, CONDITIONAL; E1-E4 applied
+to the plan body by supplement cycle 2)
+Execute start: fully-auto `.venv/bin/python3.11 -m pytest tests/unit/test_coop_expiry_guard.py`
 | disposable-lane `scripts/e2e-disposable.sh` for tests/e2e_disposable/test_expiry_index_guard.py |
 probe scenario: none | high-risk pack: yes (billing/credits class).
 ```
 
 ---
 
-**Next:** Supplement cycle 1 applied. Route to `vc-validate-agent` to re-run VALIDATE from V1
-against this supplemented plan body. Do **not** enter EXECUTE — the recorded gate is still BLOCKED
-until a fresh contract says otherwise.
+**Next:** Supplement cycle 2 applied (E1-E5 folded into the plan body against the cycle-2
+CONDITIONAL contract). PVL is complete; EXECUTE is next.

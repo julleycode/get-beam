@@ -28,6 +28,68 @@ logger = structlog.get_logger()
 # nobody holds returns the PASSING value), so the test asserts on it explicitly.
 _LOCK_KEY = "coop_expiry_sweep"
 
+# F-B guard. ``_EXPIRE_INSERT_SQL``'s ``ON CONFLICT (lot_id) WHERE entry_type =
+# 'EXPIRE'`` can only infer an arbiter if this PARTIAL UNIQUE INDEX exists
+# (migration b7e4d21a9c58). Absent it EVERY insert raises, the per-lot
+# ``except Exception`` (C-1) swallows it, and the sweep reports success having
+# expired nothing — a silent failure on a billing surface.
+_EXPIRE_INDEX_NAME = "uq_coop_ledger_expire_per_lot"
+_EXPIRE_INDEX_TABLE = "identity_credit_ledger"
+
+# POSITIVE-only cache. A miss is NEVER cached — that is what makes the guard
+# self-healing when an operator applies b7e4d21a9c58 to a running fleet.
+# TEST HYGIENE: a hit is cached for the whole PROCESS, so one healthy-path test
+# disarms every later negative-path test (and its mutation probe) in the same
+# pytest process. Guard-dependent tests MUST reset this via an autouse fixture.
+_index_verified: bool = False
+
+
+class CoopExpiryIndexMissing(RuntimeError):
+    """The EXPIRE arbiter index is absent (D2 — fail-closed, deliberately).
+
+    Matches this repo's money/PII precedent (``validate_production`` fails
+    startup on missing prod keys; ``refresh_ip_org.py`` refuses a non-local
+    DSN). Log-and-continue would produce the SAME observable outcome as the bug
+    being fixed. Deliberately NOT fail-open like ``_try_acquire_lock``: a
+    duplicate sweep is benign, a missing arbiter index is total failure. Do not
+    "harmonise" the two.
+    """
+
+
+async def assert_expire_index(db: AsyncSession) -> None:
+    """Raise ``CoopExpiryIndexMissing`` unless the EXPIRE arbiter index exists.
+
+    ``tablename`` is pinned as well as ``indexname`` so a same-named index on
+    another table cannot satisfy the guard. Deliberately NOT wrapped in
+    try/except: a catalog error (dead connection, permissions) propagates — the
+    same fail-closed direction as a miss (D3).
+    """
+    global _index_verified
+    if _index_verified:
+        return
+    row = await db.execute(
+        text(
+            "SELECT 1 FROM pg_indexes "
+            "WHERE schemaname = current_schema() "
+            "AND tablename = :t AND indexname = :n"
+        ),
+        {"t": _EXPIRE_INDEX_TABLE, "n": _EXPIRE_INDEX_NAME},
+    )
+    if row.scalar() is not None:
+        _index_verified = True
+        return
+    logger.error(
+        "coop_expiry_index_missing",
+        index=_EXPIRE_INDEX_NAME,
+        table=_EXPIRE_INDEX_TABLE,
+        migration="b7e4d21a9c58",
+    )
+    raise CoopExpiryIndexMissing(
+        f"{_EXPIRE_INDEX_NAME} missing from {_EXPIRE_INDEX_TABLE} (migration "
+        "b7e4d21a9c58 not applied): ON CONFLICT cannot infer an arbiter, so "
+        "every EXPIRE insert would fail silently. Refusing to run."
+    )
+
 
 async def _try_acquire_lock(db: AsyncSession) -> bool | None:
     """True = acquired, False = held elsewhere, None = unsupported/errored."""
@@ -72,7 +134,15 @@ async def run_coop_expiry_sweep(db: AsyncSession) -> int:
     session's connection to the pool, so the unlock may execute on a different
     connection and no-op. Every advisory-lock sweep in this repo shares that shape;
     it is recorded in the capacity-hardening advisory-lock audit note.
+
+    The F-B index guard lives HERE, not at boot (D1): the job is registered only
+    when ``identity_coop_enabled`` is ON, and ``start_scheduler()`` is sync so it
+    cannot run an async catalog probe. At this entrypoint the check fires exactly
+    when someone tries to expire credits, covers every caller, and — being
+    strictly BEFORE ``_try_acquire_lock`` — can never leak the advisory lock.
+    Do not move it up to ``main.py``.
     """
+    await assert_expire_index(db)
     got = await _try_acquire_lock(db)
     if got is False:
         logger.info("coop_expiry_sweep_skipped_locked")

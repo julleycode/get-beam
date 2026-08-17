@@ -1,0 +1,39 @@
+{
+  "artifact": "evl-index-guard-confirmation",
+  "date": "2026-08-18",
+  "plan": "process/features/visitors-identity/active/coop-expiry-index-guard_17-08-26/coop-expiry-index-guard_PLAN_17-08-26.md",
+  "runner": "vc-tester (independent EVL confirmation run)",
+  "head_at_start": "6a5b02d",
+  "head_at_end": "6a5b02d",
+  "stash_count_start": 11,
+  "stash_count_end": 11,
+  "alembic_head_rederived": "c5a91f3e07d4",
+  "gates": [
+    {"id": "G1/G2/G4/G5a/G5b", "command": "./scripts/e2e-disposable.sh evlguard -- .venv/bin/python3.11 -m pytest tests/e2e_disposable/test_expiry_index_guard.py -q -p no:randomly", "expected": "5 passed", "observed": "5 passed in 30.30s", "status": "PASS"},
+    {"id": "G3", "command": ".venv/bin/python3.11 -m pytest tests/unit/test_coop_expiry_guard.py -q", "expected": "5 passed", "observed": "5 passed in 2.35s", "status": "PASS"},
+    {"id": "G6a", "command": "git diff --stat -- apps/api/services/identity_resolver.py", "expected": "empty", "observed": "empty", "status": "PASS"},
+    {"id": "G6b", "command": "git diff -U0 -- apps/api/services/identity_coop.py | grep -c '^[+-].*spendable_balance'", "expected": "0", "observed": "0", "status": "PASS"},
+    {"id": "G7a", "command": "git status --porcelain apps/api/migrations/versions/", "expected": "empty for this plan", "observed": "only ?? c5a91f3e07d4_add_engage_outcomes.py (concurrent session's file); zero from this plan", "status": "PASS"},
+    {"id": "G7b", "command": "DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/beam .venv/bin/python3.11 -m alembic -c apps/api/alembic.ini heads", "expected": "single head, no new revision from this plan", "observed": "c5a91f3e07d4 (head)", "status": "PASS"},
+    {"id": "G8(i)", "command": ".venv/bin/python3.11 -m pytest tests/integration/test_identity_coop_ledger.py -q", "expected": "12 passed", "observed": "1 failed, 6 passed, 7 errors", "status": "BLOCKED_ENVIRONMENTAL", "attribution": "CREATE TYPE platform enum collision on shared dev DB :5433. Isolation run with the coop change FULLY REVERTED to HEAD yields 12 errors (worse). Unrelated control tests/integration/test_beam_identity.py fails same class (2 passed, 3 errors). Enum declared in apps/api/models/draft.py, a forbidden concurrently-edited file. NOT caused by this change."},
+    {"id": "G8(ii) run1", "command": "./scripts/e2e-disposable.sh evlfull1 -- .venv/bin/python3.11 -m pytest tests/e2e_disposable/ -q", "expected": "42 passed", "observed": "42 passed in 113.72s", "status": "PASS"},
+    {"id": "G8(ii) run2", "command": "./scripts/e2e-disposable.sh evlfull2 -- .venv/bin/python3.11 -m pytest tests/e2e_disposable/ -q", "expected": "42 passed", "observed": "42 passed in 130.38s", "status": "PASS"}
+  ],
+  "mutation_probes": [
+    {"id": "A", "mutation": "delete `await assert_expire_index(db)` (coop_expiry_sweep.py:145)", "result": "RED", "detail": "3 failed (G1, G5a, G5b), 2 passed. Mechanism: sibling CoopExpirySystemicFailure raised instead; coop_expiry_all_lots_failed processed=1 skipped=0 observed; type mismatch + missing coop_expiry_index_missing event.", "revert_proof": "shasum fa4c007e9de87608570c9c94472c89e0015f7cbbd2ba4adafb789ecb61f10ac3 == baseline; git status shows only intended plan modification"},
+    {"id": "B", "mutation": "delete guard call AND `failures += 1` together", "result": "RED", "detail": "4 failed (G1, G4, G5a, G5b), 1 passed. Mechanism: `Failed: DID NOT RAISE` for both CoopExpiryIndexMissing and CoopExpirySystemicFailure — reproduces the true pre-fix silent return 0.", "revert_proof": "shasum fa4c007e... and 2eeef08cf8b10b52e78a14457eb6e0c2b253763e1a421b507b06f2a7ddf408e4 both == baseline"}
+  ],
+  "post_probe_reconfirm": {"disposable_guard_file": "5 passed in 31.55s", "unit": "5 passed in 0.90s"},
+  "audits": {
+    "raising_leg_discipline": "PASS — all 3 raising legs in tests/unit/test_coop_expiry_guard.py (lines 96, 114, 128) and all 3 in tests/e2e_disposable/test_expiry_index_guard.py (100, 163, 218) name an explicit type. Zero bare pytest.raises(Exception) in executable code; the 2 grep hits at lines 10 and 124 are prose warnings inside docstrings. Stub is shape-aware: shape 1 (lapsed SELECT) always succeeds; shapes 2/3 raise RuntimeError, which cannot satisfy a typed CoopExpirySystemicFailure assertion, so legs cannot go vacuously green.",
+    "cold_cache_fixture": "PASS — @pytest.fixture(autouse=True) at line 46, function-scoped (no scope= and monkeypatch forces function scope), sets coop_expiry_sweep._index_verified = False. Runs before every test including G1. Probe A/B both went RED, proving G1 was not pre-RED.",
+    "regression_fix_scrutiny": "PASS — (a) real and fixed: full lane 42 passed on two independent runs; (b) dispose() sits in a finally AFTER capture_logs, both log assertions execute after it and are unchanged, and it does not swallow exceptions, so G5a is not weakened; (c) no other lane test depends on the disposal — other dispose calls target their own engines (conftest, probe_engine, _replica_child); SQLAlchemy recreates the pool lazily.",
+    "d4_counter_placement": "PASS — verified against apps/api/services/identity_coop.py:595-641. attempted += 1 is the first statement of the loop body BEFORE the try (and before lot_id_str). skipped += 1 on the remaining == 0 branch immediately before continue. failures += 1 inside the untouched except. processed = attempted - skipped; if processed >= 1 and failures == processed. Empty set -> processed 0, no raise. failures > processed structurally unreachable (skipped increment is immediately followed by continue; nothing between can raise). All-lots-failing-in-_lot_remaining now raises (FAIL-1 hole closed).",
+    "guard_placement": "PASS — await assert_expire_index(db) at coop_expiry_sweep.py:145, immediately before _try_acquire_lock at :146; no advisory lock can leak."
+  },
+  "known_gaps": [
+    "G8(i) integration ledger gate could not be confirmed: shared dev DB :5433 is broken by a concurrent session's model edits (platform enum collision). Attributed environmental by two isolation runs. Needs re-run when the shared DB is clean.",
+    "flag-OFF-only: no tier proves production behaviour on the first identity_coop_enabled flip (standing plan known-gap)",
+    "INVALID-index false-green, pg_indexes catalog-error path, log-pipeline greppability — all pre-declared residuals, unchanged"
+  ]
+}

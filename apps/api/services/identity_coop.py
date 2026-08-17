@@ -48,6 +48,17 @@ from apps.api.models.identity_coop import (
 logger = structlog.get_logger()
 
 
+class CoopExpirySystemicFailure(RuntimeError):
+    """Every processed lot in one ``expire_lapsed_lots`` batch failed (D4).
+
+    Exists because the per-lot ``except Exception`` (C-1) is load-bearing and
+    must NOT be narrowed — narrowing only swaps one silent-failure class for
+    another. The systemic case is detected by COUNTING instead: all-failed means
+    a systemic cause (missing arbiter index, dead session, exhausted pool) is
+    likelier than N individually-bad lots, so we raise rather than return 0.
+    """
+
+
 async def maybe_record_contribution(
     db: AsyncSession,
     visitor,
@@ -554,6 +565,11 @@ async def expire_lapsed_lots(db: AsyncSession) -> int:
     re-running write zero additional rows.
 
     Returns the number of EXPIRE rows actually written.
+
+    A single failed lot in a multi-lot batch still rolls back, logs and continues
+    (C-1, unchanged); when EVERY *processed* lot failed this raises
+    ``CoopExpirySystemicFailure`` instead of returning 0 (D4). ``remaining == 0``
+    skips are excluded from BOTH sides of that predicate.
     """
     now = datetime.now(timezone.utc)
     # Plain tuples, not ORM instances: the per-lot commit below would expire ORM
@@ -576,7 +592,12 @@ async def expire_lapsed_lots(db: AsyncSession) -> int:
     ).all()
 
     written = 0
+    attempted = skipped = failures = 0
     for lot_id, lot_site_id, lot_spendable_at, lot_expires_at in lapsed:
+        # BEFORE the try (D4): the skip lives INSIDE it, so incrementing after
+        # it would leave a pre-insert failure counted in `failures`, never in
+        # `attempted` — re-opening the silent-sweep hole.
+        attempted += 1
         # Snapshot BEFORE the try: if the failing statement is the commit itself,
         # touching lot state inside the except can trigger a lazy refresh on an
         # invalidated connection and RAISE INSIDE THE HANDLER — skipping both the
@@ -587,6 +608,7 @@ async def expire_lapsed_lots(db: AsyncSession) -> int:
         try:
             remaining = max(0, await _lot_remaining(db, lot_id))
             if remaining == 0:
+                skipped += 1
                 continue
             result = await db.execute(
                 text(_EXPIRE_INSERT_SQL),
@@ -604,6 +626,18 @@ async def expire_lapsed_lots(db: AsyncSession) -> int:
         except Exception:  # noqa: BLE001 — one bad lot must not wedge the sweep
             await db.rollback()
             logger.exception("coop_expire_lot_failed", lot_id=lot_id_str)
+            failures += 1
             continue
+
+    processed = attempted - skipped
+    if processed >= 1 and failures == processed:
+        logger.error(
+            "coop_expiry_all_lots_failed", processed=processed, skipped=skipped
+        )
+        raise CoopExpirySystemicFailure(
+            f"all {processed} processed lot(s) failed to expire — systemic cause "
+            "likely (missing uq_coop_ledger_expire_per_lot, dead session, or an "
+            "exhausted connection pool). Refusing to report a silent success."
+        )
 
     return written
