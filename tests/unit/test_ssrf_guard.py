@@ -93,6 +93,30 @@ async def test_detect_platform_refuses_metadata_without_fetch(monkeypatch):
     assert calls == []  # guard refused before any outbound GET
 
 
+async def test_fetch_site_content_refuses_metadata_without_fetch(monkeypatch):
+    """The onboarding analysis fetch is the third consumer of the guard."""
+    from apps.api.config import settings
+    from apps.api.services import site_content
+
+    # Mock mode short-circuits before the guard, so the posture must be proven
+    # with mock OFF or the assertion is vacuous.
+    monkeypatch.setattr(settings, "mock_external_apis", False)
+
+    calls: list = []
+
+    async def _track_get(self, *args, **kwargs):
+        calls.append(args)
+        raise httpx.ConnectError("must not be reached in test")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", _track_get)
+
+    for blocked in ("http://169.254.169.254/", "http://localhost:8000/"):
+        res = await site_content.fetch_site_content(blocked)
+        assert res["ok"] is False
+        assert res["text"] == ""
+    assert calls == []  # guard refused before any outbound GET
+
+
 async def test_verify_pixel_refuses_metadata_without_fetch(monkeypatch):
     calls: list = []
 
