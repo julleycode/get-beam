@@ -81,3 +81,11 @@ apps/api/data/agent_ip_ranges/runtime/
 
 # ip-org-quality-pack WS-B: PII-adjacent derived-label corpus, never committed (Q4)
 process/features/visitors-identity/active/ip-org-quality-pack_08-08-26/benchmark-corpus.tsv
+
+# Pitch decks / investor collateral — large binaries (18-19 MB each), business
+# documents rather than code. Kept on disk, never committed: a single one adds
+# ~19 MB to every future clone permanently, and removing it later needs a
+# history rewrite. Scoped by name, not a blanket *.pdf, so a genuinely
+# code-adjacent PDF can still be tracked deliberately.
+/*pitch deck*.pdf
+/[[]Fund the Future[]]*.pdf
