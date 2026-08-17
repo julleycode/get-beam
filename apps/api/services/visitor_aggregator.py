@@ -656,10 +656,20 @@ async def _score_icp_fit_for_site(db: AsyncSession, site_id: str) -> None:
         return
 
     # Write 1 — one executemany UPDATE keyed on the primary key.
+    # Targets the CORE table, not the ORM entity, and that is REQUIRED — not a
+    # style choice. `update(Visitor)` + a list of param dicts routes into
+    # SQLAlchemy 2's ORM bulk-update path, which either refuses the extra WHERE
+    # criteria outright ("bulk synchronize of persistent objects not
+    # supported ...") or demands the dicts be keyed by the literal PK column
+    # name. Either way it raises every single time, the caller's try/except
+    # swallows it into `icp_fit_pass_failed`, and the feature is a silent no-op.
+    # `update(Visitor.__table__)` is a plain Core executemany: ONE statement,
+    # cost independent of visitor count (AC-15).
+    visitors_tbl = Visitor.__table__
     await db.execute(
-        update(Visitor).where(Visitor.id == bindparam("b_id")).values(
-            icp_fit=bindparam("icp_fit")
-        ),
+        update(visitors_tbl)
+        .where(visitors_tbl.c.id == bindparam("b_id"))
+        .values(icp_fit=bindparam("icp_fit")),
         updates,
     )
     await db.commit()

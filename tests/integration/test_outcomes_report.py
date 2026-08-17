@@ -190,6 +190,8 @@ class TestFunnelPredicateRefactorRegression:
     async def test_social_touchpoints_are_counted_by_outcomes(
         self, test_client, test_db, report_setup
     ):
+        from apps.api.models.campaign import CampaignTouchpoint
+
         sid, token = report_setup["site_id"], report_setup["token"]
         url = f"/api/v1/outcomes/{sid}/report?days=30"
         before = (await test_client.get(url, headers=_auth(token))).json()
