@@ -1,10 +1,10 @@
 # Deployment Guide
 
-Last updated: 2026-08-09
+Last updated: 2026-08-18
 
 ## Overview
 
-Beam runs locally via Docker Compose (PostgreSQL + Redis) plus Python API and Next.js dev servers. Production API deploys to **Railway** via root `Dockerfile`. Production Postgres is **Supabase** project **`retarget-agent`** (`hylcleqxlkdblibpdhhm`) — pin + DB IDE connect: [supabase-retarget-agent.md](./supabase-retarget-agent.md). The tracking pixel can be served from the API static mount or a **Cloudflare Worker** edge proxy.
+Beam runs locally via Docker Compose (PostgreSQL + Redis) plus Python API and Next.js dev servers. GetBeam **PROD** (live 2026-08-18): web on **Vercel** (`getbeam.fyi`), API on **Railway** (`api.getbeam.fyi`), Postgres on **Supabase** project **`retarget-agent`** (`hylcleqxlkdblibpdhhm`) — pin + DB IDE connect: [supabase-retarget-agent.md](./supabase-retarget-agent.md). Pixel CDN: Cloudflare Worker `beam-pixel` → `pixel.getbeam.fyi`. Do **not** treat `splittrip.nhantown.com` or Worker `beam-agent-beacon-splittrip` as GetBeam PROD — that is a lab customer site. See [journal 260818](./journals/260818-0038-getbeam-prod-vs-splittrip-lab.md).
 
 ## Prerequisites
 
@@ -363,9 +363,33 @@ The gate is **fail-open by design**: any error in the gate/log logic falls back 
 original response untouched, and humans/index crawlers/static assets/`robots.txt`/`sitemap.xml`
 always get byte-identical responses.
 
-## Production (Railway)
+## Lab customer site (splittrip) — not GetBeam PROD
 
-`railway.json` at repo root:
+`infra/cloudflare/agent-beacon-worker/` deploys as Cloudflare Worker **`beam-agent-beacon-splittrip`**.
+It is wired **only** to `splittrip.nhantown.com/*` and POSTs beacons to `https://beam-api.nhantown.com`
+with test `BEAM_SITE_ID=site_e3a2c56e01ed`. Operator confirmed 2026-08-18: this is a test page, not
+the GetBeam marketing/dashboard origin.
+
+```text
+splittrip.nhantown.com  →  CF Worker splittrip  →  beam-api.nhantown.com   (lab)
+getbeam.fyi             →  Vercel middleware    →  api.getbeam.fyi         (PROD)
+```
+
+## Production (GetBeam — live 2026-08-18)
+
+Do **not** confuse these with lab hosts (`splittrip.nhantown.com`, `beamlab.nhantown.com`, `beam-api.nhantown.com`).
+
+| Layer | Vendor / name | Public host |
+|-------|----------------|-------------|
+| Web | Vercel project `retarget-agent` (`prj_w9iKlPGLYSJzDvvm8G5U9OAEqWOl`) | `getbeam.fyi`, `www.getbeam.fyi` |
+| Git | `julleycode/get-beam` → Vercel Production on `main` | (no `vercel.json` in repo) |
+| API | Railway project `retarget-agent` (`d6ab9c4e-…`), service `retarget-agent` | `api.getbeam.fyi` (custom, ACTIVE) |
+| Redis | Railway Redis (private) | `redis.railway.internal` |
+| Postgres | Supabase `retarget-agent` `hylcleqxlkdblibpdhhm` | session pooler in Railway `DATABASE_URL` |
+| Pixel CDN | CF Worker `beam-pixel` (`apps/pixel/wrangler.toml`) | `pixel.getbeam.fyi` |
+| Auth | Clerk | `/sign-in` on the Vercel app |
+
+`railway.json` at repo root (API image only):
 
 | Setting | Value |
 |---------|-------|
@@ -373,18 +397,9 @@ always get byte-identical responses.
 | Health check | `/health` (300s timeout) |
 | Restart | ON_FAILURE, max 10 retries |
 
-Typical layout:
+**Agent fetch beacon on PROD** is Vercel Edge middleware (`apps/web/src/middleware.ts` → `POST https://api.getbeam.fyi/api/v1/agents/fetch-beacon`). Cloudflare Worker `beam-agent-beacon-splittrip` is **lab-only** (see next section + [agent-beacon README](../infra/cloudflare/agent-beacon-worker/README.md)).
 
-| Service | Role |
-|---------|------|
-| API | Dockerfile → uvicorn + alembic migrate on start |
-| Web | Next.js (Vercel or separate Railway service—confirm operator setup) |
-| Postgres | Managed Postgres 16 |
-| Redis | Managed Redis 7 |
-
-**Note:** Single Railway service config in repo targets API only. Frontend hosting may be Vercel (Analytics import in `layout.tsx` suggests Vercel for web).
-
-Public marketing site: **getbeam.fyi**
+Vercel: GitHub author `julleycode` on `main` deploys READY. Commits from `nhantochi95` (including `dev_nhantc2`) are often **BLOCKED** on this team (`tranthaiwork-droid` / `tranthai.work@gmail.com`).
 
 ## Database Migrations
 
@@ -415,6 +430,63 @@ Integration tests use Redis DB `15` for isolation.
 4. Enable feature flags **only** after migration + smoke validation.
 5. Monitor `/health` and structured logs (structlog).
 
+## Scale-ready x20–x30
+
+Code on `dev_nhantc2` HEAD `73142d1` (P1 `8ffeb32`, P2 `bbae139`, P3 `73142d1`). Behavior: [system-architecture.md §Event ingest](./system-architecture.md#request-flow-event-ingest).
+
+Defaults stay safe if Railway env is forgotten: `aggregation_incremental_enabled=False`, `site_ingest_limit_enabled=False`, `db_statement_timeout_ms=0`. Ceiling number default **155** (7d p99=31×5, prod `hylcleqxlkdblibpdhhm`, 2026-08-18). Do **not** flip flags from this doc.
+
+### Operator order (required)
+
+1. Alembic `c3f6a9d1e8b2` on prod with `APP_ENV=production`, **then** deploy API (ingest requires unique `(site_id, event_id)`).
+2. F9 `run_aggregation_watermark_bootstrap()` + soak (every site with events has `last_aggregated_at`).
+3. Then `AGGREGATION_INCREMENTAL_ENABLED=true`.
+4. Then ceiling (`SITE_INGEST_LIMIT_ENABLED`) and `DB_STATEMENT_TIMEOUT_MS`.
+
+Remote DSN is blocked unless `APP_ENV` is exactly `production` (`apps/api/alembic_dsn_guard.py`). Do not apply from `local` / `development` / `test` / `ci`.
+
+### Prod leftovers (until operator)
+
+| Item | State |
+|---|---|
+| `events.event_id` IS NULL | ~682 rows until migrate backfill |
+| `buildtolaunch` | still **active** — pause is not done |
+
+### Scale triggers
+
+| Trigger | Action |
+|---|---|
+| Disk ≥ 85% quota hiện tại | Nâng Pro / xác nhận autoscale |
+| Ingest p95 > 300 ms / 15 phút | Trace agg vs PG |
+| Ingest p95 > 800 ms hoặc error > 1% | Incremental phải ON; Queue chỉ sau đó |
+| Sustained ingest > 20 rps | Split scheduler **hoặc** replica 2 |
+| Events > 50k/day × 7 ngày | Ceiling ON (nếu chưa) |
+| Events > 200k/day | Lên plan partition + R2 archive — **plan mới**, không phase này |
+| Scheduler last-success > 2× interval | Split worker |
+
+x20 (66k/day) và x30 (99k/day) **không** bật hàng trên trừ p95/error. Vẫn 1 replica.
+
+### Operator flags (after migrate-then-deploy + F9 soak)
+
+Set on Railway **only after** step 2 (F9 + soak) is green. Leave unset otherwise. Ceiling/timeout are step 4 — after the incremental flag.
+
+| Env | Suggested live value | Default in code |
+|---|---|---|
+| `AGGREGATION_INCREMENTAL_ENABLED` | `true` after F9 + soak | `False` |
+| `SITE_INGEST_LIMIT_ENABLED` | `true` after incremental soak | `False` |
+| `SITE_INGEST_LIMIT_PER_MINUTE` | `155` (7d p99=31 × 5, prod `hylcleqxlkdblibpdhhm`, 2026-08-18) | `155` |
+| `DB_STATEMENT_TIMEOUT_MS` | `30000` | `0` (disabled) |
+
+Site ceiling ON → **429, 0 INSERT**. Request path uses `SET LOCAL statement_timeout`; sweep / retention / ingest-agg / F9 override with `SET LOCAL 0` so a 30s default cannot kill the unbounded recompute. `CF-Connecting-IP` is honoured only when the TCP peer is in bundled Cloudflare CIDRs (code default `ingest_trust_cf_connecting_ip=True` — not a Railway flip for this cook).
+
+### Migrate-then-deploy (P2)
+
+Apply Alembic `c3f6a9d1e8b2` to prod **before** deploying API code that requires unique `(site_id, event_id)`. Use `APP_ENV=production`. Column stays nullable this phase; the revision backfills remaining NULLs then creates `uq_events_site_event_id`.
+
+### Nâng Supabase Pro
+
+Nâng Pro when disk ≥ 85% Free **or** before a paid customer. Spend cap **ON**. Keep `DATABASE_URL` on session pooler `:5432` (do not switch to `:6543`). `buildtolaunch` is still active — pause it before upgrade. Take `pg_dump` custom format → R2 before upgrade.
+
 ## References
 
 - [local-uat-prod.md](./local-uat-prod.md) — Local → UAT → PROD environments
@@ -424,6 +496,8 @@ Integration tests use Redis DB `15` for isolation.
 - [system-architecture.md](./system-architecture.md)
 - [visuals/beam-system-architecture.svg](./visuals/beam-system-architecture.svg)
 - `infra/docker-compose.yml`
-- `infra/cloudflare/beam-lab/` — Cloudflare Pages project + `wrangler.toml`
+- `infra/cloudflare/beam-lab/` — Cloudflare Pages lab + `wrangler.toml` (not GetBeam PROD)
+- `infra/cloudflare/agent-beacon-worker/` — splittrip lab Worker (not GetBeam PROD)
+- [journals/260818-0038-getbeam-prod-vs-splittrip-lab.md](./journals/260818-0038-getbeam-prod-vs-splittrip-lab.md)
 - `Dockerfile`, `railway.json`
 - `TESTING.md`, `process/context/tests/all-tests.md`

@@ -1,6 +1,6 @@
 # Beam Documentation
 
-Last updated: 2026-08-05
+Last updated: 2026-08-18
 
 Human-facing documentation for the Beam monorepo. Agent harness context lives separately in `process/context/` (see [all-context.md](../process/context/all-context.md)).
 
@@ -20,8 +20,9 @@ Human-facing documentation for the Beam monorepo. Agent harness context lives se
 | [beam-lab-team-brief.md](./beam-lab-team-brief.md) | **Trình bày team** — quá trình / được / hỏng, sơ đồ luồng, ít thuật ngữ |
 | [beam-lab-resume.md](./beam-lab-resume.md) | Evergreen handoff kỹ thuật Beam Lab: file khoá, `_bam` vs `_bfm`, env, việc còn mở |
 | [project-roadmap.md](./project-roadmap.md) | Shipped vs pending (roadmap + `process/features/`) |
-| [deployment-guide.md](./deployment-guide.md) | Local dev, Docker, Railway, pixel CDN; **Windows verified (port 5433)** |
+| [deployment-guide.md](./deployment-guide.md) | Local, Docker, **GetBeam PROD** (Vercel + Railway + Supabase), pixel CDN, lab vs prod beacons, **scale-ready operator runbook** |
 | [local-uat-prod.md](./local-uat-prod.md) | Local → UAT → PROD environments |
+| [journals/](./journals/) | Session journals — latest: [260818 scale-ready cook P1–P3](./journals/260818-1328-scale-ready-getbeam-cook.md) |
 | [dev-workflow-slack-issues.md](./dev-workflow-slack-issues.md) | `dev_*` branches, Slack UAT notify (proposed), GitHub Issues |
 | [design-guidelines.md](./design-guidelines.md) | Web UI tokens, fonts, shadcn/Tailwind |
 | [visuals/](./visuals/) | Tech-graph SVG/PNG (architecture, env promotion) |

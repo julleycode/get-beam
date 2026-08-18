@@ -1,10 +1,12 @@
 # System Architecture
 
-Last updated: 2026-08-01
+Last updated: 2026-08-18
 
 ## Overview
 
-Beam is a **monolithic FastAPI backend** with a **Next.js dashboard**, **edge-delivered pixel**, and optional **Chrome extension**. PostgreSQL is the system of record; Redis supports cache, rate limits, and a dormant Celery broker.
+Beam is a **monolithic FastAPI backend** with a **Next.js dashboard**, **edge-delivered pixel**, and optional **Chrome extension**. PostgreSQL is the system of record; Redis supports cache, rate limits, visitor-aggregation mutex keys, and a dormant Celery broker.
+
+**GetBeam PROD hosting (live 2026-08-18):** Next.js on **Vercel** (`getbeam.fyi`), FastAPI on **Railway** (`api.getbeam.fyi`), Postgres on **Supabase** `retarget-agent`. Cloudflare in front of `getbeam.fyi` is DNS/WAF only. Pixel CDN is Worker `beam-pixel` → `pixel.getbeam.fyi`. Lab hosts (`splittrip.nhantown.com`, `beamlab.nhantown.com`) are **not** GetBeam PROD.
 
 Publish-grade diagram: [visuals/beam-system-architecture.svg](./visuals/beam-system-architecture.svg) ([PNG](./visuals/beam-system-architecture.png)). Env promotion: [local-uat-prod.md](./local-uat-prod.md).
 
@@ -13,25 +15,26 @@ Publish-grade diagram: [visuals/beam-system-architecture.svg](./visuals/beam-sys
 ```mermaid
 flowchart TB
   subgraph client [Client Surfaces]
-    WEB[Browser / Dashboard<br/>Next.js 14]
+    WEB[Browser / Dashboard<br/>Next.js 14 on Vercel<br/>getbeam.fyi]
     PIXEL[Tracking Pixel<br/>vanilla JS]
     EXT[Chrome Extension<br/>MV3 LinkedIn]
     AGENTS[AI Crawlers / Bots]
   end
 
   subgraph edge [Edge]
-    CF[Cloudflare Worker<br/>apps/pixel/worker.js]
+    CF[Cloudflare Worker beam-pixel<br/>pixel.getbeam.fyi]
+    VMW[Vercel middleware<br/>fetch-beacon PROD]
   end
 
   subgraph api [API Service]
-    FAST[FastAPI apps/api]
+    FAST[FastAPI on Railway<br/>api.getbeam.fyi]
     SCHED[APScheduler Jobs]
     GEMINI[Gemini Client httpx]
   end
 
   subgraph data [Data Stores]
-    PG[(PostgreSQL 16)]
-    REDIS[(Redis 7)]
+    PG[(Supabase Postgres<br/>retarget-agent)]
+    REDIS[(Railway Redis)]
     CH[(ClickHouse 24<br/>unused)]
   end
 
@@ -45,11 +48,13 @@ flowchart TB
 
   WEB -->|REST /api/v1| FAST
   WEB --> CLERK
+  WEB --> VMW
+  VMW -->|on-demand AI UA| FAST
   PIXEL --> CF
   CF -->|POST ingest| FAST
   PIXEL -->|direct optional| FAST
   EXT -->|nonce to tab| WEB
-  AGENTS -->|fetch / ingest| FAST
+  AGENTS -->|fetch HTML on getbeam.fyi| WEB
 
   FAST --> PG
   FAST --> REDIS
@@ -74,19 +79,28 @@ sequenceDiagram
   participant BG as visitor_aggregator
 
   P->>API: POST /api/v1/events/ingest
+  Note over API: missing event_id → 400, 0 INSERT
   API->>BF: classify bot / suspect
-  alt agent_detection_enabled
+  alt recognized AI agent
     API->>AC: classify agent visit
     AC->>DB: agent_visits rollup
+    API-->>P: 204
+  else ceiling ON and tripped
+    API-->>P: 429 (0 INSERT)
+  else
+    API->>DB: insert Event rows unique (site_id, event_id)
+    API-->>P: 204
+    Note over API,BG: Background aggregation<br/>(inline or scheduled)
+    API->>BG: update visitor stats
+    BG->>DB: visitors / sessions
   end
-  API->>DB: insert Event rows
-  API-->>P: 200 OK
-  Note over API,BG: Background aggregation<br/>(inline or scheduled)
-  API->>BG: update visitor stats
-  BG->>DB: visitors / sessions
 ```
 
-**Key files:** `routers/events.py`, `services/bot_filter.py`, `services/agent_classifier.py`, `models/event.py`
+**Key files:** `routers/events.py`, `schemas/events.py`, `services/bot_filter.py`, `services/agent_classifier.py`, `services/ip_resolution.py`, `services/rate_limiter.py`, `models/event.py`, `models/database.py`, `services/visitor_aggregator.py`, `services/aggregation_debounce.py`
+
+**Ingest contract (HEAD `73142d1`; flags still OFF):** missing/empty `event_id` → **400**, 0 INSERT. Unique `(site_id, event_id)` with `ON CONFLICT DO NOTHING`. `Event.created_at = datetime.utcnow()` — never client `event.ts`. Site ceiling (`site_ingest_limit_enabled`, default **False**, number **155**) → **429**, 0 INSERT. `CF-Connecting-IP` is honoured only when the TCP peer is in bundled Cloudflare CIDRs (`ingest_trust_cf_connecting_ip` default True). Request sessions apply `SET LOCAL statement_timeout` from `db_statement_timeout_ms` (default **0** = off); sweep / retention / ingest-agg / F9 bootstrap override with `SET LOCAL 0`.
+
+**Visitor aggregation (P1 code; flag still OFF):** Redis `agg:debounce:{site_id}` is a mutex held until `finally` (holder token + TTL refresh); leftover cooldown is the remainder of `aggregation_min_interval_seconds` (default 60). Flag ON + Redis down → ingest skips aggregation (same as the sweep). A full ingest run (`since=None`) stamps `sites.last_aggregated_at`; the periodic sweep does not. `run_aggregation_watermark_bootstrap()` is operator-invoked and is **not** registered in `start_scheduler`. Operator order (migrate-then-deploy, F9+soak, then flags): [deployment-guide.md §Scale-ready](./deployment-guide.md#scale-ready-x20x30).
 
 ## Request Flow: Identity Resolution
 
@@ -181,8 +195,11 @@ APScheduler in `jobs/scheduler.py` (representative):
 |-----|---------|
 | `_sync_job` | Social account feed sync |
 | `_resolution_sweep_job` | Identity resolution sweep |
+| `_aggregation_sweep_job` | Full-recompute repair (does **not** stamp `last_aggregated_at`) |
 | `_retention_purge_job` | Old events / fetch events purge |
 | Digest / nudge jobs | Gated by feature flags (default OFF) |
+
+`run_aggregation_watermark_bootstrap()` exists for operator sequential full+stamp; it is **not** an APScheduler job.
 
 Celery tasks in `tasks/` exist but are **not consumed** unless `celery_worker_enabled=true` and a worker process is deployed.
 
@@ -190,8 +207,8 @@ Celery tasks in `tasks/` exist but are **not consumed** unless `celery_worker_en
 
 | Store | Tables / usage |
 |-------|----------------|
-| PostgreSQL | `events`, `visitors`, `identified_visitors`, `campaigns`, `segments`, `agent_visits`, `posts`, `drafts`, billing, CRM, ads, etc. |
-| Redis | Rate limits, cache keys, Celery broker DB 1/2 (idle) |
+| PostgreSQL | `events` (unique `(site_id, event_id)` after Alembic `c3f6a9d1e8b2`), `visitors`, `identified_visitors`, `campaigns`, `segments`, `agent_visits`, `posts`, `drafts`, billing, CRM, ads, etc. |
+| Redis | Rate limits, cache keys, `agg:debounce:{site_id}` mutex, Celery broker DB 1/2 (idle) |
 | ClickHouse | Schema init code exists; **zero runtime callers** |
 
 ## AI Integration
@@ -224,8 +241,22 @@ Most new capabilities default **OFF** in `config.py`. Examples:
 - `cadence_bot_flag_enabled`
 - `company_graph_enabled`, `identity_signals_enabled`
 - `celery_worker_enabled`
+- `aggregation_incremental_enabled` (default **False**; code path exists, prod flag not flipped)
+- `site_ingest_limit_enabled` (default **False**; ceiling number **155**)
+- `db_statement_timeout_ms` (default **0** = disabled)
 
-Operators must apply pending Alembic migrations before enabling flags in production.
+Operators must apply pending Alembic migrations before enabling flags in production. Scale-ready operator order: [deployment-guide.md §Scale-ready](./deployment-guide.md#scale-ready-x20x30).
+
+## GetBeam PROD vs lab hosts
+
+| Host | Role |
+|------|------|
+| `getbeam.fyi` | GetBeam PROD web (Vercel). Fetch-beacon = this app's middleware. |
+| `api.getbeam.fyi` | GetBeam PROD API (Railway). |
+| `pixel.getbeam.fyi` | Pixel CDN (CF Worker `beam-pixel`). |
+| `splittrip.nhantown.com` | **Lab** customer site. Worker `beam-agent-beacon-splittrip` → `beam-api.nhantown.com`. |
+| `beamlab.nhantown.com` | **Lab** Cloudflare Pages experiment (local DB, not prod). |
+| `beam-api.nhantown.com` | Named-tunnel / laptop API — not Railway prod. |
 
 ## Beam Lab (Edge Experiment Surface)
 
@@ -248,6 +279,8 @@ and [beam-lab-resume.md](./beam-lab-resume.md) for detail and open items.
 | Celery worker pool | APScheduler in uvicorn process |
 | Claude segmentation | Gemini client |
 | Auto campaigns | Human-in-the-loop only |
+| getbeam.fyi on Cloudflare Pages | **Vercel** origin; Cloudflare is DNS/WAF |
+| `beam-agent-beacon-splittrip` = GetBeam PROD | **Lab only** (`splittrip.nhantown.com`) |
 
 ## References
 

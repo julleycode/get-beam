@@ -1,6 +1,6 @@
 # Local → UAT → PROD
 
-Last updated: 2026-07-29
+Last updated: 2026-08-18
 
 ## Overview
 
@@ -20,13 +20,15 @@ Knowledge graph (AST): `apps/graphify-out/graph.html` + `GRAPH_REPORT.md`.
 | Piece | Reality |
 |-------|---------|
 | API deploy | Railway via root `Dockerfile` + `railway.json` (alembic then uvicorn) |
-| Web | Vercel implied (`@vercel/analytics`, no `vercel.json`) |
-| Pixel CDN | Cloudflare Worker `apps/pixel/wrangler.toml` → `pixel.getbeam.fyi` |
+| Web | **Vercel** project `retarget-agent` → `getbeam.fyi` (Git `julleycode/get-beam`, no `vercel.json` in repo) |
+| Pixel CDN | Cloudflare Worker `beam-pixel` (`apps/pixel/wrangler.toml`) → `pixel.getbeam.fyi` |
+| Agent beacon PROD | Vercel Edge middleware on `getbeam.fyi` → `api.getbeam.fyi/api/v1/agents/fetch-beacon` |
+| Agent beacon lab | CF Worker `beam-agent-beacon-splittrip` on **`splittrip.nhantown.com` only** — not GetBeam PROD |
 | CI | `.github/workflows/test.yml` on PR + push `main` (unit / integration / e2e) |
 | Branch `UAT` | **`origin/UAT` exists** from `main` — intended for UAT deploy target |
 | Feature branches | **`dev_<slug>`** (e.g. `dev_ads-meta`) — recommended; UAT deploy **not wired** |
 | Auto-deploy UAT | **Not implemented** — wire Railway/Vercel deploy-on-branch first |
-| Auto-deploy PROD | **Not implemented** — manual Railway/Vercel promote |
+| Auto-deploy PROD | **Vercel `main` is live Git auto-deploy** (author `julleycode` READY; `nhantochi95` often BLOCKED). Railway also deploys from Git. Isolated UAT promote still not wired. |
 | Slack UAT notify | **Not implemented** — proposed design in [dev-workflow-slack-issues.md](./dev-workflow-slack-issues.md) |
 | Local infra | `infra/docker-compose.yml` (Postgres **5433→5432**, Redis 6379; ClickHouse optional/unused) |
 | Local scripts | `scripts/dev-local.ps1` (Windows), `scripts/dev-local.sh` (macOS) — see [deployment-guide.md](./deployment-guide.md#windows-local-verified) |

@@ -1,6 +1,6 @@
 # Lớp phát hiện AI-agent — kiến trúc & đánh giá
 
-Cập nhật: 2026-08-09 · Phạm vi: tab **Agents** + **Visitors** + Beam Lab (edge) + splittrip beacon Worker
+Cập nhật: 2026-08-18 · Phạm vi: tab **Agents** + **Visitors** + Beam Lab (edge) + **hai** đường beacon (GetBeam PROD vs splittrip lab)
 Nguồn: đọc trực tiếp source + kiểm chứng live local (17/17 probe) + ChatGPT-User thật trên beamlab.nhantown.com (29-07 → 01-08)
 
 Mục đích: trả lời ba câu hỏi sản phẩm — (1) phân biệt đâu là AI, (2) ai là người đứng sau AI,
@@ -37,13 +37,19 @@ không bao giờ chạm `is_emailable_identity`.
 | Đường | Nguồn | Ghi index-tier? | Ghi chú |
 |---|---|---|---|
 | Pixel ingest (`routers/events.py`) | JS trên site khách | Có | **Crawler không chạy JS** → đường này gần như không bao giờ thấy crawler |
-| Beacon edge (`agent_fetch_beacon.py`) | Middleware getbeam.fyi, auth shared-secret | Có (từ 28-07) | Đường **duy nhất** quan sát được crawler |
-| Beacon Worker (splittrip lab site) | Cloudflare Worker **`beam-agent-beacon-splittrip`** → POST API fetch-beacon | On-demand tokens | Source `infra/cloudflare/agent-beacon-worker/`; deploy `--env splittrip`. Pin này khi MCP get/build/push — không dùng `quota-tracker`. |
+| Beacon **GetBeam PROD** | Vercel Edge middleware `apps/web/src/middleware.ts` trên **`getbeam.fyi`** → POST `api.getbeam.fyi/api/v1/agents/fetch-beacon` | On-demand | Đây là beacon của marketing/dashboard Beam. Cloudflare trước `getbeam.fyi` chỉ DNS/WAF; origin là Vercel. |
+| Beacon **lab splittrip** | Cloudflare Worker **`beam-agent-beacon-splittrip`** → POST `beam-api.nhantown.com` | On-demand tokens | Route **chỉ** `splittrip.nhantown.com/*`. Site test, **không** phải GetBeam PROD. Source `infra/cloudflare/agent-beacon-worker/`; deploy `--env splittrip`. MCP get/build/push lab Worker: tên này — không dùng `quota-tracker`. |
 
 Hệ quả quan trọng: với site khách dùng pixel, **crawler index-tier về cơ bản vô hình**. Beacon chỉ
 quan sát được khi có lớp edge (Worker/middleware) phía trước origin. Đây là giới hạn cấu trúc, không
-phải bug. Canonical Worker trên account Cloudflare cho đường splittrip: **`beam-agent-beacon-splittrip`**
-(xem `infra/cloudflare/agent-beacon-worker/README.md`).
+phải bug.
+
+Hai đường beacon **không thay thế nhau**:
+
+```text
+splittrip.nhantown.com  →  CF Worker splittrip  →  beam-api.nhantown.com   (lab)
+getbeam.fyi             →  Vercel middleware    →  api.getbeam.fyi         (PROD)
+```
 
 ---
 

@@ -1,6 +1,6 @@
 # Project Roadmap
 
-Last updated: 2026-08-02
+Last updated: 2026-08-18
 
 ## Overview
 
@@ -61,7 +61,9 @@ This roadmap merges **historical MVP phases** (`PRODUCT_ROADMAP.md`) with **curr
 
 | Capability | Shipped | Flag / gate | Human docs |
 |------------|---------|-------------|------------|
-| Pixel ingest | Yes | — | [deployment-guide](./deployment-guide.md) |
+| Pixel ingest | Yes | `event_id` required (400 if missing) | [deployment-guide](./deployment-guide.md) |
+| Incremental aggregation | Code-complete | `aggregation_incremental_enabled=OFF` | [deployment-guide](./deployment-guide.md#scale-ready-x20x30) |
+| Site ingest ceiling | Code-complete | `site_ingest_limit_enabled=OFF` (155/min) | same |
 | Visitor dashboard | Yes | — | — |
 | AI segmentation | Yes | — | Gemini |
 | Campaign email send | Yes | SendGrid / Gmail OAuth | Human approve |
@@ -92,7 +94,7 @@ This roadmap merges **historical MVP phases** (`PRODUCT_ROADMAP.md`) with **curr
 6. **Gemini/AWS-fetcher classification gap** — a Gemini-eval-window fetch used UA `got` on AWS ASN 14618, which the classifier does not recognize as an AI token, so no `agent_fetch_events` row is written for it. Optional product decision, not yet scheduled.
 7. **Close Docker-gated validation** — migration round-trips, Playwright auth harness, Meta/Google sandbox smokes.
 8. **Ads Phase 3 (Google)** — live OAuth + audience push.
-9. **Capacity hardening** — incremental aggregation, pool sizing (see `capacity-hardening` plans in `process/general-plans/`).
+9. **Capacity / scale-ready** — P1–P3 **code shipped** on `dev_nhantc2` (`8ffeb32` / `bbae139` / `73142d1`). Remaining is **operator**: migrate `c3f6a9d1e8b2` (`APP_ENV=production`) then deploy API; F9 watermark bootstrap + soak; then incremental flag; then ceiling/timeout. ~682 NULL `event_id` until migrate; `buildtolaunch` still active. Pro / Queue / ClickHouse still deferred. Runbook: [deployment-guide §Scale-ready](./deployment-guide.md#scale-ready-x20x30).
 10. **LinkedIn extension onboarding** — reduce install friction (backlog remedy notes exist).
 
 ## Out of Scope (explicit)

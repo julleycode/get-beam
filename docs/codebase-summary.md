@@ -1,6 +1,6 @@
 # Codebase Summary
 
-Last updated: 2026-08-01
+Last updated: 2026-08-18
 
 ## Overview
 
@@ -30,9 +30,11 @@ get-beam/
 │   └── extension/    Chrome MV3 LinkedIn connect (dumb pipe)
 ├── infra/
 │   ├── docker-compose.yml   postgres:16, redis:7, clickhouse:24
-│   └── cloudflare/beam-lab/ Cloudflare Pages project — AI-agent detection lab
-│                             (static site + Functions middleware, own deploy,
-│                             writes to local dev Postgres, not production)
+│   └── cloudflare/
+│       ├── beam-lab/              Cloudflare Pages — AI-agent detection lab
+│       │                          (not GetBeam PROD; writes local Postgres)
+│       └── agent-beacon-worker/   CF Worker on splittrip.nhantown.com only
+│                                  (lab fetch-beacon; not getbeam.fyi)
 ├── tests/            pytest unit + integration
 ├── process/          RIPER-5 harness (context, features, protocols)
 ├── marketing/        brand, launch, content references
@@ -63,7 +65,7 @@ get-beam/
 
 | Domain | Key paths |
 |--------|-----------|
-| Events ingest | `routers/events.py`, `services/bot_filter.py`, `models/event.py` |
+| Events ingest | `routers/events.py`, `services/bot_filter.py`, `models/event.py`, `services/visitor_aggregator.py`, `services/aggregation_debounce.py` |
 | Identity | `services/identity_resolver.py`, `services/identity_providers/` |
 | AI | `services/gemini_client.py`, `agents/`, `routers/ai.py` |
 | Campaigns | `routers/campaigns.py`, `services/campaign_sender.py` |
@@ -71,6 +73,8 @@ get-beam/
 | EvalLayer | `services/agent_classifier.py`, `services/agent_gateway.py`, `services/agent_marker.py`, `models/agent_visit.py`, `routers/agents.py` |
 | Ads | `routers/ads.py`, `services/ads/` |
 | Social / EasyEngage | `routers/drafts.py`, `feed.py`, `social_auth.py` |
+
+**Scale-ready ingest (HEAD `73142d1`, flags still OFF):** P1 `8ffeb32` (watermark + Redis mutex); P2 `bbae139` (`event_id` required + unique `(site_id, event_id)`); P3 `73142d1` (hard 429 ceiling, CF peer lock, `SET LOCAL` timeout isolation). Defaults: `aggregation_incremental_enabled=False`, `site_ingest_limit_enabled=False`, `db_statement_timeout_ms=0`, ceiling **155** (7d p99=31×5). Missing `event_id` → 400 whole batch; `created_at` = server `utcnow()`. Operator order + leftovers: [deployment-guide.md §Scale-ready](./deployment-guide.md#scale-ready-x20x30). Behavior: [system-architecture.md](./system-architecture.md#request-flow-event-ingest). Cook: [journals/260818-1328-scale-ready-getbeam-cook.md](./journals/260818-1328-scale-ready-getbeam-cook.md).
 
 **EvalLayer notes (Jul 2026):** F2 marker (`agent_marker.py`) mints Fernet `?_bam=` tokens on `offers.json` URLs; click decodes to `agent_handoff_links`. IP sweep (`agent_verification.py`) updates `agent_visits.verification_method` only — `agent_fetch_events.verification_method` stays `ua-only`. All agent flags default OFF.
 
@@ -137,6 +141,8 @@ The root `README.md` and `PRODUCT_ROADMAP.md` still describe early MVP assumptio
 | ClickHouse for events | Events in **PostgreSQL**; ClickHouse client unused |
 | Celery for background jobs | **APScheduler** in-process is live; Celery dormant |
 | Anthropic Claude primary AI | **Google Gemini 2.5 Flash** via httpx |
+| getbeam.fyi hosted on Cloudflare Pages | **Vercel** project `retarget-agent`; CF is DNS/WAF |
+| splittrip Worker = GetBeam PROD beacon | Lab only; PROD beacon is Vercel middleware |
 | Resend email | **SendGrid** (Resend deprecated in config) |
 | Auto-run campaigns | **Human approve/send** only |
 | `packages/shared`, `packages/ai` | Not present in current tree |
