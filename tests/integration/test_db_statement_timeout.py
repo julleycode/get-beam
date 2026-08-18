@@ -17,10 +17,14 @@ so the app's real pool is never reconfigured mid-run.
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from apps.api.config import settings
-from apps.api.models.database import build_connect_args
+from apps.api.models.database import (
+    apply_long_job_statement_timeout,
+    apply_request_statement_timeout,
+    build_connect_args,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -95,3 +99,69 @@ class TestConnectArgsInvariants:
     def test_a_non_supabase_url_gets_no_cache_keys(self):
         args = build_connect_args("postgresql+asyncpg://u:p@localhost:5432/x", 0)
         assert args == {}
+
+
+class TestSetLocalTimeoutIsolation:
+    """F5 — request SET LOCAL kills over-budget; sweep SET LOCAL 0 survives."""
+
+    async def test_request_session_kills_over_budget_query(self):
+        engine = _engine(0)
+        session_factory = async_sessionmaker(
+            engine, class_=AsyncSession, expire_on_commit=False
+        )
+        try:
+            with pytest.raises(Exception) as exc:
+                async with session_factory() as session:
+                    await apply_request_statement_timeout(session, timeout_ms=500)
+                    await session.execute(text("SELECT pg_sleep(2)"))
+            assert "canceling statement" in str(exc.value).lower()
+        finally:
+            await engine.dispose()
+
+    async def test_sweep_session_survives_longer_than_request_budget(self):
+        engine = _engine(500)
+        session_factory = async_sessionmaker(
+            engine, class_=AsyncSession, expire_on_commit=False
+        )
+        try:
+            async with session_factory() as session:
+                await apply_long_job_statement_timeout(session)
+                result = await session.execute(text("SELECT pg_sleep(2)"))
+                assert result is not None
+        finally:
+            await engine.dispose()
+
+    async def test_sweep_set_local_does_not_leak_to_next_checkout(self):
+        """After COMMIT, the next checkout on the same pooler gets engine 500ms."""
+        engine = _engine(500)
+        session_factory = async_sessionmaker(
+            engine, class_=AsyncSession, expire_on_commit=False
+        )
+        try:
+            async with session_factory() as session:
+                await apply_long_job_statement_timeout(session)
+                await session.execute(text("SELECT 1"))
+                await session.commit()
+            with pytest.raises(Exception) as exc:
+                async with session_factory() as session:
+                    await session.execute(text("SELECT pg_sleep(2)"))
+            assert "canceling statement" in str(exc.value).lower()
+        finally:
+            await engine.dispose()
+
+    async def test_reapply_after_commit_survives_request_budget(self):
+        """F5 tail: SET LOCAL 0 after COMMIT lets the same session keep working."""
+        engine = _engine(500)
+        session_factory = async_sessionmaker(
+            engine, class_=AsyncSession, expire_on_commit=False
+        )
+        try:
+            async with session_factory() as session:
+                await apply_long_job_statement_timeout(session)
+                await session.execute(text("SELECT 1"))
+                await session.commit()
+                await apply_long_job_statement_timeout(session)
+                result = await session.execute(text("SELECT pg_sleep(2)"))
+                assert result is not None
+        finally:
+            await engine.dispose()

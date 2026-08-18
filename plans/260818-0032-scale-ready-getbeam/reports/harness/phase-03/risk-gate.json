@@ -1,0 +1,16 @@
+{
+  "task": "phase-03-tenant-ceilings-timeout-and-x20-x30-runbook",
+  "planPath": "plans/260818-0032-scale-ready-getbeam/phase-03-tenant-ceilings-timeout-and-x20-x30-runbook.md",
+  "riskClass": "public API or external contract",
+  "riskLevel": "high",
+  "riskClasses": [
+    "public API or external contract",
+    "deploy/runtime/proxy/gateway behavior",
+    "permission/secret/trust boundary"
+  ],
+  "workDescription": "Phase 3: hard site-ingest 429 (0 INSERT) when ceiling ON; CF-Connecting-IP trusted only if TCP peer is in bundled Cloudflare CIDRs; request SET LOCAL statement_timeout; sweep/retention SET LOCAL 0; pool comment 15→60 with defaults 3/2 unchanged; x20–x30 runbook in docs/deployment-guide.md. Flags default off (site_ingest_limit_enabled=False, db_statement_timeout_ms=0).",
+  "approver": "vc-code-reviewer",
+  "mustStopBeforeFinalize": true,
+  "humanApprovalRequired": true,
+  "why": "Unauthenticated public ingest 429 plus origin header-trust and Postgres timeout affect live GetBeam (api.getbeam.fyi). Operator must not set SITE_INGEST_LIMIT_ENABLED / DB_STATEMENT_TIMEOUT_MS until Phase 1 soak is green, and must apply Phase 2 alembic c3f6a9d1e8b2 before deploying ingest code that targets unique (site_id, event_id)."
+}

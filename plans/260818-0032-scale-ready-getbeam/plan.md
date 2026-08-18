@@ -53,7 +53,7 @@ x20/x30 vừa Pro 8 GB included. Không vừa Free 500 MB.
 |-------|------|--------|
 | 1 | [Incremental aggregation soak and prod flag](./phase-01-incremental-aggregation-soak-and-prod-flag.md) | In progress (code complete; operator soak/flag remaining) |
 | 2 | [Disk and event_id survival on Free](./phase-02-disk-and-event-id-survival-on-free.md) | In progress (code complete; prod migrate-then-deploy remaining) |
-| 3 | [Tenant ceilings timeout and x20-x30 runbook](./phase-03-tenant-ceilings-timeout-and-x20-x30-runbook.md) | Pending |
+| 3 | [Tenant ceilings timeout and x20-x30 runbook](./phase-03-tenant-ceilings-timeout-and-x20-x30-runbook.md) | Completed (code; Railway flags still OFF by design) |
 
 ## Dependencies
 

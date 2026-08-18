@@ -306,12 +306,11 @@ class TestSiteIngestCeiling:
     async def test_site_ceiling_trips_on_ip_diverse_flood(
         self, test_client, test_db, test_site_id
     ):
-        """AC-1: the ceiling trips on an IP-diverse flood the per-IP limiter misses.
+        """AC-1 / F3: ceiling trips on an IP-diverse flood the per-IP limiter misses.
 
         Every request carries a DIFFERENT source IP, so no per-IP bucket ever
         approaches its 100/min allowance — only the site-scoped ceiling sees the
-        aggregate. Flag-but-store: the responses stay 204, and the excess rows are
-        written with is_flagged_abuse = True.
+        aggregate. Hard 429: tripped requests write 0 rows.
         """
         from apps.api.config import settings
         from apps.api.models.event import Event
@@ -328,6 +327,7 @@ class TestSiteIngestCeiling:
                 pass
 
             statuses = []
+            bodies = []
             for i in range(12):
                 resp = await test_client.post(
                     "/api/v1/events/ingest",
@@ -337,7 +337,7 @@ class TestSiteIngestCeiling:
                         "events": [
                             {
                                 "type": "pageview",
-                "event_id": uuidlib.uuid4().hex,
+                                "event_id": uuidlib.uuid4().hex,
                                 "url": "https://abuse-test.example.com/",
                                 "page_path": "/",
                                 "ts": "2026-07-25T00:00:00",
@@ -346,10 +346,13 @@ class TestSiteIngestCeiling:
                     },
                     headers={
                         "user-agent": _BROWSER_UA,
+                        # Diverse IPs so the per-IP 100/min limiter cannot fire.
                         "x-forwarded-for": f"198.51.100.{i + 1}",
                     },
                 )
                 statuses.append(resp.status_code)
+                if resp.status_code == 429:
+                    bodies.append(resp.text)
         finally:
             settings.site_ingest_limit_enabled = orig_enabled
             settings.site_ingest_limit_per_minute = orig_limit
@@ -358,20 +361,29 @@ class TestSiteIngestCeiling:
             except Exception:
                 pass
 
-        # No per-IP bucket was anywhere near 100/min — the per-IP limiter is blind.
-        assert 429 not in statuses
-        assert set(statuses) == {204}
+        assert 429 in statuses
+        assert 204 in statuses
+        first_429 = statuses.index(429)
+        assert all(code == 429 for code in statuses[first_429:]), (
+            f"rows written after ceiling trip: {statuses}"
+        )
+        assert all(code in (204, 429) for code in statuses)
+        for body in bodies:
+            assert test_site_id not in body
+            assert "155" not in body
+            assert "limit" not in body.lower()
 
-        flagged = (
+        test_db.expire_all()
+        stored = (
             await test_db.execute(
                 select(Event).where(
                     Event.site_id == test_site_id,
                     Event.visitor_id.like("flood-visitor-%"),
-                    Event.is_flagged_abuse.is_(True),
                 )
             )
         ).scalars().all()
-        assert flagged, "site ceiling never tripped on an IP-diverse flood"
+        assert len(stored) == statuses.count(204)
+        assert len(stored) < 12, "tripped requests must not INSERT"
 
 
 # ──────────── P4 — velocity flag, aggregator exclusion, outreach gate ────────────

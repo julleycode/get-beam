@@ -56,17 +56,15 @@ class Settings(BaseSettings):
     # 4a — SERVER-SIDE statement timeout, applied via asyncpg `server_settings`
     # (so Postgres itself kills the query; a client-side cancel would still leave
     # the backend running). 0 = DISABLED = today's exact behavior, so this ships
-    # inert; flipping it on is an explicit operator action.
-    # Ordering matters: this must only be raised above 0 AFTER Phase 3's bounded
-    # aggregation queries exist. Setting it earlier would convert the (slow,
-    # correct) full-history recompute into an error path. Suggested first live
-    # value once Phase 3 has soaked: 30_000 ms. NOTE the full-recompute repair
-    # sweep (_aggregation_sweep_job) still runs an unbounded query by design —
-    # size any non-zero value against THAT query, not against request-path SQL.
+    # inert if Railway env is forgotten. Operator may set 30000 only after
+    # Phase 1 soak is green. Request path also SET LOCAL's this value in
+    # get_db; sweep/retention SET LOCAL 0 (or >=5 min) so a 30s default cannot
+    # kill the unbounded full recompute. Suggested live value after soak: 30000.
     db_statement_timeout_ms: int = 0
-    # 4b — pool sizing. Defaults reproduce the previous hardcoded 3/2 (=5 per
-    # container) exactly, which is correct for the Supabase SESSION pooler
-    # (port 5432, 15-client cap) with one deploy overlap (old+new = 10 peak).
+    # 4b — pool sizing. Defaults stay 3/2 (=5 per container). Live Supabase
+    # SESSION pooler (port 5432) is max_connections=60 — still pin DATABASE_URL
+    # to :5432; do not switch to :6543. One deploy overlap (old+new = 10 peak)
+    # stays well under 60. Do not raise these defaults here.
     #
     # Pool math (keep this satisfied before raising either value):
     #   containers x (db_pool_size + db_max_overflow)
@@ -266,11 +264,11 @@ class Settings(BaseSettings):
     # Prefer Cloudflare's CF-Connecting-IP header for the ingest client IP.
     # api.getbeam.fyi is permanently CF-proxied, so the direct peer (and any
     # trusted-hop XFF walk) sees CF edge IPs — useless for identity resolution.
-    # CF-Connecting-IP always carries the real client. Trade-off vs the P2
-    # hop-count design: a caller that reaches the Railway origin DIRECTLY
-    # (bypassing CF) can forge this header — acceptable until the origin is
-    # locked to CF IP ranges (backlogged). Set false to fall back to the pure
-    # trusted_proxy_hops behavior.
+    # CF-Connecting-IP carries the real client, but is only honoured when the
+    # direct peer (request.client.host) is inside the bundled Cloudflare CIDR
+    # snapshot — a caller that hits the Railway origin directly cannot mint
+    # limiter keys by forging the header. Keep True for CF-proxied prod
+    # (getbeam.fyi identity). Set false to fall back to trusted_proxy_hops.
     ingest_trust_cf_connecting_ip: bool = True
 
     # Per-SITE ingest ceiling. The existing 100/min per-IP limiter is blind to a
@@ -287,12 +285,12 @@ class Settings(BaseSettings):
     # Required order:
     #   1. trusted_proxy_hops set to the P0.1-observed value (per-IP keying correct)
     #   2. THEN site_ingest_limit_enabled, after ~1 week of real per-site volume;
-    #      set site_ingest_limit_per_minute to ~5x the OBSERVED per-site p99/min,
-    #      never to the audit's 3000 placeholder below.
+    #      site_ingest_limit_per_minute is 5× observed per-site p99/min.
     #   3. THEN ingest_velocity_enabled, last (see its own note).
     site_ingest_limit_enabled: bool = False
     # Only consulted when site_ingest_limit_enabled is True.
-    site_ingest_limit_per_minute: int = 3000
+    # 155 = 5 × 7d p99 events/min (p99=31, prod hylcleqxlkdblibpdhhm, 2026-08-18).
+    site_ingest_limit_per_minute: int = 155
 
     # Write-time behavioural velocity detection. A rotating-IP flood has HIGH IP
     # entropy by construction, so IP entropy alone is worthless against it. The

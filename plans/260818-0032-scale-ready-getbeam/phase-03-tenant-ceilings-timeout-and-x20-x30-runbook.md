@@ -1,7 +1,7 @@
 ---
 phase: 3
 title: "Tenant ceilings timeout and x20-x30 runbook"
-status: pending
+status: completed
 priority: P2
 effort: S
 dependencies: [1, 2]
@@ -12,6 +12,8 @@ dependencies: [1, 2]
 ## Overview
 
 Sau incremental soak: bật trần ingest theo **p99 đo được**, `statement_timeout` 30s (sweep tách timeout), và runbook operator cho x20/x30 + nâng Pro sau.
+
+**Status note (18-08-26):** CODE ACs 7/7 test-proven. Marked `completed` for code. Railway `SITE_INGEST_LIMIT_ENABLED` / `DB_STATEMENT_TIMEOUT_MS` still OFF by design — **not** an AC leftover like Phase 1 soak. Do **not** mark umbrella / Phase 1 / Phase 2 completed.
 
 ## Requirements
 
@@ -46,14 +48,14 @@ F5: một engine hôm nay (`database.py:59-78`). Timeout request 30s **chỉ** s
 
 ## Success Criteria
 
-- [ ] Site ceiling ON: quá trần → **429**, 0 row INSERT
+- [x] Site ceiling ON: quá trần → **429**, 0 row INSERT
 <!-- Updated: Validation Session 1 - hard 429 only -->
-- [ ] Test site limiter, không nhầm IP `100/minute`
-- [ ] Origin không nhận spoof `CF-Connecting-IP` (lock CF hoặc ignore header ngoài CF)
-- [ ] Request `pg_sleep(31)` bị kill; sweep full 1 site 25-site hiện tại không timeout
-- [ ] Comment pool 15-client đã sửa thành 60
-- [ ] Runbook Pro + trigger x20/x30 nằm trong `docs/deployment-guide.md`
-- [ ] Defaults code vẫn an toàn nếu quên set Railway
+- [x] Test site limiter, không nhầm IP `100/minute`
+- [x] Origin không nhận spoof `CF-Connecting-IP` (lock CF hoặc ignore header ngoài CF)
+- [x] Request `pg_sleep(31)` bị kill; sweep full 1 site 25-site hiện tại không timeout
+- [x] Comment pool 15-client đã sửa thành 60
+- [x] Runbook Pro + trigger x20/x30 nằm trong `docs/deployment-guide.md`
+- [x] Defaults code vẫn an toàn nếu quên set Railway
 
 ## Scale triggers (copy vào docs)
 

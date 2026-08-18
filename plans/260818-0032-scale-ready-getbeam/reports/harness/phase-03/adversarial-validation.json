@@ -1,0 +1,58 @@
+{
+  "task": "phase-03-tenant-ceilings-timeout-and-x20-x30-runbook",
+  "planPath": "plans/260818-0032-scale-ready-getbeam/phase-03-tenant-ceilings-timeout-and-x20-x30-runbook.md",
+  "reviewer": "vc-code-reviewer",
+  "timestamp": "2026-08-18T11:25:00+07:00",
+  "scenarios": [
+    {
+      "scenario": "Rotate source IPs and flood one site to fill disk while staying under 100/min per IP",
+      "ruled_out": true,
+      "rationale": "site_ceiling_tripped keys on site_id via limits.RateLimitItemPerMinute, independent of the slowapi 100/minute decorator. When the flag is ON and the window is exhausted, ingest raises HTTP 429 before Event INSERT. test_site_ceiling_trips_on_ip_diverse_flood: 12 requests, limit=5, stored rows == 204 count. Per-IP test is a separate class and still expects 429 on forged XFF."
+    },
+    {
+      "scenario": "Hit Railway origin directly with a forged CF-Connecting-IP to mint a fresh limiter / identity key",
+      "ruled_out": true,
+      "rationale": "Header is honoured only when request.client.host is inside CLOUDFLARE_NETWORKS. Peers 8.8.8.8 and 1.2.3.4 are ignored (unit tests). CF overwrites CF-Connecting-IP on a real CF hop, so bouncing through the attacker’s own CF zone cannot set an arbitrary client IP."
+    },
+    {
+      "scenario": "Empty or stale CF IPv6 snapshot lets a non-CF peer look like an edge, or drops all IPv6 CF peers",
+      "ruled_out": false,
+      "rationale": "IPv6 list is not empty (7 ranges). IPv4 matches ips-v4. Bundled 2a06:98c0::/32 is narrower than live /29. Residual: CF IPv6 edges in the expanded /29 minus /32 fail peer_is_cloudflare (fail-closed, identity collapse). IPv4-mapped IPv6 peers also fail the CF check. Not a spoof-open hole."
+    },
+    {
+      "scenario": "Operator sets DB_STATEMENT_TIMEOUT_MS=30000 and a 30s budget kills the unbounded full recompute",
+      "ruled_out": false,
+      "rationale": "Sweep _sweep_one_site SET LOCAL 0 before aggregate_visitors_for_site — the heavy SELECT is covered. Retention re-applies SET LOCAL 0 after every DELETE COMMIT. Residual: _background_aggregate and _bootstrap_one_site have no override; aggregator COMMIT at visitor_aggregator.py:529 drops SET LOCAL 0 for the revive/company-resolve tail. Runbook says set timeout only after Phase 1 soak (incremental ON), which keeps ingest-path agg incremental."
+    },
+    {
+      "scenario": "SET LOCAL 0 leaks across pool checkout so the next request has no timeout",
+      "ruled_out": true,
+      "rationale": "SET LOCAL ends at COMMIT/ROLLBACK. get_db applies request timeout on each checkout. test_sweep_set_local_does_not_leak_to_next_checkout: after sweep SET LOCAL 0 + COMMIT, next checkout on a 500ms engine is killed by pg_sleep(2)."
+    },
+    {
+      "scenario": "429 response body leaks site_id, numeric limit, or client IP (PII / site oracle)",
+      "ruled_out": true,
+      "rationale": "HTTPException detail is the generic string 'Too many requests. Please retry later.' Ceiling test asserts site_id, '155', and 'limit' are absent from 429 bodies. site_id is only in the structured warning log."
+    },
+    {
+      "scenario": "Velocity (P4) is wrongly turned into a hard 429 so organic spikes drop events",
+      "ruled_out": true,
+      "rationale": "ingest_velocity_enabled still only sets abuse_flagged and writes is_flagged_abuse on INSERT. The 429 branch is site_ceiling_tripped only. Velocity remains flag-but-store. Flag default False."
+    },
+    {
+      "scenario": "Ceiling OFF (Railway forgotten) still 429s or refuses happy-path ingest",
+      "ruled_out": true,
+      "rationale": "site_ceiling_tripped returns False immediately when site_ingest_limit_enabled is False (code default). stash_site_id is inert when the flag is off. test_normal_sized_body_still_accepted expects 204. db_statement_timeout_ms default 0 omits server_settings."
+    },
+    {
+      "scenario": "Phase 3 rewrite of events.py silently restored global uq_events_event_id or dropped required event_id",
+      "ruled_out": true,
+      "rationale": "Schema Event.event_id still Field(..., min_length=1). ORM UniqueConstraint still (site_id, event_id) named uq_events_site_event_id. ON CONFLICT still index_elements=['site_id','event_id']. Column still nullable. No Phase 3 edit to that contract."
+    },
+    {
+      "scenario": "Ceiling counts batches, so a 100-event batch × 155 requests/min writes far more than 5× p99 events/min",
+      "ruled_out": false,
+      "rationale": "hit() is once per POST. ingest_body_max_bytes=256KB bounds the batch but the 155 token is still per request. Residual: disk ceiling is looser than the events/min calibration. Not a 429-before-insert failure."
+    }
+  ]
+}

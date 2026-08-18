@@ -67,14 +67,10 @@ site_limiter = Limiter(
 def site_ceiling_tripped(site_id: str) -> bool:
     """Record one ingest hit for ``site_id`` and report whether it is over ceiling.
 
-    Deliberately NOT a slowapi ``@limit`` decorator: a decorator hard-rejects with
-    429, while the locked design for a ceiling trip is Option C (flag-but-store) —
-    the request is still answered 204 and still stored, just marked
-    ``is_flagged_abuse`` so it is excluded downstream. Only the body-size guard
-    (P1) hard-rejects, because that is a different failure class.
-
-    Fail-open: a storage error returns False (never flag, never block), matching
-    the datacenter-IP and proxy/VPN checks on the same hot path.
+    Caller (ingest) hard-rejects with 429 and writes 0 rows when this is True
+    (F3 / Validation S1). Velocity (P4) stays flag-but-store — only the site
+    ceiling is a hard reject. Fail-open: a storage error returns False (never
+    block), matching the datacenter-IP and proxy/VPN checks on the same path.
     """
     if not settings.site_ingest_limit_enabled:
         return False

@@ -20,7 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
-from apps.api.models.database import async_session
+from apps.api.models.database import apply_long_job_statement_timeout, async_session
 
 logger = structlog.get_logger()
 
@@ -118,12 +118,14 @@ async def purge_events_older_than(
     days = settings.event_retention_days if days is None else days
 
     async with async_session() as lock_db:
+        await apply_long_job_statement_timeout(lock_db)
         acquired = await _try_acquire_lock(lock_db)
         if acquired is False:
             logger.info("retention_purge_lock_busy")
             return {"status": "locked", "deleted": 0}
         try:
             async with async_session() as db:
+                await apply_long_job_statement_timeout(db)
                 if not await _events_table_exists(db):
                     return {"status": "no_table", "deleted": 0}
 
@@ -134,6 +136,7 @@ async def purge_events_older_than(
 
                 total = 0
                 while True:
+                    await apply_long_job_statement_timeout(db)
                     result = await db.execute(
                         text(
                             f"""
@@ -179,12 +182,14 @@ async def purge_agent_fetch_events_older_than(
     days = settings.agent_fetch_event_retention_days if days is None else days
 
     async with async_session() as lock_db:
+        await apply_long_job_statement_timeout(lock_db)
         acquired = await _try_acquire_lock(lock_db, _AGENT_FETCH_PURGE_LOCK_KEY)
         if acquired is False:
             logger.info("agent_fetch_retention_purge_lock_busy")
             return {"status": "locked", "deleted": 0}
         try:
             async with async_session() as db:
+                await apply_long_job_statement_timeout(db)
                 if not await _agent_fetch_events_table_exists(db):
                     return {"status": "no_table", "deleted": 0}
 
@@ -197,6 +202,7 @@ async def purge_agent_fetch_events_older_than(
 
                 total = 0
                 while True:
+                    await apply_long_job_statement_timeout(db)
                     result = await db.execute(
                         text(
                             f"""
@@ -265,12 +271,14 @@ async def purge_request_logs_older_than(
     days = settings.request_log_retention_days if days is None else days
 
     async with async_session() as lock_db:
+        await apply_long_job_statement_timeout(lock_db)
         acquired = await _try_acquire_lock(lock_db, _REQUEST_LOG_PURGE_LOCK_KEY)
         if acquired is False:
             logger.info("request_log_retention_purge_lock_busy")
             return {"status": "locked", "deleted": 0}
         try:
             async with async_session() as db:
+                await apply_long_job_statement_timeout(db)
                 if not await _request_logs_table_exists(db):
                     return {"status": "no_table", "deleted": 0}
 
@@ -283,6 +291,7 @@ async def purge_request_logs_older_than(
 
                 total = 0
                 while True:
+                    await apply_long_job_statement_timeout(db)
                     result = await db.execute(
                         text(
                             f"""

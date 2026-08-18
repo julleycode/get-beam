@@ -48,11 +48,12 @@ class Event(Base):
     farbled: bool = Column(
         Boolean, default=False, server_default="false", nullable=False
     )
-    # Ingest abuse marker (P3 site-ceiling trip OR P4 velocity flag), written at
-    # insert time. Flag-but-store: the row is kept for forensics but is excluded
-    # from the visitor rollup (aggregate_visitors_for_site) and, transitively,
-    # from outreach eligibility. Aggregated per visitor (BOOL_OR) into
-    # visitors.is_abuse_flagged, exactly like optout -> do_not_resolve.
+    # Ingest abuse marker. Site-ceiling (P3) is a hard 429 with 0 INSERT — it
+    # never writes this flag. The column is for velocity (P4) and other abuse
+    # marks that still flag-but-store: those rows are kept for forensics but
+    # excluded from the visitor rollup (aggregate_visitors_for_site) and,
+    # transitively, from outreach eligibility. Aggregated per visitor (BOOL_OR)
+    # into visitors.is_abuse_flagged, exactly like optout -> do_not_resolve.
     is_flagged_abuse: bool = Column(
         Boolean, default=False, server_default="false", nullable=False
     )

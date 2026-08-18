@@ -1,0 +1,28 @@
+{
+  "task": "phase-03-tenant-ceilings-timeout-and-x20-x30-runbook",
+  "planPath": "plans/260818-0032-scale-ready-getbeam/phase-03-tenant-ceilings-timeout-and-x20-x30-runbook.md",
+  "reviewer": "vc-code-reviewer",
+  "decision": "approved-with-concerns",
+  "verdict": "PASS_WITH_WARNINGS",
+  "rationale": "Phase 3 blast-radius meets acceptance (a)–(i): ceiling 429 is before Event INSERT (row count == 204s); CF-Connecting-IP ignored unless peer in bundled CIDRs; request SET LOCAL kills over-budget; retention re-applies SET LOCAL after each COMMIT (autobegin keeps it in a transaction); pool comment 15→60 with 3/2 defaults; runbook present; flags default False/0; velocity still flag-but-store; happy-path 204 when ceiling OFF. Phase 2 unique (site_id, event_id) and required event_id were not changed. 429 body has no site_id/limit/IP. Warnings: IPv6 snapshot uses 2a06:98c0::/32 vs live /29 (fail-closed, not a spoof hole); _background_aggregate and _bootstrap_one_site lack SET LOCAL 0; sweep SET LOCAL 0 dies at aggregator’s mid-function COMMIT before revive/company-resolve; ceiling hit() counts batches not events; stale Event.is_flagged_abuse comment still says site-ceiling is flag-but-store.",
+  "timestamp": "2026-08-18T11:25:00+07:00",
+  "blockingFindings": [],
+  "nonBlockingFindings": [
+    "CF IPv6 snapshot stale: bundled 2a06:98c0::/32 vs published 2a06:98c0::/29 (cloudflare.com/ips-v6). IPv4 list matches. IPv6 is not empty. Fail-closed: edges in the expanded /29 minus /32 will ignore CF-Connecting-IP (identity collapse to edge IP), not honour a spoof.",
+    "peer_is_cloudflare does not unwrap IPv4-mapped IPv6 (::ffff:172.64.0.1). Dual-stack peers can fail the CF check and ignore a real CF-Connecting-IP.",
+    "F5 coverage is sweep + retention only. _background_aggregate and _bootstrap_one_site do not SET LOCAL 0. Safe if operator follows runbook (timeout only after Phase 1 incremental soak). Footgun if DB_STATEMENT_TIMEOUT_MS=30000 while incremental is still OFF or during F9 bootstrap.",
+    "aggregate_visitors_for_site COMMITs at line 529. Sweep SET LOCAL 0 dies there. The heavy full-recompute SELECT is still covered. Post-commit revive + _resolve_companies inherit engine 30s. Retention correctly re-applies SET LOCAL at the start of each loop after COMMIT.",
+    "site_ceiling_tripped uses RateLimitItemPerMinute.hit once per ingest request, not per event. 155 is calibrated from events/min p99. A large batch (bounded by 256KB) consumes one token. Disk protection is looser than the events/min label.",
+    "apps/api/models/event.py is_flagged_abuse comment still says 'P3 site-ceiling trip OR P4 velocity' and 'Flag-but-store'. Ceiling no longer reaches INSERT. Comment-only drift; runtime path is correct.",
+    "Agent-classified ingest persists agent_visits / agent_fetch_events and returns 204 before the site ceiling. Events table is still protected. Out of Validation S1 wording (events) but a residual write under flood-shaped agent UAs.",
+    "Execute-agent pytest 45 passed was not independently re-run by this review. Static + test-source review only."
+  ],
+  "explicitQuestions": {
+    "q1_429_before_insert": "YES — site_ceiling_tripped at events.py:354; Event INSERT at 478. HTTPException 429 exits get_db with rollback. Integration test: stored rows == number of 204s.",
+    "q2_set_local_after_commit": "YES for retention — apply_long_job_statement_timeout after db.commit() is the next execute(); SQLAlchemy autobegins a new transaction, so SET LOCAL is in-transaction. Sweep does not re-apply after aggregator commit (see nonBlockingFindings).",
+    "q3_cf_cidr_stale_empty_ipv6": "IPv6 not empty (7 ranges). IPv4 exact match to ips-v4. IPv6 slightly stale: 2a06:98c0::/32 vs live /29. Fail-closed, not a spoof bypass.",
+    "q4_phase2_unique_event_id": "NO change. Schema still requires event_id (min_length=1). UniqueConstraint still (site_id, event_id). ON CONFLICT still that pair. Column still nullable. No uq_events_event_id restored.",
+    "q5_pii_in_429_body": "NO — detail is 'Too many requests. Please retry later.' Tests forbid site_id, '155', and 'limit' in the body. Warning log has site_id (internal, not the HTTP body)."
+  },
+  "notes": "High-risk pack classes: public ingest API + CF header trust + runtime timeout. review-decision.json and adversarial-validation.json are present under harness/phase-03/. Phase 1/2 harness files were not overwritten. Do not set Railway SITE_INGEST_LIMIT_ENABLED / DB_STATEMENT_TIMEOUT_MS until Phase 1 soak is green. Apply c3f6a9d1e8b2 to prod before this ingest deploy."
+}

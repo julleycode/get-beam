@@ -13,7 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import exists, select, text
 
 from apps.api.config import settings
-from apps.api.models.database import async_session
+from apps.api.models.database import async_session, apply_long_job_statement_timeout
 from apps.api.services.resolution_runner import run_resolution_sweep
 from apps.api.services.retention import (
     purge_events_older_than,
@@ -488,6 +488,9 @@ async def _sweep_one_site(
 
     try:
         async with async_session() as db:
+            # F5 — unbounded full recompute must not inherit a 30s request
+            # timeout. SET LOCAL 0 dies at COMMIT (cannot leak into the pool).
+            await apply_long_job_statement_timeout(db)
             # E19 — the sweep is the REPAIR path. `since=None` is passed
             # explicitly and unconditionally; the incremental branch is never
             # taken, whatever aggregation_incremental_enabled says. This job is
@@ -604,6 +607,9 @@ async def _bootstrap_one_site(site_id: str) -> tuple[str, int]:
 
     try:
         async with async_session() as db:
+            # F5 / F9 — bootstrap full recompute must not inherit a 30s
+            # request timeout. SET LOCAL 0 dies at COMMIT.
+            await apply_long_job_statement_timeout(db)
             existing = await get_aggregation_watermark(db, site_id)
             if existing is not None:
                 return ("skipped", 0)

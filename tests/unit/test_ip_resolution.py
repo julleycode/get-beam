@@ -5,6 +5,8 @@ X-Forwarded-For, reads the correct entry behind N trusted hops, and NEVER raises
 into the ingest request path regardless of how malformed the input is.
 """
 
+import ipaddress
+
 import pytest
 
 from apps.api.services.ip_resolution import client_ip_key_func, resolve_client_ip
@@ -95,12 +97,13 @@ def test_key_func_defaults_to_settings_and_ignores_xff():
 
 
 def test_cf_connecting_ip_used_when_flag_on(monkeypatch):
-    """CF-Connecting-IP wins over XFF/socket peer when the flag is on."""
+    """CF-Connecting-IP wins when the flag is on AND the peer is a CF edge."""
     from apps.api.config import settings
 
     monkeypatch.setattr(settings, "ingest_trust_cf_connecting_ip", True)
     req = _FakeRequest(
-        {"cf-connecting-ip": "203.0.113.77", "x-forwarded-for": "1.2.3.4, 5.6.7.8"}
+        {"cf-connecting-ip": "203.0.113.77", "x-forwarded-for": "1.2.3.4, 5.6.7.8"},
+        peer="104.16.1.1",  # inside bundled 104.16.0.0/13
     )
     assert resolve_client_ip(req, trusted_proxy_hops=0) == "203.0.113.77"
 
@@ -121,3 +124,59 @@ def test_cf_connecting_ip_falls_back_on_malformed_value(monkeypatch):
     monkeypatch.setattr(settings, "ingest_trust_cf_connecting_ip", True)
     req = _FakeRequest({"cf-connecting-ip": "not-an-ip, stuff"})
     assert resolve_client_ip(req, trusted_proxy_hops=0) == _REAL_PEER
+
+
+@pytest.mark.parametrize("peer", ["8.8.8.8", "1.2.3.4"])
+def test_cf_connecting_ip_ignored_when_peer_not_cloudflare(monkeypatch, peer):
+    """Direct-origin spoof: CF-Connecting-IP must not mint the limiter key."""
+    from apps.api.config import settings
+
+    monkeypatch.setattr(settings, "ingest_trust_cf_connecting_ip", True)
+    req = _FakeRequest({"cf-connecting-ip": "203.0.113.77"}, peer=peer)
+    assert resolve_client_ip(req, trusted_proxy_hops=0) == peer
+
+
+def test_cf_connecting_ip_trusted_when_peer_in_cf_range(monkeypatch):
+    """Header is trusted only when the TCP peer is in the bundled CF snapshot."""
+    from apps.api.config import settings
+    from apps.api.services.ip_resolution import CLOUDFLARE_NETWORKS, peer_is_cloudflare
+
+    cf_peer = "172.64.0.1"  # 172.64.0.0/13
+    assert peer_is_cloudflare(cf_peer)
+    assert any(ipaddress.ip_address(cf_peer) in net for net in CLOUDFLARE_NETWORKS)
+
+    monkeypatch.setattr(settings, "ingest_trust_cf_connecting_ip", True)
+    req = _FakeRequest({"cf-connecting-ip": "203.0.113.88"}, peer=cf_peer)
+    assert resolve_client_ip(req, trusted_proxy_hops=0) == "203.0.113.88"
+
+
+def test_peer_is_cloudflare_unwraps_ipv4_mapped_ipv6():
+    """Dual-stack ::ffff:x.x.x.x peers must match IPv4 CF ranges."""
+    from apps.api.services.ip_resolution import peer_is_cloudflare
+
+    assert peer_is_cloudflare("104.16.1.1")
+    assert peer_is_cloudflare("::ffff:104.16.1.1")
+    assert not peer_is_cloudflare("::ffff:8.8.8.8")
+
+
+def test_cf_connecting_ip_trusted_when_peer_is_ipv4_mapped_cf(monkeypatch):
+    """IPv4-mapped CF peer still honours CF-Connecting-IP."""
+    from apps.api.config import settings
+    from apps.api.services.ip_resolution import peer_is_cloudflare
+
+    mapped = "::ffff:104.16.1.1"
+    assert peer_is_cloudflare(mapped)
+    monkeypatch.setattr(settings, "ingest_trust_cf_connecting_ip", True)
+    req = _FakeRequest({"cf-connecting-ip": "203.0.113.88"}, peer=mapped)
+    assert resolve_client_ip(req, trusted_proxy_hops=0) == "203.0.113.88"
+
+
+def test_peer_is_cloudflare_ipv6_covers_published_slash29():
+    """2a06:98c0::/29 includes 2a06:98c1:: which the old /32 missed."""
+    from apps.api.services.ip_resolution import CLOUDFLARE_NETWORKS, peer_is_cloudflare
+
+    assert any(str(net) == "2a06:98c0::/29" for net in CLOUDFLARE_NETWORKS)
+    assert peer_is_cloudflare("2a06:98c0::1")
+    assert peer_is_cloudflare("2a06:98c1::1")
+    assert peer_is_cloudflare("2a06:98c7::1")
+    assert not peer_is_cloudflare("2a06:98c8::1")

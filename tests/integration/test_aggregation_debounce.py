@@ -64,6 +64,13 @@ def runs(monkeypatch):
         async def __aexit__(self, *exc):
             return False
 
+        async def execute(self, *_a, **_k):
+            class _Result:
+                def scalar(self):
+                    return None
+
+            return _Result()
+
     monkeypatch.setattr(
         "apps.api.services.visitor_aggregator.aggregate_visitors_for_site",
         _fake_aggregate,

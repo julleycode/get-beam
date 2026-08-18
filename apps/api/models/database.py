@@ -3,7 +3,7 @@ from collections.abc import AsyncGenerator
 from datetime import datetime
 from urllib.parse import urlsplit
 
-from sqlalchemy import DateTime, func
+from sqlalchemy import DateTime, func, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -14,7 +14,7 @@ def _db_port(url: str) -> int | None:
     """Port from a SQLAlchemy/asyncpg DSN, or None if absent/unparseable.
 
     Capacity-hardening 4b: the old branch keyed only on ``"supabase" in url``, so
-    it could not tell the SESSION pooler (5432, 15-client cap) from the
+    it could not tell the SESSION pooler (5432, live max_connections=60) from the
     TRANSACTION pooler (6543, much larger cap). The port is the only signal that
     distinguishes them. Never raises — a malformed URL degrades to None, which is
     treated as "unknown pooler mode" and gets the conservative defaults.
@@ -59,14 +59,10 @@ DB_POOLER_MODE = (
 engine = create_async_engine(
     settings.database_url,
     echo=settings.app_env == "development",
-    # Supabase SESSION-mode pooler (port 5432) caps total clients at 15. The old
-    # pool_size=10/max_overflow=20 (up to 30/container) exceeded that the moment a
-    # deploy ran two containers at once -> the new container couldn't connect and
-    # the deploy failed (EMAXCONNSESSION). Keep one container's pool small enough
-    # that old+new overlap stays under 15: 5 max each -> 10 peak.
-    # Now config-driven (capacity-hardening 4b); the defaults reproduce the old
-    # hardcoded 3/2 exactly under EITHER pooler mode. Raising them is an operator
-    # action bounded by the pool math documented in config.py.
+    # Supabase SESSION-mode pooler (port 5432) live max_connections=60. Still pin
+    # DATABASE_URL to :5432 (do not move to :6543). Defaults stay 3/2 (=5 per
+    # container) so one deploy overlap is 10 peak — well under 60. Raising pool
+    # size is an operator action bounded by the pool math in config.py.
     pool_size=settings.db_pool_size,
     max_overflow=settings.db_max_overflow,
     pool_recycle=300,
@@ -88,6 +84,34 @@ class Base(DeclarativeBase):
     )
 
 
+async def apply_request_statement_timeout(
+    session: AsyncSession, timeout_ms: int | None = None
+) -> None:
+    """SET LOCAL request-path ``statement_timeout``. No-op when ms is 0.
+
+    ``timeout_ms`` defaults to ``settings.db_statement_timeout_ms``. SET LOCAL
+    dies at COMMIT/ROLLBACK so a recycled pool connection cannot leak a job
+    override into the next request (F5).
+    """
+    ms = settings.db_statement_timeout_ms if timeout_ms is None else timeout_ms
+    ms = int(ms)
+    if ms <= 0:
+        return
+    await session.execute(text(f"SET LOCAL statement_timeout = '{ms}ms'"))
+
+
+async def apply_long_job_statement_timeout(session: AsyncSession) -> None:
+    """Disable statement_timeout for this transaction (sweep / retention / ingest agg / F9 bootstrap).
+
+    Operator may later set engine ``db_statement_timeout_ms=30000``. The
+    unbounded full recompute and retention DELETEs must not inherit that 30s
+    budget. SET LOCAL 0 (allowed alternative to ≥5 min) ends at COMMIT so it
+    cannot leak into a request checkout — re-apply after any mid-run COMMIT.
+    """
+    await session.execute(text("SET LOCAL statement_timeout = 0"))
+
+
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     async with async_session() as session:
+        await apply_request_statement_timeout(session)
         yield session

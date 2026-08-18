@@ -6,6 +6,7 @@ from sqlalchemy import delete, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.models.database import apply_long_job_statement_timeout
 from apps.api.models.visitor import ResolutionLog, Visitor
 from apps.api.services.ai_referral import classify_ai_source
 
@@ -528,9 +529,16 @@ async def aggregate_visitors_for_site(
 
     await db.commit()
 
+    # SET LOCAL dies at COMMIT. Re-apply so revive / company resolution
+    # cannot inherit a 30s request budget (F5 tail).
+    await apply_long_job_statement_timeout(db)
+
     # Returning-visitor revive: a fresh IP on a previously unresolvable row is a
     # genuinely new provider query, so re-queue it for the resolution sweep.
     await revive_returning_unresolvable(db, site_id, unresolvable_pre)
+
+    # Revive may COMMIT; re-apply before watermark / _resolve_companies.
+    await apply_long_job_statement_timeout(db)
 
     # Watermark advances ONLY after a successful commit of this run's upserts
     # (checklist item 9). A crash before this point simply re-reads the same

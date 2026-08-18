@@ -1,0 +1,35 @@
+{
+  "task": "phase-03-tenant-ceilings-timeout-and-x20-x30-runbook",
+  "planPath": "plans/260818-0032-scale-ready-getbeam/phase-03-tenant-ceilings-timeout-and-x20-x30-runbook.md",
+  "executeReport": "plans/260818-0032-scale-ready-getbeam/reports/phase-03-execute-report_18-08-26.md",
+  "blastRadius": [
+    "apps/api/config.py",
+    "apps/api/models/database.py",
+    "apps/api/services/rate_limiter.py",
+    "apps/api/services/ip_resolution.py",
+    "apps/api/routers/events.py",
+    "apps/api/jobs/scheduler.py",
+    "apps/api/services/retention.py",
+    "tests/unit/test_ip_resolution.py",
+    "tests/integration/test_ingest_abuse_hardening.py",
+    "tests/integration/test_db_statement_timeout.py",
+    "docs/deployment-guide.md"
+  ],
+  "phase12SurfacesCheckedForRegression": [
+    "apps/api/schemas/events.py — event_id Field(..., min_length=1) unchanged",
+    "apps/api/models/event.py — UniqueConstraint(site_id, event_id) name=uq_events_site_event_id; column still nullable",
+    "apps/api/routers/events.py — on_conflict_do_nothing(index_elements=[site_id, event_id]) unchanged",
+    "apps/api/config.py — aggregation_incremental_enabled still False; db_pool_size=3 db_max_overflow=2 unchanged"
+  ],
+  "acceptanceMap": {
+    "a_ceiling_429_zero_insert": "events.py:354 site_ceiling_tripped before insert at 478; test_site_ceiling_trips_on_ip_diverse_flood asserts row count == 204 count",
+    "b_cf_spoof": "ip_resolution.py peer_is_cloudflare + honour header only then; tests 8.8.8.8 / 1.2.3.4 ignored",
+    "c_timeout": "get_db apply_request_statement_timeout; sweep/retention apply_long_job_statement_timeout=0; tests analog 500ms vs pg_sleep(2)",
+    "d_pool_comment": "config.py + database.py comments say max_connections=60; defaults 3/2",
+    "e_runbook": "docs/deployment-guide.md §Scale-ready x20–x30",
+    "f_safe_defaults": "site_ingest_limit_enabled=False; db_statement_timeout_ms=0",
+    "g_no_set_leak": "SET LOCAL dies at COMMIT; test_sweep_set_local_does_not_leak_to_next_checkout",
+    "h_velocity_flag_but_store": "ceiling raise 429; velocity after that still sets is_flagged_abuse and INSERTs",
+    "i_happy_path_off": "site_ceiling_tripped returns False when flag off; test_normal_sized_body_still_accepted 204"
+  }
+}

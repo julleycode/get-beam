@@ -5,11 +5,11 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from apps.api.models.database import get_db, async_session
+from apps.api.models.database import get_db, async_session, apply_long_job_statement_timeout
 from apps.api.models.event import Event
 from apps.api.schemas.events import EventBatch
 from apps.api.services.agent_classifier import classify_agent, classify_tier
@@ -349,16 +349,20 @@ async def ingest_events(
             return Response(status_code=204)
 
     # ── Abuse signals (P3 site ceiling + P4 velocity) ──────────────────
-    # Option C, flag-but-store: a tripped signal NEVER rejects the request (the
-    # response stays 204 and the rows are still written). It marks the rows
-    # is_flagged_abuse so the visitor rollup and outreach-eligibility gate
-    # exclude them, instead of hard-dropping traffic that might be legitimate.
-    abuse_flagged = site_ceiling_tripped(batch.site_id)
-    if abuse_flagged:
+    # F3: site ceiling is hard 429, 0 INSERT (disk). Do not leak site internals
+    # in the body. Velocity (P4) stays Option C flag-but-store.
+    if site_ceiling_tripped(batch.site_id):
         logger.warning(
             "site_ingest_ceiling_tripped",
             site_id=batch.site_id,
             limit_per_minute=_settings.site_ingest_limit_per_minute,
+        )
+        request.state.site_id = batch.site_id
+        request.state.log_reason = "site_ceiling"
+        request.state.log_reason_detail = "ingest ceiling — retry later"
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests. Please retry later.",
         )
 
     # P4 velocity: one check per BATCH, not per event — velocity is a
@@ -369,7 +373,8 @@ async def ingest_events(
     # byte-identical to pre-hardening. (get_redis() caches a module-global client
     # bound to the creating event loop, so building one here unconditionally
     # would also strand that client across loops.)
-    if not abuse_flagged and _settings.ingest_velocity_enabled:
+    abuse_flagged = False
+    if _settings.ingest_velocity_enabled:
         batch_fp: str | None = None
         for _event in batch.events:
             _raw_fp = _event.fp
@@ -389,13 +394,13 @@ async def ingest_events(
 
     # Admin request log markers. `stash_site_id` only populates state.site_id when
     # the site-ceiling limiter is enabled, so set it here too — the log viewer's
-    # per-site facet must work independently of that flag. An abuse-flagged batch
-    # is stored (flag-but-store), so without this marker it would look like an
-    # ordinary 204 in the log.
+    # per-site facet must work independently of that flag. A velocity-flagged
+    # batch is stored (flag-but-store), so without this marker it would look like
+    # an ordinary 204 in the log.
     request.state.site_id = batch.site_id
     if abuse_flagged:
         request.state.log_reason = "abuse_flag"
-        request.state.log_reason_detail = "site ceiling or ingest velocity flagged this batch"
+        request.state.log_reason_detail = "ingest velocity flagged this batch"
 
     # Client Hints extraction (best-effort)
     ch_ua = request.headers.get("sec-ch-ua", "")
@@ -446,9 +451,8 @@ async def ingest_events(
             # via BOOL_OR into visitors.has_unstable_fingerprint. Never a drop or
             # block signal on this path.
             farbled=bool(event.farbled),
-            # P3 site-ceiling trip OR P4 velocity flag. Written in the SAME INSERT
-            # that stores the row, so there is no window where flood traffic is
-            # durable and unmarked.
+            # P4 velocity flag (site ceiling never reaches INSERT — hard 429).
+            # Written in the SAME INSERT that stores the row.
             is_flagged_abuse=abuse_flagged,
             # WS2 agent-operated session signals. Purely additive and purely
             # observational: nothing on this request path reads it, no branch
@@ -958,6 +962,8 @@ async def _background_aggregate(site_id: str) -> None:
             )
 
         async with async_session() as db:
+            # F5 — ingest agg must not inherit a 30s request timeout.
+            await apply_long_job_statement_timeout(db)
             since = None
             run_started_at = None
             if _s.aggregation_incremental_enabled:

@@ -1,0 +1,130 @@
+{
+  "task": "phase-03-tenant-ceilings-timeout-and-x20-x30-runbook",
+  "planPath": "plans/260818-0032-scale-ready-getbeam/phase-03-tenant-ceilings-timeout-and-x20-x30-runbook.md",
+  "reviewer": "vc-tester",
+  "mode": "TEST",
+  "timestamp": "2026-08-18T11:45:00+07:00",
+  "result": "PASS",
+  "status": "DONE",
+  "independentlyReRun": true,
+  "confirmOnlyAfter": "debounce _FakeSession.execute fixture fix",
+  "python": ".venv\\Scripts\\python.exe",
+  "PYTHONPATH": "d:\\cong_viec\\22-22\\get-beam",
+  "infra": {
+    "postgres": "infra-postgres-1 healthy 0.0.0.0:5433->5432",
+    "redis": "infra-redis-1 healthy 0.0.0.0:6379->6379"
+  },
+  "diffAware": {
+    "expandedTo": "Phase 1 + Phase 2 + Phase 3 blast radius (user-mandated, not P3-only)",
+    "mappedTests": {
+      "phase1": [
+        "tests/unit/test_aggregation_mutex.py",
+        "tests/unit/test_aggregation_sweep_failopen.py",
+        "tests/unit/test_aggregation_sweep_full_recompute.py",
+        "tests/unit/test_aggregation_ingest_failopen.py",
+        "tests/unit/test_aggregation_bootstrap.py",
+        "tests/integration/test_visitor_aggregation_incremental.py",
+        "tests/integration/test_aggregation_debounce.py",
+        "tests/integration/test_aggregation_watermark_bootstrap.py",
+        "tests/integration/test_visitor_aggregation.py"
+      ],
+      "phase2": [
+        "tests/unit/test_alembic_env_dsn_guard.py",
+        "tests/unit/test_scheduler_job_config.py",
+        "tests/integration/test_events_ingest.py"
+      ],
+      "phase3": [
+        "tests/unit/test_ip_resolution.py",
+        "tests/integration/test_db_statement_timeout.py",
+        "tests/integration/test_ingest_abuse_hardening.py"
+      ]
+    }
+  },
+  "lanes": [
+    {
+      "lane": "phase-1-aggregation",
+      "result": "PASS",
+      "passed": 46,
+      "failed": 0,
+      "skipped": 0,
+      "durationSeconds": 123.73,
+      "command": ".venv\\Scripts\\python.exe -m pytest tests/unit/test_aggregation_mutex.py tests/unit/test_aggregation_sweep_failopen.py tests/unit/test_aggregation_sweep_full_recompute.py tests/unit/test_aggregation_ingest_failopen.py tests/unit/test_aggregation_bootstrap.py tests/integration/test_visitor_aggregation_incremental.py tests/integration/test_aggregation_debounce.py tests/integration/test_aggregation_watermark_bootstrap.py tests/integration/test_visitor_aggregation.py -q",
+      "exitCode": 0,
+      "failures": [],
+      "notes": "Previously 42 pass / 4 fail on TestDebounce. After _FakeSession.async execute() no-op (tests/integration/test_aggregation_debounce.py:67-72), all 46 green. Production code not touched this run."
+    },
+    {
+      "lane": "phase-2-event-id-alembic-ingest",
+      "result": "PASS",
+      "passed": 58,
+      "failed": 0,
+      "skipped": 0,
+      "durationSeconds": 113.74,
+      "command": ".venv\\Scripts\\python.exe -m pytest tests/unit/test_alembic_env_dsn_guard.py tests/unit/test_scheduler_job_config.py tests/integration/test_events_ingest.py -q",
+      "exitCode": 0,
+      "notes": "1 warning: RuntimeWarning coroutine Connection._cancel never awaited. Redis asyncio 'Event loop is closed' teardown is known noise (all-tests.md), not a failure."
+    },
+    {
+      "lane": "phase-3-ceiling-cf-timeout",
+      "result": "PASS",
+      "passed": 49,
+      "failed": 0,
+      "skipped": 0,
+      "durationSeconds": 70.75,
+      "command": ".venv\\Scripts\\python.exe -m pytest tests/unit/test_ip_resolution.py tests/integration/test_db_statement_timeout.py tests/integration/test_ingest_abuse_hardening.py -q",
+      "exitCode": 0,
+      "notes": "Same Redis teardown noise (Event loop is closed). P3 mapped tests independently re-run green."
+    }
+  ],
+  "totals": {
+    "passed": 153,
+    "failed": 0,
+    "durationSeconds": 308.22
+  },
+  "safetyInvariants": [
+    {
+      "check": "aggregation_incremental_enabled default False",
+      "result": "PASS",
+      "evidence": "apps/api/config.py:125 aggregation_incremental_enabled: bool = False"
+    },
+    {
+      "check": "site_ingest_limit_enabled default False",
+      "result": "PASS",
+      "evidence": "apps/api/config.py:290 site_ingest_limit_enabled: bool = False"
+    },
+    {
+      "check": "db_statement_timeout_ms default 0",
+      "result": "PASS",
+      "evidence": "apps/api/config.py:63 db_statement_timeout_ms: int = 0"
+    },
+    {
+      "check": "event_id required in schemas/events.py",
+      "result": "PASS",
+      "evidence": "apps/api/schemas/events.py:25 event_id: str = Field(..., min_length=1, max_length=64)"
+    },
+    {
+      "check": "UniqueConstraint site_id+event_id in models/event.py",
+      "result": "PASS",
+      "evidence": "apps/api/models/event.py:81 UniqueConstraint(\"site_id\", \"event_id\", name=\"uq_events_site_event_id\")"
+    },
+    {
+      "check": "alembic current on localhost only; no supabase host; c3f6a9d1e8b2 or later",
+      "result": "PASS",
+      "evidence": "settings host=localhost port=5433 contains_supabase=False; alembic current printed 'c3f6a9d1e8b2 (head)'; Phase 3 added no migration"
+    }
+  ],
+  "rootCause": {
+    "summary": "Resolved. Phase 3 F5 apply_long_job_statement_timeout(db) needs session.execute. Debounce fixture now stubs async execute() returning a scalar() Result. Prior FAIL (4 debounce tests, assert 0 == 1) is gone.",
+    "source": "apps/api/routers/events.py:964-966 -> apps/api/models/database.py:111",
+    "fixture": "tests/integration/test_aggregation_debounce.py:60-72",
+    "fixApplied": "_FakeSession.async execute() no-op — tester confirm-only, no production edit"
+  },
+  "riskEvidence": {
+    "riskGatePath": "plans/260818-0032-scale-ready-getbeam/reports/harness/phase-03/risk-gate.json",
+    "reviewDecisionPresent": true,
+    "adversarialValidationPresent": true,
+    "mustStopBeforeFinalize": true,
+    "notes": "Pytest 100% green (153/153). risk-gate.json still mustStopBeforeFinalize=true for human/ops approval (public ingest 429, CF IP trust, timeout flags default OFF) — not because tests failed."
+  },
+  "reportPath": "plans/260818-0032-scale-ready-getbeam/reports/phase-03-regression-report_18-08-26.md"
+}
