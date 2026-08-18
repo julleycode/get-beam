@@ -1,5 +1,7 @@
-# Canonical live Worker on the Cloudflare account (after --env splittrip):
+# Canonical live Worker after --env splittrip:
 #   beam-agent-beacon-splittrip  (id tag 9e74d04215224c4ab2cecc3e65939d21)
+# LAB ONLY — route is splittrip.nhantown.com, NOT getbeam.fyi.
+# GetBeam PROD beacon is Vercel middleware (apps/web/src/middleware.ts).
 # Always deploy / query / build against that script — never quota-tracker.
 name = "beam-agent-beacon"
 main = "worker.js"

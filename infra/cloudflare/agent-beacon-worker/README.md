@@ -1,8 +1,15 @@
-# Agent fetch beacon (Cloudflare Worker)
+# Agent fetch beacon (Cloudflare Worker) — **lab only**
 
-Makes an AI that does **not** run JavaScript visible on Beam's Agents tab.
+**Not GetBeam PROD.** This Worker is routed only at the test customer site
+`splittrip.nhantown.com`. It POSTs to `https://beam-api.nhantown.com` with
+`BEAM_SITE_ID=site_e3a2c56e01ed`. GetBeam production (`getbeam.fyi`) beacons via
+**Vercel Edge middleware** (`apps/web/src/middleware.ts`) to `api.getbeam.fyi`.
+Confirmed with the operator 2026-08-18.
 
-## Canonical Cloudflare target (pinned 09-08-26)
+Makes an AI that does **not** run JavaScript visible on Beam's Agents tab (for
+the site this Worker is routed to).
+
+## Canonical Cloudflare target (pinned 09-08-26, scope clarified 18-08-26)
 
 | Field | Value |
 |---|---|

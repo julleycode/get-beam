@@ -9,8 +9,10 @@
  * User-Agent, tells Beam, and gets out of the way.
  *
  * DEPLOY (route it at the site you want watched, e.g. splittrip.nhantown.com/*):
- *   wrangler secret put BEAM_FETCH_BEACON_SECRET
- *   wrangler deploy
+ *   wrangler secret put BEAM_FETCH_BEACON_SECRET --env splittrip
+ *   wrangler deploy --env splittrip
+ * That env is LAB (splittrip.nhantown.com → beam-api.nhantown.com), not getbeam.fyi.
+ * GetBeam PROD beacon is Vercel middleware, not this Worker.
  *
  * The Worker mirrors apps/web/src/lib/fetch-beacon.ts. Keep the token list in
  * sync with `_ON_DEMAND_TOKENS` in apps/api/services/agent_classifier.py — the
