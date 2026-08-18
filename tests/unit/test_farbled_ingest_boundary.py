@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 
 
 def _event(**extra) -> Event:
-    return Event.model_validate({"type": "click", "ts": "2026-08-10T00:00:00Z", **extra})
+    return Event.model_validate({"type": "click", "event_id": "eid-farbled-1", "ts": "2026-08-10T00:00:00Z", **extra})
 
 
 # ─── happy path ───
@@ -54,8 +54,8 @@ def test_malformed_marker_does_not_reject_the_batch():
         "site_id": "s1",
         "visitor_id": "v1",
         "events": [
-            {"type": "pageview", "ts": "2026-08-10T00:00:00Z", "_fb": {"nope": True}},
-            {"type": "click", "ts": "2026-08-10T00:00:01Z", "_fb": 1},
+            {"type": "pageview", "event_id": "eid-farbled-pv", "ts": "2026-08-10T00:00:00Z", "_fb": {"nope": True}},
+            {"type": "click", "event_id": "eid-farbled-click", "ts": "2026-08-10T00:00:01Z", "_fb": 1},
         ],
     })
     assert len(batch.events) == 2

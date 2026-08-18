@@ -15,6 +15,8 @@ Two properties, both of which the unit tier structurally cannot prove:
          "automation" still returns 204 and still gets its row written.
 """
 
+import uuid as uuidlib
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
@@ -56,6 +58,7 @@ async def test_site_id(test_db):
 def _batch(site_id: str, visitor_id: str, asig: dict | None) -> dict:
     event: dict = {
         "type": "click",
+        "event_id": uuidlib.uuid4().hex,
         "url": "https://test-agentsig.example.com/pricing",
         "page_path": "/pricing",
         "page_title": "Pricing",

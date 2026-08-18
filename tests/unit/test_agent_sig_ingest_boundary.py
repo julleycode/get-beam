@@ -19,7 +19,7 @@ pytestmark = pytest.mark.unit
 
 
 def _event(**extra) -> Event:
-    return Event.model_validate({"type": "click", "ts": "2026-08-07T00:00:00Z", **extra})
+    return Event.model_validate({"type": "click", "event_id": "eid-asig-1", "ts": "2026-08-07T00:00:00Z", **extra})
 
 
 # ─── happy path: the real pixel shape survives intact ───

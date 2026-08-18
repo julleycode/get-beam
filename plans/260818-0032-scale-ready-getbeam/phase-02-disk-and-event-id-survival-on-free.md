@@ -1,7 +1,7 @@
 ---
 phase: 2
 title: "Disk and event_id survival on Free"
-status: pending
+status: in-progress
 priority: P1
 effort: M
 dependencies: [1]
@@ -12,6 +12,8 @@ dependencies: [1]
 ## Overview
 
 Mua thời gian trên Free 500 MB (424 MB hôm 17-08) và bịt lỗ idempotency trước x20. **Không** nâng Pro trong phase này. Unique **đổi** thành `(site_id, event_id)` (F1). Thiếu id → **400** (F4).
+
+**Status note (18-08-26):** code complete; prod migration + `buildtolaunch` operator remaining. Do **not** mark completed. Local `:5433` is `c3f6a9d1e8b2`. Prod still `b7e3c9a4f215` / 682 NULL `event_id` / global unique. Migrate-then-deploy.
 
 ## Requirements
 
@@ -51,14 +53,14 @@ Disk: verify `request_logs` 7d + `events` 90d jobs; **không** anonymous visitor
 
 ## Success Criteria
 
-- [ ] Ingest thiếu `event_id` → 400, 0 row
-- [ ] Retry cùng `(site_id, event_id)` → 204, không nhân pageview
-- [ ] Cùng `event_id` khác `site_id` → cả hai row tồn tại
-- [ ] Prod `event_id IS NULL` = 0 sau backfill (đếm live lúc cook, không hardcode 682)
-- [ ] Unique `(site_id, event_id)`
-- [ ] Retention: log mỗi 24h kể `deleted=0`; `next_run_time` lúc boot
-- [ ] `APP_ENV=local|development|test|ci` + prod DSN → alembic abort
-- [ ] Disk: không ingest RPKI; `buildtolaunch` paused hoặc ghi rõ lý do giữ
+- [x] Ingest thiếu `event_id` → 400, 0 row (tests)
+- [x] Retry cùng `(site_id, event_id)` → 204, không nhân pageview (tests)
+- [x] Cùng `event_id` khác `site_id` → cả hai row tồn tại (tests)
+- [ ] Prod `event_id IS NULL` = 0 sau backfill (đếm live lúc cook, không hardcode 682) — **not done**; prod still 682 NULL, alembic `b7e3c9a4f215`
+- [x] Unique `(site_id, event_id)` — code + local `:5433` (`uq_events_site_event_id`); **prod still global `uq_events_event_id` until migrate**
+- [x] Retention: log mỗi 24h kể `deleted=0`; `next_run_time` lúc boot — code+AST; runtime fire not observed
+- [x] `APP_ENV=local|development|test|ci` + prod DSN → alembic abort — unit; fail-closed after review (unknown env abort)
+- [ ] Disk: không ingest RPKI; `buildtolaunch` paused hoặc ghi rõ lý do giữ — RPKI this phase: no ingest (`ip_org_rpki_ingest_enabled` default False; scheduler gated; cook did not load `rpki_roas`). `buildtolaunch` still ACTIVE_HEALTHY — **not paused**
 
 ## Risk Assessment
 

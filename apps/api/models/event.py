@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text, text
+from sqlalchemy import Boolean, Column, DateTime, Float, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 
@@ -13,10 +13,10 @@ class Event(Base):
     __tablename__ = "events"
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
-    # Client-generated idempotency key (pixel UUID). Unique when present;
-    # NULL for events from older pixel builds (PG unique indexes allow
-    # multiple NULLs). Lets ingest drop re-delivered beacon batches instead
-    # of double-counting pageviews/sessions/intent.
+    # Client-generated idempotency key (pixel UUID). Unique per site when
+    # present; still nullable this phase so pre-backfill rows can exist until
+    # the additive migration fills NULLs. Ingest now requires the field;
+    # NOT NULL on the column waits until 24h of zero null inserts.
     event_id: str = Column(String(64), nullable=True)
     site_id: str = Column(String(50), nullable=False)
     visitor_id: str = Column(String(100), nullable=False)
@@ -77,7 +77,7 @@ class Event(Base):
     created_at: datetime = Column(DateTime, default=func.now(), nullable=False)
 
     __table_args__ = (
-        Index("uq_events_event_id", "event_id", unique=True),
+        UniqueConstraint("site_id", "event_id", name="uq_events_site_event_id"),
         Index("ix_events_site_visitor", "site_id", "visitor_id"),
         Index("ix_events_site_created", "site_id", "created_at"),
         Index("ix_events_created", "created_at"),

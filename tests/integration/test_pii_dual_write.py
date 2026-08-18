@@ -148,6 +148,7 @@ class TestCoreUpsertDualWrite:
                 "visitor_id": vid,
                 "events": [{
                     "type": "form_email_capture",
+                    "event_id": uuidlib.uuid4().hex,
                     "email": "form@y.com",
                     "ts": datetime.utcnow().isoformat(),
                 }],

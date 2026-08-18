@@ -1,0 +1,72 @@
+{
+  "task": "phase-02-disk-and-event-id-survival-on-free",
+  "planPath": "plans/260818-0032-scale-ready-getbeam/phase-02-disk-and-event-id-survival-on-free.md",
+  "snippets": [
+    {
+      "file": "apps/api/schemas/events.py",
+      "lines": "23-25",
+      "description": "F4 — event_id required, empty string rejected (min_length=1), max 64",
+      "content": "event_id: str = Field(..., min_length=1, max_length=64)"
+    },
+    {
+      "file": "apps/api/models/event.py",
+      "lines": "16-20",
+      "description": "Column stays nullable — no NOT NULL this phase",
+      "content": "event_id: str = Column(String(64), nullable=True)"
+    },
+    {
+      "file": "apps/api/models/event.py",
+      "lines": "79-80",
+      "description": "F1 — UniqueConstraint (site_id, event_id); no leftover uq_events_event_id on the ORM",
+      "content": "UniqueConstraint(\"site_id\", \"event_id\", name=\"uq_events_site_event_id\")"
+    },
+    {
+      "file": "apps/api/routers/events.py",
+      "lines": "198-201",
+      "description": "Parse failure (missing/empty event_id) → 400, 0 INSERT",
+      "content": "try: batch = await _parse_event_batch(request)\\nexcept Exception:\\n    return Response(status_code=400)"
+    },
+    {
+      "file": "apps/api/routers/events.py",
+      "lines": "469-472",
+      "description": "ON CONFLICT target matches unique (site_id, event_id)",
+      "content": "pg_insert(Event).values(event_rows).on_conflict_do_nothing(index_elements=[\"site_id\", \"event_id\"])"
+    },
+    {
+      "file": "apps/api/migrations/versions/c3f6a9d1e8b2_events_site_event_id_unique.py",
+      "lines": "24-47",
+      "description": "Revises b7e3c9a4f215; backfill NULL then drop uq_events_event_id then unique (site_id, event_id)",
+      "content": "down_revision = \"b7e3c9a4f215\"; UPDATE ... WHERE event_id IS NULL; drop_index uq_events_event_id; create_unique_constraint uq_events_site_event_id (site_id, event_id)"
+    },
+    {
+      "file": "apps/api/alembic_dsn_guard.py",
+      "lines": "12-36",
+      "description": "F10 — listed nonprod envs + non-localhost host → SystemExit 'prod DSN blocked'. Unknown env is not blocked.",
+      "content": "_NONPROD_ENVS = {local,development,test,ci}; if env in _NONPROD_ENVS and host not in {localhost,127.0.0.1}: raise SystemExit(...)"
+    },
+    {
+      "file": "apps/api/migrations/env.py",
+      "lines": "50-52",
+      "description": "Guard runs offline before configure",
+      "content": "assert_safe_alembic_dsn(settings.app_env, settings.database_url)"
+    },
+    {
+      "file": "apps/api/migrations/env.py",
+      "lines": "74-75",
+      "description": "Guard runs online before create_async_engine (no connect on abort)",
+      "content": "assert_safe_alembic_dsn(settings.app_env, settings.database_url)"
+    },
+    {
+      "file": "apps/api/jobs/scheduler.py",
+      "lines": "68-80",
+      "description": "F10 — log every retention run including deleted=0",
+      "content": "logger.info(\"retention_purge_job_complete\", **result)  # result always has deleted"
+    },
+    {
+      "file": "apps/api/jobs/scheduler.py",
+      "lines": "730-744",
+      "description": "Existing retention_purge job; next_run_time +75s; still one add_job (24 total)",
+      "content": "id=\"retention_purge\"; next_run_time=+75s"
+    }
+  ]
+}

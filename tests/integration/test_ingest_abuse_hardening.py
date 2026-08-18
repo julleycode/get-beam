@@ -9,6 +9,7 @@ for AC-3/AC-8 (IP resolution) and AC-6/AC-10 (velocity) lives in
 """
 
 import json
+import uuid as uuidlib
 
 import pytest
 import pytest_asyncio
@@ -60,6 +61,7 @@ def _oversized_payload(site_id: str, min_bytes: int) -> bytes:
         events.append(
             {
                 "type": "pageview",
+                "event_id": uuidlib.uuid4().hex,
                 "url": f"https://abuse-test.example.com/{filler}",
                 "page_path": "/",
                 "page_title": filler,
@@ -146,6 +148,7 @@ class TestOversizedBodyRejection:
             "events": [
                 {
                     "type": "pageview",
+                "event_id": uuidlib.uuid4().hex,
                     "url": "https://abuse-test.example.com/",
                     "page_path": "/",
                     "page_title": "Home",
@@ -198,6 +201,7 @@ class TestSpoofedForwardedFor:
                         "events": [
                             {
                                 "type": "pageview",
+                "event_id": uuidlib.uuid4().hex,
                                 "url": "https://abuse-test.example.com/",
                                 "page_path": "/",
                                 "ts": "2026-07-25T00:00:00",
@@ -276,6 +280,7 @@ class TestSiteIngestCeiling:
                     "events": [
                         {
                             "type": "pageview",
+                "event_id": uuidlib.uuid4().hex,
                             "url": "https://abuse-test.example.com/",
                             "page_path": "/",
                             "ts": "2026-07-25T00:00:00",
@@ -332,6 +337,7 @@ class TestSiteIngestCeiling:
                         "events": [
                             {
                                 "type": "pageview",
+                "event_id": uuidlib.uuid4().hex,
                                 "url": "https://abuse-test.example.com/",
                                 "page_path": "/",
                                 "ts": "2026-07-25T00:00:00",

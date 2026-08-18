@@ -1,0 +1,21 @@
+{
+  "task": "phase-02-disk-and-event-id-survival-on-free",
+  "planPath": "plans/260818-0032-scale-ready-getbeam/phase-02-disk-and-event-id-survival-on-free.md",
+  "reviewer": "vc-code-reviewer",
+  "decision": "approved-with-concerns",
+  "verdict": "PASS_WITH_WARNINGS",
+  "rationale": "Phase 2 blast-radius code meets F1/F4/F10 as written: event_id required (empty/missing 400, 0 rows), UniqueConstraint (site_id, event_id) named uq_events_site_event_id with matching ON CONFLICT, no leftover ORM uq_events_event_id, no NOT NULL, alembic revises b7e3c9a4f215 (backfill then drop then unique), scheduler still 24 add_job with retention_purge next_run_time +75s, F4 tests POST with browser User-Agent. Independent prod SQL on hylcleqxlkdblibpdhhm: alembic_version=b7e3c9a4f215, only uq_events_event_id, 682 NULL event_ids — cook did not apply to Supabase. Concerns: DSN guard allows unknown APP_ENV (prod/staging/typo) against remote DSN; deploy must migrate before new ingest code or ON CONFLICT 500s; downgrade recreates global unique and cannot undo backfill.",
+  "timestamp": "2026-08-18T02:05:00+07:00",
+  "blockingFindings": [],
+  "nonBlockingFindings": [
+    "F10 DSN guard is allow-listed on local|development|test|ci only. APP_ENV=prod, staging, or a typo like produciton plus a remote DSN is allowed. config.py treats unknown env as production-strict; the alembic guard does the opposite. Fail-closed fix: abort unless (env in nonprod AND host local) OR (env == 'production').",
+    "Deploy ordering: new ingest uses on_conflict_do_nothing(index_elements=[site_id, event_id]). Prod still has only uq_events_event_id. Shipping API before c3f6a9d1e8b2 makes ingest raise (no matching unique). Apply migration first, then deploy code. Not expand-contract.",
+    "Migration downgrade drops uq_events_site_event_id then recreates global unique on event_id. After cross-site reuse that CREATE UNIQUE INDEX fails. Backfill is not reversed. Do not downgrade prod after F1 traffic.",
+    "PostgreSQL UNIQUE (site_id, event_id) still allows multiple NULLs per site. Ingest requires the field; column stays nullable by design. Residual until the deferred NOT NULL phase.",
+    "DSN guard does not treat ::1 or docker DNS names (postgres, host.docker.internal) as local. Intentional vs the localhost-only AC; operators must run alembic from the host against localhost:5433.",
+    "event_id min_length=1 does not strip: a single space passes. Empty string is tested and 400s. Low practical risk.",
+    "F10 retention deleted=0 is code-true (job always logs **result including deleted=0). No runtime proof in this cook that the job fired after boot. AST proves next_run_time only.",
+    "Execute-agent pytest 85+56 is not independently re-run by this review. Prod SQL and static unique/ON CONFLICT/nullable/revision checks are independent."
+  ],
+  "notes": "High-risk pack classes: schema/data migration + public ingest API. adversarial-validation.json is present under harness/phase-02/. Phase 1 harness files in the parent folder were not overwritten. Do not apply c3f6a9d1e8b2 with APP_ENV=local|development|test|ci. Operator apply with APP_ENV=production after backup; migrate then deploy. NOT NULL still deferred."
+}

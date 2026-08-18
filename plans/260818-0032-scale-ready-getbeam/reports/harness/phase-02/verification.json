@@ -1,0 +1,129 @@
+{
+  "task": "phase-02-disk-and-event-id-survival-on-free",
+  "planPath": "plans/260818-0032-scale-ready-getbeam/phase-02-disk-and-event-id-survival-on-free.md",
+  "tester": "vc-tester",
+  "mode": "TEST",
+  "timestamp": "2026-08-18T02:07:00+07:00",
+  "result": "PASS",
+  "status": "DONE",
+  "diffAware": {
+    "changedSource": [
+      "apps/api/schemas/events.py",
+      "apps/api/models/event.py",
+      "apps/api/routers/events.py",
+      "apps/api/jobs/scheduler.py",
+      "apps/api/migrations/env.py",
+      "apps/api/alembic_dsn_guard.py",
+      "apps/api/migrations/versions/c3f6a9d1e8b2_events_site_event_id_unique.py"
+    ],
+    "mappedTests": [
+      "tests/unit/test_alembic_env_dsn_guard.py (Strategy A — new guard)",
+      "tests/unit/test_scheduler_job_config.py (Strategy C — scheduler AST)",
+      "tests/integration/test_events_ingest.py (Strategy C — ingest F1/F4)",
+      "tests/integration/test_ingest_abuse_hardening.py (Strategy C — ingest fixtures)",
+      "tests/integration/test_aggregation_watermark_bootstrap.py (Strategy C — flag-off regression)"
+    ],
+    "unmapped": [
+      "glob tests/unit/test_*event* found only tests/unit/test_agent_fetch_events.py — agent-fetch, not ingest schema; not added to this gate"
+    ],
+    "notes": "Independent cook re-run. Prior reviewer verification.json treated execute-agent pytest as reported-not-re-run; this file replaces that with live counts."
+  },
+  "counts": {
+    "unitPassed": 32,
+    "unitFailed": 0,
+    "integrationPassed": 46,
+    "integrationFailed": 0,
+    "totalPassed": 78,
+    "totalFailed": 0,
+    "warnings": 2,
+    "breakdown": {
+      "tests/unit/test_alembic_env_dsn_guard.py": 18,
+      "tests/unit/test_scheduler_job_config.py": 14,
+      "tests/integration/test_events_ingest.py": 26,
+      "tests/integration/test_ingest_abuse_hardening.py": 16,
+      "tests/integration/test_aggregation_watermark_bootstrap.py": 4
+    }
+  },
+  "commands": [
+    {
+      "step": "1. Unit DSN guard + scheduler AST",
+      "command": ".venv\\Scripts\\python.exe -m pytest tests/unit/test_alembic_env_dsn_guard.py tests/unit/test_scheduler_job_config.py -q",
+      "result": "PASS",
+      "notes": "32 passed in 0.32s. Includes F10 unknown-env abort (produciton/staging/prod) and retention_purge next_run_time."
+    },
+    {
+      "step": "2. Integration ingest + abuse + watermark bootstrap",
+      "command": ".venv\\Scripts\\python.exe -m pytest tests/integration/test_events_ingest.py tests/integration/test_ingest_abuse_hardening.py tests/integration/test_aggregation_watermark_bootstrap.py -q",
+      "result": "PASS",
+      "notes": "46 passed, 2 warnings in 88.32s. Warnings are Redis asyncio GC 'Event loop is closed' — known noise per process/context/tests/all-tests.md, not failures."
+    },
+    {
+      "step": "3. Local alembic current only (no upgrade, no prod)",
+      "command": ".venv\\Scripts\\python.exe -m alembic -c apps/api/alembic.ini current",
+      "result": "PASS",
+      "notes": "Preflight: settings.database_url host=localhost port=5433 db=retarget_agent app_env=development contains_supabase=False. Output: c3f6a9d1e8b2 (head). No upgrade run. No prod DSN used."
+    },
+    {
+      "step": "4. aggregation_incremental_enabled still False",
+      "command": ".venv\\Scripts\\python.exe -c \"from apps.api.config import settings; print(settings.aggregation_incremental_enabled)\"",
+      "result": "PASS",
+      "notes": "Live settings.aggregation_incremental_enabled=False. Code default apps/api/config.py:127 is False. Phase 1 flag not flipped."
+    }
+  ],
+  "steps": [
+    {
+      "step": "Confirm Postgres :5433 and Redis :6379 listening",
+      "command": "Get-NetTCPConnection -LocalPort 5433,6379 -State Listen",
+      "result": "PASS",
+      "notes": "Both ports listening on :: and ::1."
+    },
+    {
+      "step": "Read-only local SQL after pytest teardown",
+      "command": "SELECT version_num FROM alembic_version; pg_class relname=events",
+      "result": "PASS",
+      "notes": "alembic_version=c3f6a9d1e8b2 on localhost:5433/retarget_agent. events table absent after tests/conftest.py drop_all teardown — expected. Unique constraint proven by live integration tests against ORM create_all, not leftover rows."
+    }
+  ],
+  "manualChecks": [
+    {
+      "check": "(a) F4 missing/empty event_id → 400 whole batch, 0 rows",
+      "result": "PASS",
+      "notes": "Empirical: test_missing_event_id_returns_400_zero_rows, test_empty_event_id_returns_400_zero_rows, test_one_missing_id_in_batch_rejects_whole_batch. Schema Field(..., min_length=1)."
+    },
+    {
+      "check": "(b) F1 unique (site_id, event_id); same id other site both insert; retry same site 204 no double pageview",
+      "result": "PASS",
+      "notes": "Empirical: test_retry_same_site_event_id_is_idempotent, test_same_event_id_different_site_inserts_both. ORM UniqueConstraint name=uq_events_site_event_id. ON CONFLICT index_elements=[site_id, event_id]."
+    },
+    {
+      "check": "(c) F10 retention logs deleted=0; next_run_time; alembic abort nonprod+prod DSN",
+      "result": "PASS_WITH_RESIDUAL",
+      "notes": "next_run_time AST proven (test_retention_purge_carries_next_run_time, offset below aggregation_sweep). DSN guard unit proven including typos produciton/staging/prod. deleted=0 is code-true (logger.info(..., **result) always includes deleted). Runtime job fire after boot NOT waited in this cook."
+    },
+    {
+      "check": "(d) aggregation_incremental_enabled still False",
+      "result": "PASS",
+      "notes": "Live settings False. Watermark bootstrap integration still passed under flag-off default."
+    },
+    {
+      "check": "(e) NO prod migration applied this tester run",
+      "result": "PASS",
+      "notes": "Tester only ran alembic current against localhost:5433. Did not upgrade. Did not touch Supabase."
+    }
+  ],
+  "findingProof": {
+    "F1": "EMPIRICALLY PROVEN — integration TestEventIdRequiredAndScoped retry + cross-site tests passed this run",
+    "F4": "EMPIRICALLY PROVEN — missing/empty/partial-batch 400 tests passed this run",
+    "F10-retention-next_run_time": "EMPIRICALLY PROVEN — AST unit tests passed (next_run_time +75s, offset < aggregation_sweep, 24 add_job)",
+    "F10-retention-deleted=0-runtime": "NOT PROVEN this cook — code logs **result including deleted; job was not observed firing",
+    "F10-dsn": "EMPIRICALLY PROVEN — 18 unit tests including unknown env (produciton/staging/prod) abort with 'prod DSN blocked'. Reviewer adversarial-validation.json still marks typo-bypass as not ruled out; current code+tests fail-close that path.",
+    "prod-untouched": "This tester did not query prod. Local current is c3f6a9d1e8b2. No upgrade command was run."
+  },
+  "riskEvidence": {
+    "riskGatePath": "plans/260818-0032-scale-ready-getbeam/reports/harness/phase-02/risk-gate.json",
+    "mustStopBeforeFinalize": true,
+    "reviewDecisionPresent": true,
+    "adversarialValidationPresent": true,
+    "notes": "High-risk schema + public ingest. Tester gates green. Finalize still blocked on operator: apply c3f6a9d1e8b2 to prod with APP_ENV=production after backup, migrate before deploy. Do not Phase 3 in this cook."
+  }
+}

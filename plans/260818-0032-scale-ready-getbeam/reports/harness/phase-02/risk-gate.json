@@ -1,0 +1,15 @@
+{
+  "task": "phase-02-disk-and-event-id-survival-on-free",
+  "planPath": "plans/260818-0032-scale-ready-getbeam/phase-02-disk-and-event-id-survival-on-free.md",
+  "riskClass": "schema/data migration",
+  "riskLevel": "high",
+  "riskClasses": [
+    "schema/data migration",
+    "public API or external contract"
+  ],
+  "workDescription": "Phase 2: require ingest event_id (400 whole batch), unique (site_id, event_id) replacing global uq_events_event_id, alembic backfill NULLs then composite unique, DSN guard aborting nonprod+remote, retention_purge boot offset. Column stays nullable. Prod migration not applied this cook.",
+  "approver": "vc-code-reviewer",
+  "mustStopBeforeFinalize": true,
+  "humanApprovalRequired": true,
+  "why": "Schema change on events (largest table) plus a public unauthenticated ingest contract change (missing event_id now 400). Operator must apply c3f6a9d1e8b2 with APP_ENV=production after backup, and must migrate before deploying the new ON CONFLICT target or ingest 500s. Guard typo-bypass is a residual concern."
+}

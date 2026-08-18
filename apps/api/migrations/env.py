@@ -26,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from apps.api.alembic_dsn_guard import assert_safe_alembic_dsn  # noqa: E402
 from apps.api.config import settings  # noqa: E402
 from apps.api.models.database import Base  # noqa: E402
 import apps.api.main  # noqa: E402,F401  — registers every model on Base.metadata
@@ -48,6 +49,7 @@ def _connect_args() -> dict:
 
 def run_migrations_offline() -> None:
     """Emit SQL to stdout without a DB connection."""
+    assert_safe_alembic_dsn(settings.app_env, settings.database_url)
     context.configure(
         url=settings.database_url,
         target_metadata=target_metadata,
@@ -70,6 +72,7 @@ def _do_run_migrations(connection: Connection) -> None:
 
 
 async def run_migrations_online() -> None:
+    assert_safe_alembic_dsn(settings.app_env, settings.database_url)
     connectable = create_async_engine(
         settings.database_url,
         poolclass=pool.NullPool,

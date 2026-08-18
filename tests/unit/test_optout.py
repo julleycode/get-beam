@@ -99,11 +99,11 @@ class TestEventSchemaDefault:
     def test_optout_defaults_false(self):
         from apps.api.schemas.events import Event
 
-        evt = Event(type="pageview", ts=datetime.now(timezone.utc))
+        evt = Event(type="pageview", event_id="eid-optout-default", ts=datetime.now(timezone.utc))
         assert evt.optout is False
 
     def test_optout_accepts_true(self):
         from apps.api.schemas.events import Event
 
-        evt = Event(type="pageview", ts=datetime.now(timezone.utc), optout=True)
+        evt = Event(type="pageview", event_id="eid-optout-true", ts=datetime.now(timezone.utc), optout=True)
         assert evt.optout is True

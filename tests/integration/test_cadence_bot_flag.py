@@ -11,6 +11,7 @@ aggregation).
 """
 
 from datetime import datetime, timedelta
+import uuid as uuidlib
 
 import pytest
 import pytest_asyncio
@@ -128,6 +129,7 @@ async def test_ingest_unaffected_by_new_module(test_client, test_db, test_site_i
         "events": [
             {
                 "type": "pageview",
+                "event_id": uuidlib.uuid4().hex,
                 "url": "https://cadence-test.example.com/",
                 "page_path": "/",
                 "page_title": "Home",

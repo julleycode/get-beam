@@ -305,6 +305,7 @@ class TestOpenClickTrackingAndStats:
             "events": [
                 {
                     "type": "pageview",
+                    "event_id": uuidlib.uuid4().hex,
                     "url": f"https://startbeam.example.com/pricing?_bid=x&_tp={tp.id}",
                     "page_path": "/pricing",
                     "user_agent": _BROWSER_UA,
@@ -370,6 +371,7 @@ class TestOpenClickTrackingAndStats:
             "events": [
                 {
                     "type": "pageview",
+                    "event_id": uuidlib.uuid4().hex,
                     "url": f"https://other.example.com/?_tp={tp.id}",
                     "page_path": "/",
                     "user_agent": _BROWSER_UA,

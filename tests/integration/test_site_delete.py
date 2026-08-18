@@ -217,6 +217,7 @@ class TestSiteIdReclaim:
             "events": [
                 {
                     "type": "pageview",
+                    "event_id": uuidlib.uuid4().hex,
                     "url": "https://example.com/",
                     "ts": "2026-05-27T00:00:00",
                 }

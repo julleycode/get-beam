@@ -5,13 +5,18 @@ Uses test_client and test_db from conftest.py which auto-create tables.
 """
 
 import json
+import uuid as uuidlib
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 # Realistic browser UA to avoid bot filter (is_bot returns True for empty UA)
 _BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+
+
+def _eid() -> str:
+    return uuidlib.uuid4().hex
 
 pytestmark = pytest.mark.integration
 
@@ -51,7 +56,7 @@ class TestEventIngestion:
             "visitor_id": "test-visitor-001",
             "events": [
                 {
-                    "type": "pageview",
+                    "type": "pageview", "event_id": _eid(),
                     "url": "https://test-ingest.example.com/",
                     "page_path": "/",
                     "page_title": "Home",
@@ -63,7 +68,7 @@ class TestEventIngestion:
         resp = await test_client.post(
             "/api/v1/events/ingest",
             content=json.dumps(payload),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA},
         )
         assert resp.status_code == 204
 
@@ -75,7 +80,7 @@ class TestEventIngestion:
             "visitor_id": "bot-visitor",
             "events": [
                 {
-                    "type": "pageview",
+                    "type": "pageview", "event_id": _eid(),
                     "url": "https://example.com/",
                     "ts": "2026-05-27T00:00:00",
                 }
@@ -99,7 +104,7 @@ class TestEventIngestion:
             "visitor_id": "test-visitor",
             "events": [
                 {
-                    "type": "pageview",
+                    "type": "pageview", "event_id": _eid(),
                     "url": "https://example.com/",
                     "ts": "2026-05-27T00:00:00",
                 }
@@ -124,7 +129,7 @@ class TestEventIngestion:
             "visitor_id": "test-visitor",
             "events": [
                 {
-                    "type": "pageview",
+                    "type": "pageview", "event_id": _eid(),
                     "url": "https://example.com/",
                     "ts": "2026-05-27T00:00:00",
                 }
@@ -160,7 +165,7 @@ class TestEventIngestion:
             "visitor_id": "beacon-visitor-001",
             "events": [
                 {
-                    "type": "pageview",
+                    "type": "pageview", "event_id": _eid(),
                     "url": "https://test-ingest.example.com/pricing",
                     "ts": "2026-05-27T00:00:00",
                 }
@@ -169,7 +174,7 @@ class TestEventIngestion:
         resp = await test_client.post(
             "/api/v1/events/ingest",
             content=json.dumps(payload),
-            headers={"Content-Type": "text/plain"},
+            headers={"Content-Type": "text/plain", "User-Agent": _BROWSER_UA},
         )
         assert resp.status_code == 204
 
@@ -195,7 +200,7 @@ class TestEmailCaptureSource:
                 "site_id": test_site_id,
                 "visitor_id": "cap-src-001",
                 "events": [{
-                    "type": "form_email_capture",
+                    "type": "form_email_capture", "event_id": _eid(),
                     "email": "Buyer@Shop.com",
                     "source": "newsletter",
                     "ts": "2026-06-30T00:00:00",
@@ -223,7 +228,7 @@ class TestEmailCaptureSource:
                 "site_id": test_site_id,
                 "visitor_id": "cap-src-002",
                 "events": [{
-                    "type": "form_email_capture",
+                    "type": "form_email_capture", "event_id": _eid(),
                     "email": "x@shop.com",
                     "ts": "2026-06-30T00:00:00",
                 }],
@@ -264,7 +269,7 @@ class TestAgentDetection:
             "site_id": test_site_id,
             "visitor_id": "agent-visitor-ac1",
             "events": [{
-                "type": "pageview",
+                "type": "pageview", "event_id": _eid(),
                 "url": "https://test-ingest.example.com/pricing",
                 "page_path": "/pricing",
                 "ts": "2026-05-27T00:00:00",
@@ -308,7 +313,7 @@ class TestAgentDetection:
             "site_id": test_site_id,
             "visitor_id": "agent-visitor-ac2",
             "events": [{
-                "type": "pageview",
+                "type": "pageview", "event_id": _eid(),
                 "url": "https://test-ingest.example.com/",
                 "page_path": "/",
                 "ts": "2026-05-27T00:00:00",
@@ -333,7 +338,7 @@ class TestAgentDetection:
             "site_id": test_site_id,
             "visitor_id": "googlebot-visitor",
             "events": [{
-                "type": "pageview",
+                "type": "pageview", "event_id": _eid(),
                 "url": "https://test-ingest.example.com/",
                 "page_path": "/",
                 "ts": "2026-05-27T00:00:00",
@@ -377,7 +382,7 @@ class TestAgentDetection:
             "site_id": test_site_id,
             "visitor_id": "agent-visitor-ac4",
             "events": [{
-                "type": "pageview",
+                "type": "pageview", "event_id": _eid(),
                 "url": "https://test-ingest.example.com/docs",
                 "page_path": "/docs",
                 "ts": "2026-05-27T00:00:00",
@@ -413,7 +418,7 @@ class TestAgentDetection:
             "site_id": test_site_id,
             "visitor_id": "agent-visitor-off",
             "events": [{
-                "type": "pageview",
+                "type": "pageview", "event_id": _eid(),
                 "url": "https://test-ingest.example.com/",
                 "page_path": "/",
                 "ts": "2026-05-27T00:00:00",
@@ -444,7 +449,7 @@ class TestCookieFpPhase2:
             "site_id": test_site_id,
             "visitor_id": "cors-cred-visitor",
             "events": [{
-                "type": "pageview",
+                "type": "pageview", "event_id": _eid(),
                 "url": "https://lab.example.com/",
                 "page_path": "/",
                 "ts": "2026-05-27T00:00:00",
@@ -490,7 +495,7 @@ class TestCookieFpPhase2:
             "site_id": test_site_id,
             "visitor_id": vid,
             "events": [{
-                "type": "pageview",
+                "type": "pageview", "event_id": _eid(),
                 "url": "https://test-ingest.example.com/",
                 "page_path": "/",
                 "ts": "2026-05-27T00:00:00",
@@ -530,7 +535,7 @@ class TestCookieFpPhase2:
             "site_id": site_id,
             "visitor_id": wiped,
             "events": [{
-                "type": "pageview",
+                "type": "pageview", "event_id": _eid(),
                 "url": "https://test-ingest.example.com/",
                 "page_path": "/",
                 "ts": "2026-05-27T00:00:00",
@@ -571,7 +576,7 @@ class TestCookieFpPhase2:
             "site_id": site_id,
             "visitor_id": "test-visitor",
             "events": [{
-                "type": "pageview",
+                "type": "pageview", "event_id": _eid(),
                 "url": "https://lab.example.com/",
                 "ts": "2026-05-27T00:00:00",
             }],
@@ -609,7 +614,7 @@ class TestCookieFpPhase2:
             "site_id": test_site_id,
             "visitor_id": vid,
             "events": [{
-                "type": "pageview",
+                "type": "pageview", "event_id": _eid(),
                 "url": "https://test-ingest.example.com/pricing",
                 "page_path": "/pricing",
                 "ts": "2026-05-27T00:00:00",
@@ -673,7 +678,7 @@ class TestUnknownSiteObservability:
             "visitor_id": "test-visitor",
             "events": [
                 {
-                    "type": "pageview",
+                    "type": "pageview", "event_id": _eid(),
                     "url": "https://example.com/",
                     "ts": "2026-05-27T00:00:00",
                 }
@@ -719,7 +724,7 @@ class TestUnknownSiteObservability:
             "visitor_id": "test-visitor",
             "events": [
                 {
-                    "type": "pageview",
+                    "type": "pageview", "event_id": _eid(),
                     "url": "https://example.com/",
                     "ts": "2026-05-27T00:00:00",
                 }
@@ -732,3 +737,245 @@ class TestUnknownSiteObservability:
         )
         assert resp.status_code == 403
         assert resp.content == b""
+
+
+@pytest_asyncio.fixture
+async def second_ingest_site_id(test_db, test_site_id):
+    """Second site for cross-tenant event_id replay (F1)."""
+    from apps.api.models.user import User
+    from apps.api.models.site import Site
+
+    result = await test_db.execute(select(User).where(User.email == "test-ingest@test.com"))
+    user = result.scalar_one()
+    site_id = "test_site_ingest_b"
+    result = await test_db.execute(select(Site).where(Site.site_id == site_id))
+    if not result.scalar_one_or_none():
+        test_db.add(
+            Site(
+                site_id=site_id,
+                user_id=user.id,
+                name="Test Site B",
+                url="https://test-ingest-b.example.com",
+            )
+        )
+        await test_db.flush()
+    await test_db.commit()
+    return site_id
+
+
+class TestEventIdRequiredAndScoped:
+    """F4: missing event_id → 400 whole batch, 0 INSERT.
+    F1: unique is (site_id, event_id); same id on two sites both persist.
+    """
+
+    @pytest.mark.asyncio
+    async def test_missing_event_id_returns_400_zero_rows(
+        self, test_client, test_site_id, test_db
+    ):
+        from apps.api.models.event import Event
+
+        async def _count() -> int:
+            return int(
+                (
+                    await test_db.execute(
+                        select(func.count()).select_from(Event).where(
+                            Event.site_id == test_site_id
+                        )
+                    )
+                ).scalar_one()
+            )
+
+        before = await _count()
+        payload = {
+            "site_id": test_site_id,
+            "visitor_id": "missing-eid-visitor",
+            "events": [
+                {
+                    "type": "pageview",
+                    "url": "https://test-ingest.example.com/",
+                    "page_path": "/",
+                    "ts": "2026-05-27T00:00:00",
+                }
+            ],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA},
+        )
+        assert resp.status_code == 400
+        test_db.expire_all()
+        assert await _count() == before
+
+    @pytest.mark.asyncio
+    async def test_empty_event_id_returns_400_zero_rows(
+        self, test_client, test_site_id, test_db
+    ):
+        from apps.api.models.event import Event
+
+        async def _count() -> int:
+            return int(
+                (
+                    await test_db.execute(
+                        select(func.count()).select_from(Event).where(
+                            Event.site_id == test_site_id
+                        )
+                    )
+                ).scalar_one()
+            )
+
+        before = await _count()
+        payload = {
+            "site_id": test_site_id,
+            "visitor_id": "empty-eid-visitor",
+            "events": [
+                {
+                    "type": "pageview",
+                    "event_id": "",
+                    "url": "https://test-ingest.example.com/",
+                    "ts": "2026-05-27T00:00:00",
+                }
+            ],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA},
+        )
+        assert resp.status_code == 400
+        test_db.expire_all()
+        assert await _count() == before
+
+    @pytest.mark.asyncio
+    async def test_one_missing_id_in_batch_rejects_whole_batch(
+        self, test_client, test_site_id, test_db
+    ):
+        from apps.api.models.event import Event
+
+        async def _count() -> int:
+            return int(
+                (
+                    await test_db.execute(
+                        select(func.count()).select_from(Event).where(
+                            Event.site_id == test_site_id
+                        )
+                    )
+                ).scalar_one()
+            )
+
+        before = await _count()
+        payload = {
+            "site_id": test_site_id,
+            "visitor_id": "partial-eid-visitor",
+            "events": [
+                {
+                    "type": "pageview",
+                    "event_id": _eid(),
+                    "url": "https://test-ingest.example.com/a",
+                    "ts": "2026-05-27T00:00:00",
+                },
+                {
+                    "type": "pageview",
+                    "url": "https://test-ingest.example.com/b",
+                    "ts": "2026-05-27T00:00:01",
+                },
+            ],
+        }
+        resp = await test_client.post(
+            "/api/v1/events/ingest",
+            content=json.dumps(payload),
+            headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA},
+        )
+        assert resp.status_code == 400
+        test_db.expire_all()
+        assert await _count() == before
+
+    @pytest.mark.asyncio
+    async def test_retry_same_site_event_id_is_idempotent(
+        self, test_client, test_site_id, test_db
+    ):
+        from apps.api.models.event import Event
+
+        eid = "retry-same-site-event-id-001"
+        vid = "retry-idempotent-visitor"
+        payload = {
+            "site_id": test_site_id,
+            "visitor_id": vid,
+            "events": [
+                {
+                    "type": "pageview",
+                    "event_id": eid,
+                    "url": "https://test-ingest.example.com/",
+                    "page_path": "/",
+                    "ts": "2026-05-27T00:00:00",
+                }
+            ],
+        }
+        headers = {"Content-Type": "application/json", "User-Agent": _BROWSER_UA}
+        first = await test_client.post(
+            "/api/v1/events/ingest", content=json.dumps(payload), headers=headers
+        )
+        second = await test_client.post(
+            "/api/v1/events/ingest", content=json.dumps(payload), headers=headers
+        )
+        assert first.status_code == 204
+        assert second.status_code == 204
+        test_db.expire_all()
+        rows = (
+            await test_db.execute(
+                select(Event).where(
+                    Event.site_id == test_site_id,
+                    Event.event_id == eid,
+                )
+            )
+        ).scalars().all()
+        assert len(rows) == 1
+        pageviews = (
+            await test_db.execute(
+                select(Event).where(
+                    Event.site_id == test_site_id,
+                    Event.visitor_id == vid,
+                    Event.event_type == "pageview",
+                )
+            )
+        ).scalars().all()
+        assert len(pageviews) == 1
+
+    @pytest.mark.asyncio
+    async def test_same_event_id_different_site_inserts_both(
+        self, test_client, test_site_id, second_ingest_site_id, test_db
+    ):
+        from apps.api.models.event import Event
+
+        eid = "cross-tenant-event-id-001"
+
+        async def _post(site_id: str, visitor_id: str):
+            payload = {
+                "site_id": site_id,
+                "visitor_id": visitor_id,
+                "events": [
+                    {
+                        "type": "pageview",
+                        "event_id": eid,
+                        "url": "https://example.com/",
+                        "page_path": "/",
+                        "ts": "2026-05-27T00:00:00",
+                    }
+                ],
+            }
+            return await test_client.post(
+                "/api/v1/events/ingest",
+                content=json.dumps(payload),
+                headers={"Content-Type": "application/json", "User-Agent": _BROWSER_UA},
+            )
+
+        a = await _post(test_site_id, "cross-tenant-a")
+        b = await _post(second_ingest_site_id, "cross-tenant-b")
+        assert a.status_code == 204, a.text
+        assert b.status_code == 204, b.text
+        test_db.expire_all()
+        rows = (
+            await test_db.execute(select(Event).where(Event.event_id == eid))
+        ).scalars().all()
+        assert len(rows) == 2
+        assert {row.site_id for row in rows} == {test_site_id, second_ingest_site_id}

@@ -221,3 +221,38 @@ class TestAC13IntervalJobHardening:
             f"expected 21 interval calls, found {len(interval)}; if a job was "
             "added or removed, update E20's arithmetic — do not relax this gate"
         )
+
+
+class TestRetentionPurgeBootOffset:
+    """F10 — retention_purge must fire shortly after boot, not wait a full interval.
+
+    Do NOT add a 25th add_job; only set next_run_time on the existing job.
+    Offset must stay below aggregation_sweep (90s) so that heaviest job
+    remains last in the boot burst.
+    """
+
+    def test_retention_purge_carries_next_run_time(self):
+        call = _job("retention_purge")
+        assert "next_run_time" in _kwargs(call), (
+            "retention_purge must set next_run_time (F10); a 24h interval job "
+            "on a process that redeploys more often than the interval never fires"
+        )
+
+    def test_retention_purge_offset_is_below_aggregation_sweep(self):
+        offsets: dict[str, int] = {}
+        for call in _add_job_calls():
+            nrt = _kwargs(call).get("next_run_time")
+            if nrt is None:
+                continue
+            job_id = _kwargs(call)["id"].value
+            for node in ast.walk(nrt):
+                if (
+                    isinstance(node, ast.Call)
+                    and getattr(node.func, "id", "") == "timedelta"
+                ):
+                    for kw in node.keywords:
+                        if kw.arg == "seconds" and isinstance(kw.value, ast.Constant):
+                            offsets[job_id] = kw.value.value
+        assert "retention_purge" in offsets
+        assert "aggregation_sweep" in offsets
+        assert offsets["retention_purge"] < offsets["aggregation_sweep"]

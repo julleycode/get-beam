@@ -260,6 +260,7 @@ class TestIngestStaysNonBlocking:
             "events": [
                 {
                     "type": "utm_identify",
+                    "event_id": uuidlib.uuid4().hex,
                     "url": f"https://sweep.example.com/?_bid={bid}",
                     "page_path": "/",
                     "bid": bid,

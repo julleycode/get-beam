@@ -1,0 +1,48 @@
+{
+  "task": "phase-02-disk-and-event-id-survival-on-free",
+  "planPath": "plans/260818-0032-scale-ready-getbeam/phase-02-disk-and-event-id-survival-on-free.md",
+  "reviewer": "vc-code-reviewer",
+  "timestamp": "2026-08-18T02:05:00+07:00",
+  "scenarios": [
+    {
+      "scenario": "Public ingest omits event_id or sends empty string to skip idempotency / insert without a key",
+      "ruled_out": true,
+      "rationale": "Pydantic Field(..., min_length=1) on Event.event_id. _parse_event_batch EventBatch(**data) raises; ingest maps Exception to 400 before any INSERT. Tests cover missing, empty, and one-missing-in-batch with User-Agent so is_bot('') cannot mask the 400."
+    },
+    {
+      "scenario": "Replay the same event_id against another tenant to occupy or suppress that site's row (cross-tenant unique)",
+      "ruled_out": true,
+      "rationale": "UniqueConstraint is (site_id, event_id). ON CONFLICT target is the same pair. Same id on two sites inserts both; integration test asserts two rows."
+    },
+    {
+      "scenario": "Retry / proxy replay doubles pageviews for the same site",
+      "ruled_out": true,
+      "rationale": "pg_insert ON CONFLICT DO NOTHING on (site_id, event_id). Retry test expects 204 twice and one pageview row."
+    },
+    {
+      "scenario": "Local cook / APP_ENV=development accidentally alembic-upgrades Supabase prod",
+      "ruled_out": true,
+      "rationale": "assert_safe_alembic_dsn aborts when env in {local,development,test,ci} and host not in {localhost,127.0.0.1}, online and offline. Independent SQL: prod still b7e3c9a4f215, uq_events_event_id present, 682 NULLs, no uq_events_site_event_id."
+    },
+    {
+      "scenario": "APP_ENV typo or shorthand (prod, staging, produciton) plus DATABASE_URL pointing at Supabase still runs alembic",
+      "ruled_out": false,
+      "rationale": "Guard only blocks the four known nonprod names. Unknown env + remote host is allowed. This is the opposite of config.py validate_production (unknown env is production-strict). Residual High. Fail-closed: allow remote DSN only when env == 'production'."
+    },
+    {
+      "scenario": "Deploy new API to Railway before applying c3f6a9d1e8b2 — ingest 500 because ON CONFLICT has no matching unique",
+      "ruled_out": false,
+      "rationale": "Prod unique is still uq_events_event_id on event_id only. New code specifies index_elements [site_id, event_id]. Postgres rejects the INSERT. Code then logger.exception + rollback + re-raise. Operator must migrate first, then deploy. Not expand-contract."
+    },
+    {
+      "scenario": "Insert NULL event_id after unique is applied (bypass ingest schema via another writer) to create duplicate unconstrained rows",
+      "ruled_out": false,
+      "rationale": "Column stays nullable this phase (accepted). PostgreSQL UNIQUE treats NULLs as distinct, so multiple (site_id, NULL) rows are allowed. Ingest path cannot send NULL. Residual until deferred NOT NULL. Do not treat unique alone as a NULL-proof idempotency guarantee."
+    },
+    {
+      "scenario": "Alembic downgrade after cross-site event_id reuse restores global unique and fails or collides",
+      "ruled_out": false,
+      "rationale": "downgrade() drops composite unique then create_index uq_events_event_id unique on event_id. Duplicate event_ids across sites make that index fail. Backfill UUIDs are not reverted. Do not downgrade prod after F1 traffic."
+    }
+  ]
+}

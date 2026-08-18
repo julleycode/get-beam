@@ -67,20 +67,17 @@ async def _retention_purge_job() -> None:
     """
     try:
         result = await purge_events_older_than()
-        if result.get("deleted"):
-            logger.info("retention_purge_job_complete", **result)
+        logger.info("retention_purge_job_complete", **result)
     except Exception:
         logger.exception("retention_purge_crashed")
     try:
         agent_result = await purge_agent_fetch_events_older_than()
-        if agent_result.get("deleted"):
-            logger.info("agent_fetch_retention_purge_job_complete", **agent_result)
+        logger.info("agent_fetch_retention_purge_job_complete", **agent_result)
     except Exception:
         logger.exception("agent_fetch_retention_purge_crashed")
     try:
         log_result = await purge_request_logs_older_than()
-        if log_result.get("deleted"):
-            logger.info("request_log_retention_purge_job_complete", **log_result)
+        logger.info("request_log_retention_purge_job_complete", **log_result)
     except Exception:
         logger.exception("request_log_retention_purge_crashed")
 
@@ -740,6 +737,11 @@ def start_scheduler() -> None:
         # session plus an inner delete session — retention.py:116/122, :177/183).
         # That 2-connection reservation is documented in the config.py 4b pool
         # math; the wide jitter keeps it off the boot burst.
+        # Boot offset (F10): interval jobs first-fire at +interval, and a
+        # 24h job on a process that redeploys more often never runs. Keep
+        # the offset below aggregation_sweep's 90s so that heaviest job
+        # stays last in the boot burst (AST gate).
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=75),
         jitter=600,
         misfire_grace_time=3600,
     )

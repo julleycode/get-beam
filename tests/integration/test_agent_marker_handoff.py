@@ -89,7 +89,7 @@ def _pageview(site_id, visitor_id, url):
         "visitor_id": visitor_id,
         "events": [
             {
-                "type": "pageview",
+                "type": "pageview", "event_id": str(uuid.uuid4()),
                 "url": url,
                 "page_path": "/pricing",
                 "page_title": "Pricing",
