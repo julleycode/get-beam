@@ -9,7 +9,7 @@ complexity: COMPLEX
 # Capacity Hardening — Beam API
 
 **Date**: 25-07-26
-**Status**: ACTIVE — planned, not started
+**Status**: ACTIVE — code W1/W4d landed; remaining **operator flag flips** owned by `plans/260818-0032-scale-ready-getbeam/` (2026-08-18). Do not start a second EXECUTE of W1.
 **Complexity**: COMPLEX (5 phases: Phase 0 pre-conditions + 4 workstreams)
 
 ## Phase Completion Rules

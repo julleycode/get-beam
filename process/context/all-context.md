@@ -3,12 +3,12 @@ name: context:all-context
 description: "Root context entrypoint — architecture, API surface, conventions, env, feature routing"
 keywords: architecture, api, visitors, privacy, do_not_resolve, clear-privacy-hold, identity, monorepo, env, conventions, routing
 related: [context:all-tests, context:all-planning]
-date: 10-08-26
+date: 18-08-26
 ---
 
 # Beam - All Context
 
-Last updated: 2026-08-11
+Last updated: 2026-08-18
 
 This file is the root context entrypoint for the repo.
 
@@ -78,9 +78,10 @@ For most substantial tasks:
 | test planning or verification | `all-context.md`, `tests/all-tests.md` | `TESTING.md` (repo root) for docker setup |
 | debugging backend/tests | `all-context.md`, `tests/all-tests.md` | the failing service/router source |
 | AI / agent-layer work | `all-context.md` (AI Layer section below) | `apps/api/services/gemini_client.py`, `apps/api/agents/` |
+| GetBeam PROD topology (web/API/DB) | `docs/deployment-guide.md` §Production | Live 18-08-26: Vercel `retarget-agent` → `getbeam.fyi`; Railway `retarget-agent` → `api.getbeam.fyi`; Supabase `hylcleqxlkdblibpdhhm`. Journal: `docs/journals/260818-0038-getbeam-prod-vs-splittrip-lab.md`. |
 | Beam Lab / edge AI detection | `docs/beam-lab-resume.md` | `docs/beam-lab-team-brief.md` (team talk), `docs/agent-detection-architecture.md` §5d, `docs/journals/260801-0051-beam-lab-soft-serve-bfm.md`, `infra/cloudflare/beam-lab/` |
 | Supabase prod DB (`retarget-agent`) | `docs/supabase-retarget-agent.md` | MCP + IDE: project ref **`hylcleqxlkdblibpdhhm`**. Never use `buildtolaunch` / `supabase-fuchsia-book`. |
-| Agent fetch beacon Worker (splittrip) | `infra/cloudflare/agent-beacon-worker/README.md` | Cloudflare account Worker **`beam-agent-beacon-splittrip`** (id `9e74d042…`); source `infra/cloudflare/agent-beacon-worker/`; deploy `npx wrangler deploy --env splittrip`. MCP get/build/push MUST use this Worker — not `quota-tracker`. |
+| Agent fetch beacon Worker (splittrip **lab**, not GetBeam PROD) | `infra/cloudflare/agent-beacon-worker/README.md` | Route **only** `splittrip.nhantown.com/*` → `beam-api.nhantown.com`. Script `beam-agent-beacon-splittrip` (id `9e74d042…`). GetBeam PROD beacon is Vercel middleware on `getbeam.fyi`, not this Worker. MCP deploy of the lab Worker: `--env splittrip`. Do not target `quota-tracker`. |
 | visitor identity / enrichment | `all-context.md` | `process/features/visitors-identity/_GUIDE.md` |
 | segments / campaigns / outreach | `all-context.md` | `process/features/campaigns-outreach/_GUIDE.md` |
 | billing / quotas | `all-context.md` | `process/features/billing/_GUIDE.md` |
@@ -363,9 +364,11 @@ getbeam/
 - **Email:** SendGrid (Resend deprecated) + optional Connect-Gmail OAuth send
 - **Identity/enrichment providers:** RB2B, Leadpipe, Capturify, People Data Labs, ipinfo, Hunter, Apollo, Proxycurl, TwitterAPI.io — all waterfall-gated, budget-capped, toggleable via env
 - **Billing:** Gumroad (active MoR, URL-token webhook), Stripe + Lemon Squeezy legacy
-- **Hosting:** Railway (api), pixel via CDN; browser automation via Playwright (scraping + e2e)
-- **Supabase (prod Postgres, pinned 09-08-26):** project **`retarget-agent`**, ref/id **`hylcleqxlkdblibpdhhm`**, region `ap-southeast-1`, API `https://hylcleqxlkdblibpdhhm.supabase.co`, host `db.hylcleqxlkdblibpdhhm.supabase.co`. MCP `project_id` MUST be this ref. Local Docker PG remains `localhost:5433` for non-prod. IDE connect steps: `docs/supabase-retarget-agent.md`.
-- **Cloudflare Worker (agent fetch beacon, pinned 09-08-26):** live script name **`beam-agent-beacon-splittrip`** (id `9e74d04215224c4ab2cecc3e65939d21`), source `infra/cloudflare/agent-beacon-worker/`, wrangler env `splittrip`, route `splittrip.nhantown.com/*`. Use this name for MCP Workers get/list/builds and for `wrangler deploy --env splittrip`. Do not target `quota-tracker`. Details: `infra/cloudflare/agent-beacon-worker/README.md`.
+- **Hosting (GetBeam PROD, live MCP 18-08-26):** Web = **Vercel** project `retarget-agent` (`prj_w9iKlPGLYSJzDvvm8G5U9OAEqWOl`, team `tranthaiwork-droid's projects`) on `getbeam.fyi` / `www.getbeam.fyi`, Git `julleycode/get-beam` auto-deploy `main`. API = **Railway** project `retarget-agent` (`d6ab9c4e-8fd5-4066-8fec-34fb4788becd`) custom domain `api.getbeam.fyi` ACTIVE + Redis private on Railway. Cloudflare in front of `getbeam.fyi` is DNS/WAF only — origin is Vercel (`x-vercel-id`), not Cloudflare Pages. Pixel CDN = Worker `beam-pixel` → `pixel.getbeam.fyi` (`apps/pixel/wrangler.toml`); that script is **not** on the Cloudflare MCP account that lists `beam-agent-beacon-splittrip`. Playwright for scraping + e2e. Repo has no `vercel.json` / `.vercel/` — the Git link lives on the Vercel dashboard. Vercel deploys from GitHub author `julleycode` go READY; commits from `nhantochi95` are often **BLOCKED**.
+- **Supabase (prod Postgres, pinned 09-08-26, org re-checked 18-08-26):** project **`retarget-agent`**, ref/id **`hylcleqxlkdblibpdhhm`**, region `ap-southeast-1`, API `https://hylcleqxlkdblibpdhhm.supabase.co`, host `db.hylcleqxlkdblibpdhhm.supabase.co`. Org slug `vercel_icfg_…` = Vercel Marketplace, not a standalone Supabase org. MCP `project_id` MUST be this ref. Local Docker PG remains `localhost:5433` for non-prod. IDE connect steps: `docs/supabase-retarget-agent.md`.
+- **Agent fetch beacon — two paths, do not merge (pinned 18-08-26):**
+  - **GetBeam PROD (`getbeam.fyi`):** Vercel Edge middleware `apps/web/src/middleware.ts` → `apps/web/src/lib/fetch-beacon.ts` → POST `https://api.getbeam.fyi/api/v1/agents/fetch-beacon`. Env on Vercel: `BEAM_FETCH_BEACON_SECRET`, `BEAM_API_BASE`, `BEAM_SITE_ID`.
+  - **Lab only:** Cloudflare Worker **`beam-agent-beacon-splittrip`** (id `9e74d04215224c4ab2cecc3e65939d21`), source `infra/cloudflare/agent-beacon-worker/`, `--env splittrip`, route **only** `splittrip.nhantown.com/*`, `BEAM_API_BASE=https://beam-api.nhantown.com`, `BEAM_SITE_ID=site_e3a2c56e01ed`. This is a test customer site, **not** GetBeam PROD. MCP get/build/push of that lab script must use this name — not `quota-tracker`. Details: `infra/cloudflare/agent-beacon-worker/README.md`.
 
 ## AI Layer (agentic-lite, shipped 20-07-26)
 
@@ -385,10 +388,12 @@ Consumers: `agents/segmenter.py` + `agents/campaign_planner.py` (JSON repair), `
 Detects AI-agent visits (GPTBot, PerplexityBot, ClaudeBot, etc.) at ingest and keeps them
 structurally separate from human Visitor/Event data, never as a targetable outreach contact:
 
-- **Edge beacon Worker (customer-site path):** Cloudflare Worker **`beam-agent-beacon-splittrip`** —
-  source `infra/cloudflare/agent-beacon-worker/` (`wrangler.toml` base name `beam-agent-beacon` +
-  `--env splittrip`). This is the account script to get/build/push for fetch-beacon data on
-  `splittrip.nhantown.com`. Separate from Beam Lab Pages (`infra/cloudflare/beam-lab/`).
+- **Fetch-beacon paths (do not merge):** GetBeam PROD uses Vercel Edge middleware on `getbeam.fyi`
+  (`apps/web/src/middleware.ts`). The Cloudflare Worker **`beam-agent-beacon-splittrip`** is the
+  **lab** customer-site path only (`splittrip.nhantown.com` → `beam-api.nhantown.com`), source
+  `infra/cloudflare/agent-beacon-worker/` (`wrangler.toml` base name `beam-agent-beacon` +
+  `--env splittrip`). Separate from Beam Lab Pages (`infra/cloudflare/beam-lab/`). MCP get/build/push
+  of the lab Worker must use `beam-agent-beacon-splittrip`, not `quota-tracker`.
 - `apps/api/services/agent_classifier.py` — UA-pattern classifier, drop-vs-classify token split
 - `apps/api/models/agent_visit.py` — dedicated `agent_visits` rollup table (one row per
   site/vendor/token tuple), never joined with `Visitor`/`Event`
