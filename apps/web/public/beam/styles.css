@@ -161,7 +161,26 @@ nav.top {
 .btn-ghost:hover { color: var(--pink); }
 
 /* ── hero ──────────────────────────────────────────────────────── */
-section.hero { padding: 8px 0 56px; }
+/* first screen fills the viewport: nav + hero + trust strip, with the
+   "used by" band (top of .launch-video) closing the fold */
+.sky-stage {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 92px);
+  min-height: calc(100svh - 92px);
+}
+.sky-stage > .wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+section.hero {
+  padding: 8px 0 56px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
 .hero-grid {
   display: grid;
   grid-template-columns: 1.05fr 1.2fr;
