@@ -1,63 +1,38 @@
-# Agent fetch beacon (Cloudflare Worker)
+# Agent fetch beacon (Cloudflare Worker) — RETIRED
 
-Makes an AI that does **not** run JavaScript visible on Beam's Agents tab.
+**Do not `wrangler deploy` this directory.** GetBeam production fetch-beacon
+runs in Next.js middleware on `getbeam.fyi` (`apps/web/src/lib/fetch-beacon.ts`),
+not this Worker.
 
-## Canonical Cloudflare target (pinned 09-08-26)
+This folder is kept as reference for the on-demand UA beacon logic only.
 
-| Field | Value |
-|---|---|
-| **Account Worker name** | `beam-agent-beacon-splittrip` |
-| Worker id (tag) | `9e74d04215224c4ab2cecc3e65939d21` |
-| Source | `infra/cloudflare/agent-beacon-worker/` |
-| Wrangler base `name` | `beam-agent-beacon` |
-| Deploy env | `splittrip` → Cloudflare names the script `{name}-{env}` |
-| Route | `splittrip.nhantown.com/*` (zone `nhantown.com`) |
+## Retired lab binding
 
-**Rule for agents / MCP / deploy:** when listing Workers, fetching Worker details, reading builds, or pushing a deploy for this beacon path, always target **`beam-agent-beacon-splittrip`**. Do **not** use `quota-tracker` (unrelated account Worker) or the bare base name `beam-agent-beacon` without `--env splittrip`.
+A Cloudflare env named `splittrip` used to attach a Worker route on a
+**third-party** hostname. That route is removed from `wrangler.toml`.
 
-Deploy / secret commands must use `--env splittrip` (see below). Cloudflare MCP `workers_get_worker` / builds tools: pass name or id of `beam-agent-beacon-splittrip`.
+- Do not re-add a Worker route on that hostname from GetBeam.
+- Do not delete that hostname's CNAME/A — it is not a GetBeam DNS record.
 
 ## Why the pixel is not enough
 
 `ChatGPT-User`, `Claude-User` and `Perplexity-User` fetch a page's HTML when a
 person asks an assistant about it, then leave. They never execute the Beam
-pixel, so the pixel path cannot see them — no configuration changes that. The
-only component that observes the request is whatever sits in front of the
-origin. On Cloudflare, that is a Worker.
+pixel, so the pixel path cannot see them. The only component that observes the
+request is whatever sits in front of the origin (Worker or Pages Functions).
 
-This is a structural limit, documented in `docs/agent-detection-architecture.md`
-§2: for a customer site running only the pixel, index-tier crawlers are
-essentially invisible.
+PROD: `apps/web/src/middleware.ts` + `BEAM_API_BASE` on Vercel.
 
-## Deploy
+## Local API check (not this Worker)
 
-```bash
-cd infra/cloudflare/agent-beacon-worker
-npx wrangler secret put BEAM_FETCH_BEACON_SECRET --env splittrip   # paste the API's value
-npx wrangler deploy --env splittrip
-# Resulting Cloudflare script name: beam-agent-beacon-splittrip
-```
-
-The API side must already have:
-
-```dotenv
-AGENT_FETCH_BEACON_ENABLED=true
-BEAM_FETCH_BEACON_SECRET=<same value>
-```
-
-With the flag off the endpoint answers **404** (dormant, not revealed). With the
-secret empty it answers **401** — an empty configured secret is rejected before
-the constant-time compare, because `compare_digest('', '')` returns true and
-would otherwise accept an empty header.
-
-## Verify without waiting for a real AI
+If `AGENT_FETCH_BEACON_ENABLED=true` on a local API:
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' -X POST \
   -H 'content-type: application/json' \
   -H 'x-beam-fetch-secret: <secret>' \
   -d '{"site_id":"site_e3a2c56e01ed","user_agent":"ChatGPT-User/1.0","path":"/"}' \
-  https://beam-api.nhantown.com/api/v1/agents/fetch-beacon
+  http://localhost:8000/api/v1/agents/fetch-beacon
 ```
 
 | Response | Meaning |
@@ -67,28 +42,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST \
 | `401` | Wrong or missing secret |
 | `404` | `AGENT_FETCH_BEACON_ENABLED` is false |
 
-Then confirm the Worker itself is wired, from outside:
-
-```bash
-curl -s -o /dev/null -H 'User-Agent: ChatGPT-User/1.0' https://splittrip.nhantown.com/
-```
-
-A row for vendor `openai` should appear on the Agents tab within seconds.
-
-## What the verification column will say
-
-A forged `ChatGPT-User` header sent from your own machine records as
-**`ip-mismatch`** — OpenAI publishes IP ranges and your address is not in them.
-That is the spoof detector working, not an error. A real ChatGPT fetch arrives
-from a published range and records as `ip-verified`. Anthropic publishes no
-ranges at all, so its traffic can never exceed `ua-only`; that ceiling is
-deliberate, since absence of evidence is not evidence of forgery.
-
 ## Scope
 
-Only **on-demand** tokens are beaconed — the ones that mean a person is waiting
-on the answer right now. Index crawlers are excluded on purpose: reporting them
-would bury the human-intent signal under routine robot traffic. Keep the token
-list in sync with `_ON_DEMAND_TOKENS` in
-`apps/api/services/agent_classifier.py`; the API silently 204s anything it does
-not recognise, so drift costs signal without raising an error.
+Only **on-demand** tokens are beaconed. Keep the token list in sync with
+`_ON_DEMAND_TOKENS` in `apps/api/services/agent_classifier.py`.

@@ -65,74 +65,30 @@ Full Local → UAT → PROD: [local-uat-prod.md](./local-uat-prod.md). Branch wo
 
 **First run:** allow full `npm install` in `apps/web`. If you use `-SkipInstall` and the web server fails to start, run `npm install` manually in `apps/web`, then re-run the script.
 
-#### Public hostnames on the `nhantown-beam` tunnel (updated 2026-07-29)
+#### Local public tunnel (retired laptop hosts)
 
-One named tunnel now serves three hostnames with deliberately different blast radii. They are not interchangeable — pick by what the caller needs to reach.
+Laptop-backed public hostnames for local UAT are **retired**. Do not publish
+the local API/web on a personal zone, and do not CNAME anything onto
+`getbeam.fyi` from a laptop tunnel (that would collide with production DNS).
 
-| Hostname | Origin | Surface | Use it for |
-|----------|--------|---------|-----------|
-| `beam-dev.nhantown.com` | API `:8000` | **3 paths only** (`/pixel/tracker.js`, `/api/v1/events/ingest`, `/health/ready`); everything else 404 | The value of `API_BASE_URL`, i.e. the host baked into every pixel snippet |
-| `beam-api.nhantown.com` | API `:8000` | Full API, including auth | The dashboard's `NEXT_PUBLIC_API_URL` |
-| `beam.nhantown.com` | Web `:3000` | Next.js dashboard | Signing in and adding sites from anywhere |
+Local default: `http://localhost:8000` (API) and `http://localhost:3000` (web).
+Use `.\scripts\dev-local.ps1 -NoTunnel`.
 
-Before 2026-07-29, `beam.nhantown.com` *was* the pixel-only host. It was promoted to the dashboard so sites can be added without a laptop, and the locked-down surface moved to `beam-dev.nhantown.com`. If an older snippet still points at `beam.nhantown.com/pixel/tracker.js`, regenerate it.
+If you still run `cloudflared` for a hostname **you** control, keep credentials
+in `%USERPROFILE%\.cloudflared\` (never Git). `dev-local.ps1` looks for
+`config-beam.yml` and requires the `API_BASE_URL` host to expose only
+`/pixel/tracker.js`, `/api/v1/events/ingest`, and `/health/ready` plus a
+per-host 404. Always pass `--config` when adding DNS routes so you do not
+attach the wrong tunnel.
 
-For testing the local tracker from an external website, set root `.env`:
+**Keep hostnames one label deep** on whatever zone you use (`pixel.example.com`,
+not `api.pixel.example.com`) unless that zone has Advanced Certificate Manager.
 
-```dotenv
-API_BASE_URL=https://beam-dev.nhantown.com
-FRONTEND_URL=https://beam.nhantown.com
-```
-
-and `apps/web/.env.local`:
-
-```dotenv
-NEXT_PUBLIC_API_URL=https://beam-api.nhantown.com
-NEXT_PUBLIC_SITE_URL=https://beam.nhantown.com
-```
-
-`NEXT_PUBLIC_*` is compiled into the browser bundle, so a `localhost` value there works on this machine and breaks for every other visitor. Restart `npm run dev` after changing it. Revert both files to `localhost` for offline work, or pass `-NoTunnel`.
+`NEXT_PUBLIC_*` is compiled into the browser bundle — `localhost` there works
+on this machine and breaks for every other visitor. Restart `npm run dev`
+after changing it.
 
 **Publishing the dashboard changes the threat model.** `/api/v1/auth/login` has no rate limit, and `scripts/ensure_demo_user.py` resets the demo account on every `dev-local` run — so a password changed by hand in the database comes back as `password123` on the next start. Set `BEAM_DEMO_PASSWORD` in the root `.env` instead; the script reads it and stops echoing the value. Signup is also open on the public API: create the accounts you need, then treat the host as reachable by anyone who learns the name.
-
-On Windows, `dev-local.ps1` looks for `%USERPROFILE%\.cloudflared\config-beam.yml`. It requires the host named by `API_BASE_URL` to carry exactly three path-scoped ingress rules — tracker, event ingest, readiness probe — plus its own 404 catch-all; other hostnames in the file are not its concern. The script restarts a matching `cloudflared` process when the config is newer, otherwise reuses it or starts one in the background. Before reporting success, it verifies both the allowed endpoints and a live 404 from `/api/v1/auth/login`.
-
-- `https://beam-dev.nhantown.com/health/ready`
-- `https://beam-dev.nhantown.com/pixel/tracker.js`
-
-Example ingress boundary (order matters — cloudflared takes the first match, so the locked-down host must come first):
-
-```yaml
-ingress:
-  - hostname: beam-dev.nhantown.com
-    path: ^/pixel/tracker\.js$
-    service: http://127.0.0.1:8000
-  - hostname: beam-dev.nhantown.com
-    path: ^/api/v1/events/ingest$
-    service: http://127.0.0.1:8000
-  - hostname: beam-dev.nhantown.com
-    path: ^/health/ready$
-    service: http://127.0.0.1:8000
-  - hostname: beam-dev.nhantown.com      # per-host catch-all, not just the final rule
-    service: http_status:404
-  - hostname: beam-api.nhantown.com
-    service: http://127.0.0.1:8000
-  - hostname: beam.nhantown.com
-    service: http://127.0.0.1:3000
-  - service: http_status:404
-```
-
-The script's audit is scoped to the host named by `API_BASE_URL`: it requires exactly those three paths, each pointing at `127.0.0.1:8000`, plus a per-host 404 — and it refuses to start the tunnel if `API_BASE_URL` names the full-API or dashboard host instead. Authentication routes are intentionally not reachable through `beam-dev.nhantown.com`.
-
-**Adding a DNS route: always pass `--config`.** `cloudflared tunnel route dns` without it reads the default `config.yml` and will happily CNAME the hostname to whichever tunnel that file names — silently pointing a Beam host at the studio tunnel. Use:
-
-```powershell
-cloudflared tunnel --config "$env:USERPROFILE\.cloudflared\config-beam.yml" route dns --overwrite-dns nhantown-beam <hostname>
-```
-
-**Keep hostnames ONE label deep.** Cloudflare Universal SSL issues a certificate for `nhantown.com` and `*.nhantown.com` only. A two-level name like `api.beam.nhantown.com` resolves and reaches the tunnel, but every HTTPS client fails first with `SSLV3_ALERT_HANDSHAKE_FAILURE` — no certificate covers it, and no amount of ingress config helps. That is why the hosts are `beam-api` / `beam-dev` rather than `api.beam` / `dev.beam`. Two-level names require Advanced Certificate Manager (paid).
-
-The real tunnel config and credentials stay in `%USERPROFILE%\.cloudflared\` and must never be committed. Use `-NoTunnel` for local-only work.
 
 The script's internal readiness probes use `127.0.0.1` deliberately. Windows PowerShell 5.1 can resolve `localhost` to IPv6 `::1`, while local Uvicorn listens on IPv4; that mismatch otherwise makes a healthy API wait through the full retry loop.
 
@@ -177,10 +133,10 @@ Test-NetConnection localhost -Port 5433
 | `ABORT: .env DATABASE_URL looks remote` | `.env` points at Railway/Supabase | Use localhost URLs for local dev |
 | API window closes immediately | venv or pip failure | Re-run without `-SkipInstall`; check `.venv\Scripts\python.exe` |
 | Alembic fails | Wrong DB or Docker down | Confirm `:5433` and `docker compose ps` shows postgres healthy |
-| Public snippet still says `localhost:8000` | Root `.env` has local `API_BASE_URL`, or API was not restarted | Set `API_BASE_URL=https://beam-dev.nhantown.com`; restart with `dev-local.ps1` |
-| Any `*.beam.nhantown.com` is unavailable | Named tunnel is stopped or config missing | Check `%TEMP%\beam-cloudflared.log` and `%USERPROFILE%\.cloudflared\config-beam.yml` |
-| Dashboard loads but every API call fails CORS | `FRONTEND_URL` in root `.env` is not the dashboard origin | Set `FRONTEND_URL=https://beam.nhantown.com`; restart the API (it feeds `_cors_origins` in `main.py`) |
-| Dashboard calls `localhost:8000` from a remote browser | `NEXT_PUBLIC_API_URL` is baked in at build/dev start | Set it to `https://beam-api.nhantown.com` and restart `npm run dev` |
+| Public snippet still says `localhost:8000` | Root `.env` has local `API_BASE_URL`, or API was not restarted | Intended for local-only; restart API after changing `API_BASE_URL` |
+| Named tunnel unavailable | Tunnel process stopped or config missing | Check `%TEMP%\beam-cloudflared.log` and `%USERPROFILE%\.cloudflared\config-beam.yml`, or use `-NoTunnel` |
+| Dashboard loads but every API call fails CORS | `FRONTEND_URL` in root `.env` is not the dashboard origin | Set `FRONTEND_URL` to the origin you actually open (usually `http://localhost:3000`) |
+| Dashboard calls `localhost:8000` from a remote browser | `NEXT_PUBLIC_API_URL` is baked in at build/dev start | Point it at a reachable API host and restart `npm run dev` |
 | A Beam hostname resolves to the studio tunnel | `route dns` was run without `--config` | Re-run with `--config ...\config-beam.yml --overwrite-dns` |
 
 Optional seed after stack is up:
@@ -327,14 +283,14 @@ Build and load unpacked from `apps/extension/` (MV3). Used for LinkedIn outreach
 
 E2E: `apps/extension/e2e/`
 
-## Beam Lab (Cloudflare Pages experiment)
+## Beam Lab (Cloudflare Pages experiment) — RETIRED
 
-`infra/cloudflare/beam-lab/` is a **separate** deployable surface from the main API/web/pixel
-stack: a static Cloudflare Pages project (`beam-lab`, live at `beamlab.nhantown.com`) plus a Pages
-Functions middleware used to validate the AI-agent detection chain end-to-end. It writes to the
-local Docker Postgres (`retarget_agent`), not production. Full findings and resume notes:
-[beam-lab-resume.md](./beam-lab-resume.md); architecture detail:
-[agent-detection-architecture.md §5d](./agent-detection-architecture.md#5d-soft-serve-gate--marker-biên-_bfm-trên-beam-lab-31-07--01-08).
+`infra/cloudflare/beam-lab/` is a **separate**, **retired** surface from the main API/web/pixel
+stack: a static Cloudflare Pages project (`beam-lab`) plus Pages Functions middleware used to
+validate the AI-agent detection chain. **Do not `wrangler pages deploy`.** Do not point
+`BEAM_API_BASE` at production (`api.getbeam.fyi`). It was never production; it wrote to
+local Docker Postgres (`retarget_agent`). Resume notes: [beam-lab-resume.md](./beam-lab-resume.md);
+architecture: [agent-detection-architecture.md §5d](./agent-detection-architecture.md#5d-soft-serve-gate--marker-biên-_bfm-trên-beam-lab-31-07--01-08).
 
 ```bash
 cd infra/cloudflare/beam-lab
@@ -353,7 +309,7 @@ The latest noted production deployment UUID for that command is
 
 | Var | Location | Purpose |
 |-----|----------|---------|
-| `BEAM_API_BASE` | `wrangler.toml [vars]` | Full API host the beacon POSTs to (`beam-api.nhantown.com`) |
+| `BEAM_API_BASE` | `wrangler.toml [vars]` | Full API host the beacon POSTs to (`https://retired.invalid` — do not set to production) |
 | `BEAM_SITE_ID` | `wrangler.toml [vars]` | `site_16c46453546f` |
 | `BEAM_AGENT_GATE` | `wrangler.toml [vars]` | Kill switch for the soft-serve agent gate. Only the literal `"0"` disables it — deleting the line leaves the gate ON |
 | `BEAM_FULL_LOG` | `wrangler.toml [vars]` | `"1"` logs the complete request/response of every non-static visitor (human included). Deliberately temporary — **turn back off once the current debug window is analysed** |

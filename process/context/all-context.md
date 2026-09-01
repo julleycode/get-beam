@@ -290,8 +290,9 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   (`settings.agent_detection_enabled`), and the `/dashboard/agents` empty state branches on it
   (flag-off vs no-visits-yet copy) — shipped 04-08-26, PVL/EVL green, archived to
   `process/features/evallayer/completed/agents-flag-empty-state_04-08-26/`.
-  **Beam Lab (31-07→01-08, reconciled 07-08-26):** soft-serve gate + edge `_bfm` marker live on
-  `beamlab.nhantown.com`; resume at `docs/beam-lab-resume.md`. Plans archived to
+  **Beam Lab (31-07→01-08, retired 01-09-26):** soft-serve gate + edge `_bfm` marker was
+  validated on a standalone Pages lab (now retired; do not redeploy onto production hosts);
+  resume at `docs/beam-lab-resume.md`. Plans archived to
   `process/features/evallayer/completed/agent-gate-soft-serve_31-07-26/` (status
   `shipped-with-known-gaps`) and `.../completed/agent-gate-lab_31-07-26/` (status `superseded` —
   the hard-403 predecessor, empirically rejected by real ChatGPT-User traffic). Open items tracked
@@ -407,7 +408,14 @@ getbeam/
 - **Billing:** Gumroad (active MoR, URL-token webhook), Stripe + Lemon Squeezy legacy
 - **Hosting:** Railway (api), pixel via CDN; browser automation via Playwright (scraping + e2e)
 - **Supabase (prod Postgres, pinned 09-08-26):** project **`retarget-agent`**, ref/id **`hylcleqxlkdblibpdhhm`**, region `ap-southeast-1`, API `https://hylcleqxlkdblibpdhhm.supabase.co`, host `db.hylcleqxlkdblibpdhhm.supabase.co`. MCP `project_id` MUST be this ref. Local Docker PG remains `localhost:5433` for non-prod. IDE connect steps: `docs/supabase-retarget-agent.md`.
-- **Cloudflare Worker (agent fetch beacon, pinned 09-08-26):** live script name **`beam-agent-beacon-splittrip`** (id `9e74d04215224c4ab2cecc3e65939d21`), source `infra/cloudflare/agent-beacon-worker/`, wrangler env `splittrip`, route `splittrip.nhantown.com/*`. Use this name for MCP Workers get/list/builds and for `wrangler deploy --env splittrip`. Do not target `quota-tracker`. Details: `infra/cloudflare/agent-beacon-worker/README.md`.
+- **Cloudflare Worker (agent fetch beacon, retired 01-09-26):** source
+  `infra/cloudflare/agent-beacon-worker/` is **retired — do not `wrangler deploy`**.
+  Production fetch-beacon is Next.js middleware on `getbeam.fyi`
+  (`apps/web/src/middleware.ts`, `apps/web/src/lib/fetch-beacon.ts`). A historical
+  Cloudflare env named `splittrip` used to bind a **third-party** hostname; that
+  route is removed from wrangler. Do not delete that third-party DNS from GetBeam.
+  Do not target unrelated account Workers (`quota-tracker`). Details:
+  `infra/cloudflare/agent-beacon-worker/README.md`.
 
 ## AI Layer (agentic-lite, shipped 20-07-26)
 
@@ -427,10 +435,10 @@ Consumers: `agents/segmenter.py` + `agents/campaign_planner.py` (JSON repair), `
 Detects AI-agent visits (GPTBot, PerplexityBot, ClaudeBot, etc.) at ingest and keeps them
 structurally separate from human Visitor/Event data, never as a targetable outreach contact:
 
-- **Edge beacon Worker (customer-site path):** Cloudflare Worker **`beam-agent-beacon-splittrip`** —
-  source `infra/cloudflare/agent-beacon-worker/` (`wrangler.toml` base name `beam-agent-beacon` +
-  `--env splittrip`). This is the account script to get/build/push for fetch-beacon data on
-  `splittrip.nhantown.com`. Separate from Beam Lab Pages (`infra/cloudflare/beam-lab/`).
+- **Edge beacon (PROD):** Next.js middleware on `getbeam.fyi`
+  (`apps/web/src/lib/fetch-beacon.ts`). The standalone Worker under
+  `infra/cloudflare/agent-beacon-worker/` is **retired** (do not deploy). Beam Lab
+  Pages (`infra/cloudflare/beam-lab/`) is a retired experiment, not production.
 - `apps/api/services/agent_classifier.py` — UA-pattern classifier, drop-vs-classify token split
 - `apps/api/models/agent_visit.py` — dedicated `agent_visits` rollup table (one row per
   site/vendor/token tuple), never joined with `Visitor`/`Event`

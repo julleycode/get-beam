@@ -150,9 +150,9 @@ ORDER BY created_at DESC LIMIT 10;
 # -------------------------------------------------------------
 function Show-BeamLab {
   Write-Header "C) BEAM LAB"
-  Write-Host "  Site URL:   https://beamlab.nhantown.com"
+  Write-Host "  Site URL:   (Beam Lab retired — do not pages-deploy)"
   Write-Host "  site_id:    $SiteId"
-  Write-Host "  Pixel host: beam-dev.nhantown.com"
+  Write-Host "  Pixel host: local API (localhost) — lab public pixel host retired"
   if ($TailBeamLab) {
     Write-Sub "Tailing beam-lab Pages deployment (Ctrl+C to stop)"
     Push-Location (Join-Path $Root "infra/cloudflare/beam-lab")

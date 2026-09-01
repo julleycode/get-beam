@@ -14,11 +14,11 @@ validate the AI-agent detection chain end-to-end on a domain Beam fully controls
 
 | Item | Value |
 |------|-------|
-| Site | https://beamlab.nhantown.com/ |
+| Site | **RETIRED** — do not pages-deploy; do not bind production hosts |
 | Cloudflare Pages project | `beam-lab` |
 | Site ID | `site_16c46453546f` |
-| Pixel destination | `beam-dev.nhantown.com` (3-path locked-down host) |
-| Fetch beacon destination | `beam-api.nhantown.com` (full API host) |
+| Pixel destination | local API only (`http://localhost:8000`) — public lab pixel host retired |
+| Fetch beacon destination | `https://retired.invalid` in wrangler — do **not** set to `api.getbeam.fyi` |
 | Database | Local Docker Postgres `retarget_agent` — **not** production |
 | Content canary | `FUCHSIA-0731` on the homepage — proves an AI answer is reading the live page, not a stale cache/index copy |
 | Deep pages | `/tac-nhan/` (full UA token list), `/kiem-chung/{openai,anthropic,perplexity,khac}/` |

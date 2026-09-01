@@ -1,7 +1,7 @@
 # Lớp phát hiện AI-agent — kiến trúc & đánh giá
 
 Cập nhật: 2026-08-09 · Phạm vi: tab **Agents** + **Visitors** + Beam Lab (edge) + splittrip beacon Worker
-Nguồn: đọc trực tiếp source + kiểm chứng live local (17/17 probe) + ChatGPT-User thật trên beamlab.nhantown.com (29-07 → 01-08)
+Nguồn: đọc trực tiếp source + kiểm chứng live local (17/17 probe) + ChatGPT-User thật trên retired Beam Lab (29-07 → 01-08)
 
 Mục đích: trả lời ba câu hỏi sản phẩm — (1) phân biệt đâu là AI, (2) ai là người đứng sau AI,
 (3) làm sao dẫn người dùng AI click vào site và định danh được họ.
@@ -138,7 +138,7 @@ vendor sẽ làm hỏng thống kê vendor đang có. Đây là lựa chọn có
 
 ## 5. Kiểm chứng live (2026-07-29/30)
 
-Phiên kiểm chứng trên môi trường lab (`beamlab.nhantown.com`) với ChatGPT-User thật (tier=on-demand).
+Phiên kiểm chứng trên môi trường lab (`retired Beam Lab`) với ChatGPT-User thật (tier=on-demand).
 
 ### Kết quả đã chứng minh
 
@@ -171,7 +171,7 @@ Phiên kiểm chứng trên môi trường lab (`beamlab.nhantown.com`) với Ch
 ## 5b. Marker end-to-end với ChatGPT thật (2026-07-31)
 
 Lần đầu chuỗi marker chạy thông với một AI thật, không phải probe. Điều kiện: `agent_marker_enabled=True`,
-AgentProfile của `site_16c46453546f` bật với 1 offer trỏ `https://beamlab.nhantown.com/`, và
+AgentProfile của `site_16c46453546f` bật với 1 offer trỏ `retired Beam Lab /`, và
 `beamlab` được deploy kèm `<link rel="alternate">` → manifest + 2 dòng offers/manifest trong `llms.txt`.
 
 | Giờ (VN) | Sự kiện | Bằng chứng |
@@ -227,10 +227,10 @@ hàng, còn offer rỗng như của `beamlab` (không giá, mô tả trống, ur
 ## 5d. Soft-serve gate + marker biên `_bfm` trên Beam Lab (31-07 → 01-08)
 
 Môi trường lab riêng biệt với `apps/api` đa tenant: **Beam Lab**
-(`https://beamlab.nhantown.com/`, Cloudflare Pages project `beam-lab`, `site_id
+(`retired Beam Lab /`, Cloudflare Pages project `beam-lab`, `site_id
 site_16c46453546f`) là trang tĩnh do chính Beam vận hành để kiểm chứng chuỗi phát hiện agent trên
-một tên miền kiểm soát hoàn toàn. Pixel gửi về `beam-dev.nhantown.com`; beacon fetch gửi về
-`beam-api.nhantown.com`; dữ liệu ghi vào Postgres Docker local (`retarget_agent`), **không phải**
+một tên miền kiểm soát hoàn toàn. Pixel gửi về `retired local pixel-only tunnel host`; beacon fetch gửi về
+`retired local full-API tunnel host`; dữ liệu ghi vào Postgres Docker local (`retarget_agent`), **không phải**
 database production. Canary nội dung `FUCHSIA-0731` trên trang chủ dùng để phân biệt AI đọc bản mới
 hay trả lời từ cache/chỉ mục cũ. Deployment production gần nhất đã ghi nhận:
 `9a4d1f20-6bdd-46fc-bfc5-447c83e81cab` (dùng với `wrangler pages deployment tail`).
@@ -331,7 +331,7 @@ không thể dùng IP để nối hai lượt fetch của cùng một phiên h�
 | Fetch canary-only / trang chủ | Thường thành công; câu trả lời trích đúng `FUCHSIA-0731` — chứng minh đọc bản mới, không phải cache |
 | Prompt "chỉ dựa trên trang đã tải" | **Chặn hẳn** việc model tự hop sang `/tac-nhan/`, dù link nằm ngay trong trang đã tải |
 | Hop tự nhiên (không chặn) | Từng thành công kiểu E2b ở lần đo trước; các lần đo sau: fetch trang chủ xong **không** GET `/tac-nhan/` dù được yêu cầu mở link — model báo "không thấy href" |
-| Fetch thẳng URL sâu `.../tac-nhan/?ref=deep-0801` | Trang public trả 200 bình thường; ChatGPT **đôi lúc không fetch luôn**, bịa lý do, có lần trích dẫn sai domain (`amlab.vn` thay vì `beamlab.nhantown.com`) |
+| Fetch thẳng URL sâu `.../tac-nhan/?ref=deep-0801` | Trang public trả 200 bình thường; ChatGPT **đôi lúc không fetch luôn**, bịa lý do, có lần trích dẫn sai domain (`amlab.vn` thay vì `retired Beam Lab`) |
 | Dán thẳng HTML/text của `/tac-nhan/` vào chat | ChatGPT liệt kê đúng cả 13 token UA (11 nhận diện được + 2 cố ý không nhận diện: `google-extended`, `applebot-extended`) — chứng minh model đọc hiểu nội dung tốt, chỉ hành vi **browse chủ động** là không ổn định |
 
 Kết luận thực dụng: đừng coi "AI có tự hop sang link không" là bug của Beam — đó là hành vi

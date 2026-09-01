@@ -8,9 +8,9 @@
  * that sees those requests, which on Cloudflare means a Worker. It reads the
  * User-Agent, tells Beam, and gets out of the way.
  *
- * DEPLOY (route it at the site you want watched, e.g. splittrip.nhantown.com/*):
+ * RETIRED: do not wrangler deploy. PROD beacon is getbeam.fyi Next middleware.
  *   wrangler secret put BEAM_FETCH_BEACON_SECRET
- *   wrangler deploy
+ *   wrangler deploy   # do not run — would republish a retired lab Worker
  *
  * The Worker mirrors apps/web/src/lib/fetch-beacon.ts. Keep the token list in
  * sync with `_ON_DEMAND_TOKENS` in apps/api/services/agent_classifier.py — the

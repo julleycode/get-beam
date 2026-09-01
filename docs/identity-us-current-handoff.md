@@ -12,7 +12,7 @@ Kiểm tra lại live ngày 05-08-26 bác bỏ ba khẳng định trong file nà
 
 | Khẳng định (02-08) | Thực tế (05-08) |
 |---|---|
-| `leadpipe.aws53.cloud/p/<uuid>.js` = **404** | **HTTP 200**, 1154 bytes, pixel thật của `beamlab.nhantown.com` |
+| `leadpipe.aws53.cloud/p/<uuid>.js` = **404** | **HTTP 200**, 1154 bytes, pixel thật của `retired Beam Lab` |
 | `pixels_total=0, pixels_active=0` | có ít nhất 1 pixel đăng ký cho domain lab; SDK chain cũng 200 |
 | "Cách dựng URL từ UUID chưa được chứng minh đúng" | **Đã chứng minh đúng** — không cần sửa `tracker.js` |
 
@@ -88,7 +88,7 @@ Candidate bị tách khỏi emailable và verified KPI
 - US RB2B logs = `13` attempts, `8` success logs, nhưng toàn bộ success dồn vào đúng 1 visitor false-positive.
 - Fresh test: `50 passed + 52 passed = 102 passed`; `git diff --check` passed. Đây là bằng chứng code-path, không phải bằng chứng live uplift.
 - Live Leadpipe read-only checks: key shape `sk_` dài 67, pixel UUID dài 36; account endpoint 200 nhưng `healthy=false`, `org_status=expired`, `credits_remaining=500`, `pixels_total=0`, `pixels_active=0`.
-- `/v1/data?domain=beamlab.nhantown.com` = 403; `/v1/data/pixels` = 403; URL dựng từ local UUID `https://leadpipe.aws53.cloud/p/<uuid>.js` = 404.
+- `/v1/data?domain=retired Beam Lab` = 403; `/v1/data/pixels` = 403; URL dựng từ local UUID `https://leadpipe.aws53.cloud/p/<uuid>.js` = 404.
 - Official docs yêu cầu dùng [exact install code và verify pixel](https://docs.leadpipe.com/guides/manage-pixels); [API tạo pixel trả về `code`](https://docs.leadpipe.com/api-reference/pixels/create-a-pixel-for-a-domain). Cách dựng URL từ UUID trong repo chưa được chứng minh là đúng.
 - Buổi điều tra chỉ đọc DB/provider state; không đổi DB row, deployment, commit hay paid-provider state. Các file tài liệu này là thay đổi duy nhất của buổi bàn giao.
 

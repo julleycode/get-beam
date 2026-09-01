@@ -34,5 +34,3 @@ Allow: /
 
 User-agent: Perplexity-User
 Allow: /
-
-Sitemap: https://beamlab.nhantown.com/sitemap.xml

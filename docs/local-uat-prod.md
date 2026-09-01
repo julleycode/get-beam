@@ -85,7 +85,7 @@ Today: CI runs on `main`; **no auto UAT deploy or Slack**. See [dev-workflow-sla
 | Repo root `.env` | `.env.example` | FastAPI (`apps/api/config.py`) |
 | `apps/web/.env.local` | `apps/web/.env.example` | Next.js (browser + server) |
 
-**Minimum to boot:** `APP_ENV=development`, localhost `DATABASE_URL` / `REDIS_URL` / `FRONTEND_URL`, and web `NEXT_PUBLIC_API_URL=http://localhost:8000`. Keep `API_BASE_URL=http://localhost:8000` for local-only work, or use `https://beam-dev.nhantown.com` when an external website must load the local pixel. To reach the dashboard publicly as well, set `FRONTEND_URL=https://beam.nhantown.com` and web `NEXT_PUBLIC_API_URL=https://beam-api.nhantown.com`. Clerk keys optional (empty = legacy JWT login). Gemini/SendGrid optional.
+**Minimum to boot:** `APP_ENV=development`, localhost `DATABASE_URL` / `REDIS_URL` / `FRONTEND_URL`, and web `NEXT_PUBLIC_API_URL=http://localhost:8000`. Keep `API_BASE_URL=http://localhost:8000` for local-only work, or use `http://localhost:8000` when an external website must load the local pixel. To reach the dashboard publicly as well, set `FRONTEND_URL=http://localhost:3000` and web `NEXT_PUBLIC_API_URL=http://localhost:8000`. Clerk keys optional (empty = legacy JWT login). Gemini/SendGrid optional.
 
 ### One-command scripts
 
@@ -124,9 +124,9 @@ cp apps/web/.env.example apps/web/.env.local
 
 **Safety:** keep databases and Redis on localhost; never use prod Railway/Supabase data URLs (`scripts/e2e-local.sh` and `dev-local.*` guard this).
 
-`API_BASE_URL` may use `https://beam-dev.nhantown.com` for public pixel tests. That tunnel host exposes only `/pixel/tracker.js`, `/api/v1/events/ingest`, and `/health/ready` — `dev-local.ps1` audits exactly that host and refuses to start the tunnel otherwise. Keep the real Cloudflare tunnel config and credential JSON outside Git.
+`API_BASE_URL` for local work is `http://localhost:8000`. Optional `cloudflared` remains possible on a hostname you control; `dev-local.ps1` audits a pixel-only host (tracker, ingest, ready + 404) when a tunnel is used. Keep tunnel credentials outside Git. Prefer `-NoTunnel`.
 
-**Tunnel-published UAT (2026-07-29).** `beam.nhantown.com` (dashboard, `:3000`) and `beam-api.nhantown.com` (full API, `:8000`) now ride the same named tunnel so sites can be added from any browser. This is a laptop-backed stand-in for UAT, not the Railway/Vercel UAT described below: it dies when the machine sleeps, shares the local Docker Postgres, and runs `APP_ENV=development` — so it does **not** exercise the production-strict secret checks a real UAT must prove. Use it to test flows; do not use it as the promotion gate to PROD. It also puts unrated-limit auth and open signup on the public internet — see the security note in [deployment-guide.md](./deployment-guide.md#public-hostnames-on-the-nhantown-beam-tunnel-updated-2026-07-29).
+**Laptop public UAT is retired.** Do not publish the local stack on a personal zone, and do not CNAME a laptop tunnel onto production `getbeam.fyi`. Local dashboard/API are `localhost:3000` / `localhost:8000`. See [deployment-guide.md](./deployment-guide.md#local-public-tunnel-retired-laptop-hosts).
 
 ### 3. API + Web (manual)
 
@@ -256,8 +256,8 @@ Ordered by value for Local→UAT→PROD:
 ### Local ready
 
 - [ ] `docker compose up -d postgres redis`  
-- [ ] `.env` with `APP_ENV=development` + local data URLs; `API_BASE_URL` local or `https://beam-dev.nhantown.com`
-- [ ] Publishing the dashboard? `FRONTEND_URL=https://beam.nhantown.com`, web `NEXT_PUBLIC_API_URL=https://beam-api.nhantown.com`, and `BEAM_DEMO_PASSWORD` set
+- [ ] `.env` with `APP_ENV=development` + local data URLs; `API_BASE_URL` local or `http://localhost:8000`
+- [ ] Publishing the dashboard? `FRONTEND_URL=http://localhost:3000`, web `NEXT_PUBLIC_API_URL=http://localhost:8000`, and `BEAM_DEMO_PASSWORD` set
 - [ ] `alembic upgrade head` + API `/health`  
 - [ ] Web on :3000 talking to local API  
 - [ ] `./scripts/test.sh unit` green  

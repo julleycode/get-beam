@@ -170,7 +170,7 @@ Pixel pageview URL chứa _bam
 
 F2 (`_bam`) là đường **sản phẩm đa tenant**: mint tại API, đi qua cờ `agent_marker_enabled`, chỉ
 sống trên `offers.json`. Song song đó, môi trường thử nghiệm **Beam Lab**
-(`beamlab.nhantown.com`, xem [agent-detection-architecture §5d](./agent-detection-architecture.md#5d-soft-serve-gate--marker-biên-_bfm-trên-beam-lab-31-07--01-08))
+(`retired Beam Lab`, xem [agent-detection-architecture §5d](./agent-detection-architecture.md#5d-soft-serve-gate--marker-biên-_bfm-trên-beam-lab-31-07--01-08))
 dùng một cơ chế nối fetch↔click **thứ ba**, độc lập với cả hai cách ở trên:
 
 | | Temporal (cách cũ) | F2 marker `_bam` (cách mới, sản phẩm) | Edge marker `_bfm` (Beam Lab) |

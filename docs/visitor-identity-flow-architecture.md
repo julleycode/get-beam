@@ -408,7 +408,7 @@ pixel URL 404). **Kiểm tra lại 05-08-26 bác bỏ phần lớn kết luận 
 | Kiểm tra | 02-08-26 | 05-08-26 |
 |---|---|---|
 | `leadpipe.aws53.cloud/p/<uuid>.js` | `404` | **`200`**, 1154 bytes, pixel thật |
-| Payload pixel | — | `"domain":"beamlab.nhantown.com"`, `"org_slug":"to-s-workspace"` |
+| Payload pixel | — | `"domain":"retired Beam Lab"`, `"org_slug":"to-s-workspace"` |
 | SDK chain `cdn.pixel.leadpipe.com/pixels/…/p.js` | — | **`200`**, 15795 bytes |
 | Pixel đã đăng ký cho domain lab | `pixels_active=0` | **có ít nhất 1** |
 | `GET /v1/data?domain=…` | `403` | **`403 "Organization is expired"`** (test lại với key thật) |

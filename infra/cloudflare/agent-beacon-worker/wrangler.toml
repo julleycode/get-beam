@@ -1,6 +1,7 @@
-# Canonical live Worker on the Cloudflare account (after --env splittrip):
-#   beam-agent-beacon-splittrip  (id tag 9e74d04215224c4ab2cecc3e65939d21)
-# Always deploy / query / build against that script — never quota-tracker.
+# RETIRED — do not wrangler deploy.
+# This Worker used to bind a third-party lab hostname. Routes are removed so a
+# deploy cannot re-attach GetBeam to that zone. Do not point BEAM_API_BASE at
+# production (api.getbeam.fyi). Do not delete third-party lab DNS from this repo.
 name = "beam-agent-beacon"
 main = "worker.js"
 compatibility_date = "2024-11-01"
@@ -10,17 +11,12 @@ compatibility_date = "2024-11-01"
 # It must equal BEAM_FETCH_BEACON_SECRET in the API's .env, or every beacon
 # gets a 401 that nothing on the dashboard will explain.
 [vars]
-# Must be the FULL API host. beam-dev.nhantown.com exposes only the three pixel
-# paths and would 404 this endpoint.
-BEAM_API_BASE = "https://beam-api.nhantown.com"
+BEAM_API_BASE = "https://retired.invalid"
 BEAM_SITE_ID = "site_e3a2c56e01ed"
 
-# Route on the site being watched, not on Beam's own hosts.
 [env.splittrip]
-routes = [
-  { pattern = "splittrip.nhantown.com/*", zone_name = "nhantown.com" }
-]
+# No routes. Do not re-attach a zone. Do not wrangler deploy.
 
 [env.splittrip.vars]
-BEAM_API_BASE = "https://beam-api.nhantown.com"
+BEAM_API_BASE = "https://retired.invalid"
 BEAM_SITE_ID = "site_e3a2c56e01ed"

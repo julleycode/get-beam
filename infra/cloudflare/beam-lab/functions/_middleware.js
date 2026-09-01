@@ -4,13 +4,14 @@
  * Runs on every request to this Pages project before the static asset is served.
  * Preferred over a standalone Worker + route: Pages Functions are part of the
  * deployment, so there is no separate route to drift, and no requirement that the
- * hostname be proxied by a DNS record we do not control. That requirement is what
- * broke splittrip.nhantown.com — its host (appdeploy.ai) de-registers any domain
- * whose DNS stops pointing directly at them, so it can never sit behind a Worker
- * route. A Pages-hosted site has no such conflict.
+ * hostname be proxied by a DNS record we do not control. A third-party lab
+ * origin (appdeploy) de-registers any domain whose DNS stops pointing directly
+ * at them, so it can never sit behind a Worker route. A Pages-hosted site has
+ * no such conflict.
  *
+ * RETIRED: do not pages-deploy; do not set BEAM_API_BASE to production.
  * Env (wrangler.toml [vars] + one secret):
- *   BEAM_API_BASE            https://beam-api.nhantown.com  (FULL api host)
+ *   BEAM_API_BASE            full API host (retired.invalid until re-hosted)
  *   BEAM_SITE_ID             site_...
  *   BEAM_FULL_LOG            "1" enables the full request/response capture below
  *   BEAM_AGENT_GATE          "0" disables the AI-agent gate below; anything else leaves it on

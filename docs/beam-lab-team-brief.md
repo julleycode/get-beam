@@ -9,7 +9,7 @@ Chi tiết kỹ thuật: [beam-lab-resume.md](./beam-lab-resume.md)
 
 **Biết khi nào AI đang đọc site của mình, và khi người thật bấm link từ câu trả lời AI thì nối được hai sự kiện đó.**
 
-Site thử: [beamlab.nhantown.com](https://beamlab.nhantown.com/)
+Site thử: **retired** (standalone Pages experiment — do not redeploy onto `getbeam.fyi`).
 
 ---
 

@@ -229,7 +229,7 @@ Operators must apply pending Alembic migrations before enabling flags in product
 
 ## Beam Lab (Edge Experiment Surface)
 
-`infra/cloudflare/beam-lab/` is a standalone Cloudflare Pages deployment (`beamlab.nhantown.com`),
+`infra/cloudflare/beam-lab/` is a standalone Cloudflare Pages deployment (**retired** — do not pages-deploy onto production hosts),
 separate from the `client` → `edge` → `api` flow above: it is Beam's own static site, run purely to
 validate the AI-agent detection chain end-to-end, and it writes to a local dev Postgres rather than
 production. Its Pages Functions middleware performs, at the edge, what the API otherwise infers
