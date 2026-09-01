@@ -38,12 +38,11 @@ không bao giờ chạm `is_emailable_identity`.
 |---|---|---|---|
 | Pixel ingest (`routers/events.py`) | JS trên site khách | Có | **Crawler không chạy JS** → đường này gần như không bao giờ thấy crawler |
 | Beacon edge (`agent_fetch_beacon.py`) | Middleware getbeam.fyi, auth shared-secret | Có (từ 28-07) | Đường **duy nhất** quan sát được crawler |
-| Beacon Worker (splittrip lab site) | Cloudflare Worker **`beam-agent-beacon-splittrip`** → POST API fetch-beacon | On-demand tokens | Source `infra/cloudflare/agent-beacon-worker/`; deploy `--env splittrip`. Pin này khi MCP get/build/push — không dùng `quota-tracker`. |
+| Beacon Worker (lab, retired) | Cloudflare Worker **`beam-agent-beacon-splittrip`** — **retired, do not deploy** | Off | Source kept in `infra/cloudflare/agent-beacon-worker/` as reference only. PROD beacon is Next middleware on `getbeam.fyi`. |
 
 Hệ quả quan trọng: với site khách dùng pixel, **crawler index-tier về cơ bản vô hình**. Beacon chỉ
 quan sát được khi có lớp edge (Worker/middleware) phía trước origin. Đây là giới hạn cấu trúc, không
-phải bug. Canonical Worker trên account Cloudflare cho đường splittrip: **`beam-agent-beacon-splittrip`**
-(xem `infra/cloudflare/agent-beacon-worker/README.md`).
+phải bug. Worker lab đã retire (xem `infra/cloudflare/agent-beacon-worker/README.md`).
 
 ---
 
@@ -251,7 +250,7 @@ comment qua `HTMLRewriter`), không còn đứng chắn trước trang. Không h
 gắn — chính header đó, cùng khối `<section>` hiển thị của bản 403, là thứ khiến công cụ browse của
 ChatGPT từng báo lỗi trên một response 200 đầy đủ nội dung.
 
-Code: `infra/cloudflare/beam-lab/functions/_middleware.js`, `infra/cloudflare/beam-lab/wrangler.toml`.
+Code: lab Pages source **removed 01-09-26** (was `infra/cloudflare/beam-lab/`). Production beacon: `apps/web/src/lib/fetch-beacon.ts`.
 
 | Biến env | Vai trò | Trạng thái hiện tại |
 |---|---|---|

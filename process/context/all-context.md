@@ -78,9 +78,9 @@ For most substantial tasks:
 | test planning or verification | `all-context.md`, `tests/all-tests.md` | `TESTING.md` (repo root) for docker setup |
 | debugging backend/tests | `all-context.md`, `tests/all-tests.md` | the failing service/router source |
 | AI / agent-layer work | `all-context.md` (AI Layer section below) | `apps/api/services/gemini_client.py`, `apps/api/agents/` |
-| Beam Lab / edge AI detection | `docs/beam-lab-resume.md` | `docs/beam-lab-team-brief.md` (team talk), `docs/agent-detection-architecture.md` §5d, `docs/journals/260801-0051-beam-lab-soft-serve-bfm.md`, `infra/cloudflare/beam-lab/` |
+| Beam Lab / edge AI detection | `docs/beam-lab-resume.md` | `docs/beam-lab-team-brief.md` (team talk), `docs/agent-detection-architecture.md` §5d, `docs/journals/260801-0051-beam-lab-soft-serve-bfm.md`. Pages project + `infra/cloudflare/beam-lab/` **removed 01-09-26**. |
 | Supabase prod DB (`retarget-agent`) | `docs/supabase-retarget-agent.md` | MCP + IDE: project ref **`hylcleqxlkdblibpdhhm`**. Never use `buildtolaunch` / `supabase-fuchsia-book`. |
-| Agent fetch beacon Worker (splittrip) | `infra/cloudflare/agent-beacon-worker/README.md` | Cloudflare account Worker **`beam-agent-beacon-splittrip`** (id `9e74d042…`); source `infra/cloudflare/agent-beacon-worker/`; deploy `npx wrangler deploy --env splittrip`. MCP get/build/push MUST use this Worker — not `quota-tracker`. |
+| Agent fetch beacon Worker (splittrip) | `infra/cloudflare/agent-beacon-worker/README.md` | **Retired — do not wrangler deploy.** PROD beacon is `apps/web/src/lib/fetch-beacon.ts`. |
 | visitor identity / enrichment | `all-context.md` | `process/features/visitors-identity/_GUIDE.md` |
 | segments / campaigns / outreach | `all-context.md` | `process/features/campaigns-outreach/_GUIDE.md` |
 | billing / quotas | `all-context.md` | `process/features/billing/_GUIDE.md` |
@@ -438,7 +438,7 @@ structurally separate from human Visitor/Event data, never as a targetable outre
 - **Edge beacon (PROD):** Next.js middleware on `getbeam.fyi`
   (`apps/web/src/lib/fetch-beacon.ts`). The standalone Worker under
   `infra/cloudflare/agent-beacon-worker/` is **retired** (do not deploy). Beam Lab
-  Pages (`infra/cloudflare/beam-lab/`) is a retired experiment, not production.
+  Pages (`beam-lab`) and `infra/cloudflare/beam-lab/` were **removed 01-09-26**.
 - `apps/api/services/agent_classifier.py` — UA-pattern classifier, drop-vs-classify token split
 - `apps/api/models/agent_visit.py` — dedicated `agent_visits` rollup table (one row per
   site/vendor/token tuple), never joined with `Visitor`/`Event`

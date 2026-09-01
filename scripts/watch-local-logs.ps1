@@ -1,24 +1,23 @@
 <#
 .SYNOPSIS
-  Local observability snapshot for Beam Lab / pixel debugging (Windows).
+  Local observability snapshot for API / pixel debugging (Windows).
 
 .DESCRIPTION
-  Prints three sections: SERVICE (API health + logs + docker), DB (recent
-  Postgres rows for a site), and BEAM LAB (site/pixel hosts + optional tail).
-  Read-only snapshot - never mutates data, never crashes if docker/PG is down.
+  Prints SERVICE (API health + logs + docker) and DB (recent Postgres rows
+  for a site). Read-only snapshot - never mutates data, never crashes if
+  docker/PG is down.
 
 .USAGE
   .\scripts\watch-local-logs.ps1
   .\scripts\watch-local-logs.ps1 -Limit 50
   .\scripts\watch-local-logs.ps1 -Watch
-  .\scripts\watch-local-logs.ps1 -TailBeamLab
 #>
 [CmdletBinding()]
 param(
-  [string]$SiteId = "site_92e8f1f8a71c",   # beamlab
+  [string]$SiteId = "site_92e8f1f8a71c",
   [int]$Limit = 20,
   [switch]$Watch,                          # refresh DB section every 5s until Ctrl+C
-  [switch]$TailBeamLab,                     # after snapshot, run wrangler pages deployment tail
+  [switch]$TailBeamLab,                     # no-op; Beam Lab Pages project was removed
   [int]$ApiLogLines = 40
 )
 
@@ -150,20 +149,9 @@ ORDER BY created_at DESC LIMIT 10;
 # -------------------------------------------------------------
 function Show-BeamLab {
   Write-Header "C) BEAM LAB"
-  Write-Host "  Site URL:   (Beam Lab retired — do not pages-deploy)"
-  Write-Host "  site_id:    $SiteId"
-  Write-Host "  Pixel host: local API (localhost) — lab public pixel host retired"
+  Write-Host "  Removed 01-09-26 (Cloudflare Pages project + infra/cloudflare/beam-lab/)."
   if ($TailBeamLab) {
-    Write-Sub "Tailing beam-lab Pages deployment (Ctrl+C to stop)"
-    Push-Location (Join-Path $Root "infra/cloudflare/beam-lab")
-    try {
-      npx wrangler pages deployment tail --project-name beam-lab
-    } finally {
-      Pop-Location
-    }
-  } else {
-    Write-Host "  Tail logs:  cd infra/cloudflare/beam-lab; npx wrangler pages deployment tail --project-name beam-lab"
-    Write-Host "              (or re-run this script with -TailBeamLab)"
+    Write-Host "  -TailBeamLab is a no-op; there is no Pages project to tail."
   }
 }
 

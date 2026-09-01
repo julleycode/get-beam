@@ -288,7 +288,7 @@ Cả hai chỉ trả lời "AI nào dẫn người nào tới site"; bước "ng
 |---|---|
 | Temporal sweep | `apps/api/services/agent_handoff_correlation.py` |
 | Marker mint/decode (`_bam`, `_bfm`) | `apps/api/services/agent_marker.py` |
-| Edge marker mint + stamp (`_bfm`, Beam Lab) | `infra/cloudflare/beam-lab/functions/_middleware.js` |
+| Edge marker mint + stamp (`_bfm`, Beam Lab) | removed 01-09-26 (`infra/cloudflare/beam-lab/` deleted) |
 | Gateway / offers | `apps/api/services/agent_gateway.py` |
 | Pixel decode hook | `apps/api/routers/events.py` (đọc `_bam` **và** `_bfm` trên URL pageview) |
 | AI referrer label | `apps/api/services/ai_referral.py` |

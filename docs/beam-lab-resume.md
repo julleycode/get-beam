@@ -1,6 +1,8 @@
 # Beam Lab — Resume Notes
 
-Last updated: 2026-08-01 · Evergreen handoff for the Beam Lab AI-agent detection experiment.
+Last updated: 2026-09-01 · Historical handoff. Cloudflare Pages project `beam-lab` and
+`infra/cloudflare/beam-lab/` were **removed**. Do not redeploy. Production fetch-beacon is
+Next middleware on `getbeam.fyi`.
 
 - **Team presentation (plain language + diagrams):** [beam-lab-team-brief.md](./beam-lab-team-brief.md)
 - Full technical detail (VI): [agent-detection-architecture.md §5d](./agent-detection-architecture.md#5d-soft-serve-gate--marker-biên-_bfm-trên-beam-lab-31-07--01-08)
@@ -15,7 +17,7 @@ validate the AI-agent detection chain end-to-end on a domain Beam fully controls
 | Item | Value |
 |------|-------|
 | Site | **RETIRED** — do not pages-deploy; do not bind production hosts |
-| Cloudflare Pages project | `beam-lab` |
+| Cloudflare Pages project | **deleted 01-09-26** |
 | Site ID | `site_16c46453546f` |
 | Pixel destination | local API only (`http://localhost:8000`) — public lab pixel host retired |
 | Fetch beacon destination | `https://retired.invalid` in wrangler — do **not** set to `api.getbeam.fyi` |
@@ -24,13 +26,12 @@ validate the AI-agent detection chain end-to-end on a domain Beam fully controls
 | Deep pages | `/tac-nhan/` (full UA token list), `/kiem-chung/{openai,anthropic,perplexity,khac}/` |
 | Latest noted production deployment UUID | `9a4d1f20-6bdd-46fc-bfc5-447c83e81cab` (for `wrangler pages deployment tail`) |
 
-## Key files
+## Key files (lab source removed 01-09-26)
+
+Lab Pages middleware lived under `infra/cloudflare/beam-lab/` (deleted). Remaining API pieces:
 
 | Path | Role |
 |------|------|
-| `infra/cloudflare/beam-lab/functions/_middleware.js` | Pages Functions middleware: soft-serve gate, `_bfm` marker mint + stamp, full-log capture, beacon POST |
-| `infra/cloudflare/beam-lab/wrangler.toml` | `BEAM_API_BASE`, `BEAM_SITE_ID`, `BEAM_FULL_LOG`, `BEAM_AGENT_GATE` vars (`BEAM_FETCH_BEACON_SECRET` is a wrangler secret, not in this file) |
-| `infra/cloudflare/beam-lab/public/index.html`, `tac-nhan/`, `kiem-chung/*/` | Static lab pages + pixel snippets |
 | `apps/api/services/agent_fetch_beacon.py` | Classifies + persists the beacon POST from the edge |
 | `apps/api/services/agent_marker.py` | `_bam` (API Fernet) mint/decode **and** `_bfm` (edge hex) extraction (`edge_marker_from_url`) |
 | `apps/api/services/agent_visit_persistence.py` | Writes `agent_fetch_events.link_marker` |
@@ -75,9 +76,7 @@ frontmatter corrected via a UPDATE PROCESS pass. Neither file was deleted.
 | `BEAM_FULL_LOG` | `wrangler.toml` `[vars]` | Logs the complete request/response of every non-static visitor (human included) | `"1"` — **turn off after the debug window** |
 | `BEAM_FETCH_BEACON_SECRET` | wrangler secret (`wrangler pages secret put`) | Must match the API's own `BEAM_FETCH_BEACON_SECRET` or every beacon 401s | secret, not in repo |
 
-Deploy: `npx wrangler pages deploy public --project-name beam-lab` from
-`infra/cloudflare/beam-lab/`. Tail production logs:
-`npx wrangler pages deployment tail --project-name beam-lab`.
+Lab Pages project and git tree were **removed 01-09-26**. Do not `wrangler pages deploy`.
 
 ## Findings this session (2026-07-31 → 2026-08-01)
 

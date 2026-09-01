@@ -5,6 +5,8 @@ runs in Next.js middleware on `getbeam.fyi` (`apps/web/src/lib/fetch-beacon.ts`)
 not this Worker.
 
 This folder is kept as reference for the on-demand UA beacon logic only.
+The Cloudflare script `beam-agent-beacon-splittrip` was deleted from the
+account on 01-09-26 (routes were already unbound).
 
 ## Retired lab binding
 
