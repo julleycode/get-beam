@@ -13,7 +13,18 @@ this package.
 
 ``rpki_roa`` is registered here for exactly the same reason and with the same
 import safety.
+
+``aep`` (AEP Service store tables) is registered here too: its routers/services
+land in later tasks, and it imports only ``apps.api.models.database``.
 """
 
 from apps.api.models.ip_org_prefix import IpOrgPrefix  # noqa: F401
 from apps.api.models.rpki_roa import RpkiRoa  # noqa: F401
+from apps.api.models.aep import (  # noqa: F401
+    AepAuditEvent,
+    AepAuthorization,
+    AepCredential,
+    AepEnrollment,
+    AepIdempotencyRecord,
+    AepReplay,
+)
