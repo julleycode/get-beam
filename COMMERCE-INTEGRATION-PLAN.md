@@ -38,10 +38,10 @@ Do not record secrets, personal data, or duplicate child queues here.
 - Active guide and stage: InFlow Payments guide, task 80 — Seller Sandbox acceptance PASS (01-10-26).
 - Last completed step and evidence: 4 paid routes × MPP + x402 settled in Sandbox via tunnel; no-match not charged; duplicate MPP replay rejected (see child plan InFlow acceptance).
 - Confirmed decisions: all three; order Payments → AEP → ODP; branch `feat/agentic-commerce`; skip RIPER-5; Payments Seller = 4 paid `/api/paid/*` endpoints in `apps/web` (Next.js route handlers) calling Python internal endpoints; Buyer = Locus Apollo reseller fallback, flag OFF, capped; stage 4 defaults accepted.
-- Pending question or blocker: next scope choice — web e2e/auth regression, Buyer track (needs production + real funds), deploy.
+- Pending question or blocker: prod Supabase DB unreachable (pre-existing) blocks Railway API deploy of 61d6008; web deployed dormant. Buyer track (task 60) next per developer.
 - Destination guide, if switching: none.
 - What the child must reassess on resumption: re-verify code state against assessment before task 10.
-- Precise next action: developer picks next Payments task.
+- Precise next action: developer restores Supabase; Payments task 60 (Buyer gate, read-only inspect).
 - Authorization needed: Node 22 pin.
 
 ## Remaining coordination work

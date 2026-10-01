@@ -12,6 +12,9 @@ const nextConfig = {
       "@x402/core",
       "@x402/hono",
       "@x402/extensions",
+      // Reseller buy route (src/app/api/internal/buy)
+      "@inflowpayai/x402-buyer",
+      "@inflowpayai/mpp-buyer",
     ],
   },
   // Let the Vercel CDN cache public blog HTML, but ONLY for requests that carry no

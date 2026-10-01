@@ -100,3 +100,97 @@ Paid checks use the InFlow CLI (`inflow mpp pay` / `inflow x402 pay`). They need
 - Outreach draft reuses the demo LLM call (legacy model id, 8s timeout).
 - `@x402/core` calls `process.exit(1)` if its background init fails. `paid-payments.ts` avoids that path by
   initializing manually. Keep it that way when upgrading the SDK.
+
+## Buyer (reseller) path
+
+**BLUF:** When no direct Apollo key is configured, the enricher can buy the same Apollo
+person-match from a reseller (Locus Apollo people-enrichment, listed $0.038) and pay with
+InFlow over x402 or MPP. **OFF by default on both sides.** Capped at $0.05 per call and
+$1.00 per UTC day. Every failure mode refuses to pay rather than guess.
+
+```
+enricher (Apollo step, no apollo_api_key, reseller_apollo_enabled)
+  └─ services/reseller_apollo.py: Redis reserve $0.05 (fail closed) ─ POST once, no retry ─▶
+apps/web POST /api/internal/buy/apollo-person   (X-Beam-Internal-Secret)
+  ├─ unpaid probe → not 402? return upstream status + JSON, nothing paid
+  ├─ price every offer BEFORE creating a payment; unknown asset/decimals = not payable
+  ├─ InFlow-managed signing only (no external wallets) → pay ≤ 20 s → replay ONCE
+  └─ 200 {provider, protocol, amount_usd, transaction, data}
+```
+
+Route responses (apps/web):
+
+| Status | Body | Paid? | apps/api reservation |
+| ------ | ---- | ----- | -------------------- |
+| 200 | `{provider:"locus_apollo", protocol, amount_usd, transaction, data}` | yes | trimmed to `amount_usd` |
+| 402 | `{error:"price_above_cap"}` | no | released |
+| 402 | `{error:"no_payable_offer"}` (InFlow cannot sign any offer) | no | released |
+| 402 | `{error:"payment_pending_or_declined"}` (approval needed, declined or > 20 s; approval cancelled) | no | released |
+| 502 | `{error:"upstream_error", paid: true \| false \| null}` + `reseller_reconcile` log | maybe | released only if `paid:false` |
+| 404 | `{error:"not_found"}` (flag off, bad secret, unknown path) | no | released |
+| other | upstream status/JSON passed through (no 402 was issued) | no | released |
+
+A timeout or network error on the apps/api → apps/web call keeps the full reservation (the
+payment may have happened). Only `match` and `no_match` results enter the 7-day
+`enrich:apollo:*` cache, so a cached answer never pays again.
+
+Privacy and cost: only `email`, `first_name`, `last_name`, `domain`, `linkedin_url`,
+`organization_name` are forwarded; `reveal_personal_emails` and `reveal_phone_number` are
+always forced `false` (the phone reveal would cost +$0.28 and is also above the cap).
+Upstream response headers are never forwarded; logs carry status, protocol and
+transaction reference only.
+
+Configuration (names only):
+
+| Side | Name | Default | Purpose |
+| ---- | ---- | ------- | ------- |
+| web | `RESELLER_BUY_ENABLED` | off | `"true"` enables `/api/internal/buy/*`, else 404 |
+| web | `INFLOW_BUYER_API_KEY` | falls back to `INFLOW_API_KEY` | InFlow key used to pay (a Seller account can buy) |
+| web | `INFLOW_ENVIRONMENT` | required | `sandbox` or `production` |
+| web | `INTERNAL_PAID_API_SECRET` | required | Same shared secret as the Seller path |
+| web | `RESELLER_APOLLO_URL_X402` | Locus x402 URL | Override for self-tests |
+| web | `RESELLER_APOLLO_URL_MPP` | Locus MPP URL | Override for self-tests |
+| web | `RESELLER_PROTOCOL` | `auto` | `x402`, `mpp`, or `auto` (x402, then MPP only if x402 had no payable offer) |
+| web | `RESELLER_MAX_PRICE_USD` | `0.05` | Per-call cap; offers above it are never paid |
+| api | `RESELLER_APOLLO_ENABLED` | `false` | Enables the fallback (only when `APOLLO_API_KEY` is empty) |
+| api | `RESELLER_DAILY_BUDGET_USD` | `1.00` | Daily ceiling, Redis key `reseller:apollo:spend:{YYYYMMDD}` (micro-USD) |
+| api | `RESELLER_MAX_PRICE_USD` | `0.05` | Per-call reservation; keep ≥ the web cap |
+| api | `BEAM_WEB_INTERNAL_BASE` | `""` | apps/web base URL for server-to-server calls |
+| api | `INTERNAL_PAID_API_SECRET` | `""` | Shared secret (reused) |
+
+Known limits:
+- Locus accepts only mainnet: x402 `exact` on Base (`eip155:8453`) and MPP `tempo`. **InFlow
+  Sandbox cannot pay either**, and production InFlow support for those offers is unverified.
+  Until it is, the route answers `no_payable_offer` and pays nothing.
+- With an API-key buyer, InFlow may still require dashboard approval. The route waits at most
+  20 s, then cancels the approval and returns `payment_pending_or_declined`. Whether
+  approval is required for API-key buyers is unverified.
+- The paid Locus response shape (`{"person": {...}}`, Apollo `people/match`) comes from the
+  listing and has not been observed on a real paid call.
+- `x402 exact` and `mpp tempo` prices are recognized only for the known assets (Base / Base
+  Sepolia USDC, InFlow ledger USDC, the Locus TIP-20 currency). Any other asset is refused.
+
+### Self-test against our own Sandbox Seller (later, not run yet)
+
+The buyer code can pay real Sandbox money to Beam's own Seller (`/api/paid/enrich-email`), which
+offers `balance` on `inflow:1` (x402) and the `inflow` method (MPP), both payable from Sandbox.
+
+1. Start the Seller stack exactly as for the task-80 checks (local `next start` + paid-only Python
+   harness + tunnel). Seller env: `AGENT_PAID_ENABLED=true`, Sandbox `INFLOW_API_KEY`.
+2. In the same web env add: `RESELLER_BUY_ENABLED=true`,
+   `RESELLER_APOLLO_URL_X402=<tunnel>/api/paid/enrich-email`,
+   `RESELLER_APOLLO_URL_MPP=<tunnel>/api/paid/enrich-email`, `RESELLER_PROTOCOL=x402` (then `mpp`).
+   The Seller price ($0.05) equals the default cap, so it is payable.
+3. Call the buy route directly with the shared secret and `{"email": "<fixture email>"}`.
+   **Caveat:** the buy route always adds `reveal_personal_emails:false, reveal_phone_number:false`,
+   and the Seller's Python schema is `extra="forbid"` (`apps/api/schemas/agent_paid.py:12`), so the
+   Seller answers **422 after the payment credential is presented, and does not settle**. The buy
+   route then returns `502 {"error":"upstream_error","paid":null}` plus a `reseller_reconcile`
+   log (a non-402 failure without a receipt is treated as ambiguous; the Seller log and InFlow
+   balance show it was not settled). That still proves the real InFlow payment-creation and replay formats
+   and the "no charge on upstream failure" path end to end. A 200 self-test needs a seller route
+   that ignores unknown fields (not built; never drop the forced reveal flags to make it pass).
+   Expect at most one InFlow approval per call; if Sandbox requires dashboard approval, the
+   route returns `payment_pending_or_declined` after 20 s.
+4. Buyer and Seller are the same Sandbox account, so the balance moves only by fees. Count gross
+   spend against the Sandbox authorization.

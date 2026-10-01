@@ -27,6 +27,7 @@ if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
     "/.well-known/(.*)",  // public agent-discovery manifests (ai-plugin.json)
     "/pricing-overview(.*)",  // public citation-watermark probe page (H4) — must never 302 to /sign-in
     "/api/paid(.*)",  // agent-paid API — MPP/x402 payment is the auth, never Clerk
+    "/api/internal/buy(.*)",  // reseller buy route — shared secret is the auth (server-to-server)
   ]);
   handler = clerkMiddleware((auth: () => { protect: () => void }, request: NextRequest) => {
     if (!isPublicRoute(request)) {
@@ -43,8 +44,9 @@ export default function middleware(req: NextRequest, ev: NextFetchEvent) {
   // response, and stays OUT of the Clerk callback. Dormant unless the server-only
   // shared secret is present. Guarded so a helper bug can never break auth/redirect.
   try {
-    // Agent-paid API calls are never beacon traffic.
-    const beaconPayload = req.nextUrl.pathname.startsWith("/api/paid")
+    // Agent-paid API and internal buy calls are never beacon traffic.
+    const path = req.nextUrl.pathname;
+    const beaconPayload = path.startsWith("/api/paid") || path.startsWith("/api/internal/buy")
       ? null
       : shouldFireFetchBeacon(req);
     if (beaconPayload && process.env.BEAM_FETCH_BEACON_SECRET) {
