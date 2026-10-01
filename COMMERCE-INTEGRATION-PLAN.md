@@ -29,19 +29,19 @@ Do not record secrets, personal data, or duplicate child queues here.
 
 | Order | Integration     | Guide URL                                       | Child-plan path              | Stage       | State                 | Next action                      |
 | ----- | --------------- | ----------------------------------------------- | ---------------------------- | ----------- | --------------------- | -------------------------------- |
-| 10    | InFlow Payments | https://app.inflowpay.ai/integration.md         | `INFLOW-INTEGRATION-PLAN.md` | Implementation / Verification | Seller verified locally in Sandbox | Next: e2e/auth regression, Buyer gate (60), deploy (90) |
-| 20    | AEP             | https://www.aep.foundation/integration.md       | `AEP-INTEGRATION-PLAN.md`    | Not started | Queued                | Begin after Payments handoff     |
+| 10    | InFlow Payments | https://app.inflowpay.ai/integration.md         | `INFLOW-INTEGRATION-PLAN.md` | Verification | Seller DONE (Sandbox-verified, prod dormant); Buyer PAUSED | Buyer resumes when InFlow auto-approval + prod access exist |
+| 20    | AEP             | https://www.aep.foundation/integration.md       | `AEP-INTEGRATION-PLAN.md`    | Plan awaiting approval | Waiting for developer | Approve AEP plan → task 10 spike |
 | 30    | ODP             | https://www.offeringprotocol.org/integration.md | `ODP-INTEGRATION-PLAN.md`    | Not started | Queued                | Begin after AEP handoff          |
 
 ## Current handoff
 
-- Active guide and stage: InFlow Payments guide, task 80 — Seller Sandbox acceptance PASS (01-10-26).
-- Last completed step and evidence: 4 paid routes × MPP + x402 settled in Sandbox via tunnel; no-match not charged; duplicate MPP replay rejected (see child plan InFlow acceptance).
+- Active guide and stage: AEP guide, stage 5 — plan awaiting approval (01-10-26).
+- Last completed step and evidence: Payments handoff — Seller: 4 routes × MPP/x402 settled in Sandbox, no-match not charged, replay rejected; deployed dormant (Railway d947910e, Vercel; /api/paid 404). Buyer: built + unit-verified, Sandbox self-test blocked by InFlow approval requirement (X402ApprovalTimeoutError, no charge); paused by developer. Unpushed commits after 61d6008: 564eaee, 9f86dd4, 88a0a4b, 7bddeae (+ plan updates).
 - Confirmed decisions: all three; order Payments → AEP → ODP; branch `feat/agentic-commerce`; skip RIPER-5; Payments Seller = 4 paid `/api/paid/*` endpoints in `apps/web` (Next.js route handlers) calling Python internal endpoints; Buyer = Locus Apollo reseller fallback, flag OFF, capped; stage 4 defaults accepted.
-- Pending question or blocker: prod Supabase DB unreachable (pre-existing) blocks Railway API deploy of 61d6008; web deployed dormant. Buyer track (task 60) next per developer.
+- Pending question or blocker: AEP interview answers. Payments open items: Buyer approval policy (ask InFlow), production InFlow login, unexplained −2.00 USDC Sandbox balance, push of unpushed commits.
 - Destination guide, if switching: none.
 - What the child must reassess on resumption: re-verify code state against assessment before task 10.
-- Precise next action: developer restores Supabase; Payments task 60 (Buyer gate, read-only inspect).
+- Precise next action: developer approves `AEP-INTEGRATION-PLAN.md` → task 10 spike.
 - Authorization needed: Node 22 pin.
 
 ## Remaining coordination work
