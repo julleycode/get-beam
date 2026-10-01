@@ -86,6 +86,7 @@ For most substantial tasks:
 | billing / quotas | `all-context.md` | `process/features/billing/_GUIDE.md` |
 | blog / landing / SEO | `all-context.md` | `process/features/marketing-site/_GUIDE.md` |
 | pixel / event ingest | `all-context.md` | `process/features/pixel/_GUIDE.md` |
+| agent-paid API (MPP/x402 via InFlow, agentic commerce) | `docs/agent-paid-api.md` | `INFLOW-INTEGRATION-PLAN.md`, `COMMERCE-INTEGRATION-PLAN.md` (repo root); `apps/web/src/lib/payments/`, `apps/api/routers/agent_paid_internal.py` |
 | context maintenance | `all-context.md` | run the `vc-audit-context` skill after edits |
 
 ## Current Features
@@ -797,6 +798,7 @@ concurrent programs move it repeatedly.
 - Billing: `GUMROAD_*` (active), `STRIPE_*`, `LEMONSQUEEZY_*` (legacy)
 - Encryption: `ENCRYPTION_KEY`, `TOKEN_ENCRYPTION_KEY`, `PII_HMAC_KEY`, `PII_ENCRYPTION_KEY` — prod startup fails fast if missing
 - Traffic hygiene: `BLOCK_DATACENTER_TRAFFIC`, `BLOCK_PROXY_VPN_TRAFFIC`
+- Agent-paid API (default OFF): api `AGENT_PAID_ENABLED`, `INTERNAL_PAID_API_SECRET`, `AGENT_PAID_RATE_LIMIT`, `AGENT_PAID_MAX_BODY_BYTES`; web (server-only) `AGENT_PAID_ENABLED`, `INFLOW_API_KEY`, `INFLOW_ENVIRONMENT`, `MPP_SECRET_KEY`, `INTERNAL_PAID_API_SECRET`, `PAID_PRICE_*` — see `docs/agent-paid-api.md`
 - Feature flags: `ENABLE_OSINT_SCAN`, `ENABLE_CONTENT_READER`, `CHANGELOG_SYNC_ENABLED`, `OUTCOMES_DIGEST_ENABLED`, `REFERRALS_ENABLED`, `CRM_*`, `CADENCE_BOT_FLAG_*`, `IP_ORG_LOOKUP_ENABLED` + `IP_ORG_DATASET_*_URL`/`IP_ORG_REFRESH_INTERVAL_HOURS` (default OFF)
 
 ## Open Questions / Outstanding Work
