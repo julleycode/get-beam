@@ -35,6 +35,7 @@ from apps.api.models.enrichment import EnrichmentProfile
 from apps.api.models.visitor import IdentifiedVisitor, Visitor
 from apps.api.services.gemini_client import GeminiError, gemini_generate
 from apps.api.services.key_vault import decrypt_key
+from apps.api.services import reseller_apollo
 from apps.api.services.redis_client import get_redis
 from apps.api.services.usage_logger import log_api_call
 
@@ -203,6 +204,40 @@ OUTPUT FORMAT — keep it SHORT (max ~200 words total):
 - Direct, conversational tone — not corporate. Write in English."""
 
 
+def map_apollo_person(person: dict) -> dict:
+    """Map an Apollo ``person`` object to the enrichment dict shape.
+
+    Pure. Shared by the direct Apollo call (``Enricher._enrich_apollo``) and the
+    paid reseller path (``services/reseller_apollo.py``) so both produce the
+    exact same profile fields. Same dict shape as ``_enrich_pdl``.
+    """
+    org = person.get("organization") or {}
+    data = {
+        "full_name": person.get("name"),
+        "job_title": person.get("title"),
+        "company_name": org.get("name"),
+        "company_domain": org.get("primary_domain") or org.get("website_url"),
+        "company_size": org.get("estimated_num_employees"),
+        "industry": org.get("industry"),
+        "seniority_level": person.get("seniority"),
+        "linkedin_url": person.get("linkedin_url"),
+        "twitter_handle": (person.get("twitter_url", "") or "").rstrip("/").split("/")[-1] or None,
+        "facebook_url": person.get("facebook_url"),
+        "github_url": person.get("github_url"),
+        "city": person.get("city"),
+        "country": person.get("country"),
+    }
+    # company_size arrives as an int; the column is a string.
+    if data["company_size"] is not None:
+        data["company_size"] = str(data["company_size"])
+    return data
+
+
+def apollo_person_usable(data: dict) -> bool:
+    """A mapped Apollo person is usable only if it carries a core field."""
+    return any(data.get(f) for f in ("job_title", "company_name", "linkedin_url"))
+
+
 class Enricher:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -299,7 +334,12 @@ class Enricher:
         # zero enrichment: steps 2 and 3 below consume PDL's own output, so they
         # cannot run without it.
         if not person_data:
-            person_data = await self._enrich_apollo(identified.email, visitor=visitor)
+            if not settings.apollo_api_key and settings.reseller_apollo_enabled:
+                # No direct Apollo key: buy the same lookup from a reseller
+                # (Locus via InFlow). Capped per call and per day; OFF by default.
+                person_data = await self._enrich_apollo_reseller(identified.email, visitor=visitor)
+            else:
+                person_data = await self._enrich_apollo(identified.email, visitor=visitor)
 
         # ── Step 1c: both people-providers missed → free company-from-domain ──
         if not person_data:
@@ -639,22 +679,8 @@ class Enricher:
                 return None
 
             org = person.get("organization") or {}
-            data = {
-                "full_name": person.get("name"),
-                "job_title": person.get("title"),
-                "company_name": org.get("name"),
-                "company_domain": org.get("primary_domain") or org.get("website_url"),
-                "company_size": org.get("estimated_num_employees"),
-                "industry": org.get("industry"),
-                "seniority_level": person.get("seniority"),
-                "linkedin_url": person.get("linkedin_url"),
-                "twitter_handle": (person.get("twitter_url", "") or "").rstrip("/").split("/")[-1] or None,
-                "facebook_url": person.get("facebook_url"),
-                "github_url": person.get("github_url"),
-                "city": person.get("city"),
-                "country": person.get("country"),
-            }
-            if not any(data.get(f) for f in ("job_title", "company_name", "linkedin_url")):
+            data = map_apollo_person(person)
+            if not apollo_person_usable(data):
                 # Shape drift guard: a 200 that maps to nothing usable means the
                 # response keys moved. Log the keys (never the values — this is
                 # PII) so it surfaces instead of silently enriching nobody.
@@ -666,13 +692,37 @@ class Enricher:
                 await self._log_enrich(visitor, "apollo", "person_enrich", False)
                 return None
 
-            # company_size arrives as an int; the column is a string.
-            if data["company_size"] is not None:
-                data["company_size"] = str(data["company_size"])
             await self._cache_set(cache_key, data)
             await self._log_enrich(visitor, "apollo", "person_enrich", True)
             logger.info("cascade_apollo_ok", email_prefix=email[:5])
             return data
+
+    async def _enrich_apollo_reseller(self, email: str, *, visitor: Visitor | None = None) -> dict | None:
+        """Apollo person-match bought from a reseller (services/reseller_apollo.py).
+
+        Shares ``_enrich_apollo``'s 7-day cache key, so a cached answer (from
+        either path) never triggers a paid call. Only definitive answers are
+        cached: a paid match, or a paid/unpaid "no person". Budget skips,
+        declined approvals and errors stay uncached. NOT retried — a retry
+        could pay twice.
+        """
+        cache_key = f"enrich:apollo:{hashlib.sha256(email.strip().lower().encode()).hexdigest()}"
+        hit, cached = await self._cache_get(cache_key)
+        if hit:
+            logger.debug("apollo_reseller_cache_hit", match=cached is not None)
+            return cached
+
+        result = await reseller_apollo.purchase_apollo_person(
+            email,
+            site_id=visitor.site_id if visitor is not None else None,
+            visitor_id=visitor.visitor_id if visitor is not None else None,
+        )
+        if result.outcome == "match":
+            await self._cache_set(cache_key, result.data)
+            return result.data
+        if result.outcome == "no_match":
+            await self._cache_set(cache_key, None)
+        return None
 
     async def _enrich_proxycurl(
         self, linkedin_url: str, *, api_key: str, visitor: Visitor | None = None

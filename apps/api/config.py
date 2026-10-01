@@ -807,6 +807,22 @@ class Settings(BaseSettings):
     # Hard request-body cap for the paid routes (Content-Length AND actual bytes).
     agent_paid_max_body_bytes: int = 16_384
 
+    # ─── Reseller BUY path (Beam pays Locus Apollo via InFlow, task 70) ───
+    # Fallback for the enricher's Apollo step ONLY when no direct Apollo key is
+    # configured. apps/api calls the apps/web route
+    # {beam_web_internal_base}/api/internal/buy/apollo-person with the shared
+    # internal_paid_api_secret; apps/web holds the InFlow buyer key and pays.
+    # Defaults OFF. Real money on production InFlow — keep the caps tight.
+    reseller_apollo_enabled: bool = False
+    # Hard daily spend ceiling (USD, UTC day), reserved in Redis BEFORE each
+    # call. Redis unavailable => no call (fail closed).
+    reseller_daily_budget_usd: float = 1.00
+    # Per-call reservation (USD). Must be >= the web route's
+    # RESELLER_MAX_PRICE_USD so a reservation always covers the real charge.
+    reseller_max_price_usd: float = 0.05
+    # Base URL of apps/web for server-to-server calls (no trailing slash needed).
+    beam_web_internal_base: str = ""
+
     # ─── Owned identity data layer (durable company graph) ───
     # When true, every successful free rDNS company resolution is persisted
     # write-through to the durable cross-tenant company_graph table, and a fresh

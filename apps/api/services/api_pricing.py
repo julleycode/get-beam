@@ -19,6 +19,7 @@ _DEFAULT_PRICES: dict[str, float] = {
     "capturify": 0.0,        # free trial
     "hunter": 0.0,           # free tier
     "apollo": 0.0,           # free tier
+    "locus_apollo": 0.038,   # Locus Apollo people-enrichment via InFlow (x402/MPP reseller)
     "ipinfo": 0.0,           # free tier
     # Enrichment cascade
     "proxycurl": 0.01,       # LinkedIn profile
