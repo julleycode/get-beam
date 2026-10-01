@@ -259,6 +259,24 @@ async def test_enrich_email_happy_path_professional_fields_only(monkeypatch, no_
 
 
 @pytest.mark.unit
+async def test_enrich_email_reveal_flags_are_accepted_but_ignored(monkeypatch, no_rate_limit):
+    monkeypatch.setattr(settings, "people_data_labs_api_key", "pdl-test")
+    monkeypatch.setattr(Enricher, "_enrich_pdl", AsyncMock(return_value=_pdl_payload()))
+    monkeypatch.setattr(Enricher, "_enrich_apollo", AsyncMock())
+    body = {"email": EMAIL, "reveal_personal_emails": True, "reveal_phone_number": True}
+    async with _client() as c:
+        r = await c.post(f"{BASE}/enrich-email", json=body, headers=_headers())
+        other = await c.post(f"{BASE}/enrich-email", json={"email": EMAIL, "reveal_ssn": True},
+                             headers=_headers())
+    assert r.status_code == 200
+    assert set(r.json()) == {"full_name", "job_title", "company_name", "company_domain",
+                             "linkedin_url", "location"}
+    for forbidden in (EMAIL, "555", "janedoe_personal"):
+        assert forbidden not in r.text
+    assert other.status_code == 422
+
+
+@pytest.mark.unit
 async def test_enrich_email_falls_back_to_apollo(monkeypatch, no_rate_limit):
     monkeypatch.setattr(settings, "people_data_labs_api_key", "pdl-test")
     monkeypatch.setattr(settings, "apollo_api_key", "apollo-test")

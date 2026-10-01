@@ -19,6 +19,11 @@ class EnrichEmailRequest(BaseModel):
     model_config = _STRICT
 
     email: EmailStr
+    # Accepted for compatibility with Apollo-style request bodies (Beam's own
+    # reseller buyer always sends both as false) and deliberately IGNORED:
+    # this endpoint never returns personal emails or phone numbers.
+    reveal_personal_emails: bool | None = None
+    reveal_phone_number: bool | None = None
 
 
 class IpCompanyRequest(BaseModel):
