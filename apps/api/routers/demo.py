@@ -26,6 +26,7 @@ from apps.api.services.rate_limiter import limiter
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.ip_resolution import ip_family as _ip_family
 from apps.api.services.ip_resolution import resolve_client_ip
+from apps.api.services.outreach_draft import generate_draft
 from apps.api.services.pii import mask_email
 from apps.api.services.platform_detector import detect_platform
 from apps.api.services.redis_client import get_redis
@@ -694,90 +695,16 @@ async def demo_generate_draft(request: Request, body: DraftRequest) -> dict:
     actual social post — not generic outreach.
     """
     await _enforce_demo_budget()
-    name = body.visitor_name.strip() or "this visitor"
-    first = name.split()[0].lower() if name != "this visitor" else "there"
-
-    # Build context-aware prompt
-    if body.recent_post:
-        prompt = (
-            f"Write a short, casual social media reply (2-3 sentences max) to this post:\n\n"
-            f'"{body.recent_post}"\n\n'
-            f"The reply is from someone who runs {body.user_url or 'a SaaS product'}. "
-            f"Be genuine, reference something specific from the post. "
-            f"No hashtags. Lowercase casual tone. Don't start with 'hey'."
-        )
-    else:
-        prompt = (
-            f"Write a short, casual social media comment (2-3 sentences max) "
-            f"to engage with {name}"
-            f"{' (' + body.visitor_role + ')' if body.visitor_role else ''}"
-            f"{' at ' + body.visitor_company if body.visitor_company else ''}. "
-            f"The commenter runs {body.user_url or 'a SaaS product'}. "
-            f"Be genuine, not salesy. No hashtags. Lowercase casual tone."
-        )
-
-    # Try Claude API (direct)
-    if settings.anthropic_api_key:
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers={
-                        "x-api-key": settings.anthropic_api_key,
-                        "anthropic-version": "2023-06-01",
-                        "content-type": "application/json",
-                    },
-                    json={
-                        "model": "claude-sonnet-4-20250514",
-                        "max_tokens": 150,
-                        "messages": [{"role": "user", "content": prompt}],
-                    },
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    text = data.get("content", [{}])[0].get("text", "")
-                    if text:
-                        return {"draft": text.strip()}
-        except Exception as e:
-            logger.warning("demo_generate_draft_anthropic_error", error=str(e))
-
-    # Try OpenRouter (fallback — supports 100+ models)
-    if settings.openrouter_api_key:
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                resp = await client.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {settings.openrouter_api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": "anthropic/claude-sonnet-4-20250514",
-                        "max_tokens": 150,
-                        "messages": [{"role": "user", "content": prompt}],
-                    },
-                )
-                if resp.status_code == 200:
-                    data = resp.json()
-                    text = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    if text:
-                        return {"draft": text.strip()}
-        except Exception as e:
-            logger.warning("demo_generate_draft_openrouter_error", error=str(e))
-
-    # Fallback: template referencing real post if available
-    if body.recent_post:
-        snippet = body.recent_post[:60] + ("..." if len(body.recent_post) > 60 else "")
-        return {"draft": f'this resonates. "{snippet}" — would love to swap notes on this.'}
-
-    site = body.user_url or "your site"
-    if name != "this visitor":
-        return {"draft": f"saw {first} checking out {site}. would love to connect and swap notes."}
-    return {
-        "draft": f"someone's been checking out your pricing page on {site}. this is what beam would draft based on their social posts and your tone."
-    }
+    # Shared with the agent-paid outreach-draft route; behaviour unchanged
+    # (same prompt, Anthropic → OpenRouter → template fallback).
+    result = await generate_draft(
+        body.visitor_name,
+        body.visitor_role,
+        body.visitor_company,
+        body.user_url,
+        body.recent_post,
+    )
+    return {"draft": result.draft}
 
 
 _X_HANDLE_INVALID = re.compile(r"[^A-Za-z0-9_]")

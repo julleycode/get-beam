@@ -60,6 +60,7 @@ from apps.api.routers import contacts
 from apps.api.routers import hot_contacts
 from apps.api.routers import request_logs
 from apps.api.routers import agent_profile, agent_gateway, agent_mcp
+from apps.api.routers import agent_paid_internal
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
 from slowapi import _rate_limit_exceeded_handler
@@ -544,6 +545,13 @@ app.include_router(
 # these routes answer 404 (dormant, not revealed) until an operator enables them.
 app.include_router(agent_gateway.router, prefix="/api/v1/agent", tags=["agent-gateway"])
 app.include_router(agent_mcp.router, prefix="/api/v1/agent", tags=["agent-mcp"])
+
+# ── Agent-paid internal API (agentic commerce) ──────────
+# Server-to-server ONLY: the apps/web MPP/x402 handler calls these after it has
+# verified payment. Deliberately NOT under /api/v1 (the router carries its own
+# /internal/v1/paid prefix) and hidden from OpenAPI. Gated by
+# settings.agent_paid_enabled + X-Beam-Internal-Secret — plain 404 otherwise.
+app.include_router(agent_paid_internal.router)
 
 # ── EasyEngage routers ──────────────────────────────────
 app.include_router(social_auth.router, prefix="/api/v1/social", tags=["social-auth"])
