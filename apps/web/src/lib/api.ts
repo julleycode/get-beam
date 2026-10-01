@@ -33,6 +33,8 @@ import type {
   AgentListResponse,
   AgentStatsResponse,
   AgentAnalytics,
+  AgentTimelineEntry,
+  AgentTimelineOut,
   SegmentListResponse,
   Campaign,
   CampaignListResponse,
@@ -631,6 +633,14 @@ class ApiClient {
   async getAgentAnalytics(siteId: string) {
     return this.request<AgentAnalytics>(
       `/api/v1/agents/${siteId}/analytics`
+    );
+  }
+
+  // WS1 — chronological AI-agent fetch timeline for one resolved visitor.
+  // Read-only; empty entries is a normal state (200, not 404).
+  async getAgentTimeline(siteId: string, visitorId: string) {
+    return this.request<AgentTimelineOut>(
+      `/api/v1/visitors/${siteId}/${visitorId}/agent-timeline`
     );
   }
 
@@ -1863,6 +1873,8 @@ export type {
   AgentListResponse,
   AgentStatsResponse,
   AgentAnalytics,
+  AgentTimelineEntry,
+  AgentTimelineOut,
   TopPageEntry,
   Segment,
   SegmentListResponse,
