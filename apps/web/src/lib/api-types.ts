@@ -330,11 +330,24 @@ export interface Visitor {
   do_not_resolve?: boolean;
 }
 
+// POST /visitors/{site_id}/{visitor_id}/web-research (TinyFish).
+export interface WebResearchResult {
+  status: "updated" | "no_results";
+  filled?: string[];
+  web?: {
+    summary?: string | null;
+    sources?: string[];
+    fetched_at?: string | null;
+  } | null;
+}
+
 export interface VisitorDetail extends Visitor {
   // Deterministic 0-100 fit against the site's reviewed ICP profile. Detail-only
   // (absent from the list `Visitor` type by design). null/undefined = not
   // scored — never 0, which would mean "scored and a poor fit".
   icp_fit?: number | null;
+  // True when TinyFish web research is enabled server-side (detail-only).
+  web_research_enabled?: boolean;
   email?: string | null;
   full_name?: string | null;
   phone?: string | null;
@@ -369,6 +382,13 @@ export interface VisitorDetail extends Visitor {
     model?: string;
     osint_scan?: OsintScan;
     social_resolution?: SocialResolution;
+    // TinyFish web research (enricher Step 4c). `sources` are the fetched page
+    // URLs (plain strings). Web-derived — render as plain text only.
+    web?: {
+      summary?: string | null;
+      sources?: string[];
+      fetched_at?: string | null;
+    };
   } | null;
   // Handoff Detection H2: latest fetch↔click handoff link for this visitor, if
   // any. PROBABILISTIC attribution only (an AI agent fetched this page shortly

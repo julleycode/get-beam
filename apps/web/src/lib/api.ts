@@ -26,6 +26,7 @@ import type {
   FeatureVoteResult,
   FeatureRequestListResponse,
   VisitorDetail,
+  WebResearchResult,
   VisitorListResponse,
   VisitorCountry,
   VisitorAiSource,
@@ -1149,6 +1150,14 @@ class ApiClient {
     const qs = force ? "?force=true" : "";
     return this.request<{ status: string; message?: string }>(
       `/api/v1/visitors/${siteId}/${visitorId}/resolve-social${qs}`,
+      { method: "POST" },
+    );
+  }
+
+  // TinyFish web research for one identified visitor (flag-gated server-side).
+  async webResearch(siteId: string, visitorId: string) {
+    return this.request<WebResearchResult>(
+      `/api/v1/visitors/${siteId}/${visitorId}/web-research`,
       { method: "POST" },
     );
   }

@@ -129,6 +129,26 @@ function LinkPill({ href, label }: { href: string; label: string }) {
   );
 }
 
+// Only http(s) links from web research are rendered (blocks javascript:/data:).
+function safeWebSources(sources: string[] | undefined): { url: string; host: string }[] {
+  if (!Array.isArray(sources)) return [];
+  const out: { url: string; host: string }[] = [];
+  const seen = new Set<string>();
+  for (const raw of sources) {
+    if (typeof raw !== "string") continue;
+    try {
+      const u = new URL(raw);
+      if ((u.protocol === "http:" || u.protocol === "https:") && !seen.has(u.href)) {
+        seen.add(u.href);
+        out.push({ url: u.href, host: u.hostname.replace(/^www\./, "") });
+      }
+    } catch {
+      // ignore unparseable URL
+    }
+  }
+  return out;
+}
+
 function Section({
   title,
   icon: Icon,
@@ -296,6 +316,9 @@ export default function VisitorDetailPage() {
     status: string;
     message?: string;
   } | null>(null);
+  // TinyFish web research — fills the "Web research" card.
+  const [webResearching, setWebResearching] = useState(false);
+  const [webResearchMessage, setWebResearchMessage] = useState<string | null>(null);
   const [showGuesses, setShowGuesses] = useState(false);
 
   // Recent social posts by this visitor, pulled from the EasyEngage feed
@@ -446,6 +469,25 @@ export default function VisitorDetailPage() {
     }
   }
 
+  async function handleWebResearch() {
+    if (!siteId || !visitorId) return;
+    setWebResearching(true);
+    setWebResearchMessage(null);
+    try {
+      const result = await api.webResearch(siteId, visitorId);
+      if (result.status === "no_results") {
+        setWebResearchMessage("No matching public pages");
+      }
+      setVisitor(await api.getVisitor(siteId, visitorId));
+    } catch (err) {
+      setWebResearchMessage(
+        err instanceof Error ? err.message : "Web research failed",
+      );
+    } finally {
+      setWebResearching(false);
+    }
+  }
+
   if (loading)
     return (
       <div className="max-w-5xl space-y-6">
@@ -469,6 +511,12 @@ export default function VisitorDetailPage() {
 
   const completeness = visitor.enrichment_completeness ?? 0;
   const hasDeepResearch = !!visitor.social_context?.deep_research;
+  const webResearch = visitor.social_context?.web;
+  const webSources = safeWebSources(webResearch?.sources);
+  const webFetched =
+    webResearch?.fetched_at && !Number.isNaN(Date.parse(webResearch.fetched_at))
+      ? new Date(webResearch.fetched_at).toLocaleDateString()
+      : null;
   const identified =
     visitor.identity_status !== "anonymous" &&
     visitor.identity_status !== "unresolvable" &&
@@ -708,6 +756,28 @@ export default function VisitorDetailPage() {
               </Badge>
             )}
             {researchButton}
+            {visitor.web_research_enabled && identified && (
+              <div className="flex flex-col items-end gap-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleWebResearch}
+                  disabled={webResearching}
+                >
+                  {webResearching ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Searching the web…
+                    </>
+                  ) : (
+                    "Web research (TinyFish)"
+                  )}
+                </Button>
+                {webResearchMessage && (
+                  <p className="text-xs text-muted-foreground">{webResearchMessage}</p>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -853,6 +923,43 @@ export default function VisitorDetailPage() {
                   );
                 })}
               </div>
+            </Section>
+          )}
+
+          {webResearch && (
+            <Section
+              title="Web research"
+              icon={Globe}
+              action={
+                <span className="text-xs text-muted-foreground">
+                  via TinyFish
+                  {webFetched ? ` · Fetched ${webFetched}` : ""}
+                </span>
+              }
+            >
+              {/* Web-derived, untrusted: rendered as plain text only. */}
+              {webResearch.summary ? (
+                <p className="whitespace-pre-line text-sm leading-relaxed">{webResearch.summary}</p>
+              ) : (
+                <p className="text-sm text-muted-foreground">No summary extracted.</p>
+              )}
+              {webSources.length > 0 && (
+                <ul className="mt-3 space-y-1">
+                  {webSources.map((s) => (
+                    <li key={s.url}>
+                      <a
+                        href={s.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground transition hover:text-primary"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        {s.host}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </Section>
           )}
 
