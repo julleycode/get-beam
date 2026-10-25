@@ -2,17 +2,6 @@
 const nextConfig = {
   experimental: {
     missingSuspenseWithCSRBailout: false,
-    // Agent-paid API SDKs (src/app/api/paid) are loaded via Node require at
-    // runtime; bundling them fails the build on mppx's optional
-    // '@modelcontextprotocol/sdk' import.
-    serverComponentsExternalPackages: [
-      "mppx",
-      "@inflowpayai/mpp-seller",
-      "@inflowpayai/x402-seller",
-      "@x402/core",
-      "@x402/hono",
-      "@x402/extensions",
-    ],
   },
   // Let the Vercel CDN cache public blog HTML, but ONLY for requests that carry no
   // Clerk session cookie.

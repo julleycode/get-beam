@@ -37,17 +37,10 @@ REASON_SAMPLED = "sampled"
 _RAW_KEY = "__raw__"
 
 
-# Prefixes that are NEVER captured, regardless of the env setting: bodies on
-# these routes are raw PII by design (the agent-paid API takes an email / IP /
-# name and returns a professional profile), so an operator clearing
-# REQUEST_LOG_EXCLUDE_PATHS must not be able to turn them into a PII store.
-ALWAYS_EXCLUDED_PREFIXES: frozenset[str] = frozenset({"/internal/v1/paid"})
-
-
 def excluded_paths() -> frozenset[str]:
-    """Path PREFIXES the middleware never logs: the setting plus the hard floor."""
+    """Path PREFIXES the middleware never logs, from the comma-separated setting."""
     raw = settings.request_log_exclude_paths or ""
-    return frozenset(p.strip() for p in raw.split(",") if p.strip()) | ALWAYS_EXCLUDED_PREFIXES
+    return frozenset(p.strip() for p in raw.split(",") if p.strip())
 
 
 def ignored_statuses() -> frozenset[int]:

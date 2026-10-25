@@ -170,39 +170,6 @@ def _avatar_from_social_context(social_context: dict | None) -> str | None:
     return None
 
 
-# Grounded deep-research prompt + output cap. Module-level so the agent-paid
-# /internal/v1/paid/deep-research route reuses the exact prompt the visitor path
-# sends (services/agent_paid.py). The visitor path's output is unchanged.
-DEEP_RESEARCH_MAX_OUTPUT_TOKENS = 2048
-
-
-def build_deep_research_prompt(person_context: str, seed_block: str = "") -> str:
-    """Return the grounded deep-research prompt for a person-context block."""
-    return f"""Deep-dive research about this person's online presence and social media activity.
-
-{person_context}
-{seed_block}
-Your task:
-1. Find ALL social media profiles (Twitter/X, LinkedIn, GitHub, Instagram, YouTube, TikTok, personal blog/website, Substack, newsletter)
-2. Determine which platforms they are MOST active on — with evidence (follower counts, posting frequency, engagement)
-3. What they post about: interests, expertise areas, recurring topics
-4. Professional background: career path, current projects, companies built or worked at
-5. Notable content, communities, or brands they are associated with
-6. My honest read: what makes them interesting, where they are credible, where they are not
-
-CRITICAL RULES:
-- Be completely honest. If public information is limited, say "Public information on this person is limited" and report only what you can verify.
-- Do NOT fabricate, guess, or hallucinate any information. Only report what you find through actual web searches.
-- If you cannot find social profiles, say so clearly.
-- Distinguish between verified facts and reasonable inferences.
-
-OUTPUT FORMAT — keep it SHORT (max ~200 words total):
-- Use tight bullet points, not paragraphs.
-- No preamble, no filler, no wrap-up section.
-- Cover only: main profiles (with handles/links), where they are MOST active, what they post about, one line on professional background, and a 1-2 sentence honest read.
-- Direct, conversational tone — not corporate. Write in English."""
-
-
 class Enricher:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
@@ -1033,7 +1000,29 @@ class Enricher:
             else (profile.social_context if profile else None)
         )
 
-        prompt = build_deep_research_prompt(person_context, seed_block)
+        prompt = f"""Deep-dive research about this person's online presence and social media activity.
+
+{person_context}
+{seed_block}
+Your task:
+1. Find ALL social media profiles (Twitter/X, LinkedIn, GitHub, Instagram, YouTube, TikTok, personal blog/website, Substack, newsletter)
+2. Determine which platforms they are MOST active on — with evidence (follower counts, posting frequency, engagement)
+3. What they post about: interests, expertise areas, recurring topics
+4. Professional background: career path, current projects, companies built or worked at
+5. Notable content, communities, or brands they are associated with
+6. My honest read: what makes them interesting, where they are credible, where they are not
+
+CRITICAL RULES:
+- Be completely honest. If public information is limited, say "Public information on this person is limited" and report only what you can verify.
+- Do NOT fabricate, guess, or hallucinate any information. Only report what you find through actual web searches.
+- If you cannot find social profiles, say so clearly.
+- Distinguish between verified facts and reasonable inferences.
+
+OUTPUT FORMAT — keep it SHORT (max ~200 words total):
+- Use tight bullet points, not paragraphs.
+- No preamble, no filler, no wrap-up section.
+- Cover only: main profiles (with handles/links), where they are MOST active, what they post about, one line on professional background, and a 1-2 sentence honest read.
+- Direct, conversational tone — not corporate. Write in English."""
 
         if not settings.gemini_api_key:
             logger.warning("deep_research_skipped_no_api_key")
@@ -1044,7 +1033,7 @@ class Enricher:
 
         try:
             research_text = await gemini_generate(
-                prompt, grounding=True, max_output_tokens=DEEP_RESEARCH_MAX_OUTPUT_TOKENS
+                prompt, grounding=True, max_output_tokens=2048
             )
         except GeminiError as e:
             logger.error("deep_research_api_error", error=str(e), visitor_id=visitor.visitor_id[:8])

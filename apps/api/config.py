@@ -787,26 +787,6 @@ class Settings(BaseSettings):
     # ('','') == True would otherwise ACCEPT an empty header — an auth bypass).
     beam_fetch_beacon_secret: str = ""
 
-    # ─── Agent-paid internal API (agentic commerce) ───
-    # POST /internal/v1/paid/* — four operations sold to external AI agents that
-    # pay via MPP/x402. Payment is verified by the apps/web Next.js route
-    # handler, which then calls these endpoints server-to-server. External
-    # agents never reach them directly.
-    #
-    # Defaults OFF. Flag off OR an empty shared secret => every route answers a
-    # plain 404 (dormant, existence not revealed) BEFORE any rate limit or work.
-    agent_paid_enabled: bool = False
-    # Shared secret with apps/web, sent as X-Beam-Internal-Secret. Server-only on
-    # both sides, NEVER shipped to the browser. Empty => dormant (checked before
-    # the constant-time compare, same '' == '' bypass guard as the beacon secret).
-    internal_paid_api_secret: str = ""
-    # Per-client-IP limit (slowapi syntax). The client IP comes from the
-    # X-Beam-Client-IP header the Next handler sets — trusted only because the
-    # shared secret has already been verified.
-    agent_paid_rate_limit: str = "30/minute"
-    # Hard request-body cap for the paid routes (Content-Length AND actual bytes).
-    agent_paid_max_body_bytes: int = 16_384
-
     # ─── Owned identity data layer (durable company graph) ───
     # When true, every successful free rDNS company resolution is persisted
     # write-through to the durable cross-tenant company_graph table, and a fresh
