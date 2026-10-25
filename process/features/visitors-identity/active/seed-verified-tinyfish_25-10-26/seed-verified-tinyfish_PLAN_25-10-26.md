@@ -141,3 +141,129 @@ psql <local-5433-dsn> -c "select count(*) from identified_visitors where site_id
 DATABASE_URL=postgresql+asyncpg://u:p@db.example.supabase.co/x .venv/bin/python -m scripts.seed_verified_visitors; echo $?  # expect non-zero, no writes
 ```
 Known gaps: KG-1 Docker gates G5/G6 pending daemon; KG-2 live TinyFish shape G7 (needs-live-provider, user opt-in).
+
+## Demo Supplement (25-10-26)
+
+User-approved add-on so TinyFish is visible in the product. No commits.
+
+- **UI:** `apps/web/src/lib/api-types.ts` — `social_context.web?: { summary?, sources?: string[], fetched_at? }` (sources are plain URL strings, per `tinyfish_reader.py:248`). `apps/web/src/app/dashboard/visitors/[visitorId]/page.tsx` — "Web research" `Section` after Deep research, shown only when `social_context.web` exists: plain-text summary, http(s)-only source links (new tab, `noopener noreferrer`, hostname), "via TinyFish · Fetched {date}".
+- **Seed:** `scripts/seed_verified_visitors.py --demo-company` adds a 6th row "Demo Visitor" (demo.visitor@example.com, Head of Partnerships, Stripe, San Francisco), no `web` key. No company-domain column exists on `EnrichmentProfile`, so none set. Default stays 5 rows; `--unseed` always removes the demo row. 5 new tests in `tests/unit/test_seed_verified_visitors.py`.
+- **Gates:** seed+tinyfish tests 31 passed; full unit 3051 passed / 2 skipped. Web `tsc`/`lint` NOT run — `apps/web/node_modules` missing.
+- **Trigger finding:** Step 4c runs only inside `Enricher.enrich_tier1`. The row "Enrich" button (`POST /enrich`) calls `deep_research` and does NOT run Step 4c. The detail page "Deep-dive research" button (`POST /resolve-social`, needs `ENABLE_OSINT_SCAN=true`) calls `enrich_tier1` first, so it does. Inside `enrich_tier1`, Step 4c is unreachable when `PEOPLE_DATA_LABS_API_KEY` is empty (early return, not mock-aware) Second blocker for this demo row: if PDL/Apollo miss, the Step-1c domain fallback derives company "Example" from example.com and `_upsert_profile` OVERWRITES the seeded "Stripe" (it sets any non-None field), so TinyFish searches "Demo Visitor Example". With MOCK_EXTERNAL_APIS=true the PDL/Apollo mocks may return their own fake company instead. Not redesigned.
+
+## Phase 2: Web research button (25-10-26)
+
+TL;DR: new flag-gated `POST /api/v1/visitors/{site_id}/{visitor_id}/web-research` that calls `enrich_from_web` directly (same gate as `/resolve`), an additive `web_research_enabled` bool on `VisitorDetailOut`, a mock-mode Gemini extraction branch in `tinyfish_reader` (today mock mode cannot complete Step 4c), and a "Web research (TinyFish)" button on the visitor detail page. `/enrich`, `Enricher.enrich_tier1` and `enricher.py` are untouched.
+
+### Status
+EXECUTED 25-10-26 — P2-G1..G6 green; P2-G7/G8 deferred (KG-1). Validated PASS (inner PVL). Builds on uncommitted Demo Supplement (web card, `social_context.web` type, `--demo-company`).
+
+### Research findings (verified on disk)
+- `enrich_from_web(visitor, identified, profile, db)` (`tinyfish_reader.py:203`) returns `bool`, never raises, does NOT commit (mutates `profile` only; caller commits). Silent `False` for: flag off, no key (non-mock), empty `full_name`, empty company (profile.company_name, else non-free-mail email domain stem), no matching results, daily cap hit (`_claim_cap`, Redis down = fail closed), no pages, any exception. Cache: Redis `tinyfish:{sha256(name|company)}` 7d; a cache hit skips search, fetch AND the cap.
+- **Mock gap:** `tinyfish_client` search/fetch have mock branches, but `gemini_generate_json` -> `gemini_generate` has NO mock branch (`gemini_client.py:99`; only `gemini_agent_loop` mocks). With `MOCK_EXTERNAL_APIS=true` and no `GEMINI_API_KEY` it raises `GeminiError` -> swallowed -> `False`. With a key set it would make a LIVE Gemini call in mock mode. Must fix for a keyless demo.
+- `/resolve` gate (`visitors.py:883-905`): `get_current_user` + `_verify_site_access` (foreign site -> 404) + select `Visitor` with `human_only_visitor_filter()` -> 404. `/enrich` (825-880) is the load template for IdentifiedVisitor/EnrichmentProfile.
+- No `@limiter.limit` exists on the visitors router yet; precedent `routers/onboarding.py:56,74` (`from apps.api.services.rate_limiter import limiter`, `@limiter.limit("30/minute")`, needs `request: Request`). Flag-off precedent: onboarding raises `HTTPException(404, "Not Found")`.
+- `check_usage_allowed`/`increment_usage` meter monthly identity resolutions (plan quota). TinyFish is not identity resolution.
+- Detail page (`apps/web/src/app/dashboard/visitors/[visitorId]/page.tsx`) does NOT use TanStack Query: it holds `visitor` in `useState` and refreshes via `api.getVisitor` (see `handleResolveSocial`, ~line 436). Errors render inline via a status/message state, not a toast library.
+- `apps/web/node_modules` missing; Docker absent (KG-1).
+
+### Decision note (approach chosen by user; sub-decisions)
+| Decision | Choice | Why |
+|---|---|---|
+| Flag off | `404 Not Found` | Matches onboarding-canary precedent; dormant feature not revealed. 409 would leak existence. |
+| Anonymous / no profile | `409` with `detail` code `not_identified` / `no_profile` | Clear, actionable 4xx; resource exists but state is wrong. Visitor existence already confirmed to this tenant, so no leak. |
+| No name / no company | `422` `detail: "missing_name"` / `"missing_company"` (pre-checked via `_company_for`) | `enrich_from_web` returns bare `False`; pre-checks give the UI a real reason. |
+| Other `False` (no results / cap / fetch fail) | `200 {"status": "no_results"}` | Not a client error; cap is an operator quota. |
+| `force` param | **Not added** | 7d cache is the quota guard; force would bypass it and burn the global fetch cap. Revisit if users ask. |
+| Rate limit | `@limiter.limit("10/minute")` per IP | Sibling precedent; endpoint triggers outbound fetch + Gemini. |
+| Usage accounting | Do NOT call `check_usage_allowed`/`increment_usage` | Those meter identity resolutions; counting web research would mis-bill. Global `tinyfish_daily_fetch_cap` + per-IP limit + 7d cache bound spend. |
+| UI flag | Additive `web_research_enabled: bool = False` on `VisitorDetailOut` only (not `VisitorOut`) | Repo lesson: detail-only fields on the detail schema; no extra call. |
+| Mock Gemini | Mock branch in `tinyfish_reader.enrich_from_web`: when `settings.mock_external_apis`, build `data` via new pure `_mock_extract(full_name, company, pages)` instead of calling Gemini | Service-layer mock convention; makes demo keyless and prevents a live Gemini call in mock mode. Does not touch `enricher.py`. |
+| Web refresh | Follow page's local pattern (`api.getVisitor` -> `setVisitor`), not TanStack invalidation | Page has no query cache; adding one is scope creep. |
+
+### Touchpoints (Phase 2)
+- `apps/api/routers/visitors.py` — new endpoint + undecorated helper `_web_research(db, site_id, visitor_id, user) -> dict`; add `"web_research_enabled"` to detail `data` dict (near line 694).
+- `apps/api/schemas/visitors.py` — `VisitorDetailOut.web_research_enabled: bool = False`.
+- `apps/api/services/tinyfish_reader.py` — `_mock_extract` + mock branch.
+- `apps/web/src/lib/api.ts` — `webResearch(siteId, visitorId)`.
+- `apps/web/src/lib/api-types.ts` — `VisitorDetail.web_research_enabled?: boolean`.
+- `apps/web/src/app/dashboard/visitors/[visitorId]/page.tsx` — button + handler + inline result.
+- New tests: `tests/unit/test_web_research_endpoint.py`; extend `tests/unit/test_tinyfish_reader.py`; new `tests/integration/test_web_research_endpoint.py` (KG-1).
+
+### Public Contracts (Phase 2)
+- `POST /api/v1/visitors/{site_id}/{visitor_id}/web-research` (auth). Responses: `200 {"status": "updated", "filled": [field names], "web": {summary, sources, fetched_at}}`; `200 {"status": "no_results"}`; `404` flag off / foreign site / unknown or bot visitor; `409 not_identified|no_profile`; `422 missing_name|missing_company`; `429` rate limit. Body never includes IP, email, or name.
+- `GET /api/v1/visitors/{site_id}/{visitor_id}` gains additive `web_research_enabled: bool`.
+
+### Blast Radius (Phase 2)
+6 source files + 3 test files, 2 packages (`apps/api`, `apps/web`). Risk class: new authed endpoint (public API, additive) + outbound PII (name+company to TinyFish, already accepted in Phase 1). No schema/migration, no billing change, flag default OFF. `/enrich`, `enricher.py`, `identity_classification.py` must have empty diffs.
+
+### Implementation Checklist (Phase 2)
+1. `schemas/visitors.py`: add `web_research_enabled: bool = False` to `VisitorDetailOut` (NOT `VisitorOut`).
+2. `routers/visitors.py` detail endpoint: `data["web_research_enabled"] = bool(settings.tinyfish_enrichment_enabled)`.
+3. `tinyfish_reader.py`: add pure `_mock_extract(full_name, company, pages) -> dict` returning deterministic `{job_title: "Head of Growth", company_name: company, linkedin_url: <first linkedin.com page url or None>, personal_website: None, summary: f"{full_name} works at {company} (mock web research)."}`; in `enrich_from_web` replace the Gemini call with `data = _mock_extract(...) if settings.mock_external_apis else await gemini_generate_json(...)`. Pass result through existing `_normalize`. Name/company enter only the returned dict, never logs.
+4. `routers/visitors.py`: import `Request`, `limiter` (`apps.api.services.rate_limiter`), `enrich_from_web`, `_company_for`. Helper `_web_research`: flag off -> 404; `_verify_site_access`; load Visitor with `human_only_visitor_filter()` -> 404; load IdentifiedVisitor -> 409 `not_identified`; load EnrichmentProfile -> 409 `no_profile`; empty `full_name` -> 422 `missing_name`; `_company_for` empty -> 422 `missing_company`; `ok = await enrich_from_web(...)`; if ok `await db.commit()` and return `updated` + `filled` + `profile.social_context["web"]`; else `no_results`. Log `web_research_requested` with `site_id`, `visitor_id[:8]`, `status` only. Endpoint `@router.post("/{site_id}/{visitor_id}/web-research")` + `@limiter.limit("10/minute")`, signature `(request: Request, site_id, visitor_id, user=Depends(get_current_user), db=Depends(get_db))`, delegates to helper. Return `filled` by diffing `_FILLABLE` attrs before/after (do not change `enrich_from_web` signature).
+5. `api-types.ts`: `web_research_enabled?: boolean` on `VisitorDetail`; response type `WebResearchResult = { status: "updated" | "no_results"; filled?: string[]; web?: {...} }`.
+6. `api.ts`: `async webResearch(siteId, visitorId)` POST to the new path, typed `WebResearchResult`.
+7. `page.tsx`: `webResearching` + `webResearchResult` state; `handleWebResearch()` calls `api.webResearch`, then `setVisitor(await api.getVisitor(...))`; on error set inline message from `err.message`. Render `Button` "Web research (TinyFish)" (Loader2 spinner while running, disabled while running) only when `visitor.web_research_enabled && visitor.identity_status === "identified"` (confirm exact identified check used elsewhere on page). Show inline result line ("No matching public pages" / error). No `any`.
+8. Tests (below). Do not edit `enricher.py`, `/enrich`, `identity_classification.py`.
+
+### Verification Evidence (Phase 2)
+| Gate / Scenario | Strategy | Proves |
+|---|---|---|
+| P2-G1 helper: flag off -> 404; foreign site (`_verify_site_access` raising 404) -> 404; visitor missing/bot -> 404; no IdentifiedVisitor -> 409; no profile -> 409; no name/company -> 422; happy path calls `enrich_from_web` once, commits, returns `updated` + `web`; `False` -> `no_results`, no commit | Fully-Automated (unit, AsyncMock db, patched `enrich_from_web`/`_verify_site_access`) | endpoint contract + gate mirror |
+| P2-G2 `_mock_extract` deterministic + mock branch never calls `gemini_generate_json`; non-mock still does | Fully-Automated | keyless demo |
+| P2-G3 detail schema: `VisitorDetailOut` has `web_research_enabled`, `VisitorOut` does not | Fully-Automated | repo schema lesson |
+| P2-G4 regression: existing tinyfish/seed/enricher unit tests + full unit lane | Fully-Automated | enrich chain untouched |
+| P2-G5 `git diff --stat main -- apps/api/services/enricher.py apps/api/services/identity_classification.py` empty; `/enrich` body unchanged | Fully-Automated | no chain edits |
+| P2-G6 web `npm ci` then `tsc --noEmit` + `lint` | Fully-Automated (prereq install) | strict TS |
+| P2-G7 integration: real PG, real route via httpx, flag on + mock, identified seed row -> 200 `updated`, profile persisted; foreign user -> 404 | Hybrid (KG-1 Docker) | DB commit + auth wiring |
+| P2-G8 manual: seed `--demo-company`, flag+mock on, click button, Web research card fills | Agent-Probe (needs Docker + dev servers) | end-to-end demo |
+
+### Test Infra Improvement Notes (Phase 2)
+- Visitors router has no unit-test harness for endpoints; the undecorated-helper pattern (`_web_research`) avoids needing a real `Request` for slowapi in unit tests. Reusable for future routes.
+
+### Resume and Execution Handoff (Phase 2)
+1. Plan: this file, section "Phase 2: Web research button (25-10-26)".
+2. Last completed: Phase 2 PLAN + inner PVL.
+3. Validate-contract: written below (Phase 2 Validate Contract), Gate PASS.
+4. Context: all-context.md, tests/all-tests.md, tinyfish_reader.py, visitors.py 671-960, onboarding.py, rate_limiter.py, page.tsx 300-470/880+.
+5. Next: ENTER EXECUTE MODE -> checklist 1-8 in order, run P2-G1..G6; G7/G8 when Docker exists.
+
+### Phase 2 Validate Contract
+generated-by: inner-pvl: phase-2
+date: 2026-10-25
+Date: 25-10-26
+Gate: PASS
+Environment-deferred gates (not plan defects): P2-G7, P2-G8 (KG-1 Docker absent).
+
+| Layer 1 | Status |
+|---|---|
+| Infra fit | PASS — limiter import path + Request param verified (onboarding precedent); no migration |
+| Test coverage | PASS — helper pattern makes all contract branches unit-testable now; DB path deferred to KG-1 |
+| Breaking changes | PASS — additive endpoint + additive detail field with default |
+| Security | PASS — same tenant gate as /resolve, 404 not 403, flag-off 404, per-IP limit, global cap, no PII in body/logs, hostile-text path unchanged |
+
+| Layer 2 | Status |
+|---|---|
+| Backend endpoint | PASS — load template and gate verified at visitors.py:825-905 |
+| Mock Gemini branch | PASS — gap confirmed (gemini_generate has no mock); fix is local to tinyfish_reader |
+| Schema field | PASS — VisitorDetailOut at schemas/visitors.py:83 |
+| Web | PASS — page uses useState + api.getVisitor; plan follows it |
+
+Cycle 1 findings fixed in plan before gate: (a) "TanStack invalidation" replaced with page-local refresh (page has no query cache); (b) mock Gemini gap added as item 3; (c) slowapi direct-call problem solved by undecorated helper; (d) `filled` computed in router to keep `enrich_from_web` signature stable. Totals: 0 FAIL / 0 CONCERN / 8 PASS.
+
+Execute-agent instructions:
+- E1 Do not change `enrich_from_web`'s signature or return type; only add the mock branch.
+- E2 Integration test must pin `DATABASE_URL` to a localhost DSN (`.env` points at Supabase PROD).
+- E3 Never put name, email, company, query or URLs in structlog events.
+- E4 Use the page's existing identified-visitor check; if none, gate on `visitor.identity_status === "identified"`.
+
+Test gates (run from work context):
+```
+/Users/apple/.venvs/get-beam/bin/python -m pytest tests/unit/test_web_research_endpoint.py tests/unit/test_tinyfish_reader.py tests/unit/test_tinyfish_client.py tests/unit/test_seed_verified_visitors.py -q
+/Users/apple/.venvs/get-beam/bin/python -m pytest tests/unit -q
+git diff --stat main -- apps/api/services/enricher.py apps/api/services/identity_classification.py   # expect empty
+(cd apps/web && npm ci && npx tsc --noEmit && npm run lint)
+# KG-1 (Docker): DATABASE_URL=<localhost:5433 dsn> /Users/apple/.venvs/get-beam/bin/python -m pytest tests/integration/test_web_research_endpoint.py -q
+```
+Known gaps: KG-1 Docker (P2-G7, P2-G8); KG-2 live TinyFish/Gemini shape (Phase 1, unchanged).
