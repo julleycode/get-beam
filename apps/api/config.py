@@ -511,6 +511,22 @@ class Settings(BaseSettings):
     # operator action, matching agent_detection_enabled / company_graph_enabled.
     agent_gateway_enabled: bool = False
 
+    # ─── InFlow x402 seller (pay-per-call /api/v1/paid/*) ───
+    # When true AND inflow_api_key is set, the API boots an InFlow x402 Seller +
+    # Facilitator in the lifespan and mounts /api/v1/paid/* (agents pay per call
+    # via the x402 v2 `balance` scheme on network inflow:1). Off => the router is
+    # not mounted and every /paid path is 404 (dormant, not revealed). Needs the
+    # paid_requests migration (d3f8a2c61b47) applied before flipping on.
+    inflow_x402_enabled: bool = False
+    inflow_api_key: str = ""  # InFlow Seller API key (X-API-KEY) — never logged
+    inflow_environment: str = "sandbox"  # "sandbox" | "production"
+    inflow_base_url: str = ""  # optional override; empty => SDK default per environment
+    # Per-route prices, InFlow SDK price syntax ("$0.05" = USD).
+    paid_price_company_from_domain: str = "$0.05"
+    paid_price_social_posts: str = "$0.03"
+    paid_price_generate_draft: str = "$0.03"
+    paid_price_detect_platform: str = "$0.01"
+
     # ─── Agent link marker (Handoff Detection F2) ───
     # When true, offers.json stamps each same-host offer URL with an opaque
     # per-fetch marker, so a human arriving on that link is tied to the exact

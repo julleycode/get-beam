@@ -50,6 +50,7 @@ from apps.api.models.agent_profile import AgentProfile  # noqa: F401 — registe
 from apps.api.models.site_tombstone import SiteTombstone  # noqa: F401 — register for create_all
 from apps.api.models.engage_outcome import EngageOutcome  # noqa: F401 — register for create_all
 from apps.api.models.job_change_event import JobChangeEvent  # noqa: F401 — register for create_all
+from apps.api.models.paid_request import PaidRequest  # noqa: F401 — register for create_all
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo, onboarding
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
@@ -60,6 +61,8 @@ from apps.api.routers import contacts
 from apps.api.routers import hot_contacts
 from apps.api.routers import request_logs
 from apps.api.routers import agent_profile, agent_gateway, agent_mcp
+from apps.api.routers import paid
+from apps.api.services.x402_seller import redact_payment_headers, setup_gate, teardown_gate
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
 from slowapi import _rate_limit_exceeded_handler
@@ -110,8 +113,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     start_scheduler()
     logger.info("scheduler_started")
 
+    # InFlow x402 seller — only when flagged on AND keyed; never blocks boot.
+    if settings.inflow_x402_enabled:
+        await setup_gate()
+
     yield
 
+    await teardown_gate()
     stop_scheduler()
     from apps.api.services.redis_client import close_redis
     await close_redis()
@@ -464,10 +472,12 @@ class RequestResponseLogMiddleware:
                     explicit_reason=state.get("log_reason"),
                 )
                 if reason:
-                    headers = {
+                    # x402 payment headers carry signed payment payloads —
+                    # never persist them (redact_headers only masks "*signature*").
+                    headers = redact_payment_headers({
                         k.decode("latin-1"): v.decode("latin-1")
                         for k, v in scope.get("headers", [])
-                    }
+                    })
                     query = scope.get("query_string", b"").decode("latin-1")
                     asyncio.ensure_future(
                         request_logger.persist_log(
@@ -544,6 +554,10 @@ app.include_router(
 # these routes answer 404 (dormant, not revealed) until an operator enables them.
 app.include_router(agent_gateway.router, prefix="/api/v1/agent", tags=["agent-gateway"])
 app.include_router(agent_mcp.router, prefix="/api/v1/agent", tags=["agent-mcp"])
+# Pay-per-call agent API (InFlow x402). Mounted ONLY when the flag is on, so the
+# default deploy has no /api/v1/paid surface at all (404, not revealed).
+if settings.inflow_x402_enabled:
+    app.include_router(paid.router, prefix="/api/v1/paid", tags=["paid"])
 
 # ── EasyEngage routers ──────────────────────────────────
 app.include_router(social_auth.router, prefix="/api/v1/social", tags=["social-auth"])

@@ -114,3 +114,61 @@ class PDLMixin:
                     "pdl_ip_enrich", f"HTTP {resp.status_code}"
                 )
         return None
+
+
+async def enrich_company_by_domain(domain: str) -> dict | None:
+    """PDL ``/v5/company/enrich`` by website domain — read-only firmographics.
+
+    Used by the paid ``/api/v1/paid/company-from-domain`` route. Returns a curated
+    dict on a match, ``None`` on a legitimate non-match (404). Raises
+    ``ProviderUnavailableError`` when PDL is not configured or the account fails
+    (401/402/429/5xx/transport) so the paid caller does NOT settle the payment.
+    Company-level data only — no person fields are requested or returned.
+    """
+    if settings.mock_external_apis:
+        return {
+            "domain": domain,
+            "name": f"Mock Company ({domain})",
+            "industry": "computer software",
+            "size": "11-50",
+            "employee_count": 25,
+            "founded": 2020,
+            "country": "united states",
+            "locality": "san francisco",
+            "linkedin_url": None,
+            "twitter_url": None,
+        }
+    if not settings.people_data_labs_api_key:
+        raise ProviderUnavailableError("pdl_company_enrich", "not configured")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://api.peopledatalabs.com/v5/company/enrich",
+                headers={"X-Api-Key": settings.people_data_labs_api_key},
+                params={"website": domain, "pretty": "false"},
+            )
+    except httpx.HTTPError as exc:
+        logger.warning("pdl_company_enrich_exception", error=type(exc).__name__)
+        raise ProviderUnavailableError("pdl_company_enrich", type(exc).__name__) from exc
+
+    if resp.status_code == 404:
+        logger.debug("pdl_company_enrich_no_match", domain=domain)
+        return None
+    if resp.status_code != 200:
+        logger.warning("pdl_company_enrich_error", status=resp.status_code)
+        raise ProviderUnavailableError("pdl_company_enrich", f"HTTP {resp.status_code}")
+
+    body = resp.json() or {}
+    location = body.get("location") or {}
+    return {
+        "domain": domain,
+        "name": body.get("display_name") or body.get("name"),
+        "industry": body.get("industry"),
+        "size": body.get("size"),
+        "employee_count": body.get("employee_count"),
+        "founded": body.get("founded"),
+        "country": location.get("country"),
+        "locality": location.get("locality"),
+        "linkedin_url": body.get("linkedin_url"),
+        "twitter_url": body.get("twitter_url"),
+    }

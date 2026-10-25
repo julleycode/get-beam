@@ -609,9 +609,18 @@ async def demo_social_posts(request: Request, body: SocialPostsRequest) -> dict:
     Never returns fake data — returns empty list if API unavailable.
     """
     await _enforce_demo_budget()
+    return await fetch_social_posts(body.twitter_handle)
+
+
+async def fetch_social_posts(twitter_handle: str) -> dict:
+    """Read-only social-post fetch shared by /demo/social-posts and /paid/social-posts.
+
+    Returns ``{"posts": [...], "source": ...}``. No budget check here — each caller
+    owns its own spend control (demo daily budget vs. x402 payment).
+    """
     posts: list[dict] = []
 
-    handle = (body.twitter_handle or "").lstrip("@").strip()
+    handle = (twitter_handle or "").lstrip("@").strip()
     if not handle:
         return {"posts": [], "source": "none"}
 
@@ -694,6 +703,15 @@ async def demo_generate_draft(request: Request, body: DraftRequest) -> dict:
     actual social post — not generic outreach.
     """
     await _enforce_demo_budget()
+    return await generate_draft_text(body)
+
+
+async def generate_draft_text(body: DraftRequest) -> dict:
+    """Draft generation shared by /demo/generate-draft and /paid/generate-draft.
+
+    Returns ``{"draft": str}``; never raises for provider errors (falls back to a
+    template). No budget check here — each caller owns its own spend control.
+    """
     name = body.visitor_name.strip() or "this visitor"
     first = name.split()[0].lower() if name != "this visitor" else "there"
 
