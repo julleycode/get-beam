@@ -155,6 +155,20 @@ def _normalize(data: dict) -> dict[str, str | None]:
     return out
 
 
+def _mock_extract(full_name: str, company: str, pages: list[dict[str, str]]) -> dict[str, str | None]:
+    """Deterministic Gemini stand-in for MOCK_EXTERNAL_APIS (pure, no I/O)."""
+    linkedin = next(
+        (p.get("url") for p in pages if "linkedin.com" in _host(p.get("url") or "")), None
+    )
+    return {
+        "job_title": "Head of Growth",
+        "company_name": company,
+        "linkedin_url": linkedin,
+        "personal_website": None,
+        "summary": f"{full_name} works at {company} (mock web research).",
+    }
+
+
 async def _cache_get(key: str) -> dict | None:
     try:
         raw = await get_redis().get(key)
@@ -241,8 +255,14 @@ async def enrich_from_web(
             if not pages:
                 logger.info("tinyfish_no_pages", visitor_id=vid, errors=len(errors))
                 return False
-            data = await gemini_generate_json(
-                build_prompt(full_name, company, pages), validate=_validate
+            # gemini_generate has no mock branch: in mock mode use a deterministic
+            # stand-in so the demo runs keyless and never makes a live call.
+            data = (
+                _mock_extract(full_name, company, pages)
+                if settings.mock_external_apis
+                else await gemini_generate_json(
+                    build_prompt(full_name, company, pages), validate=_validate
+                )
             )
             extracted = _normalize(data if isinstance(data, dict) else {})
             extracted["sources"] = [p["url"] for p in pages]

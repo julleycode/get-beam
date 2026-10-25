@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 import structlog
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -47,6 +47,7 @@ from apps.api.services.enricher import Enricher
 from apps.api.services.identity_classification import identity_level
 from apps.api.services.identity_resolver import IdentityResolver
 from apps.api.services.known_hash import email_hash
+from apps.api.services.rate_limiter import limiter
 from apps.api.services.resolution_eligibility import (
     first_win_boost_site_ids,
     is_resolution_candidate,
@@ -54,6 +55,7 @@ from apps.api.services.resolution_eligibility import (
     resolution_not_deferred_filter,
     site_resolves_all_us,
 )
+from apps.api.services.tinyfish_reader import _FILLABLE, _company_for, enrich_from_web
 from apps.api.services.usage_limits import (
     check_enrich_budget,
     check_identify_budget,
@@ -697,6 +699,7 @@ async def get_visitor_detail(
     # It stays OFF VisitorOut deliberately — a field on the wrong schema class
     # is what caused the GET /visitors 500.
     data["icp_fit"] = visitor.icp_fit
+    data["web_research_enabled"] = bool(settings.tinyfish_enrichment_enabled)
 
     # Resolution observability: latest attempt + skip reason for stuck visitors
     logs_result = await db.execute(
@@ -878,6 +881,84 @@ async def enrich_visitor(
 
     enricher = Enricher(db)
     return await enricher.deep_research(visitor, identified, profile)
+
+
+async def _web_research(
+    db: AsyncSession, site_id: str, visitor_id: str, user: User
+) -> dict:
+    """Run TinyFish web research (enricher Step 4c) for ONE identified visitor.
+
+    Undecorated so unit tests can call it without a slowapi Request. Same tenant
+    gate as /resolve. Does not meter plan usage (this is not identity
+    resolution); spend is bounded by the per-IP limit, the global daily fetch
+    cap and the 7-day cache inside enrich_from_web.
+    """
+    if not settings.tinyfish_enrichment_enabled:
+        # Dormant: do not reveal the endpoint exists when disabled.
+        raise HTTPException(status_code=404, detail="Not Found")
+    await _verify_site_access(db, site_id, user)
+
+    result = await db.execute(
+        select(Visitor).where(
+            Visitor.site_id == site_id,
+            Visitor.visitor_id == visitor_id,
+            human_only_visitor_filter(),
+        )
+    )
+    visitor = result.scalar_one_or_none()
+    if not visitor:
+        raise HTTPException(status_code=404, detail="Visitor not found")
+
+    id_result = await db.execute(
+        select(IdentifiedVisitor).where(
+            IdentifiedVisitor.site_id == site_id,
+            IdentifiedVisitor.visitor_id == visitor_id,
+        )
+    )
+    identified = id_result.scalar_one_or_none()
+    if not identified:
+        raise HTTPException(status_code=409, detail="not_identified")
+
+    prof_result = await db.execute(
+        select(EnrichmentProfile).where(
+            EnrichmentProfile.site_id == site_id,
+            EnrichmentProfile.visitor_id == visitor_id,
+        )
+    )
+    profile = prof_result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(status_code=409, detail="no_profile")
+
+    if not (getattr(identified, "full_name", None) or "").strip():
+        raise HTTPException(status_code=422, detail="missing_name")
+    company, _domain = _company_for(identified, profile)
+    if not company:
+        raise HTTPException(status_code=422, detail="missing_company")
+
+    before = {k: getattr(profile, k, None) for k in _FILLABLE}
+    ok = await enrich_from_web(visitor, identified, profile, db)
+    status = "updated" if ok else "no_results"
+    logger.info("web_research_requested", site_id=site_id, visitor_id=visitor_id[:8], status=status)
+    if not ok:
+        return {"status": "no_results"}
+
+    await db.commit()
+    filled = [k for k in _FILLABLE if not before[k] and getattr(profile, k, None)]
+    web = (profile.social_context or {}).get("web")
+    return {"status": "updated", "filled": filled, "web": web}
+
+
+@router.post("/{site_id}/{visitor_id}/web-research")
+@limiter.limit("10/minute")
+async def web_research_visitor(
+    request: Request,
+    site_id: str,
+    visitor_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Flag-gated TinyFish web research for one identified visitor."""
+    return await _web_research(db, site_id, visitor_id, user)
 
 
 @router.post("/{site_id}/{visitor_id}/resolve")

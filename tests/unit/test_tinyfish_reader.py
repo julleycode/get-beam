@@ -188,3 +188,34 @@ async def test_enricher_step_4c_wired_and_nonfatal():
         src = inspect.getsource(Enricher.enrich_tier1)
         assert "enrich_from_web(visitor, identified, profile, self.db)" in src
         assert src.index("_fetch_and_store_github") < src.index("enrich_from_web")
+
+
+# ── Phase 2: mock-mode Gemini stand-in (P2-G2) ──────────────────────────────
+
+def test_mock_extract_is_deterministic():
+    pages = [{"url": "https://acme.com/team", "text": "x"},
+             {"url": "https://www.linkedin.com/in/ava", "text": "y"}]
+    a = tr._mock_extract("Ava Chen", "Acme", pages)
+    assert a == tr._mock_extract("Ava Chen", "Acme", pages)
+    assert a == {
+        "job_title": "Head of Growth",
+        "company_name": "Acme",
+        "linkedin_url": "https://www.linkedin.com/in/ava",
+        "personal_website": None,
+        "summary": "Ava Chen works at Acme (mock web research).",
+    }
+    assert tr._mock_extract("A", "B", [{"url": "https://acme.com", "text": ""}])["linkedin_url"] is None
+
+
+async def test_mock_mode_never_calls_gemini(env, monkeypatch):
+    monkeypatch.setattr(tr.settings, "mock_external_apis", True)
+    p = _profile()
+    assert await tr.enrich_from_web(_visitor(), _identified(), p) is True
+    env.gem.assert_not_called()
+    assert p.job_title == "Head of Growth"
+    assert p.social_context["web"]["summary"] == "Ava Chen works at Example Labs (mock web research)."
+
+
+async def test_non_mock_mode_still_calls_gemini(env):
+    assert await tr.enrich_from_web(_visitor(), _identified(), _profile()) is True
+    env.gem.assert_awaited_once()

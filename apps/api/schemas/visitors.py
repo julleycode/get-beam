@@ -106,6 +106,9 @@ class VisitorDetailOut(VisitorOut):
     # DETAIL-ONLY, deliberately: it is NOT on VisitorOut, so the list endpoint's
     # select does not need to provide it.
     icp_fit: float | None = None
+    # DETAIL-ONLY: lets the detail page show the "Web research (TinyFish)"
+    # button only when settings.tinyfish_enrichment_enabled is on.
+    web_research_enabled: bool = False
     # Resolution observability — why is this visitor still anonymous?
     last_resolution_attempt: datetime | None = None
     resolution_providers_tried: list[str] | None = None
