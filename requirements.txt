@@ -19,7 +19,7 @@ bcrypt
 cryptography==44.0.0
 
 # HTTP client
-httpx==0.27.2
+httpx==0.28.1
 
 # Redis & rate limiting
 redis==5.1.1
@@ -43,6 +43,10 @@ yt-dlp==2024.12.13
 
 # Payments
 stripe>=8.0.0
+# InFlow x402 seller (pay-per-call /api/v1/paid/*, behind INFLOW_X402_ENABLED).
+# NOT the [fastapi] extra: it needs fastapi>=0.142 and we pin 0.115.0. Requires
+# httpx>=0.28.1 (hence the httpx bump above).
+inflowpay[x402]==0.3.2
 
 # Logging
 structlog==24.4.0
