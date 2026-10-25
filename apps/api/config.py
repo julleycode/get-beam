@@ -1319,6 +1319,16 @@ class Settings(BaseSettings):
     github_osint_token: str = ""
     github_reader_max_repos: int = 5             # top-N most-recently-pushed repos to keep
 
+    # ─── TinyFish web enrichment (enricher Step 4c — Search + Fetch public pages
+    # about an IDENTIFIED visitor; behind a flag, default OFF). Sends the
+    # visitor's name + company to a 3rd party, so it stays off until enabled.
+    # Never resolves identity — fills empty EnrichmentProfile fields only. ───
+    tinyfish_api_key: str | None = None
+    tinyfish_enrichment_enabled: bool = False    # master gate
+    tinyfish_max_fetch_urls: int = 3             # pages fetched per visitor
+    tinyfish_daily_fetch_cap: int = 200          # global fetch calls/day (quota guard)
+    tinyfish_timeout_s: float = 15.0
+
     # ─── phantommm sidecar (LinkedIn outreach automation) ───
     # Beam NEVER talks to LinkedIn directly and NEVER stores the raw LinkedIn
     # session cookie. The cookie lives encrypted inside the phantommm sidecar;

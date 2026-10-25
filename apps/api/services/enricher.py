@@ -316,6 +316,20 @@ class Enricher:
         # Non-fatal, flag-gated, only when github_url is already known.
         await self._fetch_and_store_github(visitor, profile)
 
+        # ── Step 4c (opt-in): TinyFish public-web Search + Fetch ──
+        # Non-fatal, flag-gated (tinyfish_enrichment_enabled). Fills EMPTY
+        # profile fields + social_context["web"]; never touches identity.
+        try:
+            from apps.api.services.tinyfish_reader import enrich_from_web
+
+            await enrich_from_web(visitor, identified, profile, self.db)
+        except Exception as exc:
+            logger.warning(
+                "tinyfish_step_failed",
+                visitor_id=visitor.visitor_id[:8],
+                error_type=type(exc).__name__,
+            )
+
         # ── Avatar (secondary): if Twitter gave no image, try OSINT profiles.
         # Read after Step 4 so any freshly-written social_context is included.
         if not profile.avatar_url:
