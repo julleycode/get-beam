@@ -2,6 +2,12 @@
 
     DATABASE_URL=postgresql+asyncpg://<user>:<pw>@localhost:5433/<db> \\
         .venv/bin/python -m scripts.seed_verified_visitors [--user-id UUID] [--dry-run] [--unseed]
+            [--demo-company]
+
+``--demo-company`` also seeds a 6th placeholder person at a real company
+(Stripe) whose profile has NO ``social_context["web"]`` key, so the TinyFish
+enrichment step (4c) has something to add during a demo. ``--unseed`` always
+removes it too.
 
 Safety: this repo's ``.env`` points ``DATABASE_URL`` at production. The script
 refuses (exit 2, zero writes) unless the DSN host is local. There is NO remote
@@ -55,6 +61,20 @@ ROSTER: list[dict[str, str]] = [
 ]
 
 
+# Opt-in demo row (--demo-company). Placeholder person, real company, so Step 4c
+# web research can find public pages. Person fields are pre-filled; social_context
+# deliberately has no "web" key. EnrichmentProfile has no company-domain column.
+DEMO_PERSON: dict[str, str] = {
+    "slug": "demo-visitor", "full_name": "Demo Visitor", "email": "demo.visitor@example.com",
+    "job_title": "Head of Partnerships", "company_name": "Stripe", "city": "San Francisco",
+    "region": "CA", "country": "US",
+}
+
+
+def roster_for(demo_company: bool = False) -> list[dict[str, str]]:
+    return [*ROSTER, DEMO_PERSON] if demo_company else list(ROSTER)
+
+
 class NonLocalDatabaseError(RuntimeError):
     pass
 
@@ -85,7 +105,7 @@ def visitor_id_for(slug: str) -> str:
 
 
 def _validate_roster() -> None:
-    for p in ROSTER:
+    for p in roster_for(demo_company=True):
         domain = p["email"].rsplit("@", 1)[1]
         if domain not in ALLOWED_EMAIL_DOMAINS:
             raise ValueError(f"roster email domain not allowed: {p['slug']}")
@@ -108,7 +128,7 @@ async def _resolve_owner(db, user_id: str | None) -> uuid.UUID:
     return first
 
 
-async def _run(user_id: str | None, dry_run: bool, unseed: bool) -> int:
+async def _run(user_id: str | None, dry_run: bool, unseed: bool, demo_company: bool = False) -> int:
     # Imported only after the DSN guard has passed.
     from sqlalchemy import delete, select
 
@@ -119,9 +139,13 @@ async def _run(user_id: str | None, dry_run: bool, unseed: bool) -> int:
     from apps.api.models.visitor_email import VisitorEmail, normalize_source
     from apps.api.services.pii_crypto import email_hash, encrypt_pii, normalize_email
 
-    ids = [visitor_id_for(p["slug"]) for p in ROSTER]
+    people = roster_for(demo_company)
+    ids = [visitor_id_for(p["slug"]) for p in people]
+    # Delete set always includes the demo row: --unseed (and a re-run without the
+    # flag) must never leave it behind.
+    delete_ids = [visitor_id_for(p["slug"]) for p in roster_for(demo_company=True)]
     if dry_run:
-        for p, vid in zip(ROSTER, ids):
+        for p, vid in zip(people, ids):
             print(f"[dry-run] {SEED_SITE_ID} {vid[:8]} {p['slug']}")
         return 0
 
@@ -130,11 +154,11 @@ async def _run(user_id: str | None, dry_run: bool, unseed: bool) -> int:
         async with db.begin():
             for model in (EnrichmentProfile, VisitorEmail, IdentifiedVisitor, Visitor):
                 await db.execute(
-                    delete(model).where(model.site_id == SEED_SITE_ID, model.visitor_id.in_(ids))
+                    delete(model).where(model.site_id == SEED_SITE_ID, model.visitor_id.in_(delete_ids))
                 )
             if unseed:
                 await db.execute(delete(Site).where(Site.site_id == SEED_SITE_ID))
-                print(f"unseeded {len(ids)} visitors + site {SEED_SITE_ID}")
+                print(f"unseeded {len(delete_ids)} visitors + site {SEED_SITE_ID}")
                 return 0
 
             site = await db.scalar(select(Site).where(Site.site_id == SEED_SITE_ID))
@@ -143,7 +167,7 @@ async def _run(user_id: str | None, dry_run: bool, unseed: bool) -> int:
                 db.add(Site(site_id=SEED_SITE_ID, user_id=owner,
                             name="Beam Seed (verified visitors)", url="https://example.com"))
 
-            for i, (p, vid) in enumerate(zip(ROSTER, ids)):
+            for i, (p, vid) in enumerate(zip(people, ids)):
                 email = normalize_email(p["email"])
                 bidx = email_hash(email)
                 cipher = encrypt_pii(email)
@@ -181,6 +205,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--user-id", help="owner user UUID (default: first local user)")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--unseed", action="store_true")
+    parser.add_argument("--demo-company", action="store_true",
+                        help="also seed a 6th placeholder visitor at Stripe for the TinyFish demo")
     args = parser.parse_args(argv)
 
     try:
@@ -192,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
         print(str(exc), file=sys.stderr)
         return 2
     _validate_roster()
-    return asyncio.run(_run(args.user_id, args.dry_run, args.unseed))
+    return asyncio.run(_run(args.user_id, args.dry_run, args.unseed, args.demo_company))
 
 
 if __name__ == "__main__":
