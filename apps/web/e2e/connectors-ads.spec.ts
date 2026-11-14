@@ -17,14 +17,30 @@ test.describe("Connectors — Ad Audiences", () => {
       "http://localhost:8000/api/v1/auth/login",
       { data: { email: "demo@getbeam.fyi", password: "password123" } }
     );
+    let sitePath = "/dashboard/connectors";
     if (res.ok()) {
       const { access_token } = await res.json();
       await page.addInitScript((token) => {
         localStorage.setItem("auth_token", token as string);
         localStorage.setItem("beam_tour_done_v1", "1");
+        for (const t of ["overview","visitors","agents","segments","campaigns","connectors","feed"]) localStorage.setItem("beam_tab_intro_v1_" + t, "1");
       }, access_token);
+      // The ad connect panel needs a selected site. Reuse the demo user's
+      // first site, or create one (the free plan allows a single site).
+      const headers = { Authorization: `Bearer ${access_token}` };
+      const list = await page.request.get("http://localhost:8000/api/v1/sites/", { headers });
+      let siteId: string | undefined;
+      if (list.ok()) siteId = ((await list.json()) as Array<{ id: string }>)[0]?.id;
+      if (!siteId) {
+        const created = await page.request.post("http://localhost:8000/api/v1/sites/", {
+          headers,
+          data: { name: "E2E Connectors", url: "https://e2e-connectors.example.com" },
+        });
+        if (created.ok()) siteId = (await created.json()).id;
+      }
+      sitePath = siteId ? `/dashboard/connectors?site=${siteId}` : sitePath;
     }
-    await page.goto("/dashboard/connectors");
+    await page.goto(sitePath);
     await page.waitForLoadState("networkidle");
   });
 
