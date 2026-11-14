@@ -19,7 +19,12 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from apps.api.config import settings
-from apps.api.routers.demo import DraftRequest, fetch_social_posts, generate_draft_text
+from apps.api.routers.demo import (
+    DraftRequest,
+    UpstreamUnavailableError,
+    fetch_social_posts,
+    generate_draft_text,
+)
 from apps.api.services.identity_providers.base import ProviderUnavailableError
 from apps.api.services.identity_providers.pdl import enrich_company_by_domain
 from apps.api.services.platform_detector import detect_platform
@@ -101,7 +106,12 @@ async def paid_social_posts(request: Request, body: SocialPostsBody) -> Response
         raise HTTPException(status_code=422, detail="Invalid handle")
 
     async def handler() -> dict:
-        return await fetch_social_posts(handle)
+        # strict: provider failure => 503 (not settled, not charged); never the
+        # demo's cookie-backed browser fallback.
+        try:
+            return await fetch_social_posts(handle, strict=True)
+        except UpstreamUnavailableError as exc:
+            raise PaymentHandlerError(503, "Social data provider unavailable") from exc
 
     return await run_paid(request, "social-posts", handler)
 
@@ -113,7 +123,12 @@ async def paid_generate_draft(request: Request, body: GenerateDraftBody) -> Resp
     draft_body = DraftRequest(**body.model_dump())
 
     async def handler() -> dict:
-        return await generate_draft_text(draft_body)
+        # strict: buyer text is sanitized + fenced; LLM failure => 503 instead of
+        # selling the canned template.
+        try:
+            return await generate_draft_text(draft_body, strict=True)
+        except UpstreamUnavailableError as exc:
+            raise PaymentHandlerError(503, "Draft model unavailable") from exc
 
     return await run_paid(request, "generate-draft", handler)
 

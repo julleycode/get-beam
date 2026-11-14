@@ -34,8 +34,8 @@ FP = "fp2_publiccanaryfingerprint"
 
 _GEO = GeoResult(
     country_code="VN", region="Hanoi", city="Hanoi",
-    lat=21.03, lon=105.85, isp="Viettel Group", org="Viettel Group",
-    as_str="AS7552 Viettel Group",
+    lat=21.03, lon=105.85, isp="FPT Telecom", org="FPT Telecom",
+    as_str="AS18403 FPT Telecom Company",
 )
 
 
@@ -115,8 +115,24 @@ async def test_public_no_auth_required(test_client, flag_on, geo_ok):
     assert r.json()["geo"] is not None
 
 
+@pytest.fixture
+def cross_agreed(monkeypatch):
+    """Both providers agree => confidence "high" => map mode (policy v2, 9b8dc23).
+
+    Only map mode sends city + coordinates; with the cross-check off (conftest
+    default) the reveal is a country card.
+    """
+    from apps.api.services.geoip_crosscheck import CrossCheck
+
+    async def _cross(_ip, _primary):
+        return CrossCheck(checked=True, agreed=True, distance_km=1.0,
+                          second_city="Hanoi", second_country="VN", country_agreed=True)
+
+    monkeypatch.setattr("apps.api.services.geoip_crosscheck.crosscheck_geo", _cross)
+
+
 @pytest.mark.asyncio
-async def test_returns_full_shape(test_client, flag_on, geo_ok, test_engine):
+async def test_returns_full_shape(test_client, flag_on, geo_ok, cross_agreed, test_engine):
     factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
     await _seed_visit(factory, BEAM_SITE, "v-pub-beam")
 
@@ -130,7 +146,7 @@ async def test_returns_full_shape(test_client, flag_on, geo_ok, test_engine):
     assert body["geo"]["city"] == "Hanoi"
     assert body["geo"]["country_code"] == "VN"
     assert body["geo"]["lat"] == 21.03 and body["geo"]["lng"] == 105.85
-    assert body["network"]["label"] == "Viettel Group"
+    assert body["network"]["label"] == "FPT Telecom"
     assert body["network"]["kind"] in ("isp", "company")
 
 
