@@ -30,10 +30,13 @@ BEAM_SITE = "site_90a488f43eac"
 OTHER_SITE = "site_someone_else"
 FP = "fp2_canarytestfingerprint"
 
+# A FIXED-LINE ISP on purpose: display policy v2 (9b8dc23) downgrades every
+# mobile-carrier connection (e.g. Viettel) to a country card, so a mobile
+# fixture can never exercise the map payload.
 _GEO = GeoResult(
     country_code="VN", region="Hanoi", city="Hanoi",
-    lat=21.03, lon=105.85, isp="Viettel Group", org="Viettel Group",
-    as_str="AS7552 Viettel Group",
+    lat=21.03, lon=105.85, isp="FPT Telecom", org="FPT Telecom",
+    as_str="AS18403 FPT Telecom Company",
 )
 
 
@@ -99,6 +102,21 @@ def geo_ok(monkeypatch):
     )
 
 
+@pytest.fixture
+def cross_agreed(monkeypatch):
+    """Both providers agree => confidence "high" => map mode.
+
+    Display policy v2 (9b8dc23) only sends a city + coordinates in map mode, and
+    map mode requires a high-confidence (cross-checked) location. With the
+    cross-check off (conftest default) the reveal is a country card.
+    """
+    async def _cross(_ip, _primary):
+        return _cc()
+
+    monkeypatch.setattr("apps.api.services.geoip_crosscheck.crosscheck_geo", _cross)
+    monkeypatch.setattr("apps.api.routers.onboarding.crosscheck_geo", _cross)
+
+
 @pytest.mark.asyncio
 async def test_flag_off_returns_404_and_calls_no_provider(authed, monkeypatch):
     from apps.api.config import settings
@@ -125,7 +143,9 @@ async def test_unauthenticated_is_rejected(test_client, flag_on):
 
 
 @pytest.mark.asyncio
-async def test_authed_returns_full_shape(authed, flag_on, geo_ok, test_engine):
+async def test_authed_returns_full_shape(
+    authed, flag_on, geo_ok, cross_agreed, test_engine
+):
     factory = async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False)
     await _seed_visit(factory, BEAM_SITE, "v-beam")
 
@@ -139,7 +159,7 @@ async def test_authed_returns_full_shape(authed, flag_on, geo_ok, test_engine):
     assert body["geo"]["city"] == "Hanoi"
     assert body["geo"]["country_code"] == "VN"
     assert body["geo"]["lat"] == 21.03 and body["geo"]["lng"] == 105.85
-    assert body["network"]["label"] == "Viettel Group"
+    assert body["network"]["label"] == "FPT Telecom"
     assert body["network"]["kind"] in ("isp", "company")
 
 
@@ -436,7 +456,7 @@ async def _async_geo():
 
 @pytest.mark.asyncio
 async def test_city_accuracy_radius_reaches_the_response(
-    authed, flag_on, monkeypatch, test_engine
+    authed, flag_on, cross_agreed, monkeypatch, test_engine
 ):
     """A measured radius from the City DB replaces the fixed 25km estimate."""
     import apps.api.services.geoip as geoip_mod
@@ -509,7 +529,7 @@ def _second_provider(monkeypatch, point):
 async def test_agreeing_providers_keep_the_city(
     authed, flag_on, geo_ok, crosscheck_on, monkeypatch, test_engine
 ):
-    _second_provider(monkeypatch, (21.05, 105.90, "Hanoi"))
+    _second_provider(monkeypatch, (21.05, 105.90, "Hanoi", "VN"))
 
     r = await authed.post("/api/v1/onboarding/canary", json={})
     assert r.status_code == 200
@@ -524,7 +544,7 @@ async def test_disagreeing_providers_never_send_the_city(
     authed, flag_on, geo_ok, crosscheck_on, monkeypatch, test_engine
 ):
     """The real incident: ip-api Hanoi vs ipinfo Haiphong, ~90km apart."""
-    _second_provider(monkeypatch, (20.8648, 106.6834, "Haiphong"))
+    _second_provider(monkeypatch, (20.8648, 106.6834, "Haiphong", "VN"))
 
     r = await authed.post("/api/v1/onboarding/canary", json={})
     assert r.status_code == 200
@@ -537,7 +557,10 @@ async def test_disagreeing_providers_never_send_the_city(
     assert geo["country_code"] == "VN"
     # The circle now genuinely contains both candidate answers.
     assert 80 <= geo["disagree_km"] <= 100
-    assert geo["accuracy_km"] == geo["disagree_km"]
+    # Display policy v2 (9b8dc23): low confidence => country card, so no
+    # circle at all is sent (accuracy_km / lat / lng are absent, not widened).
+    assert r.json()["display_mode"] == "country"
+    assert "accuracy_km" not in geo and "lat" not in geo
     # Neither rejected city name leaks through any other field.
     assert "Haiphong" not in r.text and "Hanoi" not in r.text
 
@@ -554,8 +577,11 @@ async def test_dead_second_provider_is_unverified_not_degraded(
     assert r.status_code == 200
     geo = r.json()["geo"]
     assert geo["confidence"] == "unverified"
-    assert geo["city"] == "Hanoi"
     assert "disagree_km" not in geo
+    # Display policy v2 (9b8dc23): an unverified location is a country card,
+    # not "none" — the outage degrades the claim, it does not erase the reveal.
+    assert r.json()["display_mode"] == "country"
+    assert geo["country_code"] == "VN"
 
 
 @pytest.mark.asyncio
@@ -754,8 +780,10 @@ def _patch_geo(monkeypatch, geo, *, cross=None):
     async def _fake(_ip):
         return geo
 
-    for mod in ("onboarding", "demo"):
-        monkeypatch.setattr(f"apps.api.routers.{mod}.resolve_geoip_full", _fake)
+    # onboarding binds the name at import; demo imports it lazily inside the
+    # handler, so it must be patched on the source module.
+    monkeypatch.setattr("apps.api.routers.onboarding.resolve_geoip_full", _fake)
+    monkeypatch.setattr("apps.api.services.geoip.resolve_geoip_full", _fake)
     monkeypatch.setattr("apps.api.services.asn_lookup.lookup_asn", lambda _ip: (None, None))
     if cross is not None:
         async def _cross(_ip, _primary):
