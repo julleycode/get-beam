@@ -11,6 +11,8 @@ metadata:
 
 # Identity Co-op — Umbrella Plan
 
+> **Status reconciliation 14-11-26 (repo audit):** `Status: PLANNED — HARD-BLOCKED` below is stale — Phase 1 (`d78b4f1` + `51fe0d5`) and Phase 2a (`3e7a420`) are on main; the F-B index guard shipped at `2a0fe3b` and index `uq_coop_ledger_expire_per_lot` is verified present on prod (14-11-26). All co-op flags are OFF in prod. Phase 2b (spend wiring) is PLANNED, Phase 3 not started. Open: K-3 legal re-pin of `coop_terms_version`.
+
 Date: 07-08-26
 Complexity: COMPLEX
 Status: ⏳ PLANNED — HARD-BLOCKED on two upstream dependencies (see Sequencing)
@@ -195,7 +197,7 @@ than today's silent status quo: it adds explicit consideration (strengthening th
 "sale"/"share" characterization) on top of an unfixed deletion gap. Ship erasure first.
 
 **Shared-surface claim (recorded, not blocking).**
-`process/features/visitors-identity/active/identity-program_03-08-26/` Phase 1 claims
+`process/features/visitors-identity/completed/identity-program_03-08-26/` Phase 1 claims
 `_save_identified` with status PLANNED (never executed). This program also touches
 `_save_identified`. Do not block on it — record the overlap and re-check drift at Phase 1
 RESEARCH.

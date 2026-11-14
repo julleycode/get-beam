@@ -7,7 +7,7 @@ feature: campaigns-outreach
 
 # Open gate: `apps/web && npm run test:e2e` not executed at EXECUTE time
 
-Plan: `process/features/campaigns-outreach/active/linkedin-extension-onboarding_26-07-26/linkedin-extension-onboarding_PLAN_26-07-26.md`
+Plan: `process/features/campaigns-outreach/completed/linkedin-extension-onboarding_26-07-26/linkedin-extension-onboarding_PLAN_26-07-26.md`
 (the plan's own `## Validate Contract` → Open gaps already predicted this exact residual).
 
 ## What is unproven

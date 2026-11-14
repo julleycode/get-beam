@@ -8,6 +8,8 @@ phase: "n/a — single COMPLEX plan, not a phase program"
 
 # WS2 Agent-Session Activation — PLAN (COMPLEX)
 
+> **Archived 14-11-26 by repo audit** — code on main at `457e3c1` (WS2 agent-operated session classifier, end to end). Supersedes the DRAFT status line below. PR 91 (the older WS2 classifier branch) was closed 14-11-26 as superseded by this commit. Remaining known-gaps: `backlog/ws2-emailability-tier-visibility-only_NOTE_07-08-26.md`.
+
 **Date**: 07-08-26
 **Status**: DRAFT — pending VALIDATE (not yet user-confirmed as VERIFIED)
 **Complexity**: COMPLEX

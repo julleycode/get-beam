@@ -7,6 +7,8 @@ feature: visitors-identity
 
 # AC-7 deferred — `get_enrich_usage()` real-Postgres gate not run — ✅ RESOLVED 07-08-26
 
+> **Audit 14-11-26 — RESOLVED, confirmed.** The 07-08-26 resolution below stands (`test_usage_limits.py` 3/3 against real Postgres); parent plan is archived at `completed/social-context-merge_07-08-26/`. Nothing left to do here.
+
 **RESOLVED (07-08-26 Docker gate run):** `tests/integration/test_usage_limits.py` ran **3/3
 PASSED** against real Postgres. Both recorded residuals are now proven:
 - (a) NULL-exclusion under SQL three-valued logic — observed in Postgres, not just inferred.

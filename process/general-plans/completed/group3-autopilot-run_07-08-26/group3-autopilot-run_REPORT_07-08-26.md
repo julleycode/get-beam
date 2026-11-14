@@ -11,6 +11,8 @@ metadata:
 
 # Group-3 Autopilot Run — 07-08-26 — Run Report
 
+> **Archived 14-11-26 by repo audit** — run report only (no plan); every plan it covered has since been committed to main or archived. Remaining known-gaps: none owned by this folder.
+
 **Verdict:** run complete. 2 plans executed + EVL green, 1 converged-and-held, 1 dependency-blocked, 2 audited (1 archive-ready, 1 mixed), 1 re-validated-and-held with a GDPR finding. NO commits made (user declined), NO archival moves performed (recommendations only).
 
 ## 7-Plan Outcome Table

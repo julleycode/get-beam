@@ -7,6 +7,8 @@ feature: visitors-identity
 
 # Identity Vocabulary Reconciliation — devjulley → main
 
+> **Archived 14-11-26 by repo audit** — reconciliation is on main (`identified`/`candidate` vocabulary; alembic re-chain applied; prod head now `d3f8a2c61b47`). Branch `devjulley` was deleted in the 14-11-26 remote cleanup. Remaining known-gaps: `backlog/resolver-privacy-relay-callsite-coverage_NOTE_07-08-26.md`.
+
 **Complexity: COMPLEX** (single plan, not a phase program). Rationale per
 `process/context/planning/all-planning.md`: this is one bounded rebase-and-merge operation with a
 hard sequencing dependency (2 clean commits → migration re-chain → 7 conflict resolutions → call-site

@@ -7,6 +7,8 @@ feature: pixel
 
 # PLAN — Site Identity Lifecycle (Delete/Re-Create Pixel Orphaning)
 
+> **Status reconciliation 14-11-26 (repo audit):** `Status: ACTIVE — VALIDATE pending` below is stale — the feature is on main at `1a16662` (site-id lifecycle with delete tombstones) and its migration is applied on prod (prod head `d3f8a2c61b47`). Kept active for `backlog/site-id-lifecycle-ac6-playwright-auth-harness_NOTE_04-08-26.md` (blocked on the Clerk Playwright auth harness).
+
 **Date**: 01-08-26
 **Status**: ACTIVE — plan written, VALIDATE pending
 **Complexity:** COMPLEX
@@ -440,7 +442,7 @@ defense is exactly what saves it:**
   (`f3c8b2e91d47 → a7d419e6c052 → b1c9e7f24d83`, chain confirmed via `alembic history`).
 - **`b1c9e7f24d83_add_identified_visitor_confirmed_at.py` is an UNCOMMITTED, UNTRACKED file**
   (`git status` shows `??`) belonging to a concurrent session
-  (`process/features/visitors-identity/active/identity-program_03-08-26/`). Alembic reads the
+  (`process/features/visitors-identity/completed/identity-program_03-08-26/`). Alembic reads the
   `versions/` directory on disk regardless of git tracking state, so it sees and resolves against
   this file today. If that concurrent session's file is committed unchanged before this plan's
   EXECUTE runs, chaining off `b1c9e7f24d83` is safe. If it is amended (different revision id) or

@@ -12,12 +12,14 @@ metadata:
 
 # Best-IP Selection + Capped Automatic Re-Identify — Phase 1
 
+> **Status reconciliation 14-11-26 (repo audit):** NOT started — no ranker/sweep code on main; contract is `BLOCKED`. Its predecessor is archived as superseded (`completed/ip-best-selection-retrigger_09-08-26/`).
+
 **Date**: 13-08-26
 **Status**: ⏳ PLANNED
 **Complexity**: COMPLEX (single execution stream, 8 phases, one plan file — not a phase program)
 **Feature**: visitors-identity
-**SPEC**: `process/features/visitors-identity/active/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger_SPEC_09-08-26.md`
-**Supersedes**: the Phase-1 scope of `process/features/visitors-identity/active/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger_PLAN_09-08-26.md` (244KB, 8 supplements, PVL cycle 7 `Gate: BLOCKED`, 16 gaps). Its Phase-2 surfaces stay backlogged — see §Deferred to Phase 2.
+**SPEC**: `process/features/visitors-identity/completed/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger_SPEC_09-08-26.md`
+**Supersedes**: the Phase-1 scope of `process/features/visitors-identity/completed/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger_PLAN_09-08-26.md` (244KB, 8 supplements, PVL cycle 7 `Gate: BLOCKED`, 16 gaps). Its Phase-2 surfaces stay backlogged — see §Deferred to Phase 2.
 **Context loaded**: `process/context/all-context.md`, `process/context/tests/all-tests.md`, `process/development-protocols/communication-standards.md`
 
 ---
@@ -1096,8 +1098,8 @@ Excluded from this plan by locked scope. Full detail:
    The predecessor's cycle-7 `Gate: BLOCKED` does not transfer — it applied to a different file.
    A fresh PVL from V1 is required before EXECUTE.
 4. **Supporting context files loaded:**
-   - `process/features/visitors-identity/active/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger_SPEC_09-08-26.md`
-   - `process/features/visitors-identity/active/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger-pvl-iteration-003_REPORT_13-08-26.md`
+   - `process/features/visitors-identity/completed/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger_SPEC_09-08-26.md`
+   - `process/features/visitors-identity/completed/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger-pvl-iteration-003_REPORT_13-08-26.md`
    - `process/context/all-context.md`
    - `process/context/tests/all-tests.md`
    - `process/development-protocols/communication-standards.md`

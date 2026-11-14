@@ -11,6 +11,8 @@ metadata:
 
 # PLAN — Auto Site Analysis at Add-Site (Onboarding)
 
+> **Archived 14-11-26 by repo audit** — code on main at `7081402` (grounded site analysis, two-slot profile storage). Supersedes the PLANNED status line below. Remaining known-gaps: see `site-analysis-onboarding_REPORT_14-08-26.md` in this folder.
+
 **Date**: 13-08-26
 **Status**: PLANNED — **PVL cycle 4 re-validated 13-08-26**: all five cycle-3 CONCERNs (C16–C20) and all twelve second-verifier findings (VF1–VF3 / VC4–VC9 / N10–N12) verified CLOSED; contract below is **Gate: CONDITIONAL, 0 FAILs, 4 NEW CONCERNs (C21–C24)** + 3 nits, not yet accepted
 **Complexity**: COMPLEX

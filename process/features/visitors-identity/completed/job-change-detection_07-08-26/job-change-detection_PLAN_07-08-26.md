@@ -10,6 +10,8 @@ metadata:
 
 # Job-Change Detection — Plan
 
+> **Archived 14-11-26 by repo audit** — code on main at `13d6901`, flag OFF. Supersedes the "NOT archivable" line below. Remaining known-gaps: dashboard UI leg (`backlog/job-change-dashboard-ui_NOTE_07-08-26.md`) and `backlog/job-change-detection-deferred-gates_NOTE_07-08-26.md`.
+
 Date: 07-08-26
 Status: EXECUTED 07-08-26 — backend code-complete, flag-OFF, 1093/1093 unit tests green.
 **NOT archivable** — 1 gate unexecuted (integration lane env-blocked). AC-9 descoped to its API leg 07-08-26 (user-approved); dashboard UI leg deferred to backlog.

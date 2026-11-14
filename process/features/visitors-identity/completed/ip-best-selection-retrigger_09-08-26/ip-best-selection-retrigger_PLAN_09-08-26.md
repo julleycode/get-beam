@@ -11,6 +11,8 @@ metadata:
 
 # Best-IP Selection + Capped Automatic Re-Identify
 
+> **Archived 14-11-26 by repo audit — status SUPERSEDED, never executed.** Replaced by `active/ip-best-selection-phase1_13-08-26/`; deferred scope in `backlog/ip-best-selection-phase2-deferred_NOTE_13-08-26.md`. Kept for its PVL findings and the re-derived `roster_ranking` ranking pattern (§ around line 256).
+
 **Date**: 09-08-26
 **Status**: ⏳ PLANNED
 **Complexity**: COMPLEX (multi-workstream, single execution stream — one plan file, not a phase program)

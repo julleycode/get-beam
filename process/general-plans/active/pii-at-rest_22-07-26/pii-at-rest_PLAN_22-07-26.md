@@ -7,6 +7,8 @@ feature: general
 
 # PII Encryption-at-Rest — Completion Plan
 
+> **Status reconciliation 14-11-26 (repo audit):** `Status: DRAFT` below is stale — Phases 1–2 are on main (`be39585`, `991fff3`) and the prod backfill ran 07-08-26. Prod check 14-11-26: all 11 `*_ciphertext` columns have 0 non-Fernet rows (no plaintext). `PII_ENCRYPTION_KEY` is EMPTY on prod — `pii_crypto` falls back to `ENCRYPTION_KEY`; never set `PII_ENCRYPTION_KEY` to a new value without a rotation step, or existing ciphertext becomes unreadable. `validate_production` did not check the PII keys (fix in PR `fix/live-security-hardening`). Phase 3+ NOT started.
+
 **Date**: 22-07-26
 **Status**: DRAFT — awaiting VALIDATE
 **Complexity**: COMPLEX (5 phases, migration-bearing, one destructive phase, cross-cutting blast radius across routers/services/agents)

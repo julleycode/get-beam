@@ -8,6 +8,8 @@ phase: "n/a — single COMPLEX plan"
 
 # LinkedIn Extension Onboarding Wizard — PLAN
 
+> **Archived 14-11-26 by repo audit** — code on main at `ecedc2e` (connect wizard + onboarding). Supersedes the "pending VALIDATE" line below. Remaining known-gaps: `backlog/linkedin-onboarding-oninstalled-remedy_NOTE_26-07-26.md`, `backlog/linkedin-onboarding-web-e2e-env-gap_NOTE_26-07-26.md`.
+
 Date: 26-07-26
 Status: PLAN drafted — pending VALIDATE.
 Complexity: **COMPLEX** (new user-facing flow, new extension message type crossing a security trust

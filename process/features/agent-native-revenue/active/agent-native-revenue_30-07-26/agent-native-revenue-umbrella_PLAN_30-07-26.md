@@ -11,6 +11,8 @@ metadata:
 
 # Agent-Native Revenue — Umbrella Plan
 
+> **Audit note 14-11-26:** PR 91 (WS2 agent-session classifier branch) was CLOSED on 14-11-26 as superseded — the WS2 classifier is live on main via `457e3c1` (pixel task folder archived: `process/features/pixel/completed/ws2-agent-session-activation_07-08-26/`). WS3 (agent concierge) continues in PR 92; WS1 (AI evaluation timeline) in PR 90. The `## Current Execution State` section below predates this and is stale on WS2.
+
 Date: 30-07-26
 Status: PLANNED
 **Date:** 30-07-26

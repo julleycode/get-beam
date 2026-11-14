@@ -22,6 +22,8 @@ source: skill
 
 # Identity coverage — vendor pixel → Fingerprint Pro
 
+> **Archived 14-11-26 by repo audit** — Phase 1 done; Phase 2 superseded by `plans/260805-1543-identity-coverage-recovery/`; Phase 4 docs half done. Remaining known-gaps (Phase 3 Fingerprint Pro, Phase 4 measurement) moved to `backlog/identity-coverage-ph3-ph4-remainders_NOTE_14-11-26.md`. The frontmatter `status: in-progress` is stale.
+
 ## Overview
 
 **Goal:** nhiều kết quả định danh hơn (coverage), không phá P0/P1 (precision).

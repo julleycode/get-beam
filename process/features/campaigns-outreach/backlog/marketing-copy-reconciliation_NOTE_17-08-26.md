@@ -11,6 +11,8 @@ metadata:
 
 # Marketing Copy Reconciliation Pass (deferred P4)
 
+> **Audit 14-11-26 — RESOLVED, confirmed.** The 17-08-26 resolution below stands (only `PRODUCT_ROADMAP.md` needed a reword). Nothing left to do here.
+
 **Priority:** LOW — copy edit only, no code risk.
 
 **Origin:** umbrella checklist item P4 of the `marketing-claims-gap_16-08-26` program

@@ -10,7 +10,7 @@ metadata:
 
 # Job-Change Dashboard UI — Deferred Follow-Up
 
-Source plan: `process/features/visitors-identity/active/job-change-detection_07-08-26/job-change-detection_PLAN_07-08-26.md`
+Source plan: `process/features/visitors-identity/completed/job-change-detection_07-08-26/job-change-detection_PLAN_07-08-26.md`
 Descope decision: user-approved 07-08-26 (resolves Known-Gap #6 / backlog Gap #6 —
 `job-change-detection-deferred-gates_NOTE_07-08-26.md`).
 

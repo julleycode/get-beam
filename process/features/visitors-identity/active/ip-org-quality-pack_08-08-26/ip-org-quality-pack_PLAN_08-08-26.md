@@ -7,6 +7,8 @@ feature: visitors-identity
 
 # IP-Org Quality Pack — WS-A…WS-E
 
+> **Status reconciliation 14-11-26 (repo audit):** `Status: PLANNED` below is stale — the quality pack is on main at `ad34632` (skip-ratio guard, post-swap ANALYZE, as2org org_id + family classification, PSL). ip-org flags are OFF in prod, so it has no runtime effect there yet. Open follow-ups: the `ip-org-*` notes in `backlog/`.
+
 **Date**: 08-08-26
 **Status**: PLANNED — PVL cycle 4 supplement applied (08-08-26), 7 CONCERNs (C-28…C-34) + the C-35 cosmetic bundle all closed in the plan body. Latest validate verdict: cycle 4 `Gate: CONDITIONAL`, 0 FAILs. User has pre-accepted (A1): the orchestrator records acceptance without a cycle-5 validate, after which EXECUTE proceeds in order A → C → D → E → B.
 **Complexity**: COMPLEX (5 workstreams, 1 migration, 2 new scripts, 1 new service, 1 vendored data file)

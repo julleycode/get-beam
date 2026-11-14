@@ -11,6 +11,8 @@ metadata:
 
 # Owned Data Layer — Docker/Live-Verification Gap Backlog
 
+> **Audit 14-11-26 — RESOLVED, confirmed.** The migration is on prod (head `d3f8a2c61b47`) and `COMPANY_GRAPH_ENABLED` is ON in prod; `identity_signals_enabled` is still OFF. The two SendGrid Agent-Probe rows stay open, but only matter once identity signals are enabled.
+
 **STATUS: RESOLVED (24-07-26).** All gates below closed by an independent EVL final run on a
 disposable `infra-postgres-1` container: migration round-trip clean (`upgrade head` →
 `downgrade -1` → `upgrade head`, chain to head `a9f2c1e7b4d6`), `test_company_graph.py` 14/14

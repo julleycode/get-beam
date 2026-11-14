@@ -11,6 +11,8 @@ metadata:
 
 # EvalLayer — Umbrella Plan
 
+> **Status reconciliation 14-11-26 (repo audit):** the "PENDING DOCKER GATE CLOSURE" label below is superseded — the migrations are applied on prod (head `d3f8a2c61b47`; the Dockerfile runs `alembic upgrade head` on every Railway boot) and `AGENT_DETECTION_ENABLED` is ON in prod (Railway env verified 14-11-26). Kept active only for the open backlog notes under `process/features/evallayer/backlog/`.
+
 **Date:** 22-07-26
 **Complexity:** COMPLEX
 **Status:** 🔨 CODE-COMPLETE (PENDING DOCKER GATE CLOSURE) — all 8 phases shipped 23-07-26; see

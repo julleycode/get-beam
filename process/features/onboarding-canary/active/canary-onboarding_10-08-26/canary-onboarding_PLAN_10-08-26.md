@@ -1,5 +1,7 @@
 # Canary onboarding — conversational rebuild + location reveal
 
+> **Status reconciliation 14-11-26 (repo audit):** the conversational rebuild + canary location reveal is on main at `a621edd` (authed `POST /api/v1/onboarding/canary` and its public twin `POST /demo/canary`), and `LOCATION_REVEAL_ENABLED` is ON in prod (Railway env verified 14-11-26). Reveal display policy v2 shipped at `9b8dc23` (archived: `completed/reveal-display-policy_17-08-26/`). Remaining follow-up phases were not re-audited item by item — re-check this plan's checklist before closing it.
+
 ## Context
 
 Beam's onboarding exists twice, and both copies are worse than the sum.

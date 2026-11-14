@@ -7,6 +7,8 @@ feature: visitors-identity
 
 # Co-op Expiry Index Guard (F-B) — SIMPLE Plan
 
+> **Archived 14-11-26 by repo audit** — code on main at `2a0fe3b`. Finding F-B is CLOSED: partial unique index `uq_coop_ledger_expire_per_lot` verified present on prod 14-11-26 (migration `b7e4d21a9c58` applied by the Dockerfile's boot-time `alembic upgrade head`). Remaining known-gaps: none.
+
 **TL;DR** — `expire_lapsed_lots`' `ON CONFLICT (lot_id) WHERE entry_type = 'EXPIRE'` needs the partial
 unique index `uq_coop_ledger_expire_per_lot`. Without it, **every** insert raises, the mandated per-lot
 `except Exception` (C-1) swallows it, and the sweep returns "success" having expired nothing. Fix =

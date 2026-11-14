@@ -7,6 +7,8 @@ feature: pixel
 
 # Cadence Bot Flag — PLAN (COMPLEX-lite)
 
+> **Status reconciliation 14-11-26 (repo audit):** code is on main at `1687b83`; its migration is applied on prod (prod head `d3f8a2c61b47`); `cadence_bot_flag_enabled` is OFF in prod (Railway env verified 14-11-26). Kept active for the open gates in `backlog/cadence-bot-flag-deferred-gates_NOTE_26-07-26.md` (AC-14 live crawler, AC-8/AC-9 render probe, Playwright auth-harness leg).
+
 **Date**: 26-07-26
 **Status**: PLAN — VALIDATE run (PVL pass 2, re-validation from V1). Gate: CONDITIONAL,
 execute-eligible (1 completed supplement cycle resolved G1).

@@ -7,6 +7,8 @@ feature: visitors-identity
 
 # PLAN — Cross-Tenant Identity Graph: Erasure & Disclosure Compliance
 
+> **Archived 14-11-26 by repo audit** — code on main at `784aba2` + `2136219`. Remaining known-gaps: KG-4 privacy-counsel review of public legal copy (AC-7/AC-8) stays open in `backlog/privacy-copy-counsel-review_NOTE_07-08-26.md`; other graph-erasure backlog notes (cumulative cap, race window, authorization spoofing, historical reconciliation, boundary-2 fault injection) stay open as written.
+
 **Date**: 07-08-26
 **Status**: **ACCEPTED — EXECUTE-READY. PVL loop CLOSED at supplement cycle 8 (07-08-26).** Gate remains `CONDITIONAL`, now **explicitly user-accepted** (see `Accepted by:` at the end of the Validate Contract) — literal `Gate: PASS` is structurally unreachable because AC-7/AC-8 need privacy counsel, not engineering, so further PVL rounds converge on nothing by construction. Cycle 7's three findings are RESOLVED, not deferred: the incomplete S12 rebrand (§2 Locked Design, Blast Radius multi-tenancy row, §4 step 2 heading, AC Coverage Map deferred paragraph) is corrected in the plan body this cycle, and F10/F11 plus the `config.py` naming hazard are carried as binding **Execute-Agent Instructions E-1, E-2, E-3**. Accepted residuals unchanged: AC-7/AC-8's permanently-CONDITIONAL content half (KG-4) and open Known Gaps KG-1…KG-9. Live re-derive this cycle: alembic head `c9f4a7b31e85` (single head) and `devjulley`@`5293cbc` — **neither moved**. EXECUTE may proceed against §0's user-sign-off bar, which this acceptance satisfies.
 **Complexity**: COMPLEX

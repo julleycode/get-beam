@@ -7,6 +7,8 @@ feature: visitors-identity
 
 # Own IP-to-Company Database (Pillar 1) — CAIDA pfx2as + AS2Org pipeline
 
+> **Status reconciliation 14-11-26 (repo audit):** unchanged — Phases 1–3 code is on main and the schema is on prod, but the prod tables are still unloaded and every ip-org flag is OFF in prod (Railway env verified 14-11-26). Remaining work is operator-only: prod ingest + flag flips per `ip-org-prod-enable_RUNBOOK_07-08-26.md`. The domain leg is still a separate, unstarted phase.
+
 ## Status (closeout 07-08-26)
 
 - **Phase 1 — Schema + ingestion pipeline: ✅ COMPLETE.** Migration `a3e8d5c71f02`

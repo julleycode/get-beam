@@ -11,6 +11,8 @@ metadata:
 
 # Handoff Detection — Umbrella Plan
 
+> **Status reconciliation 14-11-26 (repo audit):** `Status: PLANNED` below is stale — the program is built and on main (`apps/api/services/agent_handoff_correlation.py`, `agent_fetch_beacon.py`, `agent_intent_signals.py`), and `AGENT_FETCH_BEACON_ENABLED` + `AGENT_MARKER_ENABLED` are ON in prod (Railway env verified 14-11-26). Kept active for the open handoff-05 backlog notes (rate limit, Gemini UA token, CF Pages waitUntil).
+
 **Date:** 23-07-26
 **Complexity:** COMPLEX
 **Status:** ⏳ PLANNED

@@ -1,5 +1,7 @@
 # Báo cáo E2E + Smoke GetBeam — 10-08-26
 
+> **Archived 14-11-26 by repo audit** — report only (no plan, no code). Open concerns moved to `process/general-plans/backlog/e2e-local-smoke-concerns_NOTE_14-11-26.md`.
+
 ## TL;DR
 
 Local E2E/smoke trên GetBeam (web `:3000`, API `:8000`) kết thúc **DONE_WITH_CONCERNS**. Core loops (Add site, Agents, Visitors, Ask AI, Pixel beamlab, Outcomes, Agent Gateway, Drafts/Referrals/Feature Board/Contacts) **PASS**. Social OAuth, Campaigns, Billing **BLOCKED** (thiếu keys/segment/Gumroad). Segments / Feed / Connectors **PARTIAL**. CORS `127.0.0.1` đã fix trong session.

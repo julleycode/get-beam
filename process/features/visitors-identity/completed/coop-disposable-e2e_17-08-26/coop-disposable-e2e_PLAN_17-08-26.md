@@ -7,6 +7,8 @@ feature: visitors-identity
 
 # Coop Disposable-Container E2E Lane — PLAN (17-08-26)
 
+> **Archived 14-11-26 by repo audit** — code on main at `7eec0a9` (disposable-container e2e lane, gates DE-1…DE-21). Remaining known-gaps: none new; lane needs a running Docker daemon to execute.
+
 **TL;DR:** Build 8 pieces of test infrastructure so that the identity-coop expiry/accrual path is
 exercised the way production actually runs it — schema from `alembic`, app booted through its ASGI
 **lifespan** (so the APScheduler job really fires), a prod-shaped connection pool, and two OS

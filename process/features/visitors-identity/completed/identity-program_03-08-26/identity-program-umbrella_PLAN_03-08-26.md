@@ -11,6 +11,8 @@ metadata:
 
 # Identity Honesty Program — Umbrella Plan
 
+> **Archived 14-11-26 by repo audit** — all six phase plans have phase reports in this folder and the code is on main; the `Status: PLANNED` line below is stale and kept only as history. Remaining known-gaps: see each phase report; vocabulary was later renamed by `identity-vocab-reconcile_07-08-26`.
+
 **Date:** 03-08-26
 **Complexity:** COMPLEX
 **Status:** ⏳ PLANNED

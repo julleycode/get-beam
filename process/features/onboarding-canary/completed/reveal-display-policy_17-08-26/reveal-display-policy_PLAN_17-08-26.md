@@ -7,6 +7,8 @@ feature: onboarding-canary
 
 # Reveal Display Policy v2 — map only when we are sure
 
+> **Archived 14-11-26 by repo audit** — code on main at `9b8dc23` (server-chosen map/country/none display modes). Supersedes the "PLANNED (not validated, not executed)" line below. `LOCATION_REVEAL_ENABLED` is ON in prod (verified 14-11-26). Remaining known-gaps: none recorded by the audit.
+
 **Date**: 17-08-26
 **Status**: PLANNED (not validated, not executed)
 **Complexity**: COMPLEX

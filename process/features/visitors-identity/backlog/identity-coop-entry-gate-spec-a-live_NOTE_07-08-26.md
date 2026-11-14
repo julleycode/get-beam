@@ -1,6 +1,6 @@
 ---
 name: report:identity-coop-entry-gate-spec-a-live
-description: "Identity Co-op Phase 1 is Dependency-BLOCKED on SPEC A (graph-erasure-compliance) reaching LIVE — F1 re-entry conditions"
+description: "RESOLVED 07-08-26 (confirmed by 14-11-26 audit) — Identity Co-op Phase 1 entry gate on SPEC A (graph-erasure-compliance) going LIVE; all clearing conditions met, Phase 1 + 2a shipped"
 date: 07-08-26
 metadata:
   node_type: memory
@@ -10,6 +10,8 @@ metadata:
 ---
 
 # Identity Co-op Phase 1 — Dependency-BLOCKED on SPEC A going LIVE (F1)
+
+> **Audit 14-11-26 — RESOLVED (entry gate closed).** The Status table below is history. SPEC A (graph-erasure-compliance) is live on main (`784aba2` + `2136219`) and on prod; all four clearing conditions were met on 07-08-26; identity-coop Phase 1 (`d78b4f1` + `51fe0d5`) and Phase 2a (`3e7a420`) have since shipped. `devjulley` no longer exists.
 
 **TL;DR** — Phase 1 of the identity-coop program cannot enter EXECUTE until
 `graph-erasure-compliance_07-08-26` (SPEC A) is LIVE, not merely code-complete. Every other FAIL and
