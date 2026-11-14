@@ -101,9 +101,9 @@ test.describe("Onboarding — Platform Detection", () => {
     const headers = { Authorization: `Bearer ${token}` };
     const list = await page.request.get(`${API_BASE}/api/v1/sites/`, { headers });
     expect(list.status(), "list sites").toBe(200);
-    for (const s of (await list.json()) as Array<{ id: string }>) {
-      const del = await page.request.delete(`${API_BASE}/api/v1/sites/${s.id}`, { headers });
-      expect(del.status(), `delete site ${s.id}: ${await del.text()}`).toBe(204);
+    for (const s of (await list.json()) as Array<{ site_id: string }>) {
+      const del = await page.request.delete(`${API_BASE}/api/v1/sites/${s.site_id}`, { headers });
+      expect(del.status(), `delete site ${s.site_id}: ${await del.text()}`).toBe(204);
     }
     const after = await page.request.get(`${API_BASE}/api/v1/sites/`, { headers });
     expect(await after.json(), "no sites left").toEqual([]);
