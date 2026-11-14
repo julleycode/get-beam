@@ -8,6 +8,19 @@ from pydantic_settings import BaseSettings
 _KNOWN_NONPROD_ENVS = {"development", "test", "local", "ci"}
 
 
+def _is_fernet_key(key: str) -> bool:
+    """True when ``key`` is a valid Fernet key (urlsafe-b64 of 32 bytes)."""
+    if not key:
+        return False
+    try:
+        from cryptography.fernet import Fernet
+
+        Fernet(key.encode() if isinstance(key, str) else key)
+        return True
+    except Exception:
+        return False
+
+
 class Settings(BaseSettings):
     app_env: str = "development"
     app_secret_key: str = "change-me-in-production"
@@ -33,6 +46,25 @@ class Settings(BaseSettings):
         if not self.encryption_key:
             violations.append(
                 "ENCRYPTION_KEY is empty — BYOK API keys + the PII blind index cannot be secured"
+            )
+
+        # PII keys (services/pii_crypto.py uses `pii_* or encryption_key`), so
+        # check the EFFECTIVE keys. WARNING: never set PII_ENCRYPTION_KEY to a NEW
+        # value in an environment that already has data — existing PII rows are
+        # encrypted under ENCRYPTION_KEY (PII_ENCRYPTION_KEY is empty in prod), so
+        # a new key makes every stored row undecryptable. Changing it requires a
+        # rotation (MultiFernet + re-encrypt backfill). Same for PII_HMAC_KEY: a
+        # new value orphans every blind index (erasure would silently miss rows).
+        effective_pii_key = self.pii_encryption_key or self.encryption_key
+        if effective_pii_key and not _is_fernet_key(effective_pii_key):
+            violations.append(
+                "effective PII encryption key (PII_ENCRYPTION_KEY or ENCRYPTION_KEY) "
+                "is not a valid Fernet key"
+            )
+        if not (self.pii_hmac_key or self.encryption_key):
+            violations.append(
+                "effective PII HMAC key (PII_HMAC_KEY or ENCRYPTION_KEY) is empty — "
+                "blind indexes cannot be computed"
             )
 
         if violations:
@@ -272,6 +304,23 @@ class Settings(BaseSettings):
     # locked to CF IP ranges (backlogged). Set false to fall back to the pure
     # trusted_proxy_hops behavior.
     ingest_trust_cf_connecting_ip: bool = True
+
+    # Peer check for CF-Connecting-IP (services/ip_resolution.cf_header_trusted).
+    # The Railway origin answers directly, so anyone can send a forged
+    # CF-Connecting-IP straight to it. The check trusts the header only when the
+    # hop that connected to Railway's edge (the LAST X-Forwarded-For entry) is in
+    # Cloudflare's published ranges.
+    #   off     — legacy: trust the header from anyone.
+    #   shadow  — trust it, but log `cf_peer_check_mismatch` (coarse /24, no full
+    #             IP) whenever enforce would have rejected it. DEFAULT.
+    #   enforce — reject the header from non-Cloudflare peers and fall back to
+    #             the trusted_proxy_hops path.
+    # ROLLOUT: Railway's exact XFF shape is not yet observed in prod. Ship in
+    # shadow, watch prod logs for a few days: real visitors (via api.getbeam.fyi)
+    # must produce ~zero mismatches; mismatches should only come from direct
+    # origin hits. Then set INGEST_CF_PEER_CHECK_MODE=enforce. If genuine traffic
+    # shows mismatches, the XFF assumption is wrong — do NOT enforce.
+    ingest_cf_peer_check_mode: str = "shadow"
 
     # Per-SITE ingest ceiling. The existing 100/min per-IP limiter is blind to a
     # rotating-IP flood: spread across 500 IPs, every bucket stays under its

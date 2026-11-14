@@ -40,7 +40,11 @@ class TestValidateProduction:
 
     def test_production_ok_when_keys_set(self):
         s = _settings(app_env="production", app_secret_key="strong",
-                      token_encryption_key="tok", encryption_key="enc")
+                      token_encryption_key="tok",
+                      # Must be a real Fernet key: validate_production now
+                      # rejects an invalid effective PII encryption key.
+                      encryption_key="ZmDfcTF7_60GrrY167zsiPd67pEvs0aGOv2oasOM1Pg=",
+                      pii_encryption_key="", pii_hmac_key="")
         s.validate_production()  # must NOT raise
 
 

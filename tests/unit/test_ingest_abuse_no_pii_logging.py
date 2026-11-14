@@ -55,6 +55,12 @@ _ALLOWED_LOG_KEYS = {
     "distinct_visitors",
     "distinct_fingerprints",
     "window_seconds",
+    # cf_peer_check_mismatch (ip_resolution.cf_header_trusted): the check mode
+    # string, a COARSE /24 (v4) or /48 (v6) prefix — never a full address — and
+    # a boolean. None identifies a person.
+    "mode",
+    "peer_prefix",
+    "peer_present",
 }
 
 # Never acceptable in a log payload: raw person data or free-form user content.

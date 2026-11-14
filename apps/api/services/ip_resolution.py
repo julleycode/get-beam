@@ -26,6 +26,12 @@ Cloudflare's ``CF-Connecting-IP`` header is checked first (gated by
 ``settings.ingest_trust_cf_connecting_ip``, default on) since a permanently
 CF-proxied origin sees only CF edge IPs at the direct peer — the trusted-hop
 XFF walk below can't recover the real client in that topology.
+
+That header is only unforgeable when the request actually came THROUGH
+Cloudflare. The Railway origin is also reachable directly, so
+``settings.ingest_cf_peer_check_mode`` (off|shadow|enforce) verifies the edge
+peer (last XFF entry) is a Cloudflare IP before trusting it — see
+``cf_header_trusted``.
 """
 
 import ipaddress
@@ -34,6 +40,100 @@ import structlog
 from fastapi import Request
 
 logger = structlog.get_logger()
+
+# Cloudflare's published edge ranges, embedded statically (no network call at
+# boot). Source: https://www.cloudflare.com/ips-v4 and /ips-v6, fetched
+# 2026-11-14. Cloudflare changes these rarely; refresh when they announce it.
+_CLOUDFLARE_CIDRS: tuple[str, ...] = (
+    # IPv4
+    "173.245.48.0/20",
+    "103.21.244.0/22",
+    "103.22.200.0/22",
+    "103.31.4.0/22",
+    "141.101.64.0/18",
+    "108.162.192.0/18",
+    "190.93.240.0/20",
+    "188.114.96.0/20",
+    "197.234.240.0/22",
+    "198.41.128.0/17",
+    "162.158.0.0/15",
+    "104.16.0.0/13",
+    "104.24.0.0/14",
+    "172.64.0.0/13",
+    "131.0.72.0/22",
+    # IPv6
+    "2400:cb00::/32",
+    "2606:4700::/32",
+    "2803:f800::/32",
+    "2405:b500::/32",
+    "2405:8100::/32",
+    "2a06:98c0::/29",
+    "2c0f:f248::/32",
+)
+CLOUDFLARE_NETWORKS = tuple(ipaddress.ip_network(c) for c in _CLOUDFLARE_CIDRS)
+
+_CF_PEER_MODES = {"off", "shadow", "enforce"}
+
+
+def is_cloudflare_ip(ip: str) -> bool:
+    """True when ``ip`` parses and falls inside a published Cloudflare range."""
+    try:
+        addr = ipaddress.ip_address(ip.strip())
+    except ValueError:
+        return False
+    return any(addr in net for net in CLOUDFLARE_NETWORKS if net.version == addr.version)
+
+
+def cf_edge_peer(request: Request) -> str:
+    """The address Railway's edge saw connect to it: the LAST XFF entry.
+
+    uvicorn runs without ``--forwarded-allow-ips``, so ``request.client.host`` is
+    Railway's internal proxy, not the internet peer. Railway's edge appends the
+    peer it accepted the connection from as the rightmost XFF entry; anything to
+    its left is caller-controlled. Returns "" when absent.
+    """
+    forwarded = request.headers.get("x-forwarded-for") or ""
+    entries = [part.strip() for part in forwarded.split(",") if part.strip()]
+    return entries[-1] if entries else ""
+
+
+def _coarse(ip: str) -> str:
+    """/24 (v4) or /48 (v6) prefix of ``ip`` — never log a full client address."""
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return "unparseable" if ip else "absent"
+    prefix = 24 if addr.version == 4 else 48
+    return str(ipaddress.ip_network(f"{addr}/{prefix}", strict=False))
+
+
+def cf_header_trusted(request: Request, mode: str) -> bool:
+    """Decide whether the CF-Connecting-IP header may be honoured.
+
+    - ``off``: legacy behavior — trust it unconditionally.
+    - ``shadow``: trust it, but log ``cf_peer_check_mismatch`` when the edge
+      peer is not Cloudflare (i.e. the header would be rejected under enforce).
+    - ``enforce``: trust it ONLY when the edge peer is a Cloudflare IP.
+
+    An unknown mode is treated as ``shadow`` (never silently enforce or skip
+    the observation).
+    """
+    if mode not in _CF_PEER_MODES:
+        mode = "shadow"
+    if mode == "off":
+        return True
+    peer = cf_edge_peer(request)
+    if is_cloudflare_ip(peer):
+        return True
+    if mode == "shadow":
+        logger.info(
+            "cf_peer_check_mismatch",
+            mode=mode,
+            peer_prefix=_coarse(peer),
+            peer_present=bool(peer),
+        )
+        return True
+    return False
 
 
 def resolve_client_ip(request: Request, trusted_proxy_hops: int | None = None) -> str:
@@ -54,7 +154,9 @@ def resolve_client_ip(request: Request, trusted_proxy_hops: int | None = None) -
 
         if _cf_settings.ingest_trust_cf_connecting_ip:
             cf_ip = request.headers.get("cf-connecting-ip")
-            if cf_ip:
+            if cf_ip and cf_header_trusted(
+                request, str(getattr(_cf_settings, "ingest_cf_peer_check_mode", "shadow"))
+            ):
                 cf_ip = cf_ip.strip()
                 try:
                     ipaddress.ip_address(cf_ip)
