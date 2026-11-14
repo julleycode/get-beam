@@ -74,6 +74,9 @@ _background_tasks: set[asyncio.Task] = set()  # type: ignore[type-arg]
 # run reads current state, so it covers the newly-arrived events).
 _aggregating: set[str] = set()
 
+# Cap on distinct `beam_` utm tags attributed per ingest batch (public endpoint).
+_MAX_BEAM_TAGS_PER_BATCH = 5
+
 
 def _tp_from_url(url: str | None) -> UUID | None:
     """Extract a valid _tp campaign-touchpoint UUID from a landing URL, or None.
@@ -559,12 +562,24 @@ async def ingest_events(
     # ONE call per DISTINCT utm_source in the batch, not one per event — N SELECTs
     # per pageview on the hot path is how this repo has repeatedly regressed.
     # Fail-open unconditionally: attribution must never fail or delay ingest.
+    #
+    # Security hardening (public, unauthenticated endpoint):
+    #   - Gated on `engage_outcome_capture_enabled` (default OFF) — the feature's
+    #     own flag. Previously this ran in every environment regardless of it.
+    #   - At most _MAX_BEAM_TAGS_PER_BATCH distinct tags per batch: a real visit
+    #     carries one; a forged batch with hundreds of tags would otherwise fan
+    #     out into hundreds of SELECT/commit round-trips on the hot path.
+    #   - Abuse-flagged batches (site ceiling / velocity) are stored but never
+    #     credited — flooding must not inflate ROI or mint outcome rows.
+    #   - Counting is deduped per (tag, visitor) inside the tracker.
     try:
-        _beam_tags = {
-            e.utm.source
-            for e in batch.events
-            if e.utm and e.utm.source and e.utm.source.startswith("beam_")
-        }
+        _beam_tags: set[str] = set()
+        if _settings.engage_outcome_capture_enabled and not abuse_flagged:
+            for e in batch.events:
+                if e.utm and e.utm.source and e.utm.source.startswith("beam_"):
+                    _beam_tags.add(e.utm.source[:64])
+                    if len(_beam_tags) >= _MAX_BEAM_TAGS_PER_BATCH:
+                        break
         if _beam_tags:
             from apps.api.models.engage_outcome import record_outcome
             from apps.api.models.engagement_attribution import EngagementAttribution
@@ -574,7 +589,9 @@ async def ingest_events(
             for _tag in _beam_tags:
                 # Site-scoped inside the tracker, so a tag replayed at another
                 # tenant matches nothing and writes nothing.
-                await _tracker.attribute_visitor(batch.site_id, _tag)
+                await _tracker.attribute_visitor(
+                    batch.site_id, _tag, visitor_id=batch.visitor_id
+                )
 
                 _attr = (
                     await db.execute(
