@@ -70,6 +70,14 @@ def _do_run_migrations(connection: Connection) -> None:
 
 
 async def run_migrations_online() -> None:
+    # Fail closed before connecting: repo .env points at PRODUCTION. Offline
+    # (--sql) mode opens no connection and is intentionally not guarded.
+    import os
+
+    from apps.api.alembic_dsn_guard import assert_safe_alembic_dsn
+
+    assert_safe_alembic_dsn(settings.database_url, os.environ)
+
     connectable = create_async_engine(
         settings.database_url,
         poolclass=pool.NullPool,
