@@ -7,11 +7,12 @@ metadata:
   type: report
   feature: onboarding-canary
   phase: backlog
+status: resolved
 ---
 
 # `identity_feedback` is outside the GDPR erasure sweep — **NEW PLAN REQUIRED**
 
-**Status:** open · **Severity:** blocks a flag flip, not a deploy · **Raised by:** PVL cycle 1 on
+**Status:** resolved · **Severity:** blocks a flag flip, not a deploy · **Raised by:** PVL cycle 1 on
 `public-canary-funnel_11-08-26` (contract finding C-7 / supplement-request C-10).
 
 ## TL;DR
@@ -71,3 +72,7 @@ PASS.
 - **C —** Accept as known-gap with retention-only coverage and a documented DPA position. Requires an
   explicit human decision — an agent may not choose this.
 - **D —** This stub (chosen for now): record the residual, keep the gate CONDITIONAL, block the flip.
+
+## Resolution (14-11-26)
+
+Resolved by branch `fix/gdpr-erasure-gaps` (PR into `main`, 14-11-26) (live gap: `LOCATION_REVEAL_ENABLED=true` in production). Answers to the open questions: (1) subject key = the erased visitor's `fingerprint` + `fingerprint_v3`, read from `visitors` before deletion; (2) no cross-tenant join — rows are matched where `site_id = <this site> OR site_id IS NULL`, another tenant's site-tagged rows are never touched; (3) matched rows are deleted (over-deletion of a quality datum is the safe side); (4) no new API input — the existing per-visitor DELETE does it, and the response deliberately carries no identity_feedback count (no oracle on Beam's funnel rows). Site delete now cascades `identity_feedback` by `site_id`. Retention: new `purge_identity_feedback_older_than` (`identity_feedback_retention_days`, default 90) in the daily purge job. Residual: a public-funnel row whose device never became a tenant visitor can only be reached by retention, not by a per-person request (there is no email on the row).

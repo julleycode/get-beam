@@ -6,6 +6,7 @@ metadata:
   node_type: memory
   type: plan
   feature: visitors-identity
+status: resolved
 ---
 
 # No Erasure Abuse Control At All (KG-8)
@@ -40,3 +41,7 @@ see). Enforcing would trade a real irreversible-inaction failure for no security
 
 A cumulative daily/lifetime cap plus an anomaly-review surface. Requires three product decisions
 that were not made here: what threshold, what happens on trip, and who reviews.
+
+## Resolution (14-11-26)
+
+Resolved by branch `fix/gdpr-erasure-gaps` (PR into `main`, 14-11-26). New ENFORCED cap `graph_erasure_max_per_day` (default 1000, 0 = off): `graph_erasure.daily_cap_exceeded` counts the site's own `erasure_requests` in the trailing 24h; at/over the cap `DELETE /visitors/{site}/{vid}/data` returns 429 + `Retry-After: 3600` BEFORE anything runs (no enqueue, no local delete). Chosen on-trip behaviour: an explicit, retryable refusal — not a silent hold — which avoids the 'held = dropped' liability this note describes. The per-minute forensic marker is unchanged. Still open (human decisions): the anomaly-review surface and whether 1000/day is the right threshold. KG-6/KG-7 untouched.
