@@ -90,7 +90,9 @@ jobs:
   # ─── Frontend E2E Tests (Playwright) ──────────────────────
   e2e:
     name: E2E Tests (Playwright)
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, which Playwright 1.60 cannot
+    # install browser dependencies for.
+    runs-on: ubuntu-24.04
 
     services:
       postgres:
