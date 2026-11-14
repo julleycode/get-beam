@@ -982,6 +982,10 @@ async def _web_research(
     visitor = result.scalar_one_or_none()
     if not visitor:
         raise HTTPException(status_code=404, detail="Visitor not found")
+    # Same privacy gate as /resolve: never send this person's name + company to
+    # a third party (TinyFish search) when they opted out (GPC/DNT sticky).
+    if visitor.do_not_resolve:
+        raise HTTPException(status_code=409, detail="privacy_opt_out")
 
     id_result = await db.execute(
         select(IdentifiedVisitor).where(
@@ -992,6 +996,32 @@ async def _web_research(
     identified = id_result.scalar_one_or_none()
     if not identified:
         raise HTTPException(status_code=409, detail="not_identified")
+
+    # Suppression list (do_not_process / erased / all), same scope the resolver
+    # honours — checked on the identified email and every captured email.
+    # Fail CLOSED: if the check itself errors, nothing is sent out.
+    from apps.api.services.suppression import is_email_suppressed_any
+
+    try:
+        email_rows = await db.execute(
+            select(VisitorEmail.email).where(
+                VisitorEmail.site_id == site_id,
+                VisitorEmail.visitor_id == visitor_id,
+            )
+        )
+        emails = {e for e in email_rows.scalars().all() if e}
+        if getattr(identified, "email", None):
+            emails.add(identified.email)
+        suppressed = False
+        for email in emails:
+            if await is_email_suppressed_any(db, email, ("do_not_process", "erased")):
+                suppressed = True
+                break
+    except Exception as exc:
+        logger.warning("web_research_suppression_check_failed", error_type=type(exc).__name__)
+        raise HTTPException(status_code=503, detail="privacy_check_unavailable") from exc
+    if suppressed:
+        raise HTTPException(status_code=409, detail="suppressed")
 
     prof_result = await db.execute(
         select(EnrichmentProfile).where(

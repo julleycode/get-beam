@@ -58,13 +58,17 @@ def tinyfish_on(monkeypatch):
     async def no_cache(key):
         return None
 
-    async def claim():
+    async def claim(kind="fetch", site_id=None):
         return True
+
+    async def no_cache_set(key, data, ttl=None):
+        return None
 
     monkeypatch.setattr(tr.tinyfish_client, "search", search)
     monkeypatch.setattr(tr.tinyfish_client, "fetch", fetch)
     monkeypatch.setattr(tr, "_cache_get", no_cache)
     monkeypatch.setattr(tr, "_claim_cap", claim)
+    monkeypatch.setattr(tr, "_cache_set", no_cache_set)
 
 
 async def _seed_identified(test_db, site_id: str, visitor_id: str):
