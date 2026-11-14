@@ -51,7 +51,19 @@ async function stubExtension(page: Page, opts: StubOptions = {}) {
     };
 
     if (state.installed) {
-      document.documentElement.dataset.beamExtension = "1";
+      // Mirror apps/extension/src/content.js: mark <html> and fire the event
+      // once the document exists. Setting it at init time is too early — the
+      // parser has not created the final <html> element yet, so the marker
+      // was lost before the wizard mounted.
+      const mark = () => {
+        document.documentElement.dataset.beamExtension = "1";
+        window.dispatchEvent(new CustomEvent("beam-extension-detected"));
+      };
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", mark, { once: true });
+      } else {
+        mark();
+      }
     }
   }, opts);
 }
