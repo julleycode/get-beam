@@ -421,6 +421,31 @@ async def delete_visitor_data(
 
     await _verify_site_access(db, site_id, user)
 
+    # KG-8 enforced cumulative cap: refuse the whole request (nothing enqueued,
+    # nothing deleted) with an explicit, retryable 429 once this site has queued
+    # graph_erasure_max_per_day erasures in the trailing 24h. Counts the site's
+    # own queue rows only, so the response leaks nothing about the shared graph.
+    from apps.api.services.graph_erasure import daily_cap_exceeded
+
+    if await daily_cap_exceeded(db, site_id):
+        logger.warning("erasure_daily_cap_exceeded", site_id=site_id)
+        raise HTTPException(
+            status_code=429,
+            detail="Daily erasure limit reached for this site; retry later.",
+            headers={"Retry-After": "3600"},
+        )
+
+    # Device fingerprints are the only subject key identity_feedback stores, and
+    # the visitors row (their only source) is deleted below — read them first.
+    fp_row = (
+        await db.execute(
+            select(Visitor.fingerprint, Visitor.fingerprint_v3).where(
+                Visitor.site_id == site_id, Visitor.visitor_id == visitor_id
+            )
+        )
+    ).first()
+    fingerprints = [fp for fp in (fp_row or ()) if fp]
+
     # ORDERING-CRITICAL: enqueue the cross-tenant graph erasure BEFORE any
     # delete statement runs. The visitor/identity rows below are the only source
     # of the match keys (fingerprints + email blind indexes), so enqueuing after
@@ -474,6 +499,28 @@ async def delete_visitor_data(
             deleted[table] = r.rowcount
         except Exception as e:
             logger.warning("visitor_data_delete_partial", table=table, error=str(e))
+
+    # identity_feedback (onboarding/public location-reveal "not quite" answers)
+    # has no visitor_id or email — its only subject key is the device
+    # fingerprint. Match this site's rows plus site-less rows (the canary and the
+    # public funnel run before a site exists). Over-deletion is the safe side:
+    # a lost quality-feedback datum vs a retained fingerprint. The count is
+    # deliberately NOT in the response — site-less rows are Beam's own funnel
+    # data, and reporting a hit would make this an oracle for it.
+    if fingerprints:
+        try:
+            r = await db.execute(
+                sql_text(
+                    "DELETE FROM identity_feedback WHERE fingerprint = ANY(:fps) "
+                    "AND (site_id = :sid OR site_id IS NULL)"
+                ),
+                {"fps": fingerprints, "sid": site_id},
+            )
+            logger.info("identity_feedback_erased", site_id=site_id, rows=r.rowcount)
+        except Exception as e:
+            logger.warning(
+                "visitor_data_delete_partial", table="identity_feedback", error=str(e)
+            )
     await db.commit()
 
     logger.info("visitor_data_deleted", site_id=site_id, visitor_id=visitor_id[:8], deleted=deleted)

@@ -1,3 +1,4 @@
+import hashlib
 from html import escape
 from urllib.parse import quote
 
@@ -104,6 +105,15 @@ class EmailSender:
         # Connect-Gmail work lands; this is the interim personalization.)
         if reply_to:
             payload["reply_to"] = {"email": reply_to}
+
+        # Mock mode: never reach SendGrid from dev/test/demo. Short-circuits AFTER
+        # the suppression check and payload build, so those paths still run, and
+        # returns a deterministic fake id (same shape as a real 202).
+        if settings.mock_external_apis:
+            digest = hashlib.sha256(f"{to_email}\n{subject}".encode()).hexdigest()
+            msg_id = f"mock-{digest[:16]}"
+            logger.info("email_sent_mock", to=_mask_email(to_email), id=msg_id)
+            return {"id": msg_id, "status": 202}
 
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:

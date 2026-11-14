@@ -6,6 +6,7 @@ metadata:
   node_type: memory
   type: plan
   feature: visitors-identity
+status: resolved
 ---
 
 # visitor_emails Survives Per-Visitor Erasure
@@ -32,3 +33,7 @@ Almost certainly a one-line addition to the delete tuple. It is separated out ra
 because it changes the semantics of an existing GDPR endpoint on a different axis (own-tenant
 plaintext retention) than the plan that found it, and it deserves its own confirmation that nothing
 depends on those rows outliving the visitor.
+
+## Resolution (14-11-26)
+
+Already fixed in code before this note was closed. Commit `2136219` (fix(security): close 7 opt-out/erasure/DoS gaps) added `"visitor_emails"` to the per-visitor delete list; at `6ef19f7` it is `apps/api/routers/visitors.py:466`, ordered before `"visitors"`. Verified 14-11-26 during branch `fix/gdpr-erasure-gaps` (PR into `main`, 14-11-26).

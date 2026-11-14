@@ -343,6 +343,9 @@ async def delete_site(
             # (append-only legal audit trail, inert alone) — plan decision H1-D.
             "identity_contribution_events",
             "identity_credit_ledger",
+            # Onboarding "not quite" answers tagged with this site carry a
+            # device fingerprint + rendered location (GDPR erasure gap).
+            "identity_feedback",
         ):
             r = await db.execute(
                 sql_text(f"DELETE FROM {table} WHERE site_id = :sid"),

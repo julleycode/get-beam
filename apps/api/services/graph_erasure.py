@@ -179,6 +179,29 @@ async def _volume_marker_tripped(db: AsyncSession, site_id: str) -> bool:
     return int(recent) >= settings.graph_erasure_max_per_minute
 
 
+async def daily_cap_exceeded(db: AsyncSession, site_id: str) -> bool:
+    """Whether ``site_id`` has hit the ENFORCED cumulative 24h erasure cap (KG-8).
+
+    Unlike ``_volume_marker_tripped`` this one is acted on: the caller refuses
+    the whole request with 429 before enqueuing or deleting anything. Counts only
+    the site's own queue rows — never the graph — so the answer leaks nothing
+    about other tenants. ``graph_erasure_max_per_day <= 0`` disables it.
+    """
+    cap = settings.graph_erasure_max_per_day
+    if cap <= 0:
+        return False
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    count = (
+        await db.execute(
+            select(func.count(ErasureRequest.id)).where(
+                ErasureRequest.requesting_site_id == site_id,
+                ErasureRequest.created_at >= since,
+            )
+        )
+    ).scalar() or 0
+    return int(count) >= cap
+
+
 async def enqueue_erasure(
     db: AsyncSession, *, site_id: str, visitor_id: str
 ) -> ErasureRequest | None:

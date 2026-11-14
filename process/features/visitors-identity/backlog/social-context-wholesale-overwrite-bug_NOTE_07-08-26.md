@@ -6,7 +6,7 @@ feature: visitors-identity
 metadata:
   node_type: memory
   type: note
-  status: open
+  status: resolved
   severity: HIGH
   source: VALIDATE CONCERN-2 of github-reader_PLAN_07-08-26
 ---
@@ -85,3 +85,7 @@ comments in `apps/api/services/github_reader.py` (module docstring) and
 - `apps/api/routers/visitors_helpers.py:338`
 - VALIDATE CONCERN-2 in
   `process/features/visitors-identity/active/github-reader_07-08-26/github-reader_PLAN_07-08-26.md`
+
+## Resolution (14-11-26)
+
+Already fixed in code. Commit `b308a45` (fix(enrichment): social-context merge preserves existing fields) converted `store_social_context` to read-modify-write: at `6ef19f7`, `apps/api/services/social_intelligence.py:108-110` builds `merged = dict(... or {})`, `merged.update(context)`, and reassigns. Verified 14-11-26 during branch `fix/gdpr-erasure-gaps` (PR into `main`, 14-11-26).

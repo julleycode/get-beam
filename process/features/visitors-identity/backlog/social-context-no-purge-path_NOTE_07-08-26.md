@@ -3,6 +3,7 @@ name: note:social-context-no-purge-path
 description: "EnrichmentProfile.social_context holds scraped PII with NO purge or erasure path anywhere — unaccounted for by the erasure program"
 date: 07-08-26
 feature: visitors-identity
+status: resolved
 ---
 
 # `social_context` has NO purge/erasure path — NEW PLAN REQUIRED
@@ -52,3 +53,7 @@ accepted in that plan's validate contract rests on this note existing.
 
 `process/features/visitors-identity/active/social-context-merge_07-08-26/social-context-merge_PLAN_07-08-26.md`
 — Backlog Follow-Up #4, Validate Contract Security-surface CONCERN.
+
+## Resolution (14-11-26)
+
+Resolved by branch `fix/gdpr-erasure-gaps` (PR into `main`, 14-11-26). (1) Per-visitor erasure: `enrichment_profiles` was already in the DELETE list of `routers/visitors.py`, so the whole row incl. `social_context` goes; now pinned by `tests/integration/test_gdpr_erasure_gaps.py::test_visitor_delete_removes_social_context`. Site delete already cascades `enrichment_profiles`. (2) Retention: new `services/retention.py::purge_social_context_older_than` NULLs the blob (profile row kept) once `COALESCE(social_context_updated_at, updated_at)` is older than `social_context_retention_days` (default 180), wired into the daily `_retention_purge_job`.
