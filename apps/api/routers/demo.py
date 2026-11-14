@@ -7,6 +7,7 @@ ANY IP (residential, public WiFi, mobile) — not just business IPs.
 """
 
 import asyncio
+import json
 import re
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -612,17 +613,31 @@ async def demo_social_posts(request: Request, body: SocialPostsRequest) -> dict:
     return await fetch_social_posts(body.twitter_handle)
 
 
-async def fetch_social_posts(twitter_handle: str) -> dict:
+class UpstreamUnavailableError(Exception):
+    """Raised by the shared helpers ONLY in ``strict`` mode (paid callers) when
+    the upstream provider failed, so the caller can refuse to charge instead of
+    selling an empty/canned fallback."""
+
+
+async def fetch_social_posts(twitter_handle: str, *, strict: bool = False) -> dict:
     """Read-only social-post fetch shared by /demo/social-posts and /paid/social-posts.
 
     Returns ``{"posts": [...], "source": ...}``. No budget check here — each caller
     owns its own spend control (demo daily budget vs. x402 payment).
+
+    ``strict=True`` (paid path): no Twitter token / any API error raises
+    :class:`UpstreamUnavailableError`, and the Playwright fallback (which
+    browses with a stored personal X login cookie) is never used. A successful
+    API answer with zero posts is still returned normally.
     """
     posts: list[dict] = []
 
     handle = (twitter_handle or "").lstrip("@").strip()
     if not handle:
         return {"posts": [], "source": "none"}
+
+    if strict and not settings.twitter_bearer_token:
+        raise UpstreamUnavailableError("twitter_not_configured")
 
     # Real Twitter API call
     if settings.twitter_bearer_token:
@@ -657,8 +672,26 @@ async def fetch_social_posts(twitter_handle: str) -> dict:
                                 })
                             logger.info("demo_social_posts_twitter_ok", handle=handle, count=len(posts))
                             return {"posts": posts, "source": "twitter_api"}
+                        if strict:
+                            raise UpstreamUnavailableError(f"tweets_http_{tweets_resp.status_code}")
+                    elif strict:
+                        raise UpstreamUnavailableError("user_without_id")
+                elif strict and user_resp.status_code != 404:
+                    raise UpstreamUnavailableError(f"user_http_{user_resp.status_code}")
+                elif strict:
+                    # Unknown handle is a real answer, not a provider failure.
+                    return {"posts": [], "source": "twitter_api"}
+        except UpstreamUnavailableError:
+            raise
         except Exception as e:
             logger.warning("demo_social_posts_twitter_error", error=str(e))
+            if strict:
+                raise UpstreamUnavailableError(type(e).__name__) from e
+
+    if strict:
+        # Never reached with a token (every branch above returns or raises);
+        # kept so the cookie-backed browser fallback can't run for paid callers.
+        raise UpstreamUnavailableError("no_result")
 
     # Fallback: try Playwright browser scraping if available
     try:
@@ -706,17 +739,47 @@ async def demo_generate_draft(request: Request, body: DraftRequest) -> dict:
     return await generate_draft_text(body)
 
 
-async def generate_draft_text(body: DraftRequest) -> dict:
+async def generate_draft_text(body: DraftRequest, *, strict: bool = False) -> dict:
     """Draft generation shared by /demo/generate-draft and /paid/generate-draft.
 
-    Returns ``{"draft": str}``; never raises for provider errors (falls back to a
-    template). No budget check here — each caller owns its own spend control.
+    Returns ``{"draft": str}``. Default (demo): never raises for provider errors
+    (falls back to a template). No budget check here — each caller owns its own
+    spend control.
+
+    ``strict=True`` (paid path): buyer-supplied text is sanitized and fenced via
+    ``agents/prompt_safety`` before it reaches the prompt, and when every LLM
+    fails :class:`UpstreamUnavailableError` is raised instead of returning the
+    canned template (so the buyer is not charged for it).
     """
     name = body.visitor_name.strip() or "this visitor"
     first = name.split()[0].lower() if name != "this visitor" else "there"
 
     # Build context-aware prompt
-    if body.recent_post:
+    if strict:
+        from apps.api.agents.prompt_safety import clean_text, wrap_untrusted
+
+        fields = {
+            "recent_post": clean_text(body.recent_post, 2000),
+            "visitor_name": clean_text(body.visitor_name, 200),
+            "visitor_role": clean_text(body.visitor_role, 200),
+            "visitor_company": clean_text(body.visitor_company, 200),
+            "commenter_site": clean_text(body.user_url, 300),
+        }
+        task = (
+            "Write a short, casual social media reply (2-3 sentences max) to the "
+            "post in recent_post. Reference something specific from it."
+            if body.recent_post
+            else "Write a short, casual social media comment (2-3 sentences max) to "
+            "engage with the person described (visitor_name / visitor_role / "
+            "visitor_company)."
+        )
+        prompt = (
+            f"{task} The commenter runs the site in commenter_site (or a SaaS "
+            "product if empty). Be genuine, not salesy. No hashtags. Lowercase "
+            "casual tone. Don't start with 'hey'. Output only the reply text.\n"
+            f"{wrap_untrusted(json.dumps(fields, ensure_ascii=False))}"
+        )
+    elif body.recent_post:
         prompt = (
             f"Write a short, casual social media reply (2-3 sentences max) to this post:\n\n"
             f'"{body.recent_post}"\n\n'
@@ -784,6 +847,9 @@ async def generate_draft_text(body: DraftRequest) -> dict:
                         return {"draft": text.strip()}
         except Exception as e:
             logger.warning("demo_generate_draft_openrouter_error", error=str(e))
+
+    if strict:
+        raise UpstreamUnavailableError("all_llm_providers_failed")
 
     # Fallback: template referencing real post if available
     if body.recent_post:
