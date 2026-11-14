@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import BackgroundTasks
 
 import apps.api.main  # noqa: F401 — registers every ORM model
 from apps.api.config import settings
@@ -183,6 +184,7 @@ async def test_gated_read_tool_computes_result_before_metric(monkeypatch):
     resp = await agent_mcp._dispatch_tool(
         db,
         _FakeRequest(),
+        BackgroundTasks(),
         site,
         profile,
         1,
@@ -215,7 +217,7 @@ async def test_ungated_read_tool_computes_result_before_metric(monkeypatch):
     monkeypatch.setattr(agent_mcp, "_record_tool_call", _fake_record)
 
     resp = await agent_mcp._dispatch_tool(
-        _mock_db(), _FakeRequest(), SimpleNamespace(site_id="s1"), SimpleNamespace(),
+        _mock_db(), _FakeRequest(), BackgroundTasks(), SimpleNamespace(site_id="s1"), SimpleNamespace(),
         1, "get_offers", {},
     )
     assert order == ["tool", "record"]
@@ -246,7 +248,10 @@ async def test_hostile_ptr_domain_not_stored_or_emailed(monkeypatch):
     from apps.api.services import agent_gateway, company_resolver
     from apps.api.services.email_sender import EmailSender
 
-    # No idempotency interference: no Redis → _conversion_is_duplicate fail-open False.
+    from tests.unit._agent_concierge_fakes import FakeSession, make_lead
+
+    monkeypatch.setattr(settings, "mock_external_apis", False)
+
     async def _free(ip, db=None):
         return "<script>evil.example"  # hostile PTR
 
@@ -260,20 +265,13 @@ async def test_hostile_ptr_domain_not_stored_or_emailed(monkeypatch):
 
     monkeypatch.setattr(EmailSender, "send", _send)
 
-    added: dict = {}
-    db = _mock_db()
-    db.add = MagicMock(side_effect=lambda obj: added.__setitem__("lead", obj))
+    lead = make_lead(5, site_id="s1")
+    sess = FakeSession(lead, SimpleNamespace(site_id="s1", user_id="u1"))
+    monkeypatch.setattr("apps.api.models.database.async_session", lambda: sess)
 
-    site = SimpleNamespace(site_id="s1", user_id="u1")
-    profile = SimpleNamespace(qualified_content={})
-    result = await agent_gateway.handle_conversion_tool(
-        db, site, profile, "request_quote",
-        {"use_case": "a", "company_size": "b", "evaluating_against": "c"},
-        ip_address="203.0.113.5",
-    )
-    assert result["lead_created"] is True
-    # Hostile domain dropped before the row was built …
-    assert added["lead"].resolved_company_domain is None
+    await agent_gateway.process_new_lead(lead.id, "203.0.113.5")
+    # Hostile domain dropped before it is stored on the lead …
+    assert lead.resolved_company_domain is None
     # … and never reaches the email body (falls back to 'unknown').
     assert "<script>" not in captured.get("body_html", "")
     assert "unknown" in captured.get("body_html", "")
@@ -342,16 +340,17 @@ async def test_idempotency_collapses_duplicate_conversions(monkeypatch):
     profile = SimpleNamespace(qualified_content={})
     params = {"use_case": "a", "company_size": "b", "evaluating_against": "c"}
 
-    r1 = await agent_gateway.handle_conversion_tool(
+    r1, id1 = await agent_gateway.handle_conversion_tool(
         db, site, profile, "request_quote", dict(params), "203.0.113.1"
     )
-    r2 = await agent_gateway.handle_conversion_tool(
+    r2, id2 = await agent_gateway.handle_conversion_tool(
         db, site, profile, "request_quote", dict(params), "203.0.113.1"
     )
     assert r1["lead_created"] is True and r2["lead_created"] is True
-    # The 2nd identical call collapsed: only ONE lead row + ONE email.
+    # The 2nd identical call collapsed: ONE lead row, and no lead id → no
+    # background task → no second email.
     assert db.add.call_count == 1
-    assert send_count["n"] == 1
+    assert id1 is not None and id2 is None
 
 
 async def test_idempotency_distinct_params_not_collapsed(monkeypatch):
@@ -400,7 +399,7 @@ async def test_incomplete_conversion_calls_do_not_starve_complete(monkeypatch):
     monkeypatch.setattr(settings, "agent_concierge_conversion_idempotency_ttl_seconds", 0)
 
     async def _fake_handle(db, site, profile, tool_name, params, ip):
-        return {"lead_created": True, "tool_name": tool_name}
+        return {"lead_created": True, "tool_name": tool_name}, None
 
     async def _fake_record(*a, **k):
         return None
@@ -416,20 +415,20 @@ async def test_incomplete_conversion_calls_do_not_starve_complete(monkeypatch):
     # Fire many INCOMPLETE calls (missing params) — must NOT drain the 1/min bucket.
     for _ in range(10):
         resp = await agent_mcp._dispatch_tool(
-            db, _FakeRequest(), site, profile, 1, "request_quote", {}
+            db, _FakeRequest(), BackgroundTasks(), site, profile, 1, "request_quote", {}
         )
         assert _body(resp)["result"]["needs_more_info"] is True
 
     good = {"use_case": "a", "company_size": "b", "evaluating_against": "c"}
     # First COMPLETE call still succeeds (budget was never consumed by the empties).
     ok = await agent_mcp._dispatch_tool(
-        db, _FakeRequest(), site, profile, 1, "request_quote", good
+        db, _FakeRequest(), BackgroundTasks(), site, profile, 1, "request_quote", good
     )
     assert _body(ok)["result"]["lead_created"] is True
 
     # Second COMPLETE call is now rate-limited → proves COMPLETE calls DO consume.
     limited = await agent_mcp._dispatch_tool(
-        db, _FakeRequest(), site, profile, 1, "request_quote", good
+        db, _FakeRequest(), BackgroundTasks(), site, profile, 1, "request_quote", good
     )
     assert limited.status_code == 429
     assert _body(limited)["error"]["code"] == -32010

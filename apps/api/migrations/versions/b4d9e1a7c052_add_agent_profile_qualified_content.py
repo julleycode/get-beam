@@ -1,7 +1,7 @@
 """add agent_profiles.qualified_content — WS3 agent concierge qualified answers
 
 Revision ID: b4d9e1a7c052
-Revises: a2f8d61c9e37
+Revises: d3f8a2c61b47
 Create Date: 2026-07-30
 
 Additive only: one nullable-with-default JSONB column on an existing table. The
@@ -18,7 +18,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "b4d9e1a7c052"
-down_revision: Union[str, None] = "a2f8d61c9e37"
+down_revision: Union[str, None] = "d3f8a2c61b47"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

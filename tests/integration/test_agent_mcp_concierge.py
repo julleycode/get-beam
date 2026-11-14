@@ -25,6 +25,21 @@ from apps.api.models.user import User
 pytestmark = pytest.mark.integration
 
 
+@pytest.fixture(autouse=True)
+def _background_session_on_test_engine(test_engine, monkeypatch):
+    """``process_new_lead`` (the post-response background task) opens its own
+    session via ``apps.api.models.database.async_session``. Point it at the
+    test engine so it runs on this test's event loop and database."""
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+    monkeypatch.setattr(
+        "apps.api.models.database.async_session",
+        async_sessionmaker(test_engine, class_=AsyncSession, expire_on_commit=False),
+    )
+    # Real sends are stubbed per test; mock mode would short-circuit them.
+    monkeypatch.setattr(settings, "mock_external_apis", False)
+
+
 async def _seed(test_db, *, enabled=True, owner_email="owner@example.com"):
     """Create a User + Site + enabled AgentProfile with a unique site_id."""
     site_id = f"site_{uuid.uuid4().hex[:12]}"
@@ -476,3 +491,112 @@ async def test_conversion_tool_absent_when_flag_off(test_client, test_db, monkey
         json=_rpc("tools/call", {"name": "request_quote", "arguments": {}}),
     )
     assert resp.json()["error"]["code"] == -32601
+
+
+# ── PR #92 follow-ups: stored IP prefix, dashboard visits, leads endpoint ──
+
+_GPT_UA = "Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko); compatible; ChatGPT-User/1.0; +https://openai.com/bot"
+_ARGS = {"use_case": "analytics", "company_size": "50-200", "evaluating_against": "clay"}
+
+
+async def test_lead_stores_ip_prefix_only(test_client, test_db, monkeypatch):
+    _flags(monkeypatch, conversion=True)
+    from apps.api.services import company_resolver
+    from apps.api.services.email_sender import EmailSender
+
+    async def _free(ip, db=None):
+        return None
+
+    monkeypatch.setattr(company_resolver, "resolve_company_cached", _free)
+    monkeypatch.setattr(EmailSender, "send", lambda self, **k: _noop())
+    monkeypatch.setattr(
+        "apps.api.routers.agent_mcp.resolve_client_ip", lambda r: "198.51.100.77"
+    )
+    site_id = await _seed(test_db)
+    await test_client.post(
+        f"/api/v1/agent/{site_id}/mcp",
+        json=_rpc("tools/call", {"name": "request_quote", "arguments": _ARGS}),
+    )
+    row = (
+        await test_db.execute(select(AgentLead).where(AgentLead.site_id == site_id))
+    ).scalar_one()
+    assert row.ip_address == "198.51.100.0"
+
+
+async def test_mcp_calls_appear_in_agent_dashboard_tables(test_client, test_db, monkeypatch):
+    """tools/list and a tool call from a recognized agent write agent_fetch_events
+    rows (the Agents dashboard source)."""
+    _flags(monkeypatch, conversion=False)
+    from apps.api.models.agent_fetch_event import AgentFetchEvent
+
+    site_id = await _seed(test_db)
+    h = {"User-Agent": _GPT_UA}
+    await test_client.post(f"/api/v1/agent/{site_id}/mcp", json=_rpc("tools/list"), headers=h)
+    await test_client.post(
+        f"/api/v1/agent/{site_id}/mcp",
+        json=_rpc("tools/call", {"name": "get_offers"}),
+        headers=h,
+    )
+    paths = set(
+        (
+            await test_db.execute(
+                select(AgentFetchEvent.page_path).where(AgentFetchEvent.site_id == site_id)
+            )
+        ).scalars().all()
+    )
+    assert {"/agent/mcp/tools-list", "/agent/mcp/get_offers"} <= paths
+
+
+async def _lead_for(test_db, site_id):
+    test_db.add(
+        AgentLead(
+            site_id=site_id, tool_name="book_demo", use_case="u", company_size="s",
+            evaluating_against="e", ip_address="203.0.113.0", notified=False,
+        )
+    )
+    await test_db.commit()
+
+
+async def test_agent_leads_endpoint_owner_sees_leads(test_client, test_db, monkeypatch):
+    from apps.api.dependencies import get_current_user
+    from apps.api.main import app
+
+    site_id = await _seed(test_db, owner_email=None)
+    await _lead_for(test_db, site_id)
+    owner = (await test_db.execute(select(Site).where(Site.site_id == site_id))).scalar_one()
+    user = (await test_db.execute(select(User).where(User.id == owner.user_id))).scalar_one()
+    app.dependency_overrides[get_current_user] = lambda: user
+    try:
+        resp = await test_client.get(f"/api/v1/agent-leads/{site_id}")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+    assert resp.status_code == 200
+    leads = resp.json()["leads"]
+    assert len(leads) == 1 and leads[0]["tool_name"] == "book_demo"
+    assert "ip_address" not in leads[0]
+    assert "203.0.113" not in resp.text
+
+
+async def test_agent_leads_endpoint_foreign_or_unknown_site_404(test_client, test_db):
+    from apps.api.dependencies import get_current_user
+    from apps.api.main import app
+
+    site_id = await _seed(test_db, owner_email=None)
+    await _lead_for(test_db, site_id)
+    stranger = User(id=uuid.uuid4(), email=f"{uuid.uuid4().hex[:8]}@example.com")
+    test_db.add(stranger)
+    await test_db.commit()
+    app.dependency_overrides[get_current_user] = lambda: stranger
+    try:
+        foreign = await test_client.get(f"/api/v1/agent-leads/{site_id}")
+        unknown = await test_client.get("/api/v1/agent-leads/site_doesnotexist")
+    finally:
+        app.dependency_overrides.pop(get_current_user, None)
+    assert foreign.status_code == 404
+    assert unknown.status_code == 404
+
+
+async def test_agent_leads_endpoint_requires_auth(test_client, test_db):
+    site_id = await _seed(test_db, owner_email=None)
+    resp = await test_client.get(f"/api/v1/agent-leads/{site_id}")
+    assert resp.status_code == 401

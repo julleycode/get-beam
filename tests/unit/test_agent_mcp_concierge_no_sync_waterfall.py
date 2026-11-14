@@ -1,75 +1,38 @@
 """MF-3 (VALIDATE-added, Fully-Automated) — the budget-exhaustion guardrail.
 
-The single most important security property of the WS3 conversion tool: it MUST
-NEVER synchronously invoke the paid identity-resolution waterfall
-(``IdentityResolver.resolve`` / ``run_company_resolution_sweep``) from the public,
-unauthenticated request/response cycle. Doing so would let an unauthenticated
-caller drain a site's entire 50/day identity-resolution budget via repeated
-``request_quote`` calls.
+The WS3 conversion tool MUST NEVER invoke the paid identity-resolution waterfall
+(``IdentityResolver.resolve`` / ``run_company_resolution_sweep``) on behalf of a
+public, unauthenticated caller.
 
-Pure monkeypatch / call-count assertion — no live DB, no network. Proves the code
-path structurally cannot reach the paid waterfall: every paid provider entry
-point is patched to raise-if-called, and the conversion tool still completes.
+After the review-fix cycle the request path (``handle_conversion_tool``) is
+DB-only and does no company lookup at all; the lookup moved to the background
+task ``process_new_lead``, which uses the FREE cached path with ``db=None`` (no
+cross-tenant company_graph write). Both halves are asserted here.
 """
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 
 import apps.api.main  # noqa: F401 — registers every ORM model
+from apps.api.config import settings
+from tests.unit._agent_concierge_fakes import FakeRedis, FakeSession, make_lead
+from tests.unit._agent_concierge_fakes import mock_db as _mock_db
 
 pytestmark = pytest.mark.unit
 
 
-class _FakeRedis:
-    """Fresh in-memory Redis so the WS3 idempotency guard (added in the review-fix
-    cycle) is deterministic in the unit lane and never touches a stray local
-    :6379 container across runs."""
-
-    def __init__(self):
-        self.store: dict = {}
-
-    async def set(self, key, value, nx=False, ex=None):
-        if nx and key in self.store:
-            return None
-        self.store[key] = value
-        return True
-
-    async def incr(self, key):
-        self.store[key] = int(self.store.get(key, 0)) + 1
-        return self.store[key]
-
-    async def expire(self, key, seconds):
-        return True
-
-
 @pytest.fixture(autouse=True)
 def _hermetic_redis(monkeypatch):
-    fake = _FakeRedis()
+    fake = FakeRedis()
     monkeypatch.setattr("apps.api.services.redis_client.get_redis", lambda: fake)
     return fake
 
 
-def _mock_db():
-    db = MagicMock()
-    db.add = MagicMock()
-    db.commit = AsyncMock()
-    db.rollback = AsyncMock()
-    db.refresh = AsyncMock()
-    owner_row = MagicMock()
-    owner_row.first.return_value = ("owner@example.com",)
-    db.execute = AsyncMock(return_value=owner_row)
-    return db
-
-
-async def test_request_quote_never_calls_paid_waterfall(monkeypatch):
-    from apps.api.services import agent_gateway
-    from apps.api.services import company_resolver
-    from apps.api.services.email_sender import EmailSender
+def _patch_paid(monkeypatch):
     from apps.api.services.identity_resolver import IdentityResolver
 
-    # Every paid-provider entry point: raise the instant it is called.
     def _boom(*a, **k):
         raise AssertionError("paid identity-resolution waterfall was invoked")
 
@@ -80,8 +43,41 @@ async def test_request_quote_never_calls_paid_waterfall(monkeypatch):
         raising=False,
     )
 
-    # The FREE path is what the conversion tool must use. Record that it is the
-    # only resolver called, and that it receives the db (free graph read path).
+
+async def test_request_path_never_resolves_company(monkeypatch):
+    """The request path is DB-only: no lookup of any kind (free or paid)."""
+    from apps.api.services import agent_gateway, company_resolver
+
+    _patch_paid(monkeypatch)
+
+    async def _free(ip, db=None):
+        raise AssertionError("company lookup ran on the request path")
+
+    monkeypatch.setattr(company_resolver, "resolve_company_cached", _free)
+
+    db = _mock_db()
+    site = SimpleNamespace(site_id="site-1", user_id="u-1")
+    result, lead_id = await agent_gateway.handle_conversion_tool(
+        db,
+        site,
+        SimpleNamespace(qualified_content={}),
+        "request_quote",
+        {"use_case": "analytics", "company_size": "50-200", "evaluating_against": "clay"},
+        ip_address="203.0.113.7",
+    )
+    assert result["lead_created"] is True
+    assert lead_id is not None
+    lead = db.add.call_args[0][0]
+    assert lead.resolved_company_domain is None
+    assert lead.ip_address == "203.0.113.0"  # /24 prefix, never the full IP
+
+
+async def test_background_task_uses_free_path_without_db(monkeypatch):
+    from apps.api.services import agent_gateway, company_resolver
+    from apps.api.services.email_sender import EmailSender
+
+    _patch_paid(monkeypatch)
+    monkeypatch.setattr(settings, "mock_external_apis", False)
     free_calls: list = []
 
     async def _free(ip, db=None):
@@ -89,71 +85,42 @@ async def test_request_quote_never_calls_paid_waterfall(monkeypatch):
         return "acme.example"
 
     monkeypatch.setattr(company_resolver, "resolve_company_cached", _free)
-
-    # Never actually send email.
     monkeypatch.setattr(EmailSender, "send", AsyncMock(return_value={"id": "x"}))
 
-    db = _mock_db()
-    site = SimpleNamespace(site_id="site-1", user_id="u-1")
-    profile = SimpleNamespace(qualified_content={})
+    lead = make_lead(1)
+    sess = FakeSession(lead, SimpleNamespace(site_id="site-1", user_id="u-1"))
+    monkeypatch.setattr("apps.api.models.database.async_session", lambda: sess)
 
-    result = await agent_gateway.handle_conversion_tool(
-        db,
-        site,
-        profile,
-        "request_quote",
-        {
-            "use_case": "analytics",
-            "company_size": "50-200",
-            "evaluating_against": "clay",
-        },
-        ip_address="203.0.113.7",
-    )
+    await agent_gateway.process_new_lead(lead.id, "203.0.113.7")
 
-    # Completed via the FREE path only.
-    assert result["lead_created"] is True
-    assert len(free_calls) == 1
-    assert free_calls[0][0] == "203.0.113.7"
-    # A lead row was added and committed.
-    assert db.add.called
+    assert free_calls == [("203.0.113.7", None)]  # db=None: no graph write
+    assert lead.resolved_company_domain == "acme.example"
+    assert lead.notified is True
+    assert sess.commits == 1
 
 
-async def test_free_resolution_failure_still_creates_lead(monkeypatch):
-    """Even if the free lookup raises, the lead is still written (fail-open) and
-    the paid waterfall is never reached."""
-    from apps.api.services import agent_gateway
-    from apps.api.services import company_resolver
+async def test_free_resolution_failure_still_notifies(monkeypatch):
+    from apps.api.services import agent_gateway, company_resolver
     from apps.api.services.email_sender import EmailSender
-    from apps.api.services.identity_resolver import IdentityResolver
 
-    monkeypatch.setattr(
-        IdentityResolver,
-        "resolve",
-        MagicMock(side_effect=AssertionError("paid waterfall invoked")),
-        raising=False,
-    )
+    _patch_paid(monkeypatch)
+    monkeypatch.setattr(settings, "mock_external_apis", False)
 
     async def _free_boom(ip, db=None):
         raise RuntimeError("rDNS blew up")
 
     monkeypatch.setattr(company_resolver, "resolve_company_cached", _free_boom)
-    monkeypatch.setattr(EmailSender, "send", AsyncMock(return_value={"id": "x"}))
+    send = AsyncMock(return_value={"id": "x"})
+    monkeypatch.setattr(EmailSender, "send", send)
 
-    db = _mock_db()
-    site = SimpleNamespace(site_id="site-1", user_id="u-1")
-    profile = SimpleNamespace(qualified_content={})
+    lead = make_lead(2, tool_name="book_demo")
+    sess = FakeSession(lead, SimpleNamespace(site_id="site-1", user_id="u-1"))
+    monkeypatch.setattr("apps.api.models.database.async_session", lambda: sess)
 
-    result = await agent_gateway.handle_conversion_tool(
-        db,
-        site,
-        profile,
-        "book_demo",
-        {"use_case": "x", "company_size": "y", "evaluating_against": "z"},
-        ip_address="203.0.113.7",
-    )
-
-    assert result["lead_created"] is True
-    assert db.add.called
+    await agent_gateway.process_new_lead(lead.id, "203.0.113.7")
+    assert lead.resolved_company_domain is None
+    assert send.await_count == 1
+    assert lead.notified is True
 
 
 async def test_missing_params_returns_needs_more_info_no_lead(monkeypatch):
@@ -163,11 +130,11 @@ async def test_missing_params_returns_needs_more_info_no_lead(monkeypatch):
     site = SimpleNamespace(site_id="site-1", user_id="u-1")
     profile = SimpleNamespace(qualified_content={})
 
-    result = await agent_gateway.handle_conversion_tool(
+    result, lead_id = await agent_gateway.handle_conversion_tool(
         db, site, profile, "request_quote", {"use_case": "only-one"}, ip_address=None
     )
 
+    assert lead_id is None
     assert result["needs_more_info"] is True
     assert set(result["missing_params"]) == {"company_size", "evaluating_against"}
-    # No lead written when qualification is incomplete.
     assert not db.add.called

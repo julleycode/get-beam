@@ -570,10 +570,22 @@ class Settings(BaseSettings):
     # the per-minute limit. The 5/min limit alone still permits ~7200 leads/day/
     # site sustained; this caps the daily total so a slow-drip abuser cannot flood
     # an owner's inbox over a full day while staying under the minute bucket.
-    # Generous by design (a real business will not legitimately exceed it); set to
+    # Kept LOW (site_id is public, so this is a cap any caller can reach): an
+    # owner reviewing agent leads by hand does not need more than ~20/day. Set to
     # 0 to disable the ceiling entirely. Redis-backed per-UTC-day counter, no
     # schema change, fail-open (Redis trouble never blocks a lead).
-    agent_concierge_conversion_daily_cap: int = 500
+    agent_concierge_conversion_daily_cap: int = 20
+    # Per-caller-IP sub-bucket inside each site's daily allowance, so one caller
+    # cannot consume the whole site cap by itself. 0 disables.
+    agent_concierge_conversion_per_ip_daily_cap: int = 3
+    # Owner email: only the first N leads per site per UTC day get an individual
+    # email. Lead N+1 sends ONE overflow digest notice ("more leads today — see
+    # the dashboard"); later leads that day send nothing (still listed in
+    # GET /api/v1/agent-leads/{site_id}). Bounds inbox flooding at N+1 emails/day.
+    agent_concierge_notify_individual_per_day: int = 3
+    # Ceiling on agent_tool_calls metric rows written per site per UTC day; past it
+    # the metric write is skipped (the response is unaffected). 0 disables.
+    agent_tool_calls_daily_row_cap: int = 2000
     # M3: idempotency window (seconds). Two identical complete conversion calls
     # (same site + tool + qualification params) within this window collapse to ONE
     # lead + ONE owner email — retries/double-submits do not duplicate. Redis

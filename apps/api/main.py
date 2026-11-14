@@ -62,7 +62,7 @@ from apps.api.routers import ingest_health
 from apps.api.routers import contacts
 from apps.api.routers import hot_contacts
 from apps.api.routers import request_logs
-from apps.api.routers import agent_profile, agent_gateway, agent_mcp
+from apps.api.routers import agent_profile, agent_gateway, agent_mcp, agent_leads
 from apps.api.routers import paid
 from apps.api.services.x402_seller import redact_payment_headers, setup_gate, teardown_gate
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
@@ -585,6 +585,7 @@ app.include_router(
 # these routes answer 404 (dormant, not revealed) until an operator enables them.
 app.include_router(agent_gateway.router, prefix="/api/v1/agent", tags=["agent-gateway"])
 app.include_router(agent_mcp.router, prefix="/api/v1/agent", tags=["agent-mcp"])
+app.include_router(agent_leads.router, prefix="/api/v1/agent-leads", tags=["agent-leads"])
 # Pay-per-call agent API (InFlow x402). Mounted ONLY when the flag is on, so the
 # default deploy has no /api/v1/paid surface at all (404, not revealed).
 if settings.inflow_x402_enabled:

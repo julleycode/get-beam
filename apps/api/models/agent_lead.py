@@ -47,9 +47,9 @@ class AgentLead(Base):
     # company). A string domain, NOT a Company FK id — this path deliberately
     # never writes a Company/identity row.
     resolved_company_domain: Mapped[str | None] = mapped_column(String(253), nullable=True)
-    # Caller IP at conversion time (used for the free lookup; also lets the
-    # existing async agent-company-resolution sweep optionally pick it up later
-    # under its OWN budget/eligibility gates — never inline here).
+    # Caller NETWORK PREFIX only (IPv4 /24, IPv6 /48 — agent_gateway.truncate_ip).
+    # The full IP is used in memory for the background company lookup and is
+    # never stored, so this column is not an individual identifier.
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     # Set (to created_at-ish) only on notification SUCCESS. Stays null when the
     # fail-open owner-notification email did not send — the lead row is durable

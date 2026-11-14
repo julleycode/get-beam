@@ -28,10 +28,13 @@ HTTP 404, never a 403 and never a distinguishing error.
 Phase 3 wires the action tools. They are not present here.
 """
 
+import hashlib
+import hmac
 import json
+import math
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,6 +45,7 @@ from apps.api.services.agent_gateway import (
     CONVERSION_TOOLS,
     MCP_TOOLS,
     handle_conversion_tool,
+    process_new_lead,
     has_malformed_qualification_params,
     missing_qualification_params,
     mcp_tool_surface,
@@ -89,8 +93,13 @@ def _safe_id(raw):
     huge string or a nested object would let a caller choose our response body.
     Anything unexpected degrades to null rather than being reflected.
     """
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
         return raw
+    if isinstance(raw, float):
+        # NaN/Infinity are not valid JSON; echoing them yields a non-standard body.
+        return raw if math.isfinite(raw) else None
     if isinstance(raw, str) and len(raw) <= 128:
         return raw
     return None
@@ -209,7 +218,7 @@ def _conversion_rate_limited(site_id: str) -> bool:
         return False
 
 
-async def _conversion_daily_cap_reached(site_id: str) -> bool:
+async def _conversion_daily_cap_reached(site_id: str, ip: str | None = None) -> bool:
     """M3: a coarser per-site DAILY ceiling on completed conversion calls, on top
     of the tighter per-minute limit. The 5/min limit still permits ~7200
     leads+emails/day/site sustained; this caps the daily total so a slow-drip
@@ -230,8 +239,17 @@ async def _conversion_daily_cap_reached(site_id: str) -> bool:
         from apps.api.services.redis_client import get_redis
 
         day = datetime.now(timezone.utc).strftime("%Y%m%d")
-        key = f"agent_conv_daily:{site_id}:{day}"
         redis = get_redis()
+        # Per-IP sub-bucket first, so one caller cannot burn the whole site cap.
+        per_ip = settings.agent_concierge_conversion_per_ip_daily_cap
+        if per_ip > 0 and ip:
+            ip_key = f"agent_conv_daily_ip:{site_id}:{_hash_ip(ip) or ip}:{day}"
+            ip_count = await redis.incr(ip_key)
+            if ip_count == 1:
+                await redis.expire(ip_key, 90_000)
+            if ip_count > per_ip:
+                return True
+        key = f"agent_conv_daily:{site_id}:{day}"
         count = await redis.incr(key)
         if count == 1:
             # First hit of the day → expire a little past 24h so the window rolls.
@@ -242,8 +260,43 @@ async def _conversion_daily_cap_reached(site_id: str) -> bool:
         return False
 
 
+def _hash_ip(ip: str | None) -> str | None:
+    """Keyed hash of the caller IP (PII blind-index key). Never the raw IP.
+    None when no IP or no key is configured."""
+    if not ip:
+        return None
+    try:
+        from apps.api.services.pii_crypto import _hmac_key
+
+        return hmac.new(_hmac_key(), ip.encode(), hashlib.sha256).hexdigest()[:32]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def _tool_call_row_cap_reached(site_id: str) -> bool:
+    """Per-site per-UTC-day ceiling on agent_tool_calls rows. Fail-open (write)."""
+    cap = settings.agent_tool_calls_daily_row_cap
+    if cap <= 0:
+        return False
+    try:
+        from datetime import datetime, timezone
+
+        from apps.api.services.redis_client import get_redis
+
+        day = datetime.now(timezone.utc).strftime("%Y%m%d")
+        key = f"agent_tool_calls_rows:{site_id}:{day}"
+        redis = get_redis()
+        n = await redis.incr(key)
+        if n == 1:
+            await redis.expire(key, 90_000)
+        return n > cap
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def _record_tool_call(
     db: AsyncSession,
+    request: Request,
     site_id: str,
     method: str,
     tool_name: str | None,
@@ -261,7 +314,11 @@ async def _record_tool_call(
         return
     try:
         from apps.api.models.agent_tool_call import AgentToolCall
+        from apps.api.services.agent_classifier import classify_agent
 
+        if await _tool_call_row_cap_reached(site_id):
+            return
+        classification = classify_agent(request.headers.get("user-agent"))
         provided = {
             name: bool(isinstance(args.get(name), str) and args.get(name).strip())
             for name in REQUIRED_QUALIFICATION_PARAMS
@@ -275,6 +332,8 @@ async def _record_tool_call(
                 params_provided=provided,
                 params_complete=complete,
                 is_gated_tool=is_gated,
+                vendor=classification.vendor if classification else None,
+                ip_hash=_hash_ip(resolve_client_ip(request)),
             )
         )
         await db.commit()
@@ -291,6 +350,7 @@ async def _record_tool_call(
 async def mcp_endpoint(
     request: Request,
     site_id: str,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     # ── Gate 1: tenancy + flags, before anything else is done with the body.
@@ -353,14 +413,18 @@ async def mcp_endpoint(
                 _error(request_id, _METHOD_NOT_FOUND, "Method not found")
             )
         args = _extract_arguments(params)
-        return await _dispatch_tool(db, request, site, profile, request_id, tool_name, args)
+        return await _dispatch_tool(
+            db, request, background_tasks, site, profile, request_id, tool_name, args
+        )
 
     # Direct tool invocation as a bare method, for simple clients. Any flat dict
     # under ``params`` is treated as the tool arguments.
     if method in MCP_TOOLS or method in CONVERSION_TOOLS:
         raw_params = payload.get("params")
         args = raw_params if isinstance(raw_params, dict) else {}
-        return await _dispatch_tool(db, request, site, profile, request_id, method, args)
+        return await _dispatch_tool(
+            db, request, background_tasks, site, profile, request_id, method, args
+        )
 
     return JSONResponse(_error(request_id, _METHOD_NOT_FOUND, "Method not found"))
 
@@ -368,6 +432,7 @@ async def mcp_endpoint(
 async def _dispatch_tool(
     db: AsyncSession,
     request: Request,
+    background_tasks: BackgroundTasks,
     site,
     profile,
     request_id,
@@ -402,8 +467,11 @@ async def _dispatch_tool(
         if missing:
             from apps.api.schemas.agent_gateway import NeedsMoreInfoOut
 
+            await record_gateway_visit(
+                db, request, site.site_id, mcp_tool_surface(tool_name)
+            )
             await _record_tool_call(
-                db, site.site_id, "tools/call", tool_name, clean_args, True
+                db, request, site.site_id, "tools/call", tool_name, clean_args, True
             )
             return JSONResponse(
                 _result(
@@ -414,19 +482,25 @@ async def _dispatch_tool(
         # COMPLETE call → NOW consume the tight per-minute budget (Must-Fix 1) and
         # the coarser per-site daily ceiling (M3). `or` short-circuits so a
         # minute-limit trip does not also tick the daily counter.
+        ip_address = resolve_client_ip(request)
         if _conversion_rate_limited(site.site_id) or await _conversion_daily_cap_reached(
-            site.site_id
+            site.site_id, ip_address
         ):
             return JSONResponse(
                 _error(request_id, _RATE_LIMITED, "Rate limit exceeded"),
                 status_code=429,
             )
-        ip_address = resolve_client_ip(request)
-        result = await handle_conversion_tool(
+        result, lead_id = await handle_conversion_tool(
             db, site, profile, tool_name, clean_args, ip_address
         )
+        if lead_id is not None:
+            # Company lookup + owner email run AFTER the response is sent.
+            background_tasks.add_task(process_new_lead, lead_id, ip_address)
+        await record_gateway_visit(
+            db, request, site.site_id, mcp_tool_surface(tool_name)
+        )
         await _record_tool_call(
-            db, site.site_id, "tools/call", tool_name, clean_args, True
+            db, request, site.site_id, "tools/call", tool_name, clean_args, True
         )
         return JSONResponse(_result(request_id, result))
 
@@ -443,9 +517,12 @@ async def _dispatch_tool(
         if missing:
             from apps.api.schemas.agent_gateway import NeedsMoreInfoOut
 
-            # No ORM attribute access after this record → ordering is safe here.
+            # No ORM attribute access after these records → ordering is safe here.
+            await record_gateway_visit(
+                db, request, site.site_id, mcp_tool_surface(tool_name)
+            )
             await _record_tool_call(
-                db, site.site_id, "tools/call", tool_name, clean_args, True
+                db, request, site.site_id, "tools/call", tool_name, clean_args, True
             )
             return JSONResponse(
                 _result(
@@ -460,12 +537,16 @@ async def _dispatch_tool(
         # a sync attribute load → MissingGreenlet → 500. Reading first makes the
         # metric write strictly the last DB touch.
         result = MCP_TOOLS[tool_name](site, profile, clean_args)
+        await record_gateway_visit(
+            db, request, site.site_id, mcp_tool_surface(tool_name)
+        )
         await _record_tool_call(
-            db, site.site_id, "tools/call", tool_name, clean_args, True
+            db, request, site.site_id, "tools/call", tool_name, clean_args, True
         )
         return JSONResponse(_result(request_id, result))
 
     # Ungated legacy path — byte-identical output; same M1 read-before-record fix.
     result = MCP_TOOLS[tool_name](site, profile)
-    await _record_tool_call(db, site.site_id, "tools/call", tool_name, {}, False)
+    await record_gateway_visit(db, request, site.site_id, mcp_tool_surface(tool_name))
+    await _record_tool_call(db, request, site.site_id, "tools/call", tool_name, {}, False)
     return JSONResponse(_result(request_id, result))

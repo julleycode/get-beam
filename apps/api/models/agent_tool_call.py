@@ -52,3 +52,9 @@ class AgentToolCall(Base):
     is_gated_tool: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # Recognized agent vendor from the UA (agent_classifier), else null. This
+    # table is the kill-test metric; the Agents dashboard's source of truth stays
+    # agent_visits/agent_fetch_events (written by record_gateway_visit).
+    vendor: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    # Keyed HMAC of the caller IP (PII blind-index key), truncated. Never raw IP.
+    ip_hash: Mapped[str | None] = mapped_column(String(32), nullable=True)

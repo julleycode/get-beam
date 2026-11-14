@@ -451,40 +451,70 @@ def sanitize_resolved_domain(domain: str | None) -> str | None:
     return candidate
 
 
-def _conversion_idempotency_key(site_id: str, tool_name: str, params: dict) -> str:
-    """Stable hash of (site, tool, normalized qualification params). Identical
-    complete calls within the TTL window collapse to one lead/one email (M3)."""
+def truncate_ip(ip: str | None) -> str | None:
+    """Coarsen an IP before it is stored on a lead: IPv4 -> /24, IPv6 -> /48.
+
+    The full caller IP is personal data with no owner-facing use once the
+    company lookup is done, so ``agent_leads.ip_address`` only ever holds the
+    network prefix. Unparseable input stores nothing."""
+    if not ip:
+        return None
+    import ipaddress
+
+    try:
+        addr = ipaddress.ip_address(ip.strip())
+    except ValueError:
+        return None
+    prefix = 24 if addr.version == 4 else 48
+    return str(ipaddress.ip_network(f"{addr}/{prefix}", strict=False).network_address)
+
+
+def _conversion_idempotency_key(
+    site_id: str, tool_name: str, params: dict, caller: str | None
+) -> str:
+    """Stable hash of (site, tool, caller IP, normalized qualification params).
+
+    The caller component matters: without it, two DIFFERENT agents that happen to
+    send identical params inside the window collapse into one lead, silently
+    dropping the second buyer. Identical retries from the SAME caller still
+    collapse to one lead/one email (M3)."""
     norm = json.dumps(
         {k: params.get(k) for k in sorted(_QUALIFICATION_CAPS)},
         sort_keys=True,
         ensure_ascii=True,
     )
-    digest = hashlib.sha256(f"{site_id}|{tool_name}|{norm}".encode()).hexdigest()
-    return f"agent_conv_idem:{digest}"
+    raw = f"{site_id}|{tool_name}|{caller or '-'}|{norm}"
+    return f"agent_conv_idem:{hashlib.sha256(raw.encode()).hexdigest()}"
 
 
-async def _conversion_is_duplicate(site_id: str, tool_name: str, params: dict) -> bool:
-    """M3: True if an identical conversion call was seen within the TTL window.
+async def _claim_idempotency_key(key: str) -> bool | None:
+    """Atomically claim ``key`` (Redis SET NX EX).
 
-    Redis SET NX EX (no schema change — preferred over a new column): the first
-    caller sets the key (returns truthy) and proceeds; a retry within the window
-    finds the key already set and is collapsed. Fail-open: any Redis trouble
-    returns False so a genuine lead is never dropped."""
+    Returns True when this call claimed it (proceed), False when it was already
+    claimed (duplicate), None when idempotency is disabled or Redis failed
+    (fail-open: proceed, nothing to release)."""
     ttl = settings.agent_concierge_conversion_idempotency_ttl_seconds
     if ttl <= 0:
-        return False  # 0/negative = idempotency disabled (explicit opt-out)
+        return None
     try:
         from apps.api.services.redis_client import get_redis
 
-        redis = get_redis()
-        key = _conversion_idempotency_key(site_id, tool_name, params)
-        was_set = await redis.set(key, "1", nx=True, ex=ttl)
-        # redis-py returns True when the key was newly set, None when NX failed
-        # (already present) → a None means this is a duplicate.
-        return not was_set
+        was_set = await get_redis().set(key, "1", nx=True, ex=ttl)
+        return bool(was_set)
     except Exception as exc:  # noqa: BLE001
         logger.warning("agent_conversion_idempotency_check_failed", error=str(exc))
-        return False
+        return None
+
+
+async def _release_idempotency_key(key: str) -> None:
+    """Undo a claim when the lead write failed, so the caller's retry is not
+    swallowed as a 'duplicate' of a lead that never existed."""
+    try:
+        from apps.api.services.redis_client import get_redis
+
+        await get_redis().delete(key)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("agent_conversion_idempotency_release_failed", error=str(exc))
 
 
 def sanitize_qualification_params(params: dict | None) -> dict:
@@ -510,53 +540,41 @@ async def handle_conversion_tool(
     tool_name: str,
     params: dict | None,
     ip_address: str | None,
-) -> dict:
+) -> tuple[dict, str | None]:
     """Zero-click conversion (request_quote / book_demo): ACCEPT-AND-RETURN.
 
-    Contract (AC-WS3-2 / Must-Fix 1/2/3):
-    1. Gate on the 3 qualification params (a quote/demo without context is not a
-       useful lead) — missing => needs_more_info RESULT.
-    2. Sanitize params (defense-in-depth: already sanitized at the dispatcher,
-       re-sanitized here at the write boundary).
-    3. FREE-ONLY company lookup (Must-Fix 3): rDNS + cached company_graph via
-       company_resolver's free path — ZERO paid-provider call, never the
-       synchronous identity-resolution waterfall. Null when no free hit.
-    4. Write the AgentLead row synchronously (fast, DB-only), then fire the
-       owner-notification email FAIL-OPEN (never blocks/500s the response).
+    Returns ``(result, lead_id)``. ``lead_id`` is the id of a NEWLY written lead
+    (None for needs_more_info or a collapsed duplicate); the caller schedules
+    ``process_new_lead`` for it as a background task AFTER the response.
+
+    The request path is DB-only and fast:
+    1. Gate on the 3 qualification params (missing => needs_more_info RESULT).
+    2. Sanitize params (defense-in-depth at the write boundary).
+    3. Idempotency claim keyed on (site, tool, caller IP, params); released if
+       the write fails so a retry is not swallowed.
+    4. Write the AgentLead row with a TRUNCATED IP and no company yet.
+
+    Company lookup and owner email happen off the request path
+    (``process_new_lead``) — this unauthenticated call never does rDNS inline
+    and never writes the cross-tenant company_graph.
     """
     from apps.api.models.agent_lead import AgentLead
-    from apps.api.services.company_resolver import resolve_company_cached
+    from apps.api.schemas.agent_gateway import AgentLeadOut
 
     missing = missing_qualification_params(params)
     if missing:
         from apps.api.schemas.agent_gateway import NeedsMoreInfoOut
 
-        return NeedsMoreInfoOut(missing_params=missing).model_dump()
+        return NeedsMoreInfoOut(missing_params=missing).model_dump(), None
 
     clean = sanitize_qualification_params(params)
+    ack = AgentLeadOut(tool_name=tool_name).model_dump()
 
-    # M3: idempotency. An identical complete call within the TTL window collapses
-    # to the ORIGINAL lead/email — no duplicate row, no duplicate owner email.
-    # Return the same success ack (the request WAS received) without a second
-    # write. Checked before the DB write + email, after the qualification gate.
-    if await _conversion_is_duplicate(site.site_id, tool_name, clean):
-        from apps.api.schemas.agent_gateway import AgentLeadOut
-
-        return AgentLeadOut(tool_name=tool_name).model_dump()
-
-    # Must-Fix 3: FREE-ONLY resolution. resolve_company_cached(ip, db) reads the
-    # cached company_graph then falls back to free rDNS — it NEVER calls
-    # IdentityResolver.resolve() / the paid provider waterfall. Fail-open.
-    resolved_domain: str | None = None
-    if ip_address:
-        try:
-            resolved_domain = await resolve_company_cached(ip_address, db=db)
-        except Exception:
-            resolved_domain = None
-    # M2: the resolved domain came from an attacker-influenceable rDNS PTR record.
-    # Validate it against the strict domain grammar BEFORE it is stored on the lead
-    # row or reaches the owner email; anything non-conforming is dropped to None.
-    resolved_domain = sanitize_resolved_domain(resolved_domain)
+    key = _conversion_idempotency_key(site.site_id, tool_name, clean, ip_address)
+    claimed = await _claim_idempotency_key(key)
+    if claimed is False:
+        # Duplicate within the window: same ack, no second row, no second email.
+        return ack, None
 
     lead = AgentLead(
         site_id=site.site_id,
@@ -565,37 +583,57 @@ async def handle_conversion_tool(
         company_size=clean.get("company_size"),
         evaluating_against=clean.get("evaluating_against"),
         note=clean.get("note"),
-        resolved_company_domain=resolved_domain,
-        ip_address=ip_address,
+        resolved_company_domain=None,
+        ip_address=truncate_ip(ip_address),
         notified=False,
     )
-    db.add(lead)
-    await db.commit()
-    await db.refresh(lead)
-    # Capture the id as a plain string NOW: a later rollback in the fail-open
-    # path expires ORM attributes, and re-reading lead.id would trigger a lazy
-    # refresh (async IO) from a sync logging call → MissingGreenlet.
-    lead_id_str = str(lead.id)
-    site_id_str = site.site_id  # captured before any rollback expires ORM attrs
+    try:
+        db.add(lead)
+        await db.commit()
+    except Exception:
+        if claimed:
+            await _release_idempotency_key(key)
+        raise
+    return ack, str(lead.id)
 
-    # Fire-and-forget-shaped but awaited: fail-open so email trouble never
-    # touches the already-committed lead or the response.
+
+async def process_new_lead(lead_id: str, ip_address: str | None) -> None:
+    """Background task (runs after the MCP response is sent).
+
+    Opens its OWN session (the request session is closed by then), resolves the
+    company via the Redis-cached free rDNS path WITHOUT a db (so nothing is
+    written to the cross-tenant company_graph from an unauthenticated call),
+    then notifies the owner. Fully fail-open: every failure is logged by key
+    only and swallowed."""
+    import uuid as _uuid
+
+    from apps.api.models.agent_lead import AgentLead
+    from apps.api.models.database import async_session
     from apps.api.services.agent_lead_notify import notify_owner_of_lead
 
     try:
-        await notify_owner_of_lead(db, site, lead)
-        lead.notified = True
-        await db.commit()
+        async with async_session() as db:
+            lead = await db.get(AgentLead, _uuid.UUID(lead_id))
+            if lead is None:
+                return
+            site = (
+                await db.execute(select(Site).where(Site.site_id == lead.site_id))
+            ).scalar_one_or_none()
+            if site is None:
+                return
+            if ip_address:
+                try:
+                    from apps.api.services.company_resolver import (
+                        resolve_company_cached,
+                    )
+
+                    domain = await resolve_company_cached(ip_address, db=None)
+                except Exception:
+                    domain = None
+                # M2: rDNS PTR is attacker-influenceable — strict grammar or None.
+                lead.resolved_company_domain = sanitize_resolved_domain(domain)
+            sent = await notify_owner_of_lead(db, site, lead)
+            lead.notified = bool(sent)
+            await db.commit()
     except Exception:
-        # Fail-open: the lead is already committed. Deliberately NO db.rollback()
-        # here — the notify path only issued read-only SELECTs (no write to undo),
-        # and a rollback would expire every ORM object still shared with the
-        # caller (site/profile), breaking their attribute access downstream. Any
-        # genuinely aborted transaction is re-established by the next commit.
-        logger.warning(
-            "agent_lead_notify_failed", site_id=site_id_str, lead_id=lead_id_str
-        )
-
-    from apps.api.schemas.agent_gateway import AgentLeadOut
-
-    return AgentLeadOut(tool_name=tool_name).model_dump()
+        logger.warning("agent_lead_background_failed", lead_id=lead_id)

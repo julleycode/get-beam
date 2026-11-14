@@ -62,6 +62,8 @@ def upgrade() -> None:
         sa.Column("params_provided", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default="{}"),
         sa.Column("params_complete", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("is_gated_tool", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("vendor", sa.String(length=50), nullable=True),
+        sa.Column("ip_hash", sa.String(length=32), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("idx_agent_tool_calls_site_created", "agent_tool_calls", ["site_id", "created_at"])
