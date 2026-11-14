@@ -14,7 +14,7 @@ jobs:
   # ─── Backend Unit Tests (no DB needed) ────────────────────
   backend-unit:
     name: Backend Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +40,7 @@ jobs:
   # ─── Backend Integration Tests (with PostgreSQL + Redis) ──
   backend-integration:
     name: Backend Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     services:
       postgres:

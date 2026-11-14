@@ -142,11 +142,10 @@ test.describe("Blog — admin editor", () => {
     // which is generated on demand for a new slug.
     const listRes = await request.get(`${API_BASE}/api/v1/blog/posts?limit=100`);
     expect(listRes.ok()).toBeTruthy();
-    const listed = (await listRes.json()) as
-      | Array<{ title: string; slug: string }>
-      | { items: Array<{ title: string; slug: string }> };
-    const items = Array.isArray(listed) ? listed : listed.items;
-    const published = items.find((p) => p.title === title);
+    const { posts } = (await listRes.json()) as {
+      posts: Array<{ title: string; slug: string }>;
+    };
+    const published = posts.find((p) => p.title === title);
     expect(published, "published post is listed by the public API").toBeTruthy();
     await page.goto(`/blog/${published!.slug}`);
     await expect(
