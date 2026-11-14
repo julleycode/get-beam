@@ -309,3 +309,80 @@ async def purge_request_logs_older_than(
         finally:
             if acquired:
                 await _release_lock(lock_db, _REQUEST_LOG_PURGE_LOCK_KEY)
+
+
+# Separate advisory-lock key for the paid_requests body purge (x402 seller).
+_PAID_BODY_PURGE_LOCK_KEY = "beam_paid_request_body_purge"
+_PAID_BODY_WHERE = f"response_body IS NOT NULL AND created_at < {_AGENT_FETCH_CUTOFF_SQL}"
+
+
+async def _paid_requests_table_exists(db: AsyncSession) -> bool:
+    result = await db.execute(
+        text(
+            "SELECT EXISTS (SELECT FROM information_schema.tables "
+            "WHERE table_name = 'paid_requests')"
+        )
+    )
+    return bool(result.scalar())
+
+
+async def purge_paid_request_bodies_older_than(
+    days: int | None = None,
+    dry_run: bool = False,
+    batch_size: int = _PURGE_BATCH_SIZE,
+) -> dict:
+    """Null ``paid_requests.response_body`` on rows older than ``days`` (default 30).
+
+    The ledger row itself (hash, status, amount, payer, transaction) is kept for
+    reconciliation; only the cached paid output is dropped so it does not become
+    a forever-store. A replay of a purged payment answers 410 (see
+    services/x402_seller.py) — it is never re-run or re-charged.
+    """
+    days = settings.paid_request_body_retention_days if days is None else days
+
+    async with async_session() as lock_db:
+        acquired = await _try_acquire_lock(lock_db, _PAID_BODY_PURGE_LOCK_KEY)
+        if acquired is False:
+            logger.info("paid_body_purge_lock_busy")
+            return {"status": "locked", "purged": 0}
+        try:
+            async with async_session() as db:
+                if not await _paid_requests_table_exists(db):
+                    return {"status": "no_table", "purged": 0}
+
+                if dry_run:
+                    n = (
+                        await db.execute(
+                            text(f"SELECT count(*) FROM paid_requests WHERE {_PAID_BODY_WHERE}"),
+                            {"days": days},
+                        )
+                    ).scalar() or 0
+                    logger.info("paid_body_purge_dry_run", days=days, would_purge=n)
+                    return {"status": "dry_run", "would_purge": n}
+
+                total = 0
+                while True:
+                    result = await db.execute(
+                        text(
+                            f"""
+                            UPDATE paid_requests SET response_body = NULL
+                            WHERE id IN (
+                                SELECT id FROM paid_requests
+                                WHERE {_PAID_BODY_WHERE}
+                                LIMIT :lim
+                            )
+                            """
+                        ),
+                        {"days": days, "lim": batch_size},
+                    )
+                    await db.commit()
+                    n = result.rowcount or 0
+                    total += n
+                    if n < batch_size:
+                        break
+
+                logger.info("paid_body_purge_complete", days=days, purged=total)
+                return {"status": "ok", "purged": total}
+        finally:
+            if acquired:
+                await _release_lock(lock_db, _PAID_BODY_PURGE_LOCK_KEY)

@@ -23,6 +23,19 @@ Per-request flow (:func:`run_paid`):
    ``paid_settle_failed`` (we served content we were not paid for).
 6. Success => 200 + PAYMENT-RESPONSE, claim => settled with tx/amount/payer.
 
+Hardening (fix/tinyfish-x402-hardening):
+
+- Ledger writes after a successful settlement never fail the request: the buyer
+  was charged, so the paid body is returned and the DB error is logged as
+  ``paid_ledger_write_failed`` (needs_reconciliation) for manual matching.
+- A ``pending`` claim older than ``paid_pending_reclaim_minutes`` (a crashed
+  request) may be re-claimed, so the payload is not stuck at 409 forever.
+- Per-payer concurrency cap (``paid_max_inflight_per_payer``): the handler runs
+  before settlement, so one buyer must not fan out many verified-but-unsettled
+  payloads at once. Counted in Redis; Redis down => fail open (logged).
+- Settled response bodies are nulled after ``paid_request_body_retention_days``
+  (services/retention.py); a replay of such a payment gets 410, never a re-run.
+
 Paid handlers MUST be read-only (no user-visible state): settlement happens
 after the handler, so a handler that wrote state would leave it behind when
 settlement fails.
@@ -153,13 +166,27 @@ class SqlPaidRequestStore:
             if inserted is not None:
                 await db.commit()
                 return "claimed"
-            # Existing row: re-claim only a FAILED attempt (atomic compare-and-set).
+            # Existing row: re-claim a FAILED attempt, or a STALE pending one (the
+            # request that claimed it crashed) — atomic compare-and-set.
+            from datetime import datetime, timedelta, timezone
+
+            from sqlalchemy import and_, or_
+
+            stale_before = datetime.now(timezone.utc) - timedelta(
+                minutes=settings.paid_pending_reclaim_minutes
+            )
             reclaimed = (
                 await db.execute(
                     update(PaidRequest)
                     .where(
                         PaidRequest.payment_hash == payment_hash,
-                        PaidRequest.status.in_(("handler_failed", "settle_failed")),
+                        or_(
+                            PaidRequest.status.in_(("handler_failed", "settle_failed")),
+                            and_(
+                                PaidRequest.status == "pending",
+                                PaidRequest.updated_at < stale_before,
+                            ),
+                        ),
                     )
                     .values(status="pending", route_id=route_id, error_reason=None)
                     .returning(PaidRequest.id)
@@ -347,6 +374,90 @@ async def teardown_gate() -> None:
 # ─── Per-request flow ────────────────────────────────────────────────────────
 
 
+
+_INFLIGHT_TTL_SECONDS = 300  # safety net: a crashed request frees its slot
+
+
+def _payer_key(result: Any, request: Request) -> str:
+    """Best-effort buyer identity for the concurrency cap.
+
+    The x402 ``HTTPProcessResult`` does not expose the verify-time payer, so use
+    a payer field from the signed payload when the scheme carries one
+    (``payer`` / ``from`` / ``authorization.from``); otherwise fall back to the
+    trusted-proxy client IP. Hashed so no raw payer id lands in Redis keys.
+    """
+    payer = None
+    inner = getattr(getattr(result, "payment_payload", None), "payload", None)
+    if isinstance(inner, dict):
+        auth = inner.get("authorization")
+        for cand in (
+            inner.get("payer"),
+            inner.get("from"),
+            auth.get("from") if isinstance(auth, dict) else None,
+        ):
+            if isinstance(cand, str) and cand:
+                payer = f"payer:{cand.lower()}"
+                break
+    if not payer:
+        from apps.api.services.ip_resolution import resolve_client_ip
+
+        payer = f"ip:{resolve_client_ip(request)}"
+    return "x402:inflight:" + hashlib.sha256(payer.encode()).hexdigest()[:32]
+
+
+async def _acquire_slot(key: str) -> bool | None:
+    """True = slot taken, False = over the cap, None = Redis unavailable (fail open)."""
+    from apps.api.services.redis_client import get_redis
+
+    try:
+        r = get_redis()
+        n = int(await r.incr(key))
+        await r.expire(key, _INFLIGHT_TTL_SECONDS)
+        if n > settings.paid_max_inflight_per_payer:
+            await r.decr(key)
+            return False
+        return True
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("paid_inflight_cap_unavailable", error_type=type(exc).__name__)
+        return None
+
+
+async def _release_slot(key: str) -> None:
+    from apps.api.services.redis_client import get_redis
+
+    try:
+        await get_redis().decr(key)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("paid_inflight_release_failed", error_type=type(exc).__name__)
+
+
+async def _safe_ledger(route_id: str, phash: str, op: str, coro: Awaitable[None]) -> None:
+    """Run a ledger write; never let a DB error escape (logged for reconciliation)."""
+    try:
+        await coro
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "paid_ledger_write_failed",
+            route=route_id,
+            op=op,
+            payment_hash_prefix=phash[:12],
+            error_type=type(exc).__name__,
+            needs_reconciliation=True,
+        )
+
+
+def _cached_response(cached: CachedPaidResponse) -> Response:
+    headers = {"Cache-Control": "private, no-store"}
+    if cached.payment_response_header:
+        headers["PAYMENT-RESPONSE"] = cached.payment_response_header
+    if cached.body is None:
+        # Body purged by retention: the payment stays settled; never re-run.
+        return JSONResponse(
+            {"detail": "Paid response expired"}, status_code=410, headers=headers
+        )
+    return JSONResponse(content=cached.body, status_code=cached.status, headers=headers)
+
+
 def _payment_header(request: Request) -> str | None:
     # x402 v2 only (InFlow is v2-only): the upstream server reads PAYMENT-SIGNATURE
     # and ignores the v1 X-PAYMENT header, so the replay key must use the same one.
@@ -376,6 +487,11 @@ def _instructions_to_response(instr: Any, *, fallback_body: Any = None) -> Respo
             media_type="text/html",
         )
     body = instr.body if instr.body else (fallback_body if fallback_body is not None else {})
+    # x402>=2.28 puts a non-empty body on the 402 (e.g. {} or an error object)
+    # without the `accepts` list. Mirror the decoded PAYMENT-REQUIRED payload in
+    # whenever the body lacks it, keeping any extra keys the SDK set.
+    if isinstance(fallback_body, dict) and isinstance(body, dict) and "accepts" not in body:
+        body = {**body, **fallback_body}
     headers = {k: v for k, v in instr.headers.items() if k.lower() != "content-type"}
     return JSONResponse(content=body, status_code=instr.status, headers=headers)
 
@@ -404,7 +520,7 @@ async def run_paid(
 ) -> Response:
     """Gate ``handler`` behind an x402 payment. See module docstring."""
     from x402.http.middleware.fastapi import FastAPIAdapter
-    from x402.http.types import HTTPRequestContext, HTTPTransportContext
+    from x402.http.types import HTTPRequestContext
     from x402.schemas import VerifiedPaymentCancelOptions
 
     gate = get_gate()
@@ -419,10 +535,7 @@ async def run_paid(
         cached = await gate.store.get_settled(phash)
         if cached is not None:
             logger.info("paid_replay_served", route=route_id)
-            headers = {"Cache-Control": "private, no-store"}
-            if cached.payment_response_header:
-                headers["PAYMENT-RESPONSE"] = cached.payment_response_header
-            return JSONResponse(content=cached.body, status_code=cached.status, headers=headers)
+            return _cached_response(cached)
 
     adapter = FastAPIAdapter(request)
     context = HTTPRequestContext(
@@ -458,14 +571,53 @@ async def run_paid(
     if claim == "settled":
         cached = await gate.store.get_settled(phash)
         if cached is not None:
-            headers = {"Cache-Control": "private, no-store"}
-            if cached.payment_response_header:
-                headers["PAYMENT-RESPONSE"] = cached.payment_response_header
-            return JSONResponse(content=cached.body, status_code=cached.status, headers=headers)
+            return _cached_response(cached)
     if claim != "claimed":
         return JSONResponse(
             {"detail": "This payment is already being processed"}, status_code=409
         )
+
+    # 3b. Per-payer concurrency cap (handler runs before settlement).
+    slot_key = _payer_key(result, request)
+    slot = await _acquire_slot(slot_key)
+    if slot is False:
+        await _safe_ledger(
+            route_id, phash, "mark_failed",
+            gate.store.mark_failed(phash, "handler_failed", "payer_concurrency_cap"),
+        )
+        if dispatcher is not None:
+            try:
+                await dispatcher.cancel(VerifiedPaymentCancelOptions(reason="handler_threw"))
+            except Exception:  # noqa: BLE001
+                logger.warning("paid_cancel_failed", route=route_id)
+        logger.warning("paid_payer_concurrency_cap", route=route_id)
+        return JSONResponse(
+            {"detail": "Too many concurrent paid requests from this payer"},
+            status_code=429,
+            headers={"Retry-After": "5"},
+        )
+    try:
+        return await _run_claimed(
+            route_id, handler, gate, result, context, phash, requirements, dispatcher
+        )
+    finally:
+        if slot:
+            await _release_slot(slot_key)
+
+
+async def _run_claimed(
+    route_id: str,
+    handler: Callable[[], Awaitable[dict]],
+    gate: PaymentGate,
+    result: Any,
+    context: Any,
+    phash: str,
+    requirements: Any,
+    dispatcher: Any,
+) -> Response:
+    """Steps 4-6 for a claimed payload (handler -> settle -> ledger)."""
+    from x402.http.types import HTTPTransportContext
+    from x402.schemas import VerifiedPaymentCancelOptions
 
     # 4. Run the (read-only) handler.
     try:
@@ -480,7 +632,10 @@ async def run_paid(
                 )
             except Exception:  # noqa: BLE001
                 logger.warning("paid_cancel_failed", route=route_id)
-        await gate.store.mark_failed(phash, "handler_failed", type(exc).__name__)
+        await _safe_ledger(
+            route_id, phash, "mark_failed",
+            gate.store.mark_failed(phash, "handler_failed", type(exc).__name__),
+        )
         logger.warning(
             "paid_handler_failed_not_settled", route=route_id, error_type=type(exc).__name__
         )
@@ -503,7 +658,10 @@ async def run_paid(
         settle_error = settle.error_reason if not settle.success else None
 
     if settle is None or not settle.success:
-        await gate.store.mark_failed(phash, "settle_failed", settle_error or "unknown")
+        await _safe_ledger(
+            route_id, phash, "mark_failed",
+            gate.store.mark_failed(phash, "settle_failed", settle_error or "unknown"),
+        )
         # Revenue loss signal: content was produced, payment did not land.
         logger.error(
             "paid_settle_failed",
@@ -522,17 +680,23 @@ async def run_paid(
 
     # 6. Success.
     payment_response = settle.headers.get("PAYMENT-RESPONSE")
-    await gate.store.mark_settled(
-        phash,
-        response_status=200,
-        response_body=body,
-        payment_response_header=payment_response,
-        scheme=getattr(requirements, "scheme", None),
-        network=settle.network or getattr(requirements, "network", None),
-        asset=getattr(requirements, "asset", None),
-        amount=getattr(requirements, "amount", None),
-        payer=settle.payer,
-        transaction=settle.transaction,
+    # The buyer is charged at this point: a ledger failure must NOT turn into a
+    # 500 — return the paid body and log for reconciliation (the row may stay
+    # pending; the transaction id is in the log).
+    await _safe_ledger(
+        route_id, phash, "mark_settled",
+        gate.store.mark_settled(
+            phash,
+            response_status=200,
+            response_body=body,
+            payment_response_header=payment_response,
+            scheme=getattr(requirements, "scheme", None),
+            network=settle.network or getattr(requirements, "network", None),
+            asset=getattr(requirements, "asset", None),
+            amount=getattr(requirements, "amount", None),
+            payer=settle.payer,
+            transaction=settle.transaction,
+        ),
     )
     logger.info(
         "paid_request_settled",

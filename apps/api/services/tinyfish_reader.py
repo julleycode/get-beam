@@ -14,7 +14,13 @@ Hard rules:
   ``wrap_untrusted(clean_text(text, 8000))``.
 - Logs carry visitor_id[:8], counts and status only — never the name, query,
   URLs or page text.
-- Cached 7 days per (name, company); a global daily fetch cap guards quota.
+- Cached 7 days per (name, company); misses (no matching results / no pages)
+  are negatively cached for 1 day so the same person is not re-searched every
+  run. Search AND fetch calls each count against a global daily cap and a
+  per-site daily cap (one tenant cannot burn the whole day's quota).
+- ``linkedin_url`` / ``personal_website`` are LLM-extracted from attacker-
+  controllable pages: only http(s) URLs with a sane host and no credentials are
+  kept; ``linkedin_url`` must be on linkedin.com (exact host or subdomain).
 """
 from __future__ import annotations
 
@@ -39,6 +45,7 @@ logger = structlog.get_logger()
 
 CACHE_TTL_SECONDS = 7 * 24 * 3600
 CAP_TTL_SECONDS = 2 * 24 * 3600
+NEGATIVE_CACHE_TTL_SECONDS = 24 * 3600
 PAGE_TEXT_MAX = 8000
 _PREFERRED_HOSTS = ("linkedin.com",)
 _FILLABLE = ("job_title", "company_name", "linkedin_url", "personal_website")
@@ -53,8 +60,14 @@ def cache_key(full_name: str, company: str) -> str:
     return f"tinyfish:{hashlib.sha256(raw.encode()).hexdigest()}"
 
 
-def cap_key(now: datetime | None = None) -> str:
-    return f"tinyfish:cap:{(now or datetime.now(timezone.utc)).strftime('%Y%m%d')}"
+def cap_key(now: datetime | None = None, kind: str = "fetch", site_id: str | None = None) -> str:
+    """Daily counter key. ``kind`` is ``fetch`` or ``search``; ``site_id`` scopes
+    it per tenant. The global fetch key keeps its original shape."""
+    day = (now or datetime.now(timezone.utc)).strftime("%Y%m%d")
+    base = "tinyfish:cap" if kind == "fetch" else f"tinyfish:cap:{kind}"
+    if site_id:
+        return f"{base}:site:{hashlib.sha256(str(site_id).encode()).hexdigest()[:16]}:{day}"
+    return f"{base}:{day}"
 
 
 def _company_for(identified: IdentifiedVisitor, profile: EnrichmentProfile) -> tuple[str, str | None]:
@@ -76,6 +89,41 @@ def _host(url: str) -> str:
         return (urlsplit(url).hostname or "").lower()
     except ValueError:
         return ""
+
+
+def _is_linkedin_host(host: str) -> bool:
+    return host == "linkedin.com" or host.endswith(".linkedin.com")
+
+
+def safe_url(value: Any, *, linkedin: bool = False) -> str | None:
+    """Return a cleaned http(s) URL or None.
+
+    Rejects other schemes, embedded credentials, missing/odd hosts, whitespace
+    or control characters, and (``linkedin=True``) any host that is not exactly
+    linkedin.com or a subdomain of it (``linkedin.com.evil.io`` is rejected).
+    """
+    if not isinstance(value, str):
+        return None
+    v = value.strip()
+    if not v or len(v) > 500 or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in v):
+        return None
+    try:
+        parts = urlsplit(v)
+        host = (parts.hostname or "").lower()
+        _ = parts.port  # raises ValueError on a malformed port
+    except ValueError:
+        return None
+    if parts.scheme.lower() not in ("http", "https"):
+        return None
+    if parts.username is not None or parts.password is not None or "@" in parts.netloc:
+        return None
+    if not host or "." not in host or host.startswith(".") or host.endswith("."):
+        return None
+    if not all(c.isalnum() or c in "-." for c in host):
+        return None
+    if linkedin and not _is_linkedin_host(host):
+        return None
+    return v
 
 
 def select_urls(
@@ -146,19 +194,15 @@ def _normalize(data: dict) -> dict[str, str | None]:
     for k, cap in (("job_title", 200), ("company_name", 200), ("summary", 300)):
         v = data.get(k)
         out[k] = v.strip()[:cap] or None if isinstance(v, str) else None
-    for k in ("linkedin_url", "personal_website"):
-        v = data.get(k)
-        ok = isinstance(v, str) and v.strip().startswith(("http://", "https://"))
-        out[k] = v.strip()[:500] if ok else None
-    if out["linkedin_url"] and "linkedin.com" not in _host(out["linkedin_url"]):
-        out["linkedin_url"] = None
+    out["linkedin_url"] = safe_url(data.get("linkedin_url"), linkedin=True)
+    out["personal_website"] = safe_url(data.get("personal_website"))
     return out
 
 
 def _mock_extract(full_name: str, company: str, pages: list[dict[str, str]]) -> dict[str, str | None]:
     """Deterministic Gemini stand-in for MOCK_EXTERNAL_APIS (pure, no I/O)."""
     linkedin = next(
-        (p.get("url") for p in pages if "linkedin.com" in _host(p.get("url") or "")), None
+        (p.get("url") for p in pages if _is_linkedin_host(_host(p.get("url") or ""))), None
     )
     return {
         "job_title": "Head of Growth",
@@ -177,24 +221,44 @@ async def _cache_get(key: str) -> dict | None:
         return None
 
 
-async def _cache_set(key: str, data: dict) -> None:
+async def _cache_set(key: str, data: dict, ttl: int = CACHE_TTL_SECONDS) -> None:
     try:
-        await get_redis().set(key, json.dumps(data), ex=CACHE_TTL_SECONDS)
+        await get_redis().set(key, json.dumps(data), ex=ttl)
     except Exception:
         logger.debug("tinyfish_cache_set_failed")
 
 
-async def _claim_cap() -> bool:
-    """Reserve one fetch call against today's cap. Redis down -> fail closed."""
+async def _incr(key: str) -> int:
+    r = get_redis()
+    used = int(await r.incr(key))
+    if used == 1:
+        await r.expire(key, CAP_TTL_SECONDS)
+    return used
+
+
+async def _claim_cap(kind: str = "fetch", site_id: str | None = None) -> bool:
+    """Reserve one ``kind`` call against today's global AND per-site caps.
+
+    Redis down -> fail closed. The per-site counter is checked first so a
+    tenant that is over its own cap does not consume global quota.
+    """
+    global_cap = (
+        settings.tinyfish_daily_fetch_cap if kind == "fetch" else settings.tinyfish_daily_search_cap
+    )
     try:
-        r = get_redis()
-        key = cap_key()
-        used = await r.incr(key)
-        if used == 1:
-            await r.expire(key, CAP_TTL_SECONDS)
-        return int(used) <= settings.tinyfish_daily_fetch_cap
+        if site_id is not None:
+            if await _incr(cap_key(kind=kind, site_id=site_id)) > settings.tinyfish_site_daily_cap:
+                return False
+        return await _incr(cap_key(kind=kind)) <= global_cap
     except Exception:
         return False
+
+
+async def _negative(key: str, vid: str, reason: str, **fields: int) -> bool:
+    """Cache a miss for a day and return False (search/fetch already paid)."""
+    logger.info(f"tinyfish_{reason}", visitor_id=vid, **fields)
+    await _cache_set(key, {"negative": True}, ttl=NEGATIVE_CACHE_TTL_SECONDS)
+    return False
 
 
 def _apply(profile: EnrichmentProfile, extracted: dict[str, Any]) -> list[str]:
@@ -238,23 +302,27 @@ async def enrich_from_web(
     try:
         key = cache_key(full_name, company)
         extracted = await _cache_get(key)
+        if isinstance(extracted, dict) and extracted.get("negative"):
+            logger.info("tinyfish_negative_cache_hit", visitor_id=vid)
+            return False
         if extracted is None:
+            if not await _claim_cap("search", visitor.site_id):
+                logger.warning("tinyfish_daily_cap_reached", visitor_id=vid, kind="search")
+                return False
             results = await tinyfish_client.search(
                 f"{full_name} {company}", site_id=visitor.site_id, visitor_id=visitor.visitor_id
             )
             urls = select_urls(results, company, company_domain, settings.tinyfish_max_fetch_urls)
             if not urls:
-                logger.info("tinyfish_no_matching_results", visitor_id=vid, results=len(results))
-                return False
-            if not await _claim_cap():
-                logger.warning("tinyfish_daily_cap_reached", visitor_id=vid)
+                return await _negative(key, vid, "no_matching_results", results=len(results))
+            if not await _claim_cap("fetch", visitor.site_id):
+                logger.warning("tinyfish_daily_cap_reached", visitor_id=vid, kind="fetch")
                 return False
             pages, errors = await tinyfish_client.fetch(
                 urls, site_id=visitor.site_id, visitor_id=visitor.visitor_id
             )
             if not pages:
-                logger.info("tinyfish_no_pages", visitor_id=vid, errors=len(errors))
-                return False
+                return await _negative(key, vid, "no_pages", errors=len(errors))
             # gemini_generate has no mock branch: in mock mode use a deterministic
             # stand-in so the demo runs keyless and never makes a live call.
             data = (

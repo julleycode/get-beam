@@ -48,6 +48,7 @@ test.describe("Connectors — Ad Audiences small-audience warning (AC7)", () => 
       await page.addInitScript((token) => {
         localStorage.setItem("auth_token", token as string);
         localStorage.setItem("beam_tour_done_v1", "1");
+        for (const t of ["overview","visitors","agents","segments","campaigns","connectors","feed"]) localStorage.setItem("beam_tab_intro_v1_" + t, "1");
       }, access_token);
     }
 
