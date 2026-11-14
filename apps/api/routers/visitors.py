@@ -827,6 +827,10 @@ async def get_visitor_detail(
     return VisitorDetailOut(**data)
 
 
+# Cap on timeline rows returned (oldest first) — bounds payload + query cost.
+AGENT_TIMELINE_MAX_ENTRIES = 200
+
+
 @router.get("/{site_id}/{visitor_id}/agent-timeline", response_model=AgentTimelineOut)
 async def get_agent_timeline(
     site_id: str,
@@ -859,6 +863,11 @@ async def get_agent_timeline(
             AgentFetchEvent,
             AgentFetchEvent.id == AgentHandoffLink.agent_fetch_event_id,
         )
+        .join(
+            Visitor,
+            (Visitor.site_id == AgentHandoffLink.site_id)
+            & (Visitor.visitor_id == AgentHandoffLink.visitor_id),
+        )
         .where(
             AgentHandoffLink.site_id == site_id,
             AgentHandoffLink.visitor_id == visitor_id,
@@ -868,8 +877,15 @@ async def get_agent_timeline(
             # this is not a live exploit path today — but it is cheap and correct
             # to close on a 1:1 unique join.
             AgentFetchEvent.site_id == site_id,
+            # Same human-only guard as get_visitor_detail (AC2 / GUARD #2): a
+            # synthetic agent-derived or phantom imported Visitor never surfaces
+            # a timeline, even if its id were guessed/enumerated.
+            human_only_visitor_filter(),
         )
-        .order_by(AgentHandoffLink.created_at.asc())
+        # Order by the timestamp we DISPLAY (the fetch time), not the link's
+        # created_at (the sweep time) — the two can diverge.
+        .order_by(AgentFetchEvent.created_at.asc(), AgentFetchEvent.id.asc())
+        .limit(AGENT_TIMELINE_MAX_ENTRIES)
     )
     entries = [
         AgentTimelineEntry(

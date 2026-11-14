@@ -43,11 +43,35 @@ def _auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+async def _seed_visitor(test_db, *, site_id: str, visitor_id: str, **overrides):
+    """Insert the Visitor row the timeline joins to (human by default)."""
+    from apps.api.models.visitor import Visitor
+
+    defaults = dict(
+        site_id=site_id,
+        visitor_id=visitor_id,
+        first_seen=datetime.utcnow(),
+        last_seen=datetime.utcnow(),
+        pages_visited=[],
+        ip_address="203.0.113.7",
+        intent_score=50.0,
+        identity_status="anonymous",
+        enrichment_status="pending",
+    )
+    defaults.update(overrides)
+    test_db.add(Visitor(**defaults))
+    await test_db.commit()
+
+
 async def _seed_handoff(
     test_db, *, site_id: str, visitor_id: str, page: str, vendor: str,
-    confidence: str, created_at: datetime,
+    confidence: str, created_at: datetime, link_created_at: datetime | None = None,
 ):
-    """Insert one fetch event + its handoff link, both dated ``created_at``."""
+    """Insert one fetch event (``created_at``) + its handoff link.
+
+    ``link_created_at`` defaults to ``created_at``; pass a different value to
+    model the correlation sweep linking events out of fetch order.
+    """
     from apps.api.models.agent_fetch_event import AgentFetchEvent
     from apps.api.models.agent_handoff_link import AgentHandoffLink
 
@@ -70,7 +94,7 @@ async def _seed_handoff(
             confidence=confidence,
             delta_seconds=90,
             matched_page=page,
-            created_at=created_at,
+            created_at=link_created_at or created_at,
         )
     )
     await test_db.commit()
@@ -105,15 +129,20 @@ class TestAgentTimeline:
         visitor_id = "v-timeline"
         now = datetime.now(timezone.utc)
 
-        # Seed the LATER event first (medium/perplexity/docs @ +120s) ...
+        await _seed_visitor(test_db, site_id=site_id, visitor_id=visitor_id)
+        # Fetch times and link (sweep) times are deliberately INVERTED: the
+        # EARLIER fetch was linked LATER. Ordering by the link's created_at
+        # would return /docs first; ordering by the displayed fetch time must
+        # return /pricing first.
         await _seed_handoff(
             test_db, site_id=site_id, visitor_id=visitor_id, page="/docs",
             vendor="perplexity", confidence="medium", created_at=now + timedelta(seconds=120),
+            link_created_at=now + timedelta(seconds=130),
         )
-        # ... then the EARLIER event (high/openai/pricing @ now).
         await _seed_handoff(
             test_db, site_id=site_id, visitor_id=visitor_id, page="/pricing",
             vendor="openai", confidence="high", created_at=now,
+            link_created_at=now + timedelta(seconds=600),
         )
 
         resp = await test_client.get(
@@ -124,7 +153,8 @@ class TestAgentTimeline:
         entries = resp.json()["entries"]
         assert len(entries) == 2
 
-        # Chronological ASC: earliest first.
+        # Chronological ASC by displayed timestamp: earliest fetch first.
+        assert entries[0]["timestamp"] < entries[1]["timestamp"]
         assert entries[0]["page"] == "/pricing"
         assert entries[0]["vendor"] == "openai"
         assert entries[0]["confidence"] == "high"
@@ -177,6 +207,7 @@ class TestAgentTimeline:
                  name="Other Site", url="https://o.example.com")
         )
         await test_db.commit()
+        await _seed_visitor(test_db, site_id=other_site_id, visitor_id="v-shared")
         await _seed_handoff(
             test_db, site_id=other_site_id, visitor_id="v-shared",
             page="/secret", vendor="openai", confidence="high",
@@ -190,3 +221,41 @@ class TestAgentTimeline:
         )
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"entries": []}
+
+    @pytest.mark.asyncio
+    async def test_agent_derived_visitor_is_hidden(self, test_client, test_db, timeline_setup):
+        """human_only_visitor_filter parity with get_visitor_detail: a synthetic
+        agent-derived Visitor never surfaces a timeline."""
+        site_id = timeline_setup["site_id"]
+        await _seed_visitor(test_db, site_id=site_id, visitor_id="v-agent", is_agent_derived=True)
+        await _seed_handoff(
+            test_db, site_id=site_id, visitor_id="v-agent", page="/x",
+            vendor="openai", confidence="high", created_at=datetime.now(timezone.utc),
+        )
+        resp = await test_client.get(
+            f"/api/v1/visitors/{site_id}/v-agent/agent-timeline",
+            headers=_auth(timeline_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"entries": []}
+
+    @pytest.mark.asyncio
+    async def test_entries_are_capped(self, test_client, test_db, timeline_setup, monkeypatch):
+        """The endpoint applies a LIMIT (oldest first)."""
+        from apps.api.routers import visitors as visitors_router
+
+        monkeypatch.setattr(visitors_router, "AGENT_TIMELINE_MAX_ENTRIES", 2)
+        site_id = timeline_setup["site_id"]
+        await _seed_visitor(test_db, site_id=site_id, visitor_id="v-many")
+        base = datetime.now(timezone.utc)
+        for i in range(3):
+            await _seed_handoff(
+                test_db, site_id=site_id, visitor_id="v-many", page=f"/p{i}",
+                vendor="openai", confidence="high", created_at=base + timedelta(seconds=i),
+            )
+        resp = await test_client.get(
+            f"/api/v1/visitors/{site_id}/v-many/agent-timeline",
+            headers=_auth(timeline_setup["token"]),
+        )
+        assert resp.status_code == 200, resp.text
+        assert [e["page"] for e in resp.json()["entries"]] == ["/p0", "/p1"]

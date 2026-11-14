@@ -352,14 +352,18 @@ export default function VisitorDetailPage() {
   // (see below), so a non-empty result is guaranteed in practice.
   const [agentTimeline, setAgentTimeline] = useState<AgentTimelineEntry[] | null>(null);
   const [agentTimelineLoading, setAgentTimelineLoading] = useState(false);
+  // Separate from `agentTimeline` so a failed fetch is never shown as "no
+  // fetches"; `agentTimeline === null` keeps meaning "not loaded yet".
+  const [agentTimelineError, setAgentTimelineError] = useState(false);
 
   const loadAgentTimeline = () => {
     if (agentTimeline !== null || agentTimelineLoading) return;
     setAgentTimelineLoading(true);
+    setAgentTimelineError(false);
     api
       .getAgentTimeline(siteId, visitorId)
       .then((res) => setAgentTimeline(res.entries))
-      .catch(() => setAgentTimeline([]))
+      .catch(() => setAgentTimelineError(true))
       .finally(() => setAgentTimelineLoading(false));
   };
 
@@ -1161,6 +1165,14 @@ export default function VisitorDetailPage() {
               {agentTimelineLoading && (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" /> Loading timeline…
+                </div>
+              )}
+              {agentTimelineError && !agentTimelineLoading && (
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <p className="text-destructive">Couldn&apos;t load the timeline.</p>
+                  <Button size="sm" variant="outline" onClick={loadAgentTimeline}>
+                    Retry
+                  </Button>
                 </div>
               )}
               {agentTimeline && agentTimeline.length > 0 && (
