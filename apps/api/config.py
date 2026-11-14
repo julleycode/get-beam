@@ -526,6 +526,11 @@ class Settings(BaseSettings):
     paid_price_social_posts: str = "$0.03"
     paid_price_generate_draft: str = "$0.03"
     paid_price_detect_platform: str = "$0.01"
+    # Hardening: re-claim a crashed `pending` payload after N minutes; max
+    # concurrently-running paid handlers per payer; null cached bodies after N days.
+    paid_pending_reclaim_minutes: int = 10
+    paid_max_inflight_per_payer: int = 3
+    paid_request_body_retention_days: int = 30
 
     # ─── Agent link marker (Handoff Detection F2) ───
     # When true, offers.json stamps each same-host offer URL with an opaque
@@ -1343,6 +1348,8 @@ class Settings(BaseSettings):
     tinyfish_enrichment_enabled: bool = False    # master gate
     tinyfish_max_fetch_urls: int = 3             # pages fetched per visitor
     tinyfish_daily_fetch_cap: int = 200          # global fetch calls/day (quota guard)
+    tinyfish_daily_search_cap: int = 400         # global search calls/day (quota guard)
+    tinyfish_site_daily_cap: int = 40            # per-site search AND per-site fetch calls/day
     tinyfish_timeout_s: float = 15.0
 
     # ─── phantommm sidecar (LinkedIn outreach automation) ───
