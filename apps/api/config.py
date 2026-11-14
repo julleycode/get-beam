@@ -781,9 +781,16 @@ class Settings(BaseSettings):
     # differs from the is_flagged_abuse precedent, which DOES exclude downstream
     # — excluding here would wedge a real erasure behind a manual release on a
     # legal clock while still failing to stop the actual named attack (a single
-    # precision request). There is consequently no erasure abuse control of any
-    # kind today; see the cumulative-cap backlog note.
+    # precision request). The enforced control is graph_erasure_max_per_day below.
     graph_erasure_max_per_minute: int = 60
+    # ENFORCED cumulative cap (KG-8). Unlike the per-minute marker above, this
+    # changes the execution path: once a site has enqueued this many erasure
+    # requests in the trailing 24h, DELETE /visitors/{site}/{vid}/data answers
+    # 429 + Retry-After BEFORE anything runs (no enqueue, no local delete). The
+    # caller is told explicitly and can retry — nothing is silently dropped or
+    # held on a legal clock. The count is the site's OWN queue rows (no graph
+    # read), so the 429 is not an existence oracle. 0 disables the cap.
+    graph_erasure_max_per_day: int = 1000
     # The operator lookup IS an existence oracle by design, so precedent applies
     # in full here: default OFF, and admin-gated on top.
     graph_identity_lookup_enabled: bool = False
@@ -1238,6 +1245,13 @@ class Settings(BaseSettings):
     # retention promise as raw events — purged by the same sweep.
     agent_fetch_event_retention_days: int = 90
     retention_purge_interval_hours: int = 24  # daily purge sweep
+    # identity_feedback holds a device fingerprint + rendered location, written by
+    # an unauthenticated public route — same 90-day promise as raw events.
+    identity_feedback_retention_days: int = 90
+    # enrichment_profiles.social_context (scraped posts, OSINT findings) ages out
+    # after this many days; the profile row is kept and the blob is re-derived on
+    # the next enrichment pass.
+    social_context_retention_days: int = 180
 
     # ─── Admin request/response log (debug observability) ───
     # Captures full request + response JSON for requests that were DROPPED or
