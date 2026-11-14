@@ -209,9 +209,8 @@ test.describe("Onboarding canary", () => {
     await expect(page.getByTestId("canary-pages")).toContainText("/pricing");
     await expect(page.getByTestId("canary-map")).toBeVisible();
 
-    // The honesty caption is not decoration: without it a 30km-off pin reads
-    // as a broken product.
-    await expect(reveal).toContainText("IP-level estimate");
+    // The "IP-level estimate" caption was removed by product decision
+    // (see canary-reveal.tsx); the card now shows place + network instead.
     // OSM attribution is mandatory under the tile usage policy and must not be
     // hidden. Asserting it here so a future CSS tidy-up cannot quietly drop it.
     await expect(reveal.getByRole("link", { name: /OpenStreetMap/i })).toBeVisible();

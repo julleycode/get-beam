@@ -137,11 +137,21 @@ test.describe("Blog — admin editor", () => {
     await row.getByRole("button", { name: "Publish", exact: true }).click();
     await expect(row.getByText("Published")).toBeVisible({ timeout: 15_000 });
 
-    // Now visible on the public blog (dev mode → no ISR cache lag).
-    await page.goto("/blog");
-    await expect(page.getByRole("link", { name: title })).toBeVisible({
-      timeout: 15_000,
-    });
+    // /blog is ISR (revalidate 300s), so a fresh publish is not on the cached
+    // index yet. Check the public API instead, then render the post page,
+    // which is generated on demand for a new slug.
+    const listRes = await request.get(`${API_BASE}/api/v1/blog/posts?limit=100`);
+    expect(listRes.ok()).toBeTruthy();
+    const listed = (await listRes.json()) as
+      | Array<{ title: string; slug: string }>
+      | { items: Array<{ title: string; slug: string }> };
+    const items = Array.isArray(listed) ? listed : listed.items;
+    const published = items.find((p) => p.title === title);
+    expect(published, "published post is listed by the public API").toBeTruthy();
+    await page.goto(`/blog/${published!.slug}`);
+    await expect(
+      page.getByRole("heading", { name: title, level: 1 })
+    ).toBeVisible({ timeout: 15_000 });
   });
 
   test("SEO assistant scores the post as you write", async ({ page, request }) => {

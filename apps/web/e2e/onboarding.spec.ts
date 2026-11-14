@@ -93,7 +93,20 @@ async function waitForDetection(page: Page) {
 
 test.describe("Onboarding — Platform Detection", () => {
   test.beforeEach(async ({ page }) => {
+    // The free plan allows one site, so a site left by an earlier test makes
+    // the create form return 402. Start every test with no sites.
     await page.goto("/dashboard/onboarding");
+    const token = await page.evaluate(() => localStorage.getItem("auth_token"));
+    if (token) {
+      const headers = { Authorization: `Bearer ${token}` };
+      const list = await page.request.get(`${API_BASE}/api/v1/sites/`, { headers });
+      if (list.ok()) {
+        for (const s of (await list.json()) as Array<{ id: string }>) {
+          await page.request.delete(`${API_BASE}/api/v1/sites/${s.id}`, { headers });
+        }
+      }
+      await page.reload();
+    }
     // Ensure we're on the create step
     await expect(page.locator("text=Add your website")).toBeVisible();
   });
