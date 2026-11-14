@@ -111,8 +111,17 @@ function IntentRing({ score }: { score: number }) {
   );
 }
 
+// Profile URLs can be LLM-extracted from attacker-controllable pages (TinyFish
+// web research): only http(s) links are ever rendered — javascript:/data:/etc.
+// collapse to an inert "#".
 function withHttps(url: string): string {
-  return /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`;
+  const candidate = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : `https://${url}`;
+  try {
+    const u = new URL(candidate);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : "#";
+  } catch {
+    return "#";
+  }
 }
 
 function LinkPill({ href, label }: { href: string; label: string }) {
@@ -120,7 +129,7 @@ function LinkPill({ href, label }: { href: string; label: string }) {
     <a
       href={href}
       target="_blank"
-      rel="noopener noreferrer"
+      rel="noopener noreferrer nofollow"
       className="inline-flex items-center gap-1.5 rounded-full border bg-card px-3 py-1 text-xs font-medium text-foreground transition hover:border-primary/40 hover:text-primary"
     >
       {label}
@@ -950,7 +959,7 @@ export default function VisitorDetailPage() {
                       <a
                         href={s.url}
                         target="_blank"
-                        rel="noopener noreferrer"
+                        rel="noopener noreferrer nofollow"
                         className="inline-flex items-center gap-1 text-xs text-muted-foreground transition hover:text-primary"
                       >
                         <ExternalLink className="h-3 w-3" />
@@ -1026,7 +1035,7 @@ export default function VisitorDetailPage() {
                   <a
                     href={withHttps(visitor.linkedin_url)}
                     target="_blank"
-                    rel="noopener noreferrer"
+                    rel="noopener noreferrer nofollow"
                     className="text-xs text-muted-foreground transition hover:text-primary"
                   >
                     View profile
