@@ -91,3 +91,75 @@ Status: COMPLETE_WITH_GAPS (P2-G7/G8 deferred, KG-1 Docker absent). No commits.
 ### Forward Preview
 - Commands to stay green: the four pytest/diff/tsc/lint gates above.
 - Blast radius: as planned (6 source + 3 test files). No migration, flag default OFF.
+
+## Phase 3: Prod demo seed (26-10-26)
+
+**Status:** EXECUTED — code + unit tests only. No DB connection was opened; the prod run has NOT happened.
+
+### What Was Done
+- `scripts/seed_verified_visitors.py`: `--allow-remote` + `--owner-email` + `--yes`; `check_target()` (exit 2), `_resolve_owner_by_email` (exact, case-insensitive, 0/>1 → exit 3, never creates users), `remote_site_id()` = `beam_seed_verified_<sha256(owner)[:10]>`, other-owner site → exit 4, missing PII keys → exit 5, hostname-only `summarize()`; remote without `--yes` (or with `--dry-run`) = summary + exit 0, zero writes. Remote visitor ids are scoped to the site (`uuid5(..., f"seed-verified-{site_id}-{slug}")`); local ids unchanged. Both modes: `IdentifiedVisitor.do_not_email=True`; new site `hot_alert_enabled=False`, name "Beam Demo (fictional visitors)". Remote unseed deletes by `site_id` from enrichment_profiles, visitor_emails, identified_visitors, visitors, events, then the site (also filtered by owner). Docstring rewritten with opt-in rules.
+- Shared delete-then-insert writer `_write_people` used by both modes (local behavior unchanged apart from D6 guard + site name).
+- `_register_models()` — imports every `apps.api.models.*` module before ORM use. **Found during EXECUTE:** selecting `User` without this raises `InvalidRequestError` (`User` → `'SocialAccount'` unresolved). This was a latent bug in the existing local `_resolve_owner` too; the real prod run would have crashed on the owner lookup.
+- `tests/unit/test_seed_verified_visitors.py`: +20 tests (P3-G1…G10), fake session, no DB.
+
+### Test Gate Outcomes
+| Gate | Result |
+|---|---|
+| `pytest tests/unit/test_seed_verified_visitors.py -q` | 40 passed |
+| `pytest tests/unit -q -k "seed or identity_classification or web_research"` | 108 passed |
+| `validate-plan-artifact.mjs <plan>` | 0 failures, 0 warnings |
+| Every P3 test also run in isolation (catches import-order masking) | all pass |
+| CLI smoke, localhost DSN, non-connecting paths | local `--dry-run` exit 0; `--allow-remote` alone exit 2; `--owner-email` alone exit 2; remote with empty PII keys exit 5 |
+
+### Plan Deviations
+- Item 1 (rebase onto `origin/main`) skipped — orchestrator said do not merge/rebase. No overlap with origin/main's 3 commits.
+- E3 TDD red-first not followed literally: tests written right after the code. They did go red once (mapper bug above) before green.
+- Added (within blast radius): `--owner-email` without `--allow-remote` → exit 2; `--dry-run` forces no writes in remote mode even with `--yes`; `_register_models()`.
+
+### Operator Prod Run (needs explicit user yes — NOT run)
+`railway run` executes **locally** with the Railway prod env injected, so use the local interpreter. The container route (`railway ssh`) does not work: the `Dockerfile` copies only `apps/api/` and `apps/pixel/`, not `scripts/`. Run from the repo/worktree root:
+
+```bash
+# 1. dry run (no writes) — check host, owner id, site id, counts 1/6/6/6/6
+railway run --service retarget-agent --environment production -- \
+  /Users/apple/.venvs/get-beam/bin/python -m scripts.seed_verified_visitors \
+  --allow-remote --owner-email tranthai.work@gmail.com --demo-company
+# 2. write
+railway run --service retarget-agent --environment production -- \
+  /Users/apple/.venvs/get-beam/bin/python -m scripts.seed_verified_visitors \
+  --allow-remote --owner-email tranthai.work@gmail.com --demo-company --yes
+# 3. cleanup (run without --yes first to see live counts)
+railway run --service retarget-agent --environment production -- \
+  /Users/apple/.venvs/get-beam/bin/python -m scripts.seed_verified_visitors \
+  --allow-remote --owner-email tranthai.work@gmail.com --unseed --yes
+```
+
+DSN caveat: the engine uses `DATABASE_URL` verbatim (must be `postgresql+asyncpg://…`). Prod DB is Supabase (public pooler host), so the injected `DATABASE_URL` should be reachable from a laptop. If the service instead exposes a private host, swap in the public one, keeping the `+asyncpg` driver: `railway run ... -- sh -c 'DATABASE_URL="$DATABASE_PUBLIC_URL" /Users/apple/.venvs/get-beam/bin/python -m scripts.seed_verified_visitors ...'` (if that var is plain `postgresql://`, the script will fail to connect — rewrite the scheme inside the `sh -c`). Railway env vars override `.env` (pydantic-settings precedence), so the local `.env` does not leak in. The dry-run's `db host:` line is the check: it must be the retarget-agent Supabase host.
+
+### Closeout Packet
+- Classification: Keep in active/testing — EVL + operator P3-OP pending.
+- Next: EVL (vc-tester reruns the 3 gates), then the user's explicit yes for the operator run.
+
+### Forward Preview
+- Commands to stay green: the 3 gates above.
+- Blast radius: 2 files as planned. No migration/API/schema change.
+- CONTEXT_PARTIAL: none.
+
+- Quick fix 26-10-26: remote mode now requires only `PII_HMAC_KEY` (exit 5 if missing); empty `PII_ENCRYPTION_KEY` prints a stderr warning and seeds plaintext, matching `pii_crypto.encrypt_pii` passthrough on prod Railway. Unit file 41 passed.
+
+### Phase 3 commit + PII-check restore (14-11-26)
+
+- Phase 3 work moved from the uncommitted `visitor-seed-tinyfish-integration` worktree onto branch
+  `feat/seed-verified-prod-demo` (on top of `origin/main` `6ef19f7`; applied clean, no conflicts) and committed.
+- The 26-10-26 quick-fix relaxation is reverted: remote mode now exits 5 unless `PII_HMAC_KEY` is set
+  AND the effective key (`PII_ENCRYPTION_KEY or ENCRYPTION_KEY`) is a valid Fernet key — the same key
+  `pii_crypto._get_fernet()` uses. Prod shape (empty PII key, valid `ENCRYPTION_KEY`) passes.
+  Prod verified 14-11-26: 0 non-Fernet values across all 11 `*_ciphertext` columns — see
+  `backlog/prod-pii-encryption-key-empty_NOTE_26-10-26.md` (RESOLVED).
+- Safety re-review of remote mode: `--allow-remote` + `--owner-email` required, `--user-id`
+  rejected, writes need `--yes`, site id scoped per owner, other-owner site refused, every
+  `IdentifiedVisitor` `do_not_email=True`, unseed scoped to the one demo site. No gap found.
+- Tests: `tests/unit/test_seed_verified_visitors.py` 45 passed. Full unit lane: 3107 passed /
+  2 skipped / 1 failed — the failure (`test_paid_x402.py::test_no_payment_returns_402_with_requirements`,
+  `KeyError: 'accepts'`) is in the x402 routes from `cb3cf31`, outside this change.
+- Still pending: EVL (independent vc-tester run) and the operator prod run (needs the site owner's explicit yes).
