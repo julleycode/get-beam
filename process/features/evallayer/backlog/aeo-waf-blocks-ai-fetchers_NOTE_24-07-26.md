@@ -11,6 +11,8 @@ metadata:
   status: resolved-retracted
 ---
 
+> **Audit 14-11-26 — RESOLVED, confirmed.** The 25-07-26 retraction below stands (root cause was a `noindex` meta tag, fixed `6252f92`, not a WAF block). Agent detection is live in prod (`AGENT_DETECTION_ENABLED` + `AGENT_FETCH_BEACON_ENABLED` ON). Nothing left to do here.
+
 > **RESOLVED / RETRACTED (25-07-26).** This note's core premise — "getbeam.fyi's anti-bot WAF
 > blocks on-demand AI fetchers domain-wide" — is **disproven**. Live re-probe via Claude-in-Chrome
 > on the founder's real browser drove BOTH ChatGPT and Gemini to fetch

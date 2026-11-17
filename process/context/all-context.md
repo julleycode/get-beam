@@ -8,7 +8,7 @@ date: 10-08-26
 
 # Beam - All Context
 
-Last updated: 2026-08-11
+Last updated: 2026-11-14
 
 This file is the root context entrypoint for the repo.
 
@@ -88,25 +88,79 @@ For most substantial tasks:
 | pixel / event ingest | `all-context.md` | `process/features/pixel/_GUIDE.md` |
 | context maintenance | `all-context.md` | run the `vc-audit-context` skill after edits |
 
+## Production State (verified 14-11-26 by repo audit)
+
+This section is the current truth for prod. Where an older section below disagrees, this one wins.
+Details + evidence: `process/general-plans/backlog/repo-audit_REPORT_14-11-26.md`.
+
+- **Alembic head on prod: `d3f8a2c61b47`** (`add_paid_requests`), verified on prod 14-11-26.
+  The `Dockerfile` `CMD` runs `alembic upgrade head` before uvicorn on every Railway boot, so
+  **"merged to `main`" == "applied on prod"** — there is no separate migration step. Every
+  "pending live-apply" statement in older sections is history only.
+- **Flags ON in prod** (Railway env, verified 14-11-26; all still default `False` in
+  `apps/api/config.py`): `AGENT_DETECTION_ENABLED`, `AGENT_FETCH_BEACON_ENABLED`,
+  `AGENT_GATEWAY_ENABLED`, `AGENT_MARKER_ENABLED`, `COMPANY_GRAPH_ENABLED`,
+  `CONNECTION_NUDGE_ENABLED`, `LOCATION_REVEAL_ENABLED`, `REFERRALS_ENABLED`,
+  `REQUEST_LOG_ENABLED`, `TINYFISH_ENRICHMENT_ENABLED`.
+- **Everything else is OFF in prod**, including `inflow_x402_enabled`,
+  `engage_outcome_capture_enabled`, `identity_signals_enabled`, the identity-coop flags, every
+  ip-org flag, `ad_audiences_enabled`, `cadence_bot_flag_enabled`, `site_ingest_limit_enabled`,
+  `ingest_velocity_enabled`, `candidate_outreach_enabled`, `icp_fit_enabled`,
+  `campaign_benchmark_enabled`, and the `reengagement_*` flags.
+- **PII keys:** `PII_ENCRYPTION_KEY` is EMPTY on prod; `pii_crypto` falls back to `ENCRYPTION_KEY`
+  (a valid Fernet key). All 11 `*_ciphertext` columns had 0 non-Fernet rows on 14-11-26 (no
+  plaintext at rest). `validate_production` did NOT check the PII keys — fix in PR
+  `fix/live-security-hardening`. **Never set `PII_ENCRYPTION_KEY` to a new value without a
+  rotation step** — it would make every existing ciphertext unreadable.
+- **Origin bypass:** the Railway origin `retarget-agent-production.up.railway.app` is reachable
+  directly, bypassing Cloudflare, so `CF-Connecting-IP` is forgeable by anyone who calls the origin.
+  Code fix in PR `fix/live-security-hardening` (shadow, then enforce). Operator step still needed:
+  remove the public `up.railway.app` domain. See also
+  `process/features/onboarding-canary/backlog/cf-connecting-ip-forgeability-canary_NOTE_11-08-26.md`.
+- **CI:** `.github/workflows/test.yml` had been red on `main` since ~13-08-26 (last green
+  22-07-26). Fix in PR `fix/ci-green`. Until that merges, a green CI badge does not exist — local
+  gate runs are the only evidence.
+- **Remote branches:** 54 stale remote branches were deleted 14-11-26; every SHA is in
+  `process/general-plans/backlog/deleted-branches-backup_NOTE_14-11-26.md`. Backup tags pushed:
+  `backup/agentic-commerce-2026-10-25` and `backup/*-2026-11-14` for the 5 branches with unique
+  work. Remaining remote branches: `main`, `dev_nhantc2` (held commits, partial cherry-pick),
+  `feat/ws1-ai-evaluation-timeline` (PR 90), `feat/ws3-agent-concierge` (PR 92). `devjulley` is
+  gone — any "devjulley" branch statement below is history.
+- **Agentic commerce:** the web-side MPP/x402 integration was reverted from `main` on 25-10-26
+  (`1df9a80`). The redo is the Python InFlow x402 seller under `/api/v1/paid` (`cb3cf31`), flag
+  `inflow_x402_enabled` OFF.
+- **Commit before you close:** roster-precision (07-08-26) was "shipped + EVL-green" but never
+  committed and is now lost entirely — see
+  `process/features/visitors-identity/backlog/roster-precision-lost_NOTE_14-11-26.md`.
+
 ## Current Features
 
 Feature-scoped plan folders under `process/features/` (each has `active/`, `completed/`, `backlog/` and a `_GUIDE.md` with scope + key files):
 
 - `visitors-identity` — pixel visitors → identity resolution waterfall → enrichment → OSINT →
   first-party capture expansion (value-based field matching, mailto/URL-param, cross-browser
-  autofill, shadow-DOM/same-origin-iframe) feeding the owned identity graph. Active task folders
-  (07-08-26 autopilot run reconciled the set; none pushed/merged):
-  - `graph-erasure-compliance_07-08-26` — SPEC + COMPLEX PLAN, **planned, not yet VALIDATE'd**.
-    Closes the gap where per-visitor GDPR erasure (`apps/api/routers/visitors.py:403-439`) never
-    deletes cross-tenant `beam_identity_graph` rows, plus stale public legal copy.
-    **Integration gates attempted 07-08-26 (Docker gate run): 7/14 pass, 8/14 blocked on
-    test-FIXTURE bugs (NOT source bugs — `IdentifiedVisitor` has no `first_seen`/`last_seen`;
-    `Site` has no `domain` col, needs `name`+`url`). Entry-gate for identity-coop still UNMET.
-    Migration `d1a6c4e93f27` live round-trip IS closed (KG-5). See
-    `backlog/docker-gate-run-findings_NOTE_07-08-26.md`.**
+  autofill, shadow-DOM/same-origin-iframe) feeding the owned identity graph. Task folders
+  (reconciled by the 14-11-26 repo audit — everything below is on `main`; the "none pushed/merged"
+  framing from 07-08-26 is obsolete). **Still in `active/`:** `identity-coop_07-08-26`,
+  `ip-org-database_07-08-26`, `ip-org-quality-pack_08-08-26` (code on main `ad34632`, flags OFF),
+  `cross-tenant-erasure-phase2_07-08-26` (NOT executed; KG-6/KG-7 open),
+  `ip-best-selection-phase1_13-08-26` (NOT started), `browser-capture-trust-tier_15-08-26` (SPEC
+  only, no plan), `seed-verified-tinyfish_25-10-26` (in flight in another PR).
+  **Archived to `completed/` 14-11-26:** `coop-disposable-e2e_17-08-26` (`7eec0a9`),
+  `coop-expiry-index-guard_17-08-26` (`2a0fe3b`), `graph-erasure-compliance_07-08-26`,
+  `identity-program_03-08-26`, `identity-vocab-reconcile_07-08-26`,
+  `job-change-detection_07-08-26` (`13d6901`, flag OFF), `ip-best-selection-retrigger_09-08-26`
+  (superseded, never executed), `identity-coverage-pixel-fppro_02-08-26`.
+  - `graph-erasure-compliance_07-08-26` — **SHIPPED on main (`784aba2` + `2136219`), archived
+    14-11-26** → `completed/graph-erasure-compliance_07-08-26/`. Closes the gap where per-visitor
+    GDPR erasure never deleted cross-tenant `beam_identity_graph` rows. Integration fixtures were
+    repaired same day (14/14, see `backlog/docker-gate-run-findings_NOTE_07-08-26.md`); migration
+    `d1a6c4e93f27` is on prod. Still open: KG-4 privacy-counsel review of the public legal copy
+    (`backlog/privacy-copy-counsel-review_NOTE_07-08-26.md`) and the other `graph-erasure-*`
+    backlog notes.
   - `identity-coop_07-08-26` — **Phase 1 + Phase 2a SHIPPED and human-approved 16/17-08-26;
-    committed `51fe0d5` + `3e7a420` + `c26c5d1`. Both flags remain OFF — production exposure is
-    NONE.** (Supersedes the earlier "Phase 1 Dependency-BLOCKED on graph-erasure" note: all four
+    committed `51fe0d5` + `3e7a420` + `c26c5d1`. Both flags remain OFF (re-verified on prod
+    14-11-26) — production exposure is NONE.** (Supersedes the earlier "Phase 1 Dependency-BLOCKED on graph-erasure" note: all four
     clearing conditions in `backlog/identity-coop-entry-gate-spec-a-live_NOTE_07-08-26.md` were
     met on 07-08-26 and the entry gate is closed.)
     **Phase 1** (ledger substrate: `identity_contribution_events`, `identity_credit_ledger`,
@@ -129,17 +183,20 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
     `increment_usage`) is PLANNED and entry-gated on 2a going LIVE —
     `phase-2b-spend-wiring_PLAN_16-08-26.md`. Phase 3 unchanged. `REVERSE` semantics were
     descoped to `backlog/coop-credit-reversal-semantics_NOTE_16-08-26.md`.
-    **Open production finding (F-B):** `_EXPIRE_INSERT_SQL`'s `ON CONFLICT (lot_id) WHERE
-    entry_type = 'EXPIRE'` needs `uq_coop_ledger_expire_per_lot` to exist; without it PostgreSQL
-    cannot infer an arbiter, every insert raises, the per-lot `except` swallows it, and **the sweep
-    silently expires nothing**. Migration `b7e4d21a9c58` has never been applied to production. Fix
-    plan: `active/coop-expiry-index-guard_17-08-26/`.
+    **Production finding F-B — CLOSED 14-11-26.** `_EXPIRE_INSERT_SQL`'s `ON CONFLICT (lot_id)
+    WHERE entry_type = 'EXPIRE'` needs `uq_coop_ledger_expire_per_lot` to exist; without it every
+    insert raises, the per-lot `except` swallows it, and the sweep silently expires nothing. The
+    index is now **verified present on prod** (migration `b7e4d21a9c58` applied by the boot-time
+    `alembic upgrade head`), and the fail-closed guard shipped at `2a0fe3b` makes a missing index
+    loud. Archived: `completed/coop-expiry-index-guard_17-08-26/`.
     **Test infra:** a disposable-container e2e lane (`tests/e2e_disposable/`,
     `scripts/e2e-disposable.sh`, gates DE-1…DE-21) was built 17-08-26 specifically because the
     integration lane builds its schema with `Base.metadata.create_all` and NEVER runs alembic, and
     because `httpx.ASGITransport` does not run lifespan so `start_scheduler()` was executed by no
-    test at any tier. See `active/coop-disposable-e2e_17-08-26/`.
-  - `identity-coverage-pixel-fppro_02-08-26` — audit verdict 07-08-26: Ph.01 done (manual gate
+    test at any tier. See `completed/coop-disposable-e2e_17-08-26/` (archived 14-11-26, code `7eec0a9`).
+  - `identity-coverage-pixel-fppro_02-08-26` — **archived 14-11-26** →
+    `completed/identity-coverage-pixel-fppro_02-08-26/`; open Ph.03/Ph.04 remainders moved to
+    `backlog/identity-coverage-ph3-ph4-remainders_NOTE_14-11-26.md`. Audit verdict 07-08-26: Ph.01 done (manual gate
     transferred to recovery program); Ph.02 SUPERSEDED by `plans/260805-1543-identity-coverage-recovery/`
     on branch `dev_nhantc2` (outside `process/`, invisible to plan-discovery); Ph.03 backlog
     needs-live-provider (fp3 may obviate — measure first); Ph.04 docs half EXECUTED 07-08-26
@@ -187,39 +244,22 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
     Known-gaps + follow-ups: `backlog/ip-org-followups_NOTE_07-08-26.md` (extended 07-08-26:
     post-swap ANALYZE, G8 tail margin, eyeball token gaps); new source idea:
     `backlog/rb2b-ip-to-company-eyeball-source_NOTE_07-08-26.md`.
-  - `identity-vocab-reconcile_07-08-26` — **EXECUTED and user-accepted, unpushed.** Reconciles
-    `devjulley` onto `main`'s `identified`/`candidate` vocabulary; PVL closed `HALTED_ACCEPTED` at
-    supplement cycle 9 of 10 (`Gate: CONDITIONAL`, accepted). `devjulley` is rebased onto `main` at
-    `5293cbc`, working tree clean, but nothing is pushed to `origin/devjulley` (ahead 32, behind 5).
-    Kept in `active/` — see the "Migration head status" note above for the still-pending
-    Alembic re-chain this plan carries. Known-gap:
+  - `identity-vocab-reconcile_07-08-26` — **DONE, on main, archived 14-11-26** →
+    `completed/identity-vocab-reconcile_07-08-26/`. Reconciled `devjulley` onto `main`'s
+    `identified`/`candidate` vocabulary; PVL closed `HALTED_ACCEPTED` at supplement cycle 9 of 10
+    (`Gate: CONDITIONAL`, accepted). The alembic re-chain it carried is applied (prod head is now
+    `d3f8a2c61b47`) and the `devjulley` branch was deleted in the 14-11-26 cleanup. Known-gap:
     `process/features/visitors-identity/backlog/resolver-privacy-relay-callsite-coverage_NOTE_07-08-26.md`.
   - `privacy-hold-clear_09-08-26` — **EXECUTED + EVL PASS + archived 10-08-26 (WITH_GAPS).**
     Option D: site-owner explicit Clear for sticky `do_not_resolve`. See
     `completed/privacy-hold-clear_09-08-26/` and §Privacy-Hold Clear below. Open residuals:
     `backlog/privacy-hold-clear-e2e-auth-harness_NOTE_09-08-26.md` (Clerk e2e AC-1/2/3/6),
     `backlog/privacy-copy-counsel-review_NOTE_07-08-26.md` (AC-13 counsel).
-  - `roster-precision_07-08-26` — **SPLIT after PVL cycle 4; Part A SHIPPED + EVL-green,
-    UNCOMMITTED.** Makes the Hunter/Apollo company-level pick *informed* instead of arbitrary
-    (Hunter already returns and bills for 5 employees; `hunter.py:56` keeps `emails[0]` and discards
-    4). **Part A** = `apps/api/services/roster_ranking.py` (392 lines, **zero imports**,
-    AST-enforced pure deterministic scorer: page→role affinity, geo affinity, weighted score with
-    a drop-from-both-numerator-and-denominator degradation rule, deterministic tie-break) +
-    `tests/unit/test_roster_ranking.py` (44 tests). **Zero existing files modified.** Gates
-    confirmed by three independent tester runs: unit **1324 passed / 2 skipped / 0 failed**,
-    integration **537 passed** unchanged, `identity_classification.py` diff empty. The scorer is
-    **not called by anything yet** — it is dead code until Part B lands.
-  - `roster-precision-wiring_07-08-26` — **Part B, PLANNED, never validated.** The resolver wiring
-    Part A does not include: roster retention, exclusion + suppression + the mandatory site-wide
-    `email_bidx` merge-collision guard, redaction of all candidates, `IdentifiedVisitor.roster_selection`
-    JSONB + migration, the `roster_excluded` ledger outcome, merge-preserving upsert, and the
-    detail-endpoint surface. Inherits all four PVL cycles of findings (F-H1 predicate mismatch,
-    F-H2-rev ledger taxonomy, F-H3 parse-vs-storage allow-lists, F3 hash-live-on-both-sides, F6
-    merge-preserving upsert, the seven-site `identity_status` census, exact integration fixture
-    shapes) rather than re-deriving them. **Needs its own PVL loop from V1** with a parallel
-    adversarial verifier — that second leg found the top defect in all four prior cycles and
-    overturned an orchestrator decision twice. `roster_precision_enabled` default OFF; nothing
-    becomes emailable (`is_emailable_identity("hunter")` stays `False`, regression-gated).
+  - **roster-precision — LOST, needs a fresh design.** The 07-08-26 roster-precision work
+    (Part A pure scorer `roster_ranking.py` + 44 tests, its plan/SPEC/validate-contract, and the
+    Part B `roster-precision-wiring` plan) was never committed; the 14-11-26 audit found no ref and
+    no disk copy. Nothing exists on `main`. Any restart is a new feature through PLAN + VALIDATE.
+    Full record: `backlog/roster-precision-lost_NOTE_14-11-26.md`.
 
   Completed 11-08-26 (archived out of `active/`):
   - `social-context-merge_07-08-26` — completed 11-08-26 →
@@ -235,7 +275,8 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
     07-08-26 audit; vocabulary since renamed by identity-vocab-reconcile).
 - `onboarding-canary` — conversational onboarding rebuild in React + a canarytokens-style
   location reveal (Leaflet pin on the user's city, their network, and the pages they just read on
-  getbeam.fyi). 4-phase plan; **Phase 1 (backend, flag OFF) EXECUTED 10-08-26.** Widened
+  getbeam.fyi). **LIVE in prod: `LOCATION_REVEAL_ENABLED` is ON (verified 14-11-26).** 4-phase
+  plan; Phase 1 (backend) EXECUTED 10-08-26. Widened
   `services/geoip.py` (`resolve_geoip_full` + `GeoResult`; `resolve_geoip` is now a thin wrapper
   with a frozen 2-tuple signature so `routers/events.py` needed zero edits; NEW `geoip2:` JSON
   Redis prefix kept separate from the legacy pipe-joined `geoip:` key; added the missing
@@ -246,17 +287,26 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   (`POST /api/v1/onboarding/canary` 30/min + `/identity-feedback`; flag-off => 404; IP never in
   the response body), config `beam_self_site_id` + `location_reveal_enabled` (default OFF),
   migration `a1c7f4e082d5` (`idx_visitors_fingerprint` + `identity_feedback` table) —
-  live up/down/up round-tripped on a disposable DB. Phases 2-4 (React chat shell, Leaflet canary,
-  follow-ups) not started. Plan:
+  live up/down/up round-tripped on a disposable DB. The React conversational rebuild + Leaflet
+  canary shipped on main at `a621edd` (11-08-26), which also added the public unauthenticated twin
+  `POST /demo/canary` (`routers/demo.py`) — the earlier "Phases 2-4 not started" line is obsolete.
+  Plan:
   `process/features/onboarding-canary/active/canary-onboarding_10-08-26/canary-onboarding_PLAN_10-08-26.md`
+  Other task folders (14-11-26 audit): **archived** `completed/reveal-display-policy_17-08-26/`
+  (`9b8dc23`, server-chosen map/country/none display modes) and
+  `completed/site-analysis-onboarding_13-08-26/` (`7081402`, grounded site analysis);
+  **still active** `private-beta-apply-form_14-08-26` (only the `WaitlistSignup` fields + migration
+  `d7e2b4c81f93` exist — no endpoint, no UI) and `public-canary-funnel_11-08-26` (not validated;
+  must be reconciled against the already-shipped `/demo/canary`).
 - reengagement lifecycle (no feature folder — plan lived outside `process/` at
   `~/.claude/plans/`; shipped 11-08-26, commit `b2a7eef`) — user-inactivity lifecycle:
   `users.last_active_at` touch in `get_current_user` + 3-stage daily sweep (remind at 7d /
   auto-pause at 14d with `sites.auto_paused_at` + silent auto-resume on login / one-time
   install nudge); resolution sweep now skips `tracking_enabled=false` sites; migration
   `f4b9d2a71c68`; 7 `reengagement_*` flags default OFF; EVL 7/7 green incl. live migration
-  round-trip. Operator steps remaining: deploy → 1 week baseline → dry-run
-  `run_reengagement_once` → flag flip.
+  round-trip. Deployed (migration is on prod); `reengagement_*` flags still OFF in prod as of
+  14-11-26. Operator steps remaining: 1 week baseline → dry-run `run_reengagement_once` → flag
+  flip. (Separate, older job: `CONNECTION_NUDGE_ENABLED` IS on in prod.)
 - `campaigns-outreach` — AI segmentation, campaign planning, email + social outreach, drafts.
   **marketing-claims-gap (16-08-26):** 3-phase program (demo-booking link/attribution, deterministic
   `icp_fit` scoring, learning-loop + zero-PII cross-tenant benchmarks) — **all 3 phases ✅ VERIFIED
@@ -268,8 +318,14 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   flag-gated feature is unproven until the flag-ON path executes against real infra). Migrations
   `e4b1d78c3a05` → `f6a3c81d5e27` → `a8c2f47e91b6` (current head) live-round-tripped clean from an
   EMPTY DB. Flags `icp_fit_enabled` + `campaign_benchmark_enabled` still OFF (operator step;
-  Phase 1's `Site.booking_url` is data, not a flag). Open: marketing copy pass
-  (`backlog/marketing-copy-reconciliation_NOTE_17-08-26.md`).
+  Phase 1's `Site.booking_url` is data, not a flag). The marketing copy pass
+  (`backlog/marketing-copy-reconciliation_NOTE_17-08-26.md`) and the container-gates note are
+  marked RESOLVED by the 14-11-26 audit.
+  **engage-learning-agent (17-08-26):** Phase 1 (outcome capture) shipped on main `45b6da0`,
+  `engage_outcome_capture_enabled` OFF; Phases 2 / 3a / 3b not started.
+  **linkedin-extension-onboarding** (`ecedc2e`) archived 14-11-26 →
+  `completed/linkedin-extension-onboarding_26-07-26/`; `linkedin-extension_25-07-26` stays active
+  (in testing).
 - `billing` — Gumroad MoR billing, plans/quotas, BYOK keys
 - `marketing-site` — public site: landing, blog, changelog, SEO (content sources in `marketing/`)
 - `pixel` — tracking pixel, event ingest, consent, bot filtering; ingest-abuse-hardening
@@ -282,9 +338,15 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   round-trip, AC-14 live-crawler validation, AC-8/AC-9 Agent-Probe manual render check,
   Playwright auth-harness leg) — see
   `process/features/pixel/backlog/cadence-bot-flag-deferred-gates_NOTE_26-07-26.md`
+  (the migration leg is closed — it is on prod). ws2-agent-session-activation (WS2
+  agent-operated session classifier, end to end) shipped on main `457e3c1`, archived 14-11-26 →
+  `process/features/pixel/completed/ws2-agent-session-activation_07-08-26/`. site-id-lifecycle
+  (`1a16662`) is on main and stays active only for its Playwright auth-harness gap.
 - `evallayer` — AI-agent traffic detection (agent_classifier, `/agents` API + dashboard tab, IP/rDNS
   verification, agent→company outreach-safe resolution, GEO/AEO analytics, outreach-exclusion
-  guardrail); 8-phase program, code-complete 23-07-26, pending Docker-gate closure — see
+  guardrail); 8-phase program, code-complete 23-07-26, **LIVE in prod** (`AGENT_DETECTION_ENABLED`,
+  `AGENT_FETCH_BEACON_ENABLED`, `AGENT_MARKER_ENABLED` all ON, verified 14-11-26 — the old
+  "pending Docker-gate closure" label is superseded) — see
   `process/features/evallayer/active/evallayer_22-07-26/evallayer-umbrella_PLAN_22-07-26.md`.
   `GET /agents/{site_id}/stats` now returns additive `detection_enabled: bool`
   (`settings.agent_detection_enabled`), and the `/dashboard/agents` empty state branches on it
@@ -302,14 +364,24 @@ Feature-scoped plan folders under `process/features/` (each has `active/`, `comp
   per-site data model, authed CRUD, dashboard editor) and Phase 2 (public
   `manifest.json`/`offers.json`/`llms.txt` + hand-written read-only JSON-RPC MCP server exposing
   `get_offers`/`get_pricing`/`check_availability`) are CODE DONE + EVL-green, mounted in
-  `apps/api/main.py`; `agent_gateway_enabled` default OFF. **Phase 3/4 of this plan's own
+  `apps/api/main.py`; `agent_gateway_enabled` defaults OFF in code but is **ON in prod** (verified
+  14-11-26). **Phase 3/4 of this plan's own
   consent-link design are SUPERSEDED (07-08-26, user decision) — never implemented.** The chosen
   design is zero-click `AgentLead` (structurally isolated from `IdentifiedVisitor`/`Visitor`, no
   human consent click, accepted tradeoff: lead quality depends on agent truthfulness), built on
-  unmerged branch `feat/ws3-agent-concierge` — not yet reconciled with sibling branch
-  `feat/ws2-agent-session-classifier` or merged to `devjulley`/`main`. See
+  unmerged branch `feat/ws3-agent-concierge` (PR 92, rebase + fix in progress 14-11-26). The
+  sibling WS2 branch is gone: PR 91 was closed 14-11-26 as superseded by `457e3c1` on `main`. See
   `process/features/agent-gateway/active/agent-gateway_26-07-26/agent-gateway_PLAN_26-07-26.md`
   §Decision Record and §WS3 Merge Preconditions.
+  **InFlow x402 seller (25-10-26):** pay-per-call routes under `/api/v1/paid` (`cb3cf31`,
+  migration `d3f8a2c61b47` `add_paid_requests`), flag `inflow_x402_enabled` OFF. This is the redo
+  of the web-side MPP/x402 integration reverted at `1df9a80`. Plan:
+  `process/features/agent-gateway/active/inflow-x402-seller_PLAN_25-10-26.md`.
+- `agent-native-revenue` — program charter for agent-driven revenue (WS0 ops gate, WS1 AI
+  evaluation timeline, WS2 agent-session classifier, WS3 agent concierge). WS2 is live on `main`
+  via `457e3c1` (PR 91 closed as superseded); WS1 is PR 90 and WS3 is PR 92, both rebase + fix in
+  progress 14-11-26. Umbrella:
+  `process/features/agent-native-revenue/active/agent-native-revenue_30-07-26/agent-native-revenue-umbrella_PLAN_30-07-26.md`
 - `ads-audiences` — OAuth-linked ad channels (Meta Custom Audiences, Google Data Manager API,
   LinkedIn deferred/CSV-only) with direct segment-audience push mirroring the CRM connector
   pattern; 3-phase program. Phase 1 Foundation (models, `services/ads/` registry, router, mock-mode
@@ -452,7 +524,11 @@ structurally separate from human Visitor/Event data, never as a targetable outre
   regression-tested in `tests/unit/test_agent_origin_exclusion.py`)
 - `apps/api/services/agent_aggregator.py` — read-only vendor/page/verification-method analytics,
   `GET /api/v1/agents/{site_id}/analytics`
-- Feature flag: `agent_detection_enabled` in `apps/api/config.py` — **defaults OFF**
+- Feature flag: `agent_detection_enabled` in `apps/api/config.py` — defaults OFF in code,
+  **ON in prod** (Railway env verified 14-11-26; see §Production State)
+- **Migration head, current (14-11-26): prod is at `d3f8a2c61b47` (`add_paid_requests`).** The
+  consolidated 07-08-26 note below is kept for chain archaeology only — every `c4a8f13e07b6`
+  "current head" statement in it is superseded, and `devjulley` no longer exists.
 - **Migration head status, consolidated 07-08-26 (last reconciled at ip-org Phase 3 closeout —
   supersedes the identity-vocab-reconcile consolidation and its two-branch framing).**
   `main`, `devjulley`, and **prod** are now ALL on one unified chain with head **`c4a8f13e07b6`**
@@ -519,11 +595,12 @@ structurally separate from human Visitor/Event data, never as a targetable outre
     at `b6f4a2d90c13`, meaning the earlier chain (including the re-chained devjulley tail) had
     reached prod in prior deploys. Prod alembic head is now `c4a8f13e07b6`; `ip_org_prefixes` +
     `rpki_roas` exist on prod but are EMPTY (ingest is a separate operator step); `/health` +
-    `/health/ready` 200. **Schema-applied ≠ feature-enabled:** every gated flag
-    (`agent_detection_enabled`, `company_graph_enabled`, `identity_signals_enabled`,
-    `site_ingest_limit_enabled`, `ingest_velocity_enabled`, `cadence_bot_flag_enabled`,
-    `candidate_outreach_enabled`, `ip_org_lookup_enabled` + the 3 Phase-3 ip-org flags) remains
-    OFF in prod — flipping any of them is still a separate explicit operator action. For the
+    `/health/ready` 200. **Schema-applied ≠ feature-enabled** (flag list corrected 14-11-26):
+    `agent_detection_enabled` and `company_graph_enabled` are now **ON in prod**;
+    `identity_signals_enabled`, `site_ingest_limit_enabled`, `ingest_velocity_enabled`,
+    `cadence_bot_flag_enabled`, `candidate_outreach_enabled`, `ip_org_lookup_enabled` + the 3
+    Phase-3 ip-org flags remain OFF in prod — flipping any of them is still a separate explicit
+    operator action. Full ON list: §Production State. For the
     ip-org set, follow
     `process/features/visitors-identity/active/ip-org-database_07-08-26/ip-org-prod-enable_RUNBOOK_07-08-26.md`.
     Before flipping any OTHER flag, verify its required revisions are ≤ `c4a8f13e07b6` in
@@ -580,9 +657,9 @@ from existing outbound email engagement:
   always-on explicit `tracking_settings`; `campaign_sender.py` passes `custom_args` at its
   identified-visitor send call site.
 - Feature flags: `company_graph_enabled`, `identity_signals_enabled` in `apps/api/config.py` —
-  both **default OFF** (`company_graph_staleness_days` default `75`); flipping either to `True` in
-  a real environment is an explicit human, post-migration-live-apply operator action, matching the
-  `agent_detection_enabled` precedent.
+  both default OFF in code (`company_graph_staleness_days` default `75`). **Prod (verified
+  14-11-26): `COMPANY_GRAPH_ENABLED` is ON; `identity_signals_enabled` is still OFF.** Flipping the
+  remaining one is an explicit human operator action.
 - Status 24-07-26: **VERIFIED and archived**. Docker-gate closure (EVL final run, 24-07-26,
   independent): migration round-trip clean on a disposable Postgres (chain to head
   `a9f2c1e7b4d6`), `test_company_graph.py` 14/14, integration `company_graph`+`identity_signals`
@@ -757,8 +834,8 @@ Adds the two signals the v2 hash was missing, without disturbing v2:
   JS at all — it needs TCP-stack timing at the edge, not the pixel).
 
 **Alembic head note:** `f1a7c3e05b92` (`add_fingerprint_v3`) was the `devjulley` head when fp3
-shipped; the head has since moved through `a3e8d5c71f02` to `c4a8f13e07b6`
-(`add_ip_org_evidence_graph`, applied live on prod 2026-08-07) — see the consolidated
+shipped; the head has since moved through `a3e8d5c71f02` and `c4a8f13e07b6` to
+**`d3f8a2c61b47`** (`add_paid_requests`, on prod, verified 14-11-26) — see §Production State and the consolidated
 "Migration head status" note in the AI-Agent-Traffic Layer section above for the unified chain
 and prod live-apply status. Always re-run `alembic heads` before chaining or applying;
 concurrent programs move it repeatedly.
@@ -830,7 +907,9 @@ concurrent programs move it repeatedly.
   verified 0 remaining across all 4 tables. Erasure sweep now reaches every row. The pii-at-rest
   plan itself stays validated-and-held CONDITIONAL — still NOT executing until: Docker for Hybrid
   gates, high-risk evidence pack, PVL refresh closing the READ-census G1 gap (prereq (a) backfill
-  is ✅ done).
+  is ✅ done). **Re-verified 14-11-26:** all 11 `*_ciphertext` columns have 0 non-Fernet rows;
+  `PII_ENCRYPTION_KEY` is empty on prod and `pii_crypto` falls back to `ENCRYPTION_KEY` — do not
+  set a new `PII_ENCRYPTION_KEY` without rotation (see §Production State). Phase 3+ not started.
 - `CAMPAIGN_PLANNER_TOOLS_ENABLED=true` (planner tool loop) needs live-model validation before prod enable
 - Real-key Gemini smoke for `/ai/ask` agentic path not yet run (no key on dev machine) — check `gemini_tool_call` in structlog when run
 - Legacy `plan/` folder (11 dated pre-harness plans) is read-only history — migrate still-relevant items into `process/features/*/backlog/` opportunistically
@@ -841,9 +920,9 @@ concurrent programs move it repeatedly.
   `company_graph_enabled`, `identity_signals_enabled`, `site_ingest_limit_enabled`,
   `ingest_velocity_enabled`, `cadence_bot_flag_enabled`, `candidate_outreach_enabled`,
   `ip_org_lookup_enabled` all default
-  OFF. The migration chain is now unified across `main`/`devjulley`/prod with head
-  `c4a8f13e07b6` applied LIVE on prod (2026-08-07) — schema-applied ≠ feature-enabled; every
-  flag above remains OFF and flipping each is a separate operator action. See the consolidated
+  OFF in code. **Prod, verified 14-11-26:** head is `d3f8a2c61b47`; `agent_detection_enabled` and
+  `company_graph_enabled` are ON; the other flags named above remain OFF and flipping each is a
+  separate operator action (full ON list: §Production State). See the consolidated
   "Migration head status" note in the AI-Agent-Traffic Layer section above for the unified
   chain and prod live-apply detail — see
   `process/features/evallayer/backlog/program-docker-verification-gaps_NOTE_23-07-26.md`,
@@ -852,11 +931,13 @@ concurrent programs move it repeatedly.
   (RESOLVED), `process/features/visitors-identity/backlog/post-docker-gate-followups_NOTE_24-07-26.md`
   (**SUPERSEDED 07-08-26 — the "478 passed / 23 failed / 17 errors" figure that note records is
   STALE.** The integration lane is now **537 passed / 0 failed / 0 errors**, measured twice
-  independently on 07-08-26 (roster-precision PVL cycle 4 and the EVL confirmation run). Commits
+  independently on 07-08-26. Commits
   `81eb4e6` (repaired never-executed fixtures) and `c92cc62` (the `GET /visitors` P0) closed that
-  failure set. Unit lane baseline for the same tree: **1280 passed / 2 skipped / 0 failed**, or
-  **1324** with roster-precision Part A's 44 new tests present. conftest Redis-isolation hardening
-  confirmed-twice),
+  failure set. Unit lane baseline for the 07-08-26 tree: **1280 passed / 2 skipped / 0 failed**.
+  (The "1324" figure once quoted here included 44 roster-precision tests that were never committed
+  and are lost — it is not reproducible. All of these counts are 07-08-26 snapshots; re-measure on
+  current `main`, where CI has been red since ~13-08-26 pending PR `fix/ci-green`.) conftest
+  Redis-isolation hardening confirmed-twice),
   `process/features/pixel/backlog/ingest-abuse-hardening-deferred-gates_NOTE_25-07-26.md` (open:
   AC-4a mutation-kill re-verification; migration round-trip RESOLVED 07-08-26),
   `process/features/pixel/backlog/cadence-bot-flag-deferred-gates_NOTE_26-07-26.md` (open:

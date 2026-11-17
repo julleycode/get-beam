@@ -7,6 +7,8 @@ feature: visitors-identity
 
 # PLAN — Cross-Tenant Erasure Phase 2, Track A
 
+> **Status reconciliation 14-11-26 (repo audit):** NOT executed — the plan is still at PVL cycle 2 `Gate: CONDITIONAL` and the audit found no Track A commit on main. KG-6 / KG-7 remain open. Related erasure fixes are in PR `fix/gdpr-erasure-gaps` (opened 14-11-26); re-validate this plan against that PR once it merges.
+
 **TL;DR:** One guard + one read-only audit extension. `_save_identified` currently inserts an
 `IdentifiedVisitor` with a freshly-discovered email and **zero** suppression check — that is the
 whole hole. Add the same `is_email_suppressed_any(db, email, GRAPH_WRITE_BLOCKING_SCOPES)` check

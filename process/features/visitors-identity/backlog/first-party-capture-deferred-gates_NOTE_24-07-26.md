@@ -11,6 +11,8 @@ metadata:
 
 # First-Party Capture — Deferred Gates Backlog
 
+> **Audit 14-11-26 — RESOLVED, confirmed.** Gap 3's remaining leg ("a production live-apply remains a separate operator action") is closed: prod head is `d3f8a2c61b47`, which is past `a9f2c1e7b4d6`. All three gaps are now closed; the D4 policy-doc pointer was carried to `post-docker-gate-followups_NOTE_24-07-26.md`.
+
 **STATUS: RESOLVED (24-07-26)** for Gap 1 and Gap 2. Independent EVL final run: Gap 1 (AC5
 webkit/firefox autofill legs) — `e2e/autofill.spec.ts --project=webkit --project=firefox` 2/2
 passed. Gap 2 (Phase 3 integration re-confirm) — the AC11 `do_not_resolve` integration test

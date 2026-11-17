@@ -13,7 +13,7 @@ metadata:
 
 **Parent (Phase 1):** `process/features/visitors-identity/active/ip-best-selection-phase1_13-08-26/ip-best-selection-phase1_PLAN_13-08-26.md`
 **Origin of findings:** PVL cycle 7 of the superseded plan —
-`process/features/visitors-identity/active/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger-pvl-iteration-003_REPORT_13-08-26.md`
+`process/features/visitors-identity/completed/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger-pvl-iteration-003_REPORT_13-08-26.md`
 
 Every item below is **excluded from Phase 1 by locked scope**. None is closed. Do not fold any of
 them into Phase 1 — each needs its own decision or a prerequisite that Phase 1 does not deliver.

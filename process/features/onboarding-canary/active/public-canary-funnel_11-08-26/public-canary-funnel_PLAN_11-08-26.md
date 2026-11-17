@@ -7,6 +7,8 @@ feature: onboarding-canary
 
 # Public canary endpoint + truncated static funnel — residual hardening
 
+> **Status reconciliation 14-11-26 (repo audit):** partly overtaken by shipped code — a public, unauthenticated `POST /demo/canary` already exists on main (`apps/api/routers/demo.py`, commit `a621edd`). The plan below is still "not validated, not executed" and its contract is `BLOCKED`; reconcile the plan against the shipped endpoint (PLAN supplement + VALIDATE) before any EXECUTE.
+
 **Date**: 11-08-26
 **Status**: PLANNED (not validated, not executed)
 **Complexity**: COMPLEX

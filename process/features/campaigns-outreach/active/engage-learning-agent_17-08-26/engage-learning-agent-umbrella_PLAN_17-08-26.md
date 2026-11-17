@@ -12,6 +12,8 @@ metadata:
 
 # Engage Learning Agent — Umbrella Plan
 
+> **Status reconciliation 14-11-26 (repo audit):** `Status: PLANNED` below is stale for Phase 1 — Phase 1 (signal acquisition / outcome capture) shipped on main at `45b6da0`; `engage_outcome_capture` is OFF in prod (Railway env verified 14-11-26). Phases 2, 3a and 3b are NOT started. Phase 3 (`phase-3-learning-autonomy`) remains superseded by 3a/3b.
+
 **Date**: 17-08-26
 **Complexity**: COMPLEX
 **Status**: ⏳ PLANNED

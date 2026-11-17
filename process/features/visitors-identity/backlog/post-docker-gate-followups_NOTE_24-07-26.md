@@ -11,6 +11,8 @@ metadata:
 
 # Post-Docker-Gate Followups — visitors-identity
 
+> **Audit 14-11-26 — SUPERSEDED.** The failure inventory below (478 passed / 23 failed / 17 errors) was closed on 07-08-26 by `81eb4e6` + `c92cc62` (integration lane then 537 passed / 0 failed). Do not act on it. Current test truth: CI has been red on main since ~13-08-26 and is being fixed in PR `fix/ci-green` — re-measure there. The conftest Redis-isolation recommendation (section 2) is the only part still worth reading.
+
 **Why this note exists:** the 24-07-26 EVL final run that closed the Docker/browser gates on
 `owned-data-layer` and `first-party-capture` (see
 `owned-data-layer-docker-verification_NOTE_23-07-26.md` and

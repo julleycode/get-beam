@@ -11,6 +11,8 @@ metadata:
 
 # Ad Audiences — Umbrella Plan
 
+> **Status reconciliation 14-11-26 (repo audit):** unchanged in substance — all 3 phases' code is on main (Phase 1 `09df589`, Phase 3 `e3adae3`); `ad_audiences_enabled` is OFF in prod (Railway env verified 14-11-26). The only remaining work is operator-side: Meta + Google sandbox smokes before any flag flip. The phase-1 plan's own `Status: PLANNED` line is stale (Phase 1 is VERIFIED).
+
 **Date:** 25-07-26
 **Complexity:** COMPLEX
 **Status:** 🧪 TESTING (all 3 phases code-complete; Phase 1 ✅ VERIFIED; Phases 2–3 EVL-green pending operator sandbox gates)

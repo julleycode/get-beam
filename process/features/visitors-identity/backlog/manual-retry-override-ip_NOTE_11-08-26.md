@@ -12,7 +12,7 @@ metadata:
 # Manual Retry cannot choose an IP — `override_ip` is sweep-only
 
 **Origin:** PVL cycle 2 of
-`process/features/visitors-identity/active/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger_PLAN_09-08-26.md`
+`process/features/visitors-identity/completed/ip-best-selection-retrigger_09-08-26/ip-best-selection-retrigger_PLAN_09-08-26.md`
 (defect ND-3, found by the adversarial verifier). Deliberately scoped OUT of that plan.
 
 ## TL;DR

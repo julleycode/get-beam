@@ -8,6 +8,8 @@ phase: "n/a — single COMPLEX plan"
 
 # LinkedIn Outreach Connect Extension — PLAN
 
+> **Status reconciliation 14-11-26 (repo audit):** code is on main (`apps/extension/`); the follow-on onboarding wizard shipped at `ecedc2e` and its task folder is archived (`completed/linkedin-extension-onboarding_26-07-26/`). Still in testing: `backlog/linkedin-extension-dev-stack-gates_NOTE_25-07-26.md` is open.
+
 Date: 25-07-26
 Status: CODE DONE — in testing (keep active). RESEARCH/SPEC/INNOVATE/PLAN/VALIDATE(Gate: PASS)/
 EXECUTE/EVL all complete (25-07-26); shipped in commits `89d924d` (feat) + `646689e` (process).

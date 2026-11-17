@@ -10,6 +10,8 @@ metadata:
 
 # Marketing Claims Gap — Container-Blocked Gates (all 3 phases)
 
+> **Audit 14-11-26 — RESOLVED, confirmed.** All three program migrations (`e4b1d78c3a05` → `f6a3c81d5e27` → `a8c2f47e91b6`) are behind the prod head `d3f8a2c61b47`, so they are applied on prod (boot-time `alembic upgrade head`). `icp_fit_enabled` + `campaign_benchmark_enabled` are still OFF in prod — that is an operator choice, not an open gate. Nothing left to do here.
+
 ## ✅ RESOLVED 17-08-26
 
 Docker daemon came back up (infra-postgres-1 `:5433` + infra-redis-1 `:6379`); **every gate

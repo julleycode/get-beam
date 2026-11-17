@@ -7,6 +7,8 @@ feature: onboarding-canary
 
 # PLAN — Private Beta Apply Form (COMPLEX)
 
+> **Status reconciliation 14-11-26 (repo audit):** NOT built beyond the data layer — only the `WaitlistSignup` application fields + migration `d7e2b4c81f93` exist on main (`52fa1cb`). There is no apply endpoint and no UI. The rest of this plan is still to do.
+
 ## TL;DR
 Six sections: (A) additive-nullable schema + migration (**7** nullable columns incl. `plan_interest`), (B) extend the zero-caller intake endpoint, (C) new public `/apply` React route, (D) admin waitlist UI surfaces the new fields, (E) rewire **7 static CTAs + 4 React pricing CTAs**, (F) invite-gate hardening (incl. the invite-URL/query-drop fix that makes AC-13 reachable at all) + operator flip. Nothing is enabled until the CTAs are rewired and `INVITE_ONLY=true` is set by an operator.
 

@@ -10,6 +10,8 @@ metadata:
 
 # erasure_requests Migration — Live Round-Trip Not Run (KG-5) — ✅ RESOLVED 07-08-26
 
+> **Audit 14-11-26 — RESOLVED, confirmed.** KG-5 is fully closed including the production leg: `d1a6c4e93f27` is behind the prod head `d3f8a2c61b47`. The "7/14 pass, 8/14 blocked on fixtures" line below is also stale — fixtures were repaired the same day (14/14). Parent plan archived: `completed/graph-erasure-compliance_07-08-26/`.
+
 **RESOLVED (07-08-26 Docker gate run, disposable postgres:16-alpine):** full 64-revision chain
 applied from an EMPTY database through head `d1a6c4e93f27` (this migration); downgraded 17
 revisions to `e6b2d4a1c837` (exercising this migration's downgrade leg — `erasure_requests`

@@ -7,6 +7,8 @@ feature: billing
 
 # PLAN — Per-Plan Site Limit Enforcement (SIMPLE)
 
+> **Status reconciliation 14-11-26 (repo audit):** `Status: PLANNED` below is stale — enforcement is on main at `7687b25` (per-plan site limits at `create_site`); the 10-08-26 local smoke observed the 402 on over-limit site creation. Not re-verified against this plan's full gate list by the audit, so the folder stays active.
+
 **Date**: 26-07-26
 **Status**: PLANNED (validate-contract written; awaiting EXECUTE approval)
 **Complexity**: SIMPLE

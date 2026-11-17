@@ -8,6 +8,8 @@ complexity: COMPLEX
 
 # Capacity Hardening — Beam API
 
+> **Status reconciliation 14-11-26 (repo audit):** `Status: planned, not started` below is stale — several workstreams are on main from 26-07-26: statement timeout + pool sizing `8097626`, incremental aggregation + repair sweep `8239186`, Celery dispatch gate `06a986f`, Redis socket timeout `01e1ea2`. The audit did not map every phase to a commit; follow-up work is in PR `feat/aggregation-watermark-bootstrap` (opened 14-11-26). Re-check the checklist before closing.
+
 **Date**: 25-07-26
 **Status**: ACTIVE — planned, not started
 **Complexity**: COMPLEX (5 phases: Phase 0 pre-conditions + 4 workstreams)

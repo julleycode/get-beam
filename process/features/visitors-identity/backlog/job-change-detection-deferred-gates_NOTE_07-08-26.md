@@ -10,7 +10,7 @@ metadata:
 
 # Job-Change Detection v1 — Deferred Gates
 
-Source plan: `process/features/visitors-identity/active/job-change-detection_07-08-26/job-change-detection_PLAN_07-08-26.md`
+Source plan: `process/features/visitors-identity/completed/job-change-detection_07-08-26/job-change-detection_PLAN_07-08-26.md`
 EXECUTE report: same folder, `job-change-detection_REPORT_07-08-26.md`
 
 Backend is code-complete, flag-OFF, 1093/1093 unit tests green. These two gates never ran, so

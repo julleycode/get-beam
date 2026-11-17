@@ -1,6 +1,6 @@
 ---
 name: note:ws2-emailability-tier-visibility-only
-description: "User decision: WS2 agent-operated session classifier gets a visibility-only emailability tier (not hard-exclude), matching the is_bot_suspect / is_internal_suspect precedent — is_emailable_identity() stays at 3 params. Must be transcribed into the WS2 SPEC by whoever owns process/features/pixel/active/ws2-agent-session-activation_07-08-26/."
+description: "User decision: WS2 agent-operated session classifier gets a visibility-only emailability tier (not hard-exclude), matching the is_bot_suspect / is_internal_suspect precedent — is_emailable_identity() stays at 3 params. Must be transcribed into the WS2 SPEC by whoever owns process/features/pixel/completed/ws2-agent-session-activation_07-08-26/."
 date: 07-08-26
 feature: pixel
 ---
@@ -8,7 +8,7 @@ feature: pixel
 # WS2 agent-operated emailability tier — visibility-only (user decision)
 
 **TL;DR** — The user decided that when the WS2 agent-operated session classifier (in
-`process/features/pixel/active/ws2-agent-session-activation_07-08-26/`) flags a session as
+`process/features/pixel/completed/ws2-agent-session-activation_07-08-26/`) flags a session as
 agent-operated, that flag stays **visibility-only** — it does NOT hard-exclude the identity from
 `is_emailable_identity()`. This mirrors the existing `is_bot_suspect` / `is_internal_suspect`
 precedent (flag-and-surface, not flag-and-block) and keeps `is_emailable_identity()` at its
@@ -18,7 +18,7 @@ already asserts).
 ## Why this note exists here and not in the WS2 SPEC directly
 
 The natural home for this decision is the WS2 SPEC/PLAN, but
-`process/features/pixel/active/ws2-agent-session-activation_07-08-26/` is under a **hard
+`process/features/pixel/completed/ws2-agent-session-activation_07-08-26/` is under a **hard
 exclusion** for this UPDATE PROCESS session — a concurrent Claude session is actively running a
 PVL loop in that folder and must not be touched. This note exists so the decision is not lost;
 it must be transcribed into the WS2 SPEC by whoever owns that folder next.
@@ -42,7 +42,7 @@ it must be transcribed into the WS2 SPEC by whoever owns that folder next.
 
 ## Action required
 
-Whoever next works `process/features/pixel/active/ws2-agent-session-activation_07-08-26/` must
+Whoever next works `process/features/pixel/completed/ws2-agent-session-activation_07-08-26/` must
 transcribe this decision into that folder's SPEC (and PLAN, if the PLAN currently leaves this
 open) before treating the emailability-tier question as settled. Do not silently assume
 hard-exclude was chosen — it explicitly was not.

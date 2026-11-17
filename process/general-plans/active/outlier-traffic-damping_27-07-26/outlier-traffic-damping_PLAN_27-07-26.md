@@ -8,6 +8,8 @@ phase: "n/a"
 
 # Outlier / Internal Traffic Damping — Implementation Plan
 
+> **Status reconciliation 14-11-26 (repo audit):** code is on main at `6426c47`; migration `f3a7c9e21b48` is applied on prod (prod head `d3f8a2c61b47`). Kept active for the open gaps in `process/general-plans/backlog/outlier-traffic-damping-deferred-gates_NOTE_27-07-26.md`.
+
 **Date**: 27-07-26
 **Status**: VALIDATED (see Validate Contract)
 **Complexity**: COMPLEX
