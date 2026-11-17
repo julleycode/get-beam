@@ -49,6 +49,28 @@ def _sensitive_header(name: str) -> bool:
     return any(marker in lowered for marker in _SENSITIVE_HEADER_MARKERS)
 
 
+def strip_query(url: str) -> str:
+    """Drop the query string and fragment; they can carry tokens or emails."""
+    for sep in ("?", "#"):
+        url = url.split(sep, 1)[0]
+    return url
+
+
+def _scrub_breadcrumbs(event: dict) -> None:
+    crumbs = event.get("breadcrumbs")
+    values = crumbs.get("values") if isinstance(crumbs, dict) else crumbs
+    if not isinstance(values, list):
+        return
+    for crumb in values:
+        data = crumb.get("data") if isinstance(crumb, dict) else None
+        if not isinstance(data, dict):
+            continue
+        for key in ("url", "from", "to"):
+            if isinstance(data.get(key), str):
+                data[key] = strip_query(data[key])
+        data.pop("http.query", None)
+
+
 def scrub_sentry_event(event: dict, _hint: dict | None = None) -> dict:
     """Drop auth material and anything on the user except an id.
 
@@ -68,6 +90,10 @@ def scrub_sentry_event(event: dict, _hint: dict | None = None) -> dict:
         request.pop("cookies", None)
         # Ingest and dashboard bodies carry visitor emails and other PII.
         request.pop("data", None)
+        request.pop("query_string", None)
+        if isinstance(request.get("url"), str):
+            request["url"] = strip_query(request["url"])
+    _scrub_breadcrumbs(event)
 
     user = event.get("user")
     if isinstance(user, dict):

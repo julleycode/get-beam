@@ -1,5 +1,7 @@
-import type { ErrorEvent, TransactionEvent } from "@sentry/core";
 import * as Sentry from "@sentry/nextjs";
+import type { ErrorEvent } from "@sentry/nextjs";
+
+type TransactionEvent = Parameters<NonNullable<NonNullable<Parameters<typeof Sentry.init>[0]>["beforeSendTransaction"]>>[0];
 
 /**
  * Sentry for the Next.js dashboard.
@@ -23,7 +25,10 @@ type Scrubbable = {
     headers?: Record<string, string>;
     cookies?: unknown;
     data?: unknown;
+    url?: string;
+    query_string?: unknown;
   };
+  breadcrumbs?: Array<{ data?: Record<string, unknown> | null; message?: string }>;
   user?: {
     id?: string | number;
     email?: string;
@@ -47,6 +52,12 @@ export function readSentryRelease(env: NodeJS.ProcessEnv = process.env): string 
   return value || undefined;
 }
 
+/** Drops the query string and fragment; they can carry tokens or emails. */
+export function stripQuery(url: string): string {
+  const cut = url.search(/[?#]/);
+  return cut === -1 ? url : url.slice(0, cut);
+}
+
 export function scrubSentryEvent<T extends Scrubbable>(event: T): T {
   const headers = event.request?.headers;
   if (headers) {
@@ -57,6 +68,17 @@ export function scrubSentryEvent<T extends Scrubbable>(event: T): T {
   if (event.request) {
     delete event.request.cookies;
     delete event.request.data;
+    delete event.request.query_string;
+    if (typeof event.request.url === "string") event.request.url = stripQuery(event.request.url);
+  }
+  if (Array.isArray(event.breadcrumbs)) {
+    for (const crumb of event.breadcrumbs) {
+      const data = crumb?.data;
+      if (!data) continue;
+      for (const key of ["url", "from", "to"]) {
+        if (typeof data[key] === "string") data[key] = stripQuery(data[key] as string);
+      }
+    }
   }
   if (event.user) {
     const id = event.user.id;

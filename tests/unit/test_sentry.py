@@ -160,3 +160,25 @@ def test_fastapi_error_captures_clerk_id_and_drops_auth(sentry_disabled):
         user = event.get("user") or {}
         assert "email" not in user
         assert list(user.keys()) <= ["id"]
+
+
+def test_scrub_strips_query_strings_from_url_and_breadcrumbs():
+    event = {
+        "request": {
+            "url": "https://api.example.com/v1/x?token=secret&email=a@b.c#frag",
+            "query_string": "token=secret&email=a@b.c",
+        },
+        "breadcrumbs": {
+            "values": [
+                {"data": {"url": "https://h/p?key=abc", "http.query": "key=abc"}},
+                {"data": None},
+            ]
+        },
+    }
+    out = scrub_sentry_event(event)
+    assert out["request"]["url"] == "https://api.example.com/v1/x"
+    assert "query_string" not in out["request"]
+    crumb = out["breadcrumbs"]["values"][0]["data"]
+    assert crumb["url"] == "https://h/p"
+    assert "http.query" not in crumb
+    assert "secret" not in json.dumps(out)

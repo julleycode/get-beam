@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import type { NextRequest, NextFetchEvent } from "next/server";
-import * as Sentry from "@sentry/nextjs";
 import { shouldFireFetchBeacon, fireFetchBeacon } from "@/lib/fetch-beacon";
 
 // NOTE: /onboarding used to 307 non-US visitors to /login, on the premise that
@@ -28,17 +27,9 @@ if (process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
     "/.well-known/(.*)",  // public agent-discovery manifests (ai-plugin.json)
     "/pricing-overview(.*)",  // public citation-watermark probe page (H4) — must never 302 to /sign-in
   ]);
-  handler = clerkMiddleware((auth: () => { protect: () => void; userId?: string | null }, request: NextRequest) => {
-    const session = auth();
-    if (session.userId) {
-      try {
-        Sentry.setUser({ id: session.userId });
-      } catch {
-        // Sentry must never block auth.
-      }
-    }
+  handler = clerkMiddleware((auth: () => { protect: () => void }, request: NextRequest) => {
     if (!isPublicRoute(request)) {
-      session.protect();
+      auth().protect();
     }
   });
 } else {

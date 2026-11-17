@@ -5,7 +5,6 @@ import { Analytics } from "@vercel/analytics/next";
 import { cn } from "@/lib/utils";
 import { ClerkTokenSync } from "@/components/clerk-token-sync";
 import { SentryClerkUser } from "@/components/sentry-clerk-user";
-import { bindServerClerkUser } from "@/lib/sentry-server-user";
 import { OG_IMAGE, OG_IMAGE_HEIGHT, OG_IMAGE_WIDTH, SITE_URL } from "@/lib/blog-fetch";
 import { Providers } from "./providers";
 import "./globals.css";
@@ -87,7 +86,6 @@ export default function RootLayout({
   );
 
   if (HAS_CLERK) {
-    bindServerClerkUser();
     return (
       <ClerkProvider signInUrl="/sign-in" signUpUrl="/sign-up">
         {inner}

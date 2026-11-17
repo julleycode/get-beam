@@ -9,6 +9,7 @@ import {
   readSentryEnvironment,
   readSentryRelease,
   scrubSentryEvent,
+  stripQuery,
 } from "./sentry";
 
 // Public example key. The transport below never opens a socket.
@@ -150,5 +151,28 @@ describe("sentry tags", () => {
     expect(event.request?.cookies).toBeUndefined();
     expect(event.request?.data).toBeUndefined();
     expect(JSON.stringify(event)).not.toContain("secret@example.com");
+  });
+});
+
+describe("query string scrubbing", () => {
+  it("strips query and fragment from request url and breadcrumb urls", () => {
+    const event = scrubSentryEvent({
+      request: {
+        url: "https://app.example.com/dash?token=secret&email=a@b.c#x",
+        query_string: "token=secret",
+      },
+      breadcrumbs: [
+        { data: { url: "https://api.example.com/v1?key=abc", from: "/a?x=1", to: "/b#y" } },
+        { message: "no data" },
+      ],
+    });
+    expect(event.request?.url).toBe("https://app.example.com/dash");
+    expect(event.request?.query_string).toBeUndefined();
+    expect(event.breadcrumbs?.[0].data).toEqual({ url: "https://api.example.com/v1", from: "/a", to: "/b" });
+    expect(JSON.stringify(event)).not.toContain("secret");
+  });
+
+  it("leaves urls without a query unchanged", () => {
+    expect(stripQuery("https://x.test/a/b")).toBe("https://x.test/a/b");
   });
 });
