@@ -31,6 +31,8 @@ from apps.api.routers.visitors_helpers import (
     _run_social_resolution_job,
 )
 from apps.api.schemas.visitors import (
+    AgentTimelineEntry,
+    AgentTimelineOut,
     InternalOverrideRequest,
     ManualIdentifyRequest,
     VisitorAiSourceOut,
@@ -823,6 +825,78 @@ async def get_visitor_detail(
         })
 
     return VisitorDetailOut(**data)
+
+
+# Cap on timeline rows returned (oldest first) — bounds payload + query cost.
+AGENT_TIMELINE_MAX_ENTRIES = 200
+
+
+@router.get("/{site_id}/{visitor_id}/agent-timeline", response_model=AgentTimelineOut)
+async def get_agent_timeline(
+    site_id: str,
+    visitor_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> AgentTimelineOut:
+    """WS1 — chronological AI-agent fetch timeline for a resolved visitor.
+
+    Read-only join over ``agent_handoff_links`` ⋈ ``agent_fetch_events``, widening
+    the single-latest handoff link already surfaced by ``get_visitor_detail`` (H2)
+    into the full ordered (ASC) list. Additive, tenant-scoped exactly like
+    ``get_visitor_detail`` (``_verify_site_access`` → 404-not-403 on a foreign
+    ``site_id``, never leaking id existence). PROBABILISTIC attribution — a pure
+    SELECT with NO write path, so it can never create/upgrade/mutate an
+    ``IdentifiedVisitor`` or touch emailability.
+
+    An empty timeline is a normal state (a valid visitor with no handoff-linked
+    fetch events, and a foreign-but-syntactically-valid ``visitor_id``, both look
+    identical): returns 200 + ``entries: []``, never a 404.
+    """
+    await _verify_site_access(db, site_id, user)
+
+    from apps.api.models.agent_fetch_event import AgentFetchEvent
+    from apps.api.models.agent_handoff_link import AgentHandoffLink
+
+    result = await db.execute(
+        select(AgentHandoffLink, AgentFetchEvent)
+        .join(
+            AgentFetchEvent,
+            AgentFetchEvent.id == AgentHandoffLink.agent_fetch_event_id,
+        )
+        .join(
+            Visitor,
+            (Visitor.site_id == AgentHandoffLink.site_id)
+            & (Visitor.visitor_id == AgentHandoffLink.visitor_id),
+        )
+        .where(
+            AgentHandoffLink.site_id == site_id,
+            AgentHandoffLink.visitor_id == visitor_id,
+            # [VALIDATE P1 — defense-in-depth] belt-and-suspenders tenant scope on
+            # BOTH joined tables. get_visitor_detail's H2 join filters only the
+            # link side; the correlation sweep only ever links same-site rows, so
+            # this is not a live exploit path today — but it is cheap and correct
+            # to close on a 1:1 unique join.
+            AgentFetchEvent.site_id == site_id,
+            # Same human-only guard as get_visitor_detail (AC2 / GUARD #2): a
+            # synthetic agent-derived or phantom imported Visitor never surfaces
+            # a timeline, even if its id were guessed/enumerated.
+            human_only_visitor_filter(),
+        )
+        # Order by the timestamp we DISPLAY (the fetch time), not the link's
+        # created_at (the sweep time) — the two can diverge.
+        .order_by(AgentFetchEvent.created_at.asc(), AgentFetchEvent.id.asc())
+        .limit(AGENT_TIMELINE_MAX_ENTRIES)
+    )
+    entries = [
+        AgentTimelineEntry(
+            page=fetch_event.page_path,
+            vendor=fetch_event.vendor,
+            timestamp=fetch_event.created_at,
+            confidence=link.confidence,
+        )
+        for link, fetch_event in result.all()
+    ]
+    return AgentTimelineOut(entries=entries)
 
 
 @router.post("/{site_id}/{visitor_id}/enrich")
