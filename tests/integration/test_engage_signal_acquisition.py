@@ -696,6 +696,8 @@ class TestRoiThroughIngest:
         both halves — the ROI counter AND the `attributed_visit` outcome row that
         Phase 3a's positive-rate depends on.
         """
+        # The ingest-side producer is gated on the feature flag (default OFF).
+        monkeypatch.setattr(settings, "engage_outcome_capture_enabled", True)
         bundle = await _seed(
             test_db,
             email_tag="engage-roi",

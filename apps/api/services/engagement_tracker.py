@@ -13,7 +13,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 import structlog
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.models.engagement_attribution import EngagementAttribution
@@ -36,6 +36,21 @@ def make_utm_tag() -> str:
     name; the tag format stays owned here.
     """
     return _make_utm_tag()
+
+
+_SEEN_TTL_SECONDS = 30 * 24 * 3600
+
+
+async def _first_sighting(site_id: str, utm_tag: str, visitor_id: str) -> bool:
+    """True exactly once per (site, tag, visitor) within the TTL. Fail-closed."""
+    try:
+        from apps.api.services.redis_client import get_redis
+
+        key = f"engage_attr_seen:{site_id}:{utm_tag}:{visitor_id[:64]}"
+        return bool(await get_redis().set(key, "1", nx=True, ex=_SEEN_TTL_SECONDS))
+    except Exception as exc:
+        logger.warning("engage_attr_dedupe_unavailable", error_type=type(exc).__name__)
+        return False
 
 
 async def derive_draft_site_id(
@@ -71,8 +86,14 @@ async def derive_draft_site_id(
 
     try:
         if visitor_id:
+            # Tenant-scoped: only sites the drafting user OWNS are candidates.
+            # Without the Site join a visitor_id that also exists under another
+            # tenant's site would resolve to (or make ambiguous) a site this user
+            # does not own, attributing the draft cross-tenant.
             result = await db.execute(
-                select(Visitor.site_id).where(Visitor.visitor_id == visitor_id)
+                select(Visitor.site_id)
+                .join(Site, Site.site_id == Visitor.site_id)
+                .where(Visitor.visitor_id == visitor_id, Site.user_id == user_id)
             )
             site_ids = {row[0] for row in result.all() if row[0]}
             if len(site_ids) == 1:
@@ -192,27 +213,53 @@ class EngagementTracker:
         site_id: str,
         utm_source: Optional[str],
         is_identified: bool = False,
-    ) -> None:
+        visitor_id: Optional[str] = None,
+    ) -> bool:
         """Increment attribution counters when a visitor arrives with a Beam UTM tag.
 
         Called during event ingestion when utm_source matches a known Beam tag.
+        Returns True when the counters were incremented.
+
+        Hardening (public, unauthenticated ingest path):
+        - Dedupe per (tag, visitor_id): every pageview batch of the same visitor
+          carries the same utm_source, so counting per batch inflated
+          ``new_visitors_count`` by the visitor's pageview count — and let any
+          caller who saw a tagged link inflate it at will. A Redis SET NX marker
+          (30-day TTL) makes it once per visitor. If Redis is unavailable we do
+          NOT count (fail-closed: undercount beats an inflatable metric).
+          ``visitor_id=None`` keeps the legacy un-deduped behavior for callers
+          that have no visitor context.
+        - Atomic increment: ``UPDATE ... SET n = n + 1`` instead of an ORM
+          read-modify-write, so concurrent batches cannot lose updates.
         """
         if not utm_source or not utm_source.startswith(_UTM_PREFIX):
-            return
+            return False
 
         result = await self.db.execute(
-            select(EngagementAttribution).where(
+            select(EngagementAttribution.id).where(
                 EngagementAttribution.utm_tag == utm_source,
                 EngagementAttribution.site_id == site_id,
             )
         )
-        attribution = result.scalar_one_or_none()
-        if not attribution:
-            return
+        attribution_id = result.scalar_one_or_none()
+        if attribution_id is None:
+            return False
 
-        attribution.new_visitors_count += 1
+        if visitor_id is not None and not await _first_sighting(
+            site_id, utm_source, visitor_id
+        ):
+            return False
+
+        values = {
+            "new_visitors_count": EngagementAttribution.new_visitors_count + 1,
+        }
         if is_identified:
-            attribution.new_identified_count += 1
+            values["new_identified_count"] = EngagementAttribution.new_identified_count + 1
+        await self.db.execute(
+            update(EngagementAttribution)
+            .where(EngagementAttribution.id == attribution_id)
+            .values(**values)
+        )
         await self.db.commit()
 
         logger.info(
@@ -221,6 +268,7 @@ class EngagementTracker:
             site_id=site_id,
             is_identified=is_identified,
         )
+        return True
 
     async def get_engagement_roi(
         self,
