@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
+from apps.api.sentry_init import bind_clerk_user
 from apps.api.models.database import get_db
 from apps.api.models.site import Site
 from apps.api.models.user import User
@@ -257,6 +258,8 @@ async def get_current_user(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid Clerk token: no sub claim",
                 )
+            # Id only. The profile fetch below is for our own user row, not Sentry.
+            bind_clerk_user(clerk_user_id)
 
             result = await db.execute(
                 select(User).where(User.clerk_user_id == clerk_user_id)
@@ -410,6 +413,9 @@ async def get_current_user(
         )
     # Same activity touch on the legacy HS256 path (see the Clerk branch above).
     await record_user_activity(user)
+    # Legacy sessions have no Clerk id unless the row was linked. Never send
+    # the email or the internal user UUID as the Sentry user.
+    bind_clerk_user(user.clerk_user_id)
     return user
 
 

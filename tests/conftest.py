@@ -36,6 +36,9 @@ os.environ.setdefault("TOKEN_ENCRYPTION_KEY", _Fernet.generate_key().decode())
 # agentic /ai/ask path would silently hit the live API before its fallback.
 # Env vars beat dotenv in pydantic-settings, so an empty value forces mocks.
 os.environ.setdefault("GEMINI_API_KEY", "")
+# A developer .env may set SENTRY_DSN. Force it off for the suite so imports
+# of the API never phone home. Capture tests pass a dummy DSN into init_sentry.
+os.environ["SENTRY_DSN"] = ""
 # Developer .env may set RESOLUTION_RETRY_COOLDOWN_DAYS=0 to disable the
 # no-retry lock locally. Tests that assert "recently_attempted" need the
 # historical 30-day window, so pin it before Settings loads.

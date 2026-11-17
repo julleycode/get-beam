@@ -52,6 +52,9 @@ x402==2.28.0  # pinned: 402 body shape changed across releases
 # Logging
 structlog==24.4.0
 
+# Error reporting. Off unless SENTRY_DSN is set (see apps/api/sentry_init.py).
+sentry-sdk==2.75.0
+
 # Analytics DB (optional, fails gracefully)
 clickhouse-connect==0.8.3
 

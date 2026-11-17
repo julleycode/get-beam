@@ -1,7 +1,14 @@
+import { withSentryConfig } from "@sentry/nextjs/config";
+
+/** Source map upload runs only when the auth token is present. */
+const sentryAuthToken = process.env.SENTRY_AUTH_TOKEN;
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
     missingSuspenseWithCSRBailout: false,
+    // Next.js 14 does not load instrumentation.ts unless this is on.
+    instrumentationHook: true,
   },
   // Let the Vercel CDN cache public blog HTML, but ONLY for requests that carry no
   // Clerk session cookie.
@@ -61,4 +68,26 @@ const nextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG,
+  project: process.env.SENTRY_PROJECT,
+  authToken: sentryAuthToken,
+  silent: true,
+  // The build plugin's own telemetry is separate from app errors. Leave it off.
+  telemetry: false,
+  sourcemaps: {
+    disable: !sentryAuthToken,
+  },
+  release: {
+    // Creating a release calls Sentry. Skip that unless upload is configured.
+    create: Boolean(sentryAuthToken),
+  },
+  errorHandler(error) {
+    console.warn("[sentry] source map upload skipped:", error);
+  },
+  webpack: {
+    treeshake: {
+      removeDebugLogging: true,
+    },
+  },
+});

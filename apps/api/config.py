@@ -136,6 +136,9 @@ class Settings(BaseSettings):
     # ─── Clerk Authentication ───
     clerk_secret_key: str = ""
     clerk_publishable_key: str = ""
+
+    # ─── Sentry (optional). Empty keeps the SDK off; never hardcode a DSN. ───
+    sentry_dsn: str = ""
     # Gate new-account creation to waitlist-approved emails. Default open now
     # that the private beta is over; set INVITE_ONLY=true to re-gate.
     invite_only: bool = False
