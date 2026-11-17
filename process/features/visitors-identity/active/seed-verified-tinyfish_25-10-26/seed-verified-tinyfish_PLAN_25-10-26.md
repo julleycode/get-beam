@@ -267,3 +267,142 @@ git diff --stat main -- apps/api/services/enricher.py apps/api/services/identity
 # KG-1 (Docker): DATABASE_URL=<localhost:5433 dsn> /Users/apple/.venvs/get-beam/bin/python -m pytest tests/integration/test_web_research_endpoint.py -q
 ```
 Known gaps: KG-1 Docker (P2-G7, P2-G8); KG-2 live TinyFish/Gemini shape (Phase 1, unchanged).
+
+## Phase 3: Prod demo seed (25-10-26)
+
+**Phase 3 status:** COMMITTED 14-11-26 on branch `feat/seed-verified-prod-demo` (draft PR to `main`) — code + unit tests done; PII check tightened (D9 amended). **EVL (independent vc-tester run) still pending; operator prod run NOT done** (needs the site owner + explicit yes). Commands: REPORT `## Phase 3`.
+
+**Goal:** let the operator put the 6 fictional demo visitors (5 verified + "Demo Visitor @ Stripe") into a dedicated demo site owned by `tranthai.work@gmail.com` on PRODUCTION, so the live "Web research (TinyFish)" button can be demoed — without ever touching that user's real sites, billing, email, or the cross-tenant identity graph. EXECUTE = code + unit tests only. The prod run is a separate operator step that needs an explicit user "yes".
+
+Base: plan against `origin/main` (`6ef19f7`; its 3 extra commits are agent-gateway/x402 + httpx bump — no overlap with this blast radius). EXECUTE must `git rebase origin/main` (or merge) first.
+
+### Research Findings (Phase 3)
+
+- `scripts/seed_verified_visitors.py` today: hard local-only guard (`_assert_local_dsn` on env + `settings.database_url`), fixed `SEED_SITE_ID="beam_seed_verified"`, owner = `--user-id` or first user, writes `Site` + `Visitor` + `IdentifiedVisitor` + `VisitorEmail` + `EnrichmentProfile` only. It does **not** write `beam_identity_graph`, `events`, `suppression_list`, `api_usage_logs`, or call `increment_usage` — confirmed by reading the script. Good: nothing cross-tenant to skip; Phase 3 adds a unit test that pins this.
+- Dashboard site picker = `GET /api/v1/sites` → `select(Site).where(Site.user_id == user.id)` (`apps/api/routers/sites.py:248`). No plan/quota/onboarding/pixel_verified filter. A row with the correct `user_id` is enough to appear.
+- `Site` defaults that matter: `hot_alert_enabled=True` (would email the owner on hot visitors — seed sets **False**), `auto_identify_enabled=False`, `contribution_enabled=False`, `benchmark_contribution_enabled=False`, `tracking_enabled=True` (keep; no pixel is installed so nothing ingests).
+- Web research (`routers/visitors.py:_web_research`) needs: flag on, site access, human visitor, `IdentifiedVisitor` row, `EnrichmentProfile` row, non-empty `full_name`, company. It does NOT read `do_not_email` or the provider — so a never-email guard does not break the demo. Does not meter plan usage.
+- Email paths: `campaign_sender.py` honors `IdentifiedVisitor.do_not_email` (line 329) and `is_email_suppressed`. Other `is_emailable_identity` consumers (`csv_exporter`, `hot_alert`, `outcome_digest`) key off provider. `form_capture` is person-level → emailable by provider.
+- Precedent for remote opt-in: `scripts/refresh_ip_org.py` `--apply` refuses non-local DSN unless `--allow-remote`; unparseable = refuse.
+- Prod DSN/PII keys live in the Railway `retarget-agent` production service env; `.env` `DATABASE_URL` also points at prod (see all-context ⚠️ SAFETY).
+
+### Decisions (Phase 3)
+
+| # | Decision | Why |
+|---|---|---|
+| D1 | Remote mode needs BOTH `--allow-remote` AND `--owner-email`; `--user-id` is rejected in remote mode. Local behavior unchanged (refusal exit 2 for non-local DSN without `--allow-remote`). | Fail-closed; matches refresh_ip_org precedent. |
+| D2 | Remote writes need `--yes`. Without it: print dry-run summary and exit 0 with zero writes. No interactive prompt (deterministic, testable, safe under `railway run`). | Requirement; avoids TTY ambiguity. |
+| D3 | Owner = exact case-insensitive match `lower(users.email) == lower(:email)`; 0 or >1 match → exit 3, no writes. Never creates users. | Requirement. |
+| D4 | Remote site id = `beam_seed_verified_` + first 10 hex of `sha256(str(owner_id))` (29 chars ≤ 50). Local keeps `beam_seed_verified`. If a site with that id exists and its `user_id != owner` → exit 4, no writes. | Per-user, no collision, never a real site (real ids are not `beam_seed_verified_*`). |
+| D5 | Visitor ids in remote mode = `uuid5(NS, f"seed-verified-{site_id}-{slug}")` (local ids unchanged). | `visitor_id` may be unique per table; avoids cross-site id collision. |
+| D6 | Never-email guard: every seeded `IdentifiedVisitor` gets `do_not_email=True` (both modes); demo site `hot_alert_enabled=False`; emails stay RFC 2606 `example.*` (undeliverable by spec). Provider stays `form_capture` so rows still show as identified. No `suppression_list` writes (that table is cross-tenant). | Three independent backstops; web-research unaffected (does not read these). |
+| D7 | Unseed in remote mode deletes, scoped by `site_id == <demo site id>` (whole site, not just roster ids), from: `EnrichmentProfile`, `VisitorEmail`, `IdentifiedVisitor`, `Visitor`, `Event`, then `Site`. Refuses (exit 4) if the site's `user_id != owner`. Requires `--yes` too. | Removes rows web-research or anything else may have added; owner check prevents deleting someone else's site. |
+| D8 | Dry-run summary prints: mode, DB **hostname only** (no user/password/port/db), owner user id, site id, action (seed/unseed), per-table row counts (seed: sites 0/1, visitors 6, identified_visitors 6, visitor_emails 6, enrichment_profiles 6; unseed: live counts via `select count`). Never prints DSN, keys, or emails. | Requirement; hostname reveals no secret. |
+| D9 | PII encryption uses the process env (`PII_HMAC_KEY`/`PII_ENCRYPTION_KEY`) via existing `pii_crypto`. Remote mode refuses (exit 5) if `settings.pii_hmac_key` is empty or there is no effective Fernet-valid PII key (`pii_encryption_key or encryption_key`, mirroring `_get_fernet()`) — amended 14-11-26: prod has empty `PII_ENCRYPTION_KEY` + valid `ENCRYPTION_KEY`, so the fallback is the real key — otherwise ciphertext/bidx would be wrong for prod. Operator supplies env via `railway run` — the agent never reads/prints secrets. | Prod API must decrypt the same rows. |
+
+Rejected: interactive confirm (not testable; `railway run` may lack TTY); reuse fixed `beam_seed_verified` (collides across users); non-person provider (would show as candidate, not identified); suppression rows (cross-tenant table).
+
+### Touchpoints (Phase 3)
+
+- `scripts/seed_verified_visitors.py` — add args `--allow-remote`, `--owner-email`, `--yes`; refactor guard into `check_target(dsn, allow_remote, owner_email, user_id) -> mode`; `_resolve_owner_by_email`; `remote_site_id(owner)`; `summarize(...)`; `do_not_email=True`; `hot_alert_enabled=False`; remote unseed scope.
+- `tests/unit/test_seed_verified_visitors.py` — new tests below (fake-session pattern, no DB).
+- Read-only: `apps/api/routers/sites.py`, `apps/api/routers/visitors.py`, `apps/api/models/{site,visitor,event,user}.py`, `apps/api/services/pii_crypto.py`.
+
+### Public Contracts (Phase 3)
+
+CLI only (operator script). No API, schema, migration, or model change. Local invocation contract unchanged.
+
+### Blast Radius (Phase 3)
+
+2 files (1 script, 1 test). Risk class: **operator data write to production** (destructive-data class for unseed) — mitigated by D1–D9; the prod run itself is outside EXECUTE.
+
+### Implementation Checklist (Phase 3)
+
+1. [ ] Rebase onto `origin/main`.
+2. [ ] Args + `check_target`: non-local DSN & no `--allow-remote` → exit 2; `--allow-remote` without `--owner-email` → exit 2; `--allow-remote` + `--user-id` → exit 2; local DSN + `--allow-remote` → allowed (treated as remote mode, useful for local rehearsal).
+3. [ ] `_resolve_owner_by_email` (exact, case-insensitive, 0/>1 → exit 3).
+4. [ ] `remote_site_id(owner_id)` + ownership check on existing site (exit 4).
+5. [ ] PII-key presence check in remote mode (exit 5).
+6. [ ] Summary printer (hostname-only redaction); remote without `--yes` → summary + exit 0, no `db.begin()` writes.
+7. [ ] Seed: `do_not_email=True` on IdentifiedVisitor; new Site gets `hot_alert_enabled=False`, name "Beam Demo (fictional visitors)", url `https://example.com`.
+8. [ ] Remote unseed: delete by `site_id` across EnrichmentProfile, VisitorEmail, IdentifiedVisitor, Visitor, Event, then Site.
+9. [ ] Docstring: replace "There is NO remote override flag" with the opt-in rules + operator command.
+10. [ ] Unit tests (Verification Evidence). Run full seed test file + `test_identity_classification`-adjacent regressions.
+
+### Verification Evidence (Phase 3)
+
+| Gate / Scenario | Strategy | Proves SPEC criterion |
+|---|---|---|
+| P3-G1 non-local DSN without `--allow-remote` → exit 2, `async_session` never called | Fully-Automated | default refusal unchanged |
+| P3-G2 `--allow-remote` without `--owner-email` → exit 2; with `--user-id` → exit 2 | Fully-Automated | both flags required |
+| P3-G3 remote without `--yes` → summary printed, zero `db.add`/`delete` | Fully-Automated | dry-run before writes |
+| P3-G4 summary contains hostname, not password/user/port/emails | Fully-Automated | redaction |
+| P3-G5 owner resolution: 0 → exit 3, 2 → exit 3, 1 → id | Fully-Automated | exact owner match, no user creation (no `User` add) |
+| P3-G6 remote site id deterministic, differs per owner, prefix `beam_seed_verified_`, ≤50 chars; existing site with other owner → exit 4 | Fully-Automated | no collision / never touch others' sites |
+| P3-G7 seeded IdentifiedVisitors all `do_not_email=True`, Site `hot_alert_enabled=False`, 6 rows with `--demo-company` | Fully-Automated | never-emailable guard |
+| P3-G8 remote unseed deletes only `site_id == demo id` across 5 child tables + Site; refuses other-owner site | Fully-Automated | unseed scope |
+| P3-G9 seed never touches `beam_identity_graph`/`suppression_list`/usage (no such model in added objects / executed statements) | Fully-Automated | no cross-tenant / billing writes |
+| P3-G10 missing PII keys in remote mode → exit 5 | Fully-Automated | encryption matches prod |
+| P3-G11 existing Phase 1/2 seed tests still pass | Fully-Automated | regression |
+| P3-OP operator prod run + checklist below | Hybrid (operator, post-EXECUTE) | site + 6 visitors visible; web research works; unseed clean |
+
+### Operator Prod Run (NOT part of EXECUTE — needs explicit user yes)
+
+Run from repo root after the change is merged/deployed-agnostic (script runs locally against prod env). Uses the Railway production service env so DSN + PII keys come from Railway, never typed or printed:
+
+```bash
+# 1. dry run (no writes) — check hostname, owner id, site id, counts
+railway run --service <api-service> --environment production -- \
+  .venv/bin/python -m scripts.seed_verified_visitors --allow-remote \
+  --owner-email tranthai.work@gmail.com --demo-company
+# 2. write
+railway run --service <api-service> --environment production -- \
+  .venv/bin/python -m scripts.seed_verified_visitors --allow-remote \
+  --owner-email tranthai.work@gmail.com --demo-company --yes
+# 3. later cleanup
+railway run --service <api-service> --environment production -- \
+  .venv/bin/python -m scripts.seed_verified_visitors --allow-remote \
+  --owner-email tranthai.work@gmail.com --unseed --yes
+```
+
+Note: if Railway's `DATABASE_URL` uses a private/internal hostname unreachable from a laptop, use the public proxy URL variable (e.g. `DATABASE_PUBLIC_URL`) by running `railway run ... -- sh -c 'DATABASE_URL="$DATABASE_PUBLIC_URL" .venv/bin/python -m ...'` — still no secret printed.
+
+Verification checklist (operator):
+- [ ] Dry-run shows host `*.supabase.com` (retarget-agent), the expected owner id, site `beam_seed_verified_<hash>`, counts 1/6/6/6/6.
+- [ ] Dashboard (signed in as tranthai.work@gmail.com) site picker lists "Beam Demo (fictional visitors)"; real sites unchanged.
+- [ ] Visitors page shows 6 identified visitors incl. "Demo Visitor" @ Stripe.
+- [ ] "Web research (TinyFish)" on Demo Visitor returns `updated` or `no_results` (not 404/409/422).
+- [ ] No email sent (no hot alert; campaigns would skip `do_not_email`).
+- [ ] `--unseed --yes` removes the site; picker no longer lists it; dry-run unseed afterwards shows 0 rows.
+
+### Test Infra Improvement Notes (Phase 3)
+
+(none identified yet)
+
+### Resume and Execution Handoff (Phase 3)
+
+1. Selected plan: this file, section `## Phase 3: Prod demo seed (25-10-26)`.
+2. Last completed: PLAN + VALIDATE (Phase 3).
+3. Validate-contract: written below (inner-pvl: phase-3).
+4. Context loaded: process/context/all-context.md (SAFETY note), seed script + tests, sites/visitors routers, Site/IdentifiedVisitor models, identity_classification, campaign_sender.
+5. Next: ENTER EXECUTE MODE → items 1–10; then EVL (vc-tester runs gates). Prod run = separate user yes.
+
+### Validate Contract (Phase 3)
+
+generated-by: inner-pvl: phase-3
+date: 2026-10-25
+Date: 25-10-26
+Gate: PASS
+
+Layer 1: Infra fit PASS (script-only, runs under operator env; no DB access during EXECUTE) · Test coverage PASS (all logic unit-testable with existing fake session) · Breaking changes PASS (local CLI contract unchanged; no schema/API) · Security PASS (fail-closed flags, owner check, hostname-only redaction, no secret reads by agent, triple never-email guard).
+Layer 2: Decisions/Checklist PASS — targets exist (`_assert_local_dsn`, `_resolve_owner`, `_run`, `main` in script; `do_not_email`, `hot_alert_enabled` columns exist). Highest-risk edit: remote unseed delete scope → mitigated by ownership check + G8.
+Known-gaps (not blocking): Railway service name and private-vs-public DSN host unknown to agent (operator step only); P3-OP is Hybrid/manual.
+
+Test gates (EXECUTE + EVL):
+```bash
+cd /Users/apple/get-beam/.claude/worktrees/visitor-seed-tinyfish-integration-e3d167
+/Users/apple/.venvs/get-beam/bin/python -m pytest tests/unit/test_seed_verified_visitors.py -q
+/Users/apple/.venvs/get-beam/bin/python -m pytest tests/unit -q -k "seed or identity_classification or web_research"
+node .claude/skills/vc-generate-plan/scripts/validate-plan-artifact.mjs process/features/visitors-identity/active/seed-verified-tinyfish_25-10-26/seed-verified-tinyfish_PLAN_25-10-26.md
+```
+Execute-agent instructions: E1 never set or read prod `DATABASE_URL`; tests must monkeypatch DSN/settings and fake `async_session`. E2 do not run the script against any DB. E3 TDD: write P3-G1..G10 red first.
