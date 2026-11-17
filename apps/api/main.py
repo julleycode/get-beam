@@ -12,6 +12,7 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from apps.api.config import settings
+from apps.api.sentry_init import init_sentry
 from apps.api.models.database import engine, Base
 from apps.api.models.api_key import UserApiKey  # noqa: F401 — register for create_all
 from apps.api.models.request_log import RequestLog  # noqa: F401 — register for create_all
@@ -89,6 +90,10 @@ structlog.configure(
 )
 
 logger = structlog.get_logger()
+
+# Before the app and its routes exist, so the FastAPI integration wraps them.
+# Empty SENTRY_DSN returns immediately and does not call sentry_sdk.init.
+init_sentry(settings.sentry_dsn, environment=settings.app_env)
 
 # Phase 05 (5b): dual-write encrypted PII columns on every ORM insert/update.
 register_pii_encryption_hooks()
