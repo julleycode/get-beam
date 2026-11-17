@@ -28,27 +28,49 @@ HTTP 404, never a 403 and never a distinguishing error.
 Phase 3 wires the action tools. They are not present here.
 """
 
+import hashlib
+import hmac
 import json
+import math
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from apps.api.config import settings
 from apps.api.models.database import get_db
+from apps.api.schemas.agent_gateway import REQUIRED_QUALIFICATION_PARAMS
 from apps.api.services.agent_gateway import (
+    CONVERSION_TOOLS,
     MCP_TOOLS,
-    SURFACE_MCP_TOOLS_LIST,
+    handle_conversion_tool,
+    process_new_lead,
+    has_malformed_qualification_params,
+    missing_qualification_params,
     mcp_tool_surface,
     record_gateway_visit,
     resolve_public_profile,
+    sanitize_qualification_params,
+    SURFACE_MCP_TOOLS_LIST,
 )
+from apps.api.services.ip_resolution import resolve_client_ip
 from apps.api.services.rate_limiter import limiter
 
 router = APIRouter()
 logger = structlog.get_logger()
 
 MCP_RATE_LIMIT = "60/minute"
+
+# WS3 MCP lifecycle handshake — STATIC values only. Never the real internal
+# service version, build hash, or any per-site dynamic data (no info leak).
+MCP_PROTOCOL_VERSION = "2025-06-18"
+MCP_SERVER_NAME = "beam-agent-concierge"
+MCP_SERVER_VERSION = "1.0.0"
+
+# Custom (out-of-band) JSON-RPC application error for a tripped conversion-tool
+# rate limit. Outside the reserved -32768..-32000 standard range on purpose.
+_RATE_LIMITED = -32010
 
 # 16 KB. A legitimate JSON-RPC read call is a few hundred bytes; this leaves
 # three orders of magnitude of headroom while keeping the parser off anything
@@ -71,8 +93,13 @@ def _safe_id(raw):
     huge string or a nested object would let a caller choose our response body.
     Anything unexpected degrades to null rather than being reflected.
     """
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, int):
         return raw
+    if isinstance(raw, float):
+        # NaN/Infinity are not valid JSON; echoing them yields a non-standard body.
+        return raw if math.isfinite(raw) else None
     if isinstance(raw, str) and len(raw) <= 128:
         return raw
     return None
@@ -92,26 +119,230 @@ def _result(request_id, payload: dict) -> dict:
     return {"jsonrpc": "2.0", "id": _safe_id(request_id), "result": payload}
 
 
-def _tools_list() -> dict:
+def _qualification_input_schema() -> dict:
+    """inputSchema advertising the 3 required qualification params. Advisory
+    only — the server-side gate is the real enforcement; this lets a
+    spec-conformant client pre-validate."""
     return {
-        "tools": [
+        "type": "object",
+        "properties": {
+            "use_case": {"type": "string"},
+            "company_size": {"type": "string"},
+            "evaluating_against": {"type": "string"},
+        },
+        "required": list(REQUIRED_QUALIFICATION_PARAMS),
+    }
+
+
+def _tools_list() -> dict:
+    """Advertise the available tools. Flag-aware:
+
+    - qualification OFF (default): the 3 read tools with an empty inputSchema —
+      byte-identical to the pre-WS3 surface.
+    - qualification ON: the same 3 tools gain the required-params inputSchema.
+    - conversion ON: the 2 conversion tools are appended; OFF (default): absent.
+    """
+    gated = settings.agent_concierge_qualification_enabled
+    read_schema = _qualification_input_schema() if gated else {
+        "type": "object", "properties": {}
+    }
+    tools = [
+        {
+            "name": "get_offers",
+            "description": "List everything this business sells.",
+            "inputSchema": read_schema,
+        },
+        {
+            "name": "get_pricing",
+            "description": "Prices for everything this business sells.",
+            "inputSchema": read_schema,
+        },
+        {
+            "name": "check_availability",
+            "description": "Availability for everything this business sells.",
+            "inputSchema": read_schema,
+        },
+    ]
+    if settings.agent_concierge_conversion_enabled:
+        tools += [
             {
-                "name": "get_offers",
-                "description": "List everything this business sells.",
-                "inputSchema": {"type": "object", "properties": {}},
+                "name": "request_quote",
+                "description": "Request a tailored quote. Creates a real lead.",
+                "inputSchema": _qualification_input_schema(),
             },
             {
-                "name": "get_pricing",
-                "description": "Prices for everything this business sells.",
-                "inputSchema": {"type": "object", "properties": {}},
-            },
-            {
-                "name": "check_availability",
-                "description": "Availability for everything this business sells.",
-                "inputSchema": {"type": "object", "properties": {}},
+                "name": "book_demo",
+                "description": "Request a demo. Creates a real lead.",
+                "inputSchema": _qualification_input_schema(),
             },
         ]
+    return {"tools": tools}
+
+
+def _initialize_result() -> dict:
+    """Static MCP lifecycle handshake — no dynamic/internal data."""
+    return {
+        "protocolVersion": MCP_PROTOCOL_VERSION,
+        "capabilities": {"tools": {}},
+        "serverInfo": {"name": MCP_SERVER_NAME, "version": MCP_SERVER_VERSION},
     }
+
+
+def _extract_arguments(params) -> dict:
+    """Pull the tool arguments out of a tools/call params object. MCP nests them
+    under ``arguments``; tolerate a flat dict for simple clients."""
+    if not isinstance(params, dict):
+        return {}
+    args = params.get("arguments")
+    if isinstance(args, dict):
+        return args
+    return {}
+
+
+def _conversion_rate_limited(site_id: str) -> bool:
+    """Must-Fix 1: a dedicated, tighter per-site rate limit for the conversion
+    tools, via a manual limiter.hit() (NOT a route decorator — a decorator would
+    rate-limit the WHOLE endpoint, not just this dispatch branch). Distinct
+    namespace so it never collides with the shared read budget or the ingest
+    ceiling. Fail-open: a storage error never blocks a legitimate lead."""
+    try:
+        from limits import RateLimitItemPerMinute
+
+        item = RateLimitItemPerMinute(
+            settings.agent_concierge_conversion_rate_limit_per_minute
+        )
+        # .hit() returns False once the window's allowance is exhausted.
+        return not limiter.limiter.hit(item, "mcp_conversion_tool", site_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_conversion_rate_check_failed", error=str(exc))
+        return False
+
+
+async def _conversion_daily_cap_reached(site_id: str, ip: str | None = None) -> bool:
+    """M3: a coarser per-site DAILY ceiling on completed conversion calls, on top
+    of the tighter per-minute limit. The 5/min limit still permits ~7200
+    leads+emails/day/site sustained; this caps the daily total so a slow-drip
+    abuser cannot flood an owner's inbox over a full day while staying under the
+    minute bucket.
+
+    Redis INCR on a per-site, per-UTC-day key (no schema change — preferred over a
+    new column). Fail-open: any Redis trouble returns False (never blocks a
+    legitimate lead), matching every other guard on this path. Only invoked for
+    COMPLETE calls, so incomplete/needs_more_info calls never consume the day's
+    allowance (M4)."""
+    cap = settings.agent_concierge_conversion_daily_cap
+    if cap <= 0:
+        return False  # 0/negative = disabled ceiling (explicit operator opt-out)
+    try:
+        from datetime import datetime, timezone
+
+        from apps.api.services.redis_client import get_redis
+
+        day = datetime.now(timezone.utc).strftime("%Y%m%d")
+        redis = get_redis()
+        # Per-IP sub-bucket first, so one caller cannot burn the whole site cap.
+        per_ip = settings.agent_concierge_conversion_per_ip_daily_cap
+        if per_ip > 0 and ip:
+            ip_key = f"agent_conv_daily_ip:{site_id}:{_hash_ip(ip) or ip}:{day}"
+            ip_count = await redis.incr(ip_key)
+            if ip_count == 1:
+                await redis.expire(ip_key, 90_000)
+            if ip_count > per_ip:
+                return True
+        key = f"agent_conv_daily:{site_id}:{day}"
+        count = await redis.incr(key)
+        if count == 1:
+            # First hit of the day → expire a little past 24h so the window rolls.
+            await redis.expire(key, 90_000)
+        return count > cap
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("mcp_conversion_daily_cap_check_failed", error=str(exc))
+        return False
+
+
+def _hash_ip(ip: str | None) -> str | None:
+    """Keyed hash of the caller IP (PII blind-index key). Never the raw IP.
+    None when no IP or no key is configured."""
+    if not ip:
+        return None
+    try:
+        from apps.api.services.pii_crypto import _hmac_key
+
+        return hmac.new(_hmac_key(), ip.encode(), hashlib.sha256).hexdigest()[:32]
+    except Exception:  # noqa: BLE001
+        return None
+
+
+async def _tool_call_row_cap_reached(site_id: str) -> bool:
+    """Per-site per-UTC-day ceiling on agent_tool_calls rows. Fail-open (write)."""
+    cap = settings.agent_tool_calls_daily_row_cap
+    if cap <= 0:
+        return False
+    try:
+        from datetime import datetime, timezone
+
+        from apps.api.services.redis_client import get_redis
+
+        day = datetime.now(timezone.utc).strftime("%Y%m%d")
+        key = f"agent_tool_calls_rows:{site_id}:{day}"
+        redis = get_redis()
+        n = await redis.incr(key)
+        if n == 1:
+            await redis.expire(key, 90_000)
+        return n > cap
+    except Exception:  # noqa: BLE001
+        return False
+
+
+async def _record_tool_call(
+    db: AsyncSession,
+    request: Request,
+    site_id: str,
+    method: str,
+    tool_name: str | None,
+    args: dict,
+    is_gated: bool,
+) -> None:
+    """WS3 kill-test instrumentation. Append one agent_tool_calls row. FAIL-OPEN
+    — instrumentation must never break a response. Only recorded while the
+    concierge experiment is active on this deployment (either flag on); when both
+    flags are off, behavior is byte-identical to today (no new writes)."""
+    if not (
+        settings.agent_concierge_qualification_enabled
+        or settings.agent_concierge_conversion_enabled
+    ):
+        return
+    try:
+        from apps.api.models.agent_tool_call import AgentToolCall
+        from apps.api.services.agent_classifier import classify_agent
+
+        if await _tool_call_row_cap_reached(site_id):
+            return
+        classification = classify_agent(request.headers.get("user-agent"))
+        provided = {
+            name: bool(isinstance(args.get(name), str) and args.get(name).strip())
+            for name in REQUIRED_QUALIFICATION_PARAMS
+        }
+        complete = all(provided.values())
+        db.add(
+            AgentToolCall(
+                site_id=site_id,
+                method=method,
+                tool_name=tool_name,
+                params_provided=provided,
+                params_complete=complete,
+                is_gated_tool=is_gated,
+                vendor=classification.vendor if classification else None,
+                ip_hash=_hash_ip(resolve_client_ip(request)),
+            )
+        )
+        await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        logger.warning("mcp_tool_call_metric_failed", error=str(exc))
 
 
 @router.post("/{site_id}/mcp")
@@ -119,6 +350,7 @@ def _tools_list() -> dict:
 async def mcp_endpoint(
     request: Request,
     site_id: str,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> JSONResponse:
     # ── Gate 1: tenancy + flags, before anything else is done with the body.
@@ -162,11 +394,13 @@ async def mcp_endpoint(
     if not isinstance(method, str):
         return JSONResponse(_error(request_id, _INVALID_REQUEST, "Invalid Request"))
 
-    # ── Gate 4: strict method allow-list. Recording happens only past this gate,
-    # so a malformed or rejected call never lands in the agent tables; the label
-    # is always a fixed literal or a validated MCP_TOOLS key, never raw input.
+    # ── Gate 4: strict method allow-list.
+    if method == "initialize":
+        return JSONResponse(_result(request_id, _initialize_result()))
+
     if method == "tools/list":
         await record_gateway_visit(db, request, site_id, SURFACE_MCP_TOOLS_LIST)
+        await _record_tool_call(db, request, site_id, "tools/list", None, {}, False)
         return JSONResponse(_result(request_id, _tools_list()))
 
     if method == "tools/call":
@@ -174,18 +408,145 @@ async def mcp_endpoint(
         if not isinstance(params, dict):
             return JSONResponse(_error(request_id, _INVALID_PARAMS, "Invalid params"))
         tool_name = params.get("name")
-        if not isinstance(tool_name, str) or tool_name not in MCP_TOOLS:
+        if not isinstance(tool_name, str):
             return JSONResponse(
                 _error(request_id, _METHOD_NOT_FOUND, "Method not found")
             )
-        await record_gateway_visit(db, request, site_id, mcp_tool_surface(tool_name))
-        return JSONResponse(
-            _result(request_id, MCP_TOOLS[tool_name](site, profile))
+        args = _extract_arguments(params)
+        return await _dispatch_tool(
+            db, request, background_tasks, site, profile, request_id, tool_name, args
         )
 
-    # Direct tool invocation as a bare method, for simple clients.
-    if method in MCP_TOOLS:
-        await record_gateway_visit(db, request, site_id, mcp_tool_surface(method))
-        return JSONResponse(_result(request_id, MCP_TOOLS[method](site, profile)))
+    # Direct tool invocation as a bare method, for simple clients. Any flat dict
+    # under ``params`` is treated as the tool arguments.
+    if method in MCP_TOOLS or method in CONVERSION_TOOLS:
+        raw_params = payload.get("params")
+        args = raw_params if isinstance(raw_params, dict) else {}
+        return await _dispatch_tool(
+            db, request, background_tasks, site, profile, request_id, method, args
+        )
 
     return JSONResponse(_error(request_id, _METHOD_NOT_FOUND, "Method not found"))
+
+
+async def _dispatch_tool(
+    db: AsyncSession,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    site,
+    profile,
+    request_id,
+    tool_name: str,
+    args: dict,
+) -> JSONResponse:
+    """Shared tool dispatch for both the tools/call wrapper and the bare-method
+    path. Applies the WS3 qualification gate, the conversion-tool branch (rate
+    limit + Must-Fix 3 free lookup + fail-open notification), and kill-test
+    instrumentation. The 3 read tools stay ungated + byte-identical when the
+    qualification flag is off."""
+    # ── Conversion tools (write path) — gated behind the conversion flag ──
+    if tool_name in CONVERSION_TOOLS:
+        if not settings.agent_concierge_conversion_enabled:
+            # OFF => behave as if the tool does not exist (same posture as an
+            # unrecognized method).
+            return JSONResponse(
+                _error(request_id, _METHOD_NOT_FOUND, "Method not found")
+            )
+        # Malformed (present-but-wrong-typed) params => -32602, distinct from
+        # absent params (the needs_more_info case below).
+        if has_malformed_qualification_params(args):
+            return JSONResponse(_error(request_id, _INVALID_PARAMS, "Invalid params"))
+        # Must-Fix 2: sanitize at the entry point before anything downstream.
+        clean_args = sanitize_qualification_params(args)
+        # M4: decide completeness BEFORE consuming the tight dedicated budgets. An
+        # incomplete (needs_more_info) call is zero-cost and MUST NOT drain the
+        # 5/min conversion bucket or the daily ceiling — otherwise a public caller
+        # could starve the feature forever with empty request_quote calls (site_id
+        # is public). Incomplete calls stay under the shared 60/min read budget.
+        missing = missing_qualification_params(clean_args)
+        if missing:
+            from apps.api.schemas.agent_gateway import NeedsMoreInfoOut
+
+            await record_gateway_visit(
+                db, request, site.site_id, mcp_tool_surface(tool_name)
+            )
+            await _record_tool_call(
+                db, request, site.site_id, "tools/call", tool_name, clean_args, True
+            )
+            return JSONResponse(
+                _result(
+                    request_id,
+                    NeedsMoreInfoOut(missing_params=missing).model_dump(),
+                )
+            )
+        # COMPLETE call → NOW consume the tight per-minute budget (Must-Fix 1) and
+        # the coarser per-site daily ceiling (M3). `or` short-circuits so a
+        # minute-limit trip does not also tick the daily counter.
+        ip_address = resolve_client_ip(request)
+        if _conversion_rate_limited(site.site_id) or await _conversion_daily_cap_reached(
+            site.site_id, ip_address
+        ):
+            return JSONResponse(
+                _error(request_id, _RATE_LIMITED, "Rate limit exceeded"),
+                status_code=429,
+            )
+        result, lead_id = await handle_conversion_tool(
+            db, site, profile, tool_name, clean_args, ip_address
+        )
+        if lead_id is not None:
+            # Company lookup + owner email run AFTER the response is sent.
+            background_tasks.add_task(process_new_lead, lead_id, ip_address)
+        await record_gateway_visit(
+            db, request, site.site_id, mcp_tool_surface(tool_name)
+        )
+        await _record_tool_call(
+            db, request, site.site_id, "tools/call", tool_name, clean_args, True
+        )
+        return JSONResponse(_result(request_id, result))
+
+    # ── Read tools ──
+    if tool_name not in MCP_TOOLS:
+        return JSONResponse(_error(request_id, _METHOD_NOT_FOUND, "Method not found"))
+
+    gated = settings.agent_concierge_qualification_enabled
+    clean_args = sanitize_qualification_params(args) if gated else {}
+    if gated:
+        if has_malformed_qualification_params(args):
+            return JSONResponse(_error(request_id, _INVALID_PARAMS, "Invalid params"))
+        missing = missing_qualification_params(args)
+        if missing:
+            from apps.api.schemas.agent_gateway import NeedsMoreInfoOut
+
+            # No ORM attribute access after these records → ordering is safe here.
+            await record_gateway_visit(
+                db, request, site.site_id, mcp_tool_surface(tool_name)
+            )
+            await _record_tool_call(
+                db, request, site.site_id, "tools/call", tool_name, clean_args, True
+            )
+            return JSONResponse(
+                _result(
+                    request_id,
+                    NeedsMoreInfoOut(missing_params=missing).model_dump(),
+                )
+            )
+        # M1: compute the tool result BEFORE recording the metric. _record_tool_call
+        # is fail-open and may db.rollback() on a metric-write failure, which
+        # expires the site/profile ORM attrs (rollback expires regardless of
+        # expire_on_commit=False); a tool call issued AFTER that rollback would hit
+        # a sync attribute load → MissingGreenlet → 500. Reading first makes the
+        # metric write strictly the last DB touch.
+        result = MCP_TOOLS[tool_name](site, profile, clean_args)
+        await record_gateway_visit(
+            db, request, site.site_id, mcp_tool_surface(tool_name)
+        )
+        await _record_tool_call(
+            db, request, site.site_id, "tools/call", tool_name, clean_args, True
+        )
+        return JSONResponse(_result(request_id, result))
+
+    # Ungated legacy path — byte-identical output; same M1 read-before-record fix.
+    result = MCP_TOOLS[tool_name](site, profile)
+    await record_gateway_visit(db, request, site.site_id, mcp_tool_surface(tool_name))
+    await _record_tool_call(db, request, site.site_id, "tools/call", tool_name, {}, False)
+    return JSONResponse(_result(request_id, result))

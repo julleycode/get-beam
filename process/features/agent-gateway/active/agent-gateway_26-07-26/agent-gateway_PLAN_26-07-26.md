@@ -189,7 +189,7 @@ below — **never implemented** (confirmed on disk 07-08-26: no `agent_action.py
 (pushed to `origin/feat/ws3-agent-concierge`, **not merged** to `devjulley`/`main`). Exposes
 `request_quote`/`book_demo` MCP tools that write a structurally isolated `AgentLead` row —
 confirmed via `git ls-tree -r feat/ws3-agent-concierge`: `apps/api/models/agent_lead.py`,
-migrations `c5e0f2b8d163_add_agent_leads_and_tool_calls.py` and `c9d2f7b4e1a6_add_consent_mode.py`,
+migrations `b4d9e1a7c052_add_agent_profile_qualified_content.py` and `c5e0f2b8d163_add_agent_leads_and_tool_calls.py`,
 extended `apps/api/routers/agent_gateway.py` / `agent_mcp.py`, `agent_lead_notify.py`. No
 `visitor_id` column on `AgentLead`; zero imports of `IdentifiedVisitor`/`Visitor` from that model
 (not independently re-verified line-by-line in this UPDATE PROCESS pass — read the branch file
@@ -227,7 +227,8 @@ here, checklist only)
    `agent-native-revenue-branch-topology.md`). A merge of ws3 needs that reconciled separately —
    umbrella state currently lives split across two unpushed-to-main branches.
 2. **Migration re-chain required at merge time.** The ws3 branch carries its own migrations
-   (`c5e0f2b8d163_add_agent_leads_and_tool_calls.py`, `c9d2f7b4e1a6_add_consent_mode.py`) which
+   (`b4d9e1a7c052_add_agent_profile_qualified_content.py` -> `c5e0f2b8d163_add_agent_leads_and_tool_calls.py`;
+   re-chained 14-11-26 onto `d3f8a2c61b47`) which
    must be re-chained onto the TRUE live alembic head at merge time — always re-run
    `.venv/bin/python3.11 -m alembic -c apps/api/alembic.ini heads` live immediately before
    merging or writing any `down_revision`; never trust a value recorded in any plan or context

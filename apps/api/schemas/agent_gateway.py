@@ -68,3 +68,32 @@ class AgentOffersFeed(BaseModel):
     seller_name: str
     seller_url: str
     offers: list[AgentOfferOut] = []
+
+
+# ── WS3 agent-concierge shapes ────────────────────────────────────────
+
+# The 3 qualification params a caller must supply once the qualification flag is
+# on, to unlock a structured answer or a conversion tool.
+REQUIRED_QUALIFICATION_PARAMS = ("use_case", "company_size", "evaluating_against")
+
+
+class NeedsMoreInfoOut(BaseModel):
+    """RESULT (not a JSON-RPC error) returned when a gated tool is called with
+    one or more required qualification params missing. AC-WS3-1: a clear
+    request-for-params, never a silent failure or a free answer."""
+
+    needs_more_info: bool = True
+    missing_params: list[str] = []
+    message: str = (
+        "Provide use_case, company_size and evaluating_against to get a "
+        "tailored answer."
+    )
+
+
+class AgentLeadOut(BaseModel):
+    """RESULT shape returned to the caller after a successful conversion-tool
+    call. Deliberately minimal — an ack, not an echo of stored data."""
+
+    lead_created: bool = True
+    tool_name: str
+    message: str = "Your request was received. The team will follow up shortly."
