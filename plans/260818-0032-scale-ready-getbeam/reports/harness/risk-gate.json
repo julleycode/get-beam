@@ -1,0 +1,12 @@
+{
+  "task": "phase-01-incremental-aggregation-soak-and-prod-flag",
+  "planPath": "plans/260818-0032-scale-ready-getbeam/phase-01-incremental-aggregation-soak-and-prod-flag.md",
+  "riskClass": "none",
+  "riskLevel": "medium",
+  "riskClasses": [],
+  "workDescription": "Phase 1 incremental aggregation soak: server created_at, ingest/sweep mutex, Redis-degraded skip when flag ON, stamp after full bootstrap only, sequential F9 bootstrap job, flag default remains False.",
+  "approver": "vc-code-reviewer",
+  "mustStopBeforeFinalize": false,
+  "humanApprovalRequired": true,
+  "why": "Not one of the six high-risk classes (no auth, billing, schema, public-contract, deploy, or trust-boundary change). Medium because a wrong stamp or SET-vs-ADD race can inflate visitor pageviews. Railway flag flip remains an operator hard stop. Integration and prod soak are still unproven."
+}

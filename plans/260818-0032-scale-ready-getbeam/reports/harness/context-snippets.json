@@ -1,0 +1,47 @@
+{
+  "task": "phase-01-incremental-aggregation-soak-and-prod-flag",
+  "snippets": [
+    {
+      "file": "apps/api/routers/events.py",
+      "lines": "459-460",
+      "description": "F2 — ingest stores server utcnow(), never event.ts",
+      "content": "created_at=datetime.utcnow(),"
+    },
+    {
+      "file": "apps/api/routers/events.py",
+      "lines": "944-975",
+      "description": "F6/F7/F8 — mutex, Redis skip when flag ON, stamp only after full bootstrap (since is None), release in finally",
+      "content": "lock = _dbnc.RunLock(...); acquired = await lock.acquire(); if acquired is False: return; if acquired is None and flag ON: return; if flag ON and watermark is None: run_started_at = SELECT now(); aggregate(...); if run_started_at: advance_watermark(...); finally: lock.release() if lock is not None"
+    },
+    {
+      "file": "apps/api/services/aggregation_debounce.py",
+      "lines": "172-216",
+      "description": "F8 RunLock — acquire sets _held; release no-op when not held; leftover cooldown after hold",
+      "content": "class RunLock: acquire() sets _held only on True; release() returns immediately if not _held; leftover cooldown = remaining TTL else 0"
+    },
+    {
+      "file": "apps/api/services/visitor_aggregator.py",
+      "lines": "535-540",
+      "description": "Aggregator still stamps only when since is not None (no double-stamp on full bootstrap)",
+      "content": "if since is not None and run_started_at is not None: await advance_watermark(...)"
+    },
+    {
+      "file": "apps/api/jobs/scheduler.py",
+      "lines": "492-509",
+      "description": "F6 — sweep always since=None and never stamps; releases mutex in finally",
+      "content": "count = await aggregate_visitors_for_site(db, site_id, since=None); finally: await lock.release(); await dbnc.release(marker)"
+    },
+    {
+      "file": "apps/api/jobs/scheduler.py",
+      "lines": "625-632",
+      "description": "F9 — sequential bootstrap callable, not registered in start_scheduler",
+      "content": "run_aggregation_watermark_bootstrap() — Not registered in start_scheduler so the job-count AST gate stays at 24 add_job calls."
+    },
+    {
+      "file": "apps/api/config.py",
+      "lines": "127",
+      "description": "Flag default still False",
+      "content": "aggregation_incremental_enabled: bool = False"
+    }
+  ]
+}
