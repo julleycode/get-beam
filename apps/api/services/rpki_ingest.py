@@ -125,6 +125,11 @@ async def _load_roas_and_swap(db: AsyncSession, roas: list[Roa]) -> None:
             f'(LIKE "{RPKI_ROA_TABLE}" INCLUDING ALL)'
         )
     )
+    # LIKE does not copy row-level security. The rename below would otherwise
+    # publish a table with RLS off. The loader is the table owner and bypasses RLS.
+    await db.execute(
+        text(f'ALTER TABLE "{RPKI_ROA_STAGING_TABLE}" ENABLE ROW LEVEL SECURITY')
+    )
     insert_sql = text(
         f'INSERT INTO "{RPKI_ROA_STAGING_TABLE}" (id, prefix, asn, max_length) '
         "VALUES (:id, CAST(:prefix AS cidr), :asn, :max_length)"
