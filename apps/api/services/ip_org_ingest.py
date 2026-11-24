@@ -436,6 +436,12 @@ async def _load_staging_and_swap(
             f'(LIKE "{IP_ORG_TABLE}" INCLUDING ALL)'
         )
     )
+    # LIKE does not copy row-level security. The swap below renames this
+    # table onto the live one, so skipping this would turn RLS back off on
+    # the next ingest. The loader is the table owner and bypasses RLS.
+    await db.execute(
+        text(f'ALTER TABLE "{IP_ORG_STAGING_TABLE}" ENABLE ROW LEVEL SECURITY')
+    )
 
     if carry_over:
         # Server-side copy: never pulls the other sources' rows through Python.
