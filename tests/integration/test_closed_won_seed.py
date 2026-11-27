@@ -356,14 +356,30 @@ async def test_exclusion_matrix(test_db, cw, case):
     assert build.excluded == 1
 
 
-async def test_exclusion_company_module_absent_is_noop(test_db, cw):
-    """N4: the sibling company-exclusion module is not on this branch — guarded no-op."""
-    import importlib.util
+async def test_company_exclusion_flag_on_skips_competitor_keeps_customer(test_db, cw, monkeypatch):
+    """Flag ON: competitor-domain deal leaves the seed; customer-reason exclusion stays in."""
+    from apps.api.config import settings
+    from apps.api.models.site_exclusion import SiteExclusion
+    from apps.api.services.closed_won_seed import build_seed, ingest_deals
+    from apps.api.services.crm.base import ClosedWonDeal
 
-    from apps.api.services.closed_won_seed import _company_excluded_domains
+    monkeypatch.setattr(settings, "company_exclusion_enabled", True)
+    site_id = cw["site_id"]
+    test_db.add_all([
+        SiteExclusion(site_id=site_id, domain="rival.example", reason="competitor"),
+        SiteExclusion(site_id=site_id, domain="buyer.example", reason="customer"),
+    ])
+    await test_db.commit()
+    await ingest_deals(test_db, site_id, [
+        ClosedWonDeal("d1", "a@sub.rival.example", company_domain="sub.rival.example"), ClosedWonDeal("d2", "b@buyer.example", company_domain="buyer.example"),
+    ], source="csv")
+    emails = [r.email for r in (await build_seed(test_db, site_id)).rows]
+    assert "a@sub.rival.example" not in emails
+    assert "b@buyer.example" in emails
 
-    assert importlib.util.find_spec("apps.api.services.company_exclusion") is None
-    assert await _company_excluded_domains(test_db, cw["site_id"], {"rival.example"}) == set()
+    monkeypatch.setattr(settings, "company_exclusion_enabled", False)
+    emails_off = [r.email for r in (await build_seed(test_db, site_id)).rows]
+    assert "a@sub.rival.example" in emails_off
 
 
 async def test_needs_reconnect_surfaces_in_seed_summary(test_db, test_client, cw, owner):

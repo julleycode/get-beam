@@ -263,8 +263,10 @@ async def _company_excluded(db: AsyncSession, site_id: str, visitor_id: str) -> 
     The company_exclusion module is a sibling plan; when absent this gate is a
     no-op. When present it fails CLOSED on error (treat as excluded).
     """
+    if not settings.company_exclusion_enabled:
+        return False
     try:
-        from apps.api.services.company_exclusion import excluded_visitor_ids  # type: ignore
+        from apps.api.services.company_exclusion import excluded_visitor_ids
     except ImportError:
         return False
     try:

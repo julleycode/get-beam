@@ -143,6 +143,25 @@ async def test_unmapped_goal_recorded_skipped_unmapped(test_db, conv):
     assert [r.status for r in goal_rows] == ["skipped_unmapped"]
 
 
+async def test_company_excluded_competitor_skipped_flag_on(test_db, conv, monkeypatch):
+    """Flag ON: a visitor at an excluded competitor domain is never sent."""
+    from apps.api.config import settings
+    from apps.api.models.site_exclusion import SiteExclusion
+    from apps.api.services.ad_conversions import run_conversion_sweep_once
+
+    monkeypatch.setattr(settings, "company_exclusion_enabled", True)
+    site_id = conv["site_id"]
+    test_db.add(SiteExclusion(site_id=site_id, domain="rival.io", reason="competitor"))
+    await _visitor(test_db, site_id, "v-rival", email="buyer@rival.io")
+    await _visitor(test_db, site_id, "v-ok")
+    await test_db.commit()
+    await run_conversion_sweep_once(test_db)
+    rows = {r.visitor_id: r.status for r in await _deliveries(test_db, site_id)
+            if r.conversion_type == "lead"}
+    assert rows.get("v-ok") == "sent"
+    assert rows.get("v-rival") in (None, "skipped_company_excluded")
+
+
 async def test_retry_then_failed_after_max_attempts(test_db, conv, monkeypatch):
     from apps.api.config import settings
     from apps.api.services import ad_conversions as ac

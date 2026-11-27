@@ -30,7 +30,7 @@ from apps.api.schemas.account_rollup import (
     AccountRow,
 )
 from apps.api.services.agent_visitor_filters import human_only_visitor_filter
-from apps.api.services.enricher import _FREE_MAIL_DOMAINS
+from apps.api.services.company_exclusion import FREEMAIL_DOMAINS
 
 logger = structlog.get_logger()
 
@@ -85,7 +85,8 @@ def _members(site_id: str, since: datetime, domain: str | None = None):
         Visitor.site_id == site_id,
         Visitor.company_domain.is_not(None),
         Visitor.company_domain != "",
-        dom.not_in(sorted(_FREE_MAIL_DOMAINS)),
+        # SQL-side form of company_exclusion.is_freemail() (same backing set).
+        dom.not_in(sorted(FREEMAIL_DOMAINS)),
         Visitor.is_abuse_flagged.is_not(True),
         human_only_visitor_filter(),
     )

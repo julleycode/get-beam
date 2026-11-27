@@ -296,22 +296,18 @@ async def _company_excluded_domains(db: AsyncSession, site_id: str, domains: set
     Import-guarded: absent module = no-op. Present but erroring = fail closed
     (every domain excluded).
     """
-    if not domains:
+    if not domains or not settings.company_exclusion_enabled:
         return set()
     try:
-        from apps.api.services.company_exclusion import (  # type: ignore
-            load_exclusions,
-            match_excluded,
-        )
+        from apps.api.services.company_exclusion import load_exclusions, match_excluded
     except ImportError:
         return set()
     try:
         exclusions = await load_exclusions(db, site_id)
         excluded: set[str] = set()
         for domain in domains:
-            hit = match_excluded(exclusions, domain=domain)
-            reason = getattr(hit, "reason", hit) if hit else None
-            if hit and reason != "customer":
+            reason = match_excluded([domain], exclusions)
+            if reason is not None and reason != "customer":
                 excluded.add(domain)
         return excluded
     except Exception:  # noqa: BLE001 — fail closed

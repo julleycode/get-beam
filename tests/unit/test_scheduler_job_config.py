@@ -177,14 +177,17 @@ class TestAC13IntervalJobHardening:
         assert [c for c in cron if "jitter" in _kwargs(c)] == []
 
     def test_the_asserted_set_is_derived_not_hardcoded(self):
-        """E20 arithmetic: 30 total / 26 interval / 3 cron — all AST-derived.
+        """E20 arithmetic: 30 total / 26 interval / 4 cron — all AST-derived.
 
-        Was 29/25/3; +1 interval job for poll_closed_won (closed-won-lookalikes —
+        Re-derived 27-11-26 after merging conversion-apis (#11) + closed-won
+        lookalikes (#12) onto main: both jobs present exactly once.
+
+        Was 29/25/4; +1 interval job for poll_closed_won (closed-won-lookalikes —
         CRM closed-won read-back; flag-gated OFF on closed_won_lookalikes_enabled
         at the registration site AND in the wrapper; literal jitter 120 +
         misfire_grace_time, no next_run_time).
 
-        Was 28/24/3; +1 interval job for ad_conversions_sweep (conversion-apis —
+        Was 28/24/4; +1 interval job for ad_conversions_sweep (conversion-apis —
         server-side ad conversions outbox; flag-gated OFF on
         ad_conversions_enabled at the registration site AND in the wrapper;
         literal jitter 30 + misfire_grace_time, no next_run_time).
