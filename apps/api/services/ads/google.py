@@ -43,9 +43,12 @@ from apps.api.services.ads.base import (
     AdsProvider,
     AdTestOutcome,
     AudienceResult,
+    ConversionEvent,
+    ConversionResult,
     HashedContact,
     sanitize_error,
 )
+from apps.api.services.click_ids import google_ad_identifier
 from apps.api.services.encryption import decrypt_token
 
 logger = structlog.get_logger()
@@ -448,6 +451,110 @@ class GoogleAdsProvider(AdsProvider):
             )
         return sent
 
+
+    # ── conversion-apis: Data Manager events:ingest ──────
+
+    async def send_conversions(
+        self, connection, config, events: list[ConversionEvent]
+    ) -> list[ConversionResult]:
+        """Ingest conversions via Data Manager ``events:ingest``.
+
+        NOT ``uploadClickConversions`` (closed to new integrations 15-06-2026).
+        EEA + unknown-country rows are excluded upstream by the sweep. One outbox
+        attempt = one HTTP call per chunk; no tenacity stacking (E6).
+        """
+        if not events:
+            return []
+        if settings.mock_external_apis:
+            return [ConversionResult(delivery_id=e.delivery_id, ok=True) for e in events]
+        if not (
+            (getattr(config, "google_operating_account_id", "") or "").strip()
+            and (getattr(config, "google_product_destination_id", "") or "").strip()
+        ):
+            return [
+                ConversionResult(delivery_id=e.delivery_id, ok=False, error="no_destination")
+                for e in events
+            ]
+        token = _access_token(connection)
+        results: list[ConversionResult] = []
+        for batch in chunk_conversion_events(events):
+            payload = build_data_manager_events_request(config, batch)
+            try:
+                async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                    resp = await client.post(
+                        f"{_DATA_MANAGER_BASE}/events:ingest",
+                        json=payload,
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                resp.raise_for_status()
+                request_id = (resp.json() or {}).get("requestId", "")
+            except Exception as exc:  # noqa: BLE001 — classified, sanitized
+                transient = _is_transient_http_error(exc)
+                reason = sanitize_error(exc)
+                results.extend(
+                    ConversionResult(
+                        delivery_id=e.delivery_id, ok=False, error=reason, transient=transient
+                    )
+                    for e in batch
+                )
+                continue
+            results.extend(ConversionResult(delivery_id=e.delivery_id, ok=True) for e in batch)
+            logger.info("google_dm_events_ack", request_id=request_id, events=len(batch))
+        return results
+
+
+# Data Manager events:ingest accepts up to 2000 events per request.
+DM_EVENTS_BATCH_SIZE = 2000
+
+
+def chunk_conversion_events(events: list[ConversionEvent]) -> list[list[ConversionEvent]]:
+    return [
+        events[i : i + DM_EVENTS_BATCH_SIZE] for i in range(0, len(events), DM_EVENTS_BATCH_SIZE)
+    ]
+
+
+def _rfc3339(when: datetime) -> str:
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def build_data_manager_event(event: ConversionEvent) -> dict:
+    identifiers: list[dict] = []
+    if event.email_sha256:
+        identifiers.append({"emailAddress": event.email_sha256})
+    if event.phone_sha256:
+        identifiers.append({"phoneNumber": event.phone_sha256})
+    body: dict = {
+        "transactionId": event.dedup_id,
+        "eventTimestamp": _rfc3339(event.event_time),
+        "userData": {"userIdentifiers": identifiers},
+        # Every row reaching here is non-EEA and known-country (sweep gate D3).
+        "consent": {
+            "adUserData": "CONSENT_GRANTED",
+            "adPersonalization": "CONSENT_GRANTED",
+        },
+    }
+    ad_id = google_ad_identifier(event.click_ids)
+    if ad_id:
+        body["adIdentifiers"] = {ad_id[0]: ad_id[1]}
+    return body
+
+
+def build_data_manager_events_request(config, events: list[ConversionEvent]) -> dict:
+    destination = {
+        "operatingAccount": {
+            "accountId": (config.google_operating_account_id or "").replace("-", ""),
+            "accountType": "GOOGLE_ADS",
+        },
+        "productDestinationId": config.google_product_destination_id,
+    }
+    return {
+        "destinations": [destination],
+        "events": [build_data_manager_event(e) for e in events],
+        "encoding": _HASH_ENCODING,
+        "validateOnly": bool(getattr(config, "validate_only", True)),
+    }
 
 def _expiry_from(payload: dict) -> datetime | None:
     expires_in = int(payload.get("expires_in") or 0)

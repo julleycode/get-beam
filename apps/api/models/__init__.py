@@ -17,3 +17,7 @@ import safety.
 
 from apps.api.models.ip_org_prefix import IpOrgPrefix  # noqa: F401
 from apps.api.models.rpki_roa import RpkiRoa  # noqa: F401
+
+# conversion-apis: the sweep is the only writer; registered here so create_all /
+# alembic autogenerate always see both tables (same rationale as above).
+from apps.api.models.ad_conversion import AdConversionConfig, AdConversionDelivery  # noqa: F401,E402

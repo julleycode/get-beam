@@ -35,3 +35,41 @@ class LinkedInAdsProvider(AdsProvider):
         self, connection, link, hashed_contacts: list[HashedContact]
     ) -> AudienceResult:
         raise NotImplementedError(_UNSUPPORTED)
+
+
+# ── conversion-apis: LinkedIn offline-conversion CSV export (v1, CSV-only) ──
+
+LINKEDIN_CONVERSION_CSV_COLUMNS = (
+    "email_sha256",
+    "li_fat_id",
+    "conversion_type",
+    "event_name",
+    "event_time",
+    "dedup_id",
+)
+
+
+def build_linkedin_conversions_csv(events) -> str:
+    """CSV of hashed conversions for manual LinkedIn upload. No plaintext PII."""
+    import csv
+    import io
+    from datetime import timezone
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(LINKEDIN_CONVERSION_CSV_COLUMNS)
+    for e in events:
+        when = e.event_time
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        writer.writerow(
+            [
+                e.email_sha256,
+                (e.click_ids or {}).get("li_fat_id", ""),
+                e.conversion_type,
+                e.event_name,
+                when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                e.dedup_id,
+            ]
+        )
+    return buf.getvalue()

@@ -44,6 +44,10 @@ class Visitor(Base):
     utm_source: Mapped[str | None] = mapped_column(String(200))
     utm_medium: Mapped[str | None] = mapped_column(String(200))
     country_code: Mapped[str | None] = mapped_column(String(5))
+    # conversion-apis: first-ad-click ids parsed server-side from events.url
+    # ({fbclid, fbc_ts, gclid, wbraid, gbraid, li_fat_id}, only keys present).
+    # Write-once; NULL (never {}) when no click id was ever seen.
+    click_ids: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     device_type: Mapped[str | None] = mapped_column(String(20))
     ip_address: Mapped[str | None] = mapped_column(String(45))
     company_domain: Mapped[str | None] = mapped_column(String(253))
