@@ -999,6 +999,41 @@ export interface AdPushResult {
   queued?: boolean;
 }
 
+// ── Closed-won lookalikes ──
+export interface ClosedWonSeedSummary {
+  total: number;
+  matched: number;
+  eligible: number;
+  excluded: number;
+  needs_reconnect: boolean;
+}
+
+export interface ClosedWonCsvResult {
+  upserted: number;
+  skipped_erased: number;
+  skipped_invalid: number;
+}
+
+export interface ClosedWonLookalikeRequest {
+  provider: "meta" | "google";
+  country: string;
+  ratio?: string;
+  expansion?: "NARROW" | "BALANCED" | "BROAD";
+  push_seed?: boolean;
+}
+
+export interface ClosedWonLookalikeResult {
+  provider: string;
+  seed_audience_id: string;
+  seed_pushed: number | null;
+  lookalike_audience_id: string;
+  status: string;
+  reused: boolean;
+  previous_lookalike_id: string | null;
+  warning: string;
+  error: string;
+}
+
 export interface CrmPushResult {
   provider: string;
   segment_id: string;

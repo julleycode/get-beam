@@ -1094,6 +1094,13 @@ class Settings(BaseSettings):
     ad_conversions_sweep_interval_s: int = 300
     ad_conversions_max_attempts: int = 5
 
+    # closed-won-lookalikes: CRM closed-won read-back + seed + lookalike.
+    # OFF by default: routes 404, poll job NOT registered, webhook 404.
+    closed_won_lookalikes_enabled: bool = False
+    closed_won_poll_interval_hours: int = 6
+    meta_lookalike_min_seed: int = 100
+    google_lookalike_min_seed: int = 1000
+
     # Per-site cap on CRM push operations per clock hour (abuse / runaway guard).
     max_crm_pushes_per_hour_per_site: int = 20
     # Offload large pushes to Celery. OFF by default — only safe when a Celery

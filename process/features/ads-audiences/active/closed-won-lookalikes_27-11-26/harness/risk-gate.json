@@ -1,0 +1,8 @@
+{
+  "riskClass": "PII egress + trust-boundary + schema/migration + public API + CRM OAuth scope",
+  "workDescription": "closed-won-lookalikes v1: CRM closed-won read-back (HubSpot/Pipedrive/Salesforce poll, generic_webhook inbound, CSV) into crm_closed_won_contacts (bidx + ciphertext only); exclusion-filtered seed pushed as SHA-256 to Meta/Google; Meta LOOKALIKE + Google lookalikeUserList; LinkedIn CSV. closed_won_lookalikes_enabled default OFF. Migration f7d1b3c84e29.",
+  "approver": "vc-execute-agent (self-classification); human operator must approve before flag flip",
+  "mustStopBeforeFinalize": true,
+  "piiFlow": "CRM/webhook/CSV email -> normalize -> email_hash (HMAC blind index) + encrypt_pii (Fernet) stored; plaintext dropped -> at seed push: decrypt in-process -> exclusions -> SHA-256(lower(trim(email))) -> Meta customaudiences/users or Google Data Manager ingest. Lookalike calls carry only the seed audience id + country + ratio/expansion.",
+  "rollback": "Flip closed_won_lookalikes_enabled OFF (routes 404, poll job unregistered, webhook 404); alembic downgrade e5c2a9f71d36 drops the one additive table."
+}

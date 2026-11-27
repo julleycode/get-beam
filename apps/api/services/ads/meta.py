@@ -35,6 +35,8 @@ from apps.api.services.ads.base import (
     ConversionEvent,
     ConversionResult,
     HashedContact,
+    LookalikeResult,
+    LookalikeSpec,
     sanitize_error,
 )
 from apps.api.services.click_ids import meta_fbc
@@ -379,6 +381,13 @@ class MetaAdsProvider(AdsProvider):
             failed=invalid,
         )
 
+    # ── closed-won-lookalikes: lookalike from a processed seed ──
+
+    async def create_lookalike(
+        self, connection, seed_audience_id: str, spec: LookalikeSpec
+    ) -> LookalikeResult:
+        return await _meta_create_lookalike(self, connection, seed_audience_id, spec)
+
     # ── conversion-apis: Conversions API (server-side events) ──
 
     async def send_conversions(
@@ -461,3 +470,77 @@ def build_meta_capi_request(config, events: list[ConversionEvent]) -> dict:
     if test_code:
         body["test_event_code"] = test_code
     return body
+
+
+# ── closed-won-lookalikes: lookalike audience ───────────
+
+# Meta drops ``lookalike_spec.country`` after v26 (location moves to ad-set
+# targeting). Beam pins v25, so country is sent; the guard keeps a future
+# version bump from silently sending a field Meta rejects.
+_LOOKALIKE_COUNTRY_MAX_VERSION = 26
+
+
+def graph_major_version(version: str = GRAPH_API_VERSION) -> int:
+    try:
+        return int(version.lstrip("v").split(".", 1)[0])
+    except ValueError:
+        return 0
+
+
+def build_meta_lookalike_payload(
+    seed_audience_id: str, spec: LookalikeSpec, version: str = GRAPH_API_VERSION
+) -> dict:
+    """Form body for ``POST act_{id}/customaudiences`` (access_token added by caller)."""
+    lookalike_spec: dict = {"ratio": spec.ratio, "type": "similarity"}
+    if graph_major_version(version) <= _LOOKALIKE_COUNTRY_MAX_VERSION:
+        lookalike_spec["country"] = spec.country
+    return {
+        "name": f"Beam closed-won lookalike {spec.country} {spec.ratio}",
+        "subtype": "LOOKALIKE",
+        "origin_audience_id": seed_audience_id,
+        "lookalike_spec": json.dumps(lookalike_spec),
+    }
+
+
+def meta_seed_warning(seed_size: int) -> str:
+    if seed_size < settings.meta_lookalike_min_seed:
+        return (
+            f"Your seed has {seed_size} people. Meta needs at least "
+            f"{settings.meta_lookalike_min_seed} matched people for a lookalike — "
+            "it may fail or stay empty until the seed grows."
+        )
+    return ""
+
+
+def _graph_error_message(resp: httpx.Response) -> str:
+    """Meta's own error text (seed not ready, too small). Contains no contact data."""
+    try:
+        err = (resp.json() or {}).get("error") or {}
+    except ValueError:
+        err = {}
+    msg = str(err.get("error_user_msg") or err.get("message") or "").strip()
+    return (msg or f"Provider returned HTTP {resp.status_code}")[:300]
+
+
+async def _meta_create_lookalike(
+    provider, connection, seed_audience_id: str, spec: LookalikeSpec
+) -> LookalikeResult:
+    if settings.mock_external_apis:
+        return LookalikeResult(audience_id=f"mock-meta-lal-{uuid.uuid4().hex[:12]}")
+    token = _access_token(connection)
+    account_path = _account_path(connection)
+    data = {"access_token": token, **build_meta_lookalike_payload(seed_audience_id, spec)}
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            resp = await client.post(f"{_GRAPH_BASE}/{account_path}/customaudiences", data=data)
+    except httpx.HTTPError as exc:
+        return LookalikeResult(status="error", error=sanitize_error(exc, "Lookalike create failed"))
+    if _is_tos_error(resp):
+        return LookalikeResult(status="error", error=_tos_error_message(account_path))
+    if resp.status_code >= 400:
+        return LookalikeResult(status="error", error=_graph_error_message(resp))
+    audience_id = str((resp.json() or {}).get("id") or "")
+    if not audience_id:
+        return LookalikeResult(status="error", error="Meta did not return a lookalike audience id")
+    logger.info("meta_lookalike_created")
+    return LookalikeResult(audience_id=audience_id)

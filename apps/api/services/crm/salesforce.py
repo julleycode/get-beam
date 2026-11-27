@@ -10,6 +10,7 @@ match or POST a new record.
 """
 
 import asyncio
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 
 import httpx
@@ -19,11 +20,14 @@ from apps.api.config import settings
 from apps.api.services.crm.base import (
     HTTP_TIMEOUT,
     PUSH_CONCURRENCY,
+    ClosedWonDeal,
+    ClosedWonFetch,
     CRMContact,
     CRMConnector,
     CrmOAuthTokens,
     PushResult,
     _http_retry,
+    mock_closed_won_deals,
     sanitize_error,
 )
 
@@ -221,3 +225,85 @@ class SalesforceConnector(CRMConnector):
             if not ok and msg and msg not in errors:
                 errors.append(msg)
         return PushResult(pushed=pushed, failed=failed, errors=errors)
+
+    # ── closed-won-lookalikes: read-back ─────────────────
+
+    @_http_retry
+    async def _soql_get(self, url: str, access_token: str, params: dict | None = None) -> dict:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            resp = await client.get(
+                url, params=params, headers={"Authorization": f"Bearer {access_token}"}
+            )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def fetch_closed_won(
+        self,
+        *,
+        access_token: str = "",
+        instance_url: str = "",
+        scopes: list[str] | None = None,
+        since: datetime | None = None,
+    ) -> ClosedWonFetch:
+        if settings.mock_external_apis:
+            return ClosedWonFetch(deals=mock_closed_won_deals("salesforce"))
+        if not access_token or not instance_url:
+            return ClosedWonFetch()
+        base = f"{instance_url}/services/data/{_API_VERSION}"
+        page = await self._soql_get(f"{base}/query", access_token, {"q": closed_won_soql(since)})
+        deals: list[ClosedWonDeal] = []
+        cursor = since
+        for _ in range(500):  # hard page cap
+            for record in page.get("records") or []:
+                modified = parse_sf_ts(record.get("LastModifiedDate"))
+                if modified and (cursor is None or modified > cursor):
+                    cursor = modified
+                deals.extend(salesforce_opportunity_contacts(record))
+            next_url = page.get("nextRecordsUrl")
+            if page.get("done", True) or not next_url:
+                break
+            page = await self._soql_get(f"{instance_url}{next_url}", access_token)
+        logger.info("crm_salesforce_closed_won_fetched", deals=len(deals))
+        return ClosedWonFetch(deals=deals, cursor=cursor)
+
+
+def closed_won_soql(since: datetime | None) -> str:
+    """Opportunity IsWon = true + contact-role emails, ordered by modification."""
+    where = "IsWon = true"
+    if since is not None:
+        stamp = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        where += f" AND LastModifiedDate >= {stamp}"
+    return (
+        "SELECT Id, CloseDate, LastModifiedDate, "
+        "(SELECT Contact.Email FROM OpportunityContactRoles) "
+        f"FROM Opportunity WHERE {where} ORDER BY LastModifiedDate ASC"
+    )
+
+
+def parse_sf_ts(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00").replace("+0000", "+00:00"))
+    except ValueError:
+        return None
+
+
+def salesforce_opportunity_contacts(record: dict) -> list[ClosedWonDeal]:
+    roles = (record.get("OpportunityContactRoles") or {}).get("records") or []
+    out: list[ClosedWonDeal] = []
+    closed_at = None
+    if record.get("CloseDate"):
+        try:
+            closed_at = datetime.fromisoformat(str(record["CloseDate"])).replace(tzinfo=timezone.utc)
+        except ValueError:
+            closed_at = None
+    for role in roles:
+        email = (((role or {}).get("Contact") or {}).get("Email") or "").strip()
+        if email:
+            out.append(
+                ClosedWonDeal(
+                    external_deal_id=str(record.get("Id")), email=email, closed_at=closed_at
+                )
+            )
+    return out

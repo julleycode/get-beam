@@ -37,6 +37,12 @@ class LinkedInAdsProvider(AdsProvider):
         raise NotImplementedError(_UNSUPPORTED)
 
 
+def build_linkedin_seed_csv(contacts: list[HashedContact]) -> str:
+    """closed-won-lookalikes: hashed seed for manual Matched Audiences upload."""
+    lines = ["email_sha256"] + [c.email_sha256 for c in contacts if c.email_sha256]
+    return "\n".join(lines) + "\n"
+
+
 # ── conversion-apis: LinkedIn offline-conversion CSV export (v1, CSV-only) ──
 
 LINKEDIN_CONVERSION_CSV_COLUMNS = (

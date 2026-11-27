@@ -1,0 +1,15 @@
+{
+  "scenarios": [
+    {"scenario": "Webhook forgery by an attacker without the secret", "ruled_out": true, "rationale": "HMAC-SHA256 over raw body with the per-connection secret, hmac.compare_digest; missing/bad signature 400 (tested)."},
+    {"scenario": "Webhook forgery by a holder of the generic_webhook secret (Zapier/Make account)", "ruled_out": false, "rationale": "UD5 accepted trade-off: the secret holder can inject closed-won emails into the seed. Impact limited to the owner's own ad audience; all exclusions still apply."},
+    {"scenario": "Replay of a signed payload", "ruled_out": true, "rationale": "Upsert unique on (site_id, external_deal_id, email_bidx): replay yields 1 row (tested)."},
+    {"scenario": "Oversize body / memory exhaustion", "ruled_out": true, "rationale": "Declared Content-Length and actual bytes both capped at 256KB -> 413 (tested); 60/min rate limit."},
+    {"scenario": "Cross-tenant identity match via shared blind index", "ruled_out": true, "rationale": "Every IdentifiedVisitor.email_bidx read filters site_id (tested with same bidx on another site)."},
+    {"scenario": "Suppressed / erased / do_not_resolve / agent / abuse person enters a seed", "ruled_out": true, "rationale": "Erased never ingested; build_seed re-checks suppression scopes and identity flags on every push (8-case matrix tested)."},
+    {"scenario": "Competitor seeded via company exclusion gap", "ruled_out": false, "rationale": "Domain-keyed company exclusion is import-guarded; inactive until the sibling company-exclusion module merges. Merge note: verify load_exclusions/match_excluded signatures and that the gate is live."},
+    {"scenario": "Duplicate lookalikes inflating spend", "ruled_out": true, "rationale": "One lookalike row per connection; same spec reuses stored id with zero provider calls; Google DUPLICATE_LOOKALIKE -> exists."},
+    {"scenario": "segment_id injection via country/ratio", "ruled_out": true, "rationale": "Country ^[A-Z]{2}$ and ratio/expansion fixed allow-lists validated before the string is built; 422 otherwise (tested)."},
+    {"scenario": "Plaintext email in logs or at rest", "ruled_out": true, "rationale": "Only bidx + Fernet ciphertext stored; structlog calls log counts/site_id/provider only; caplog assertion in G1."},
+    {"scenario": "Google EEA data without consent", "ruled_out": true, "rationale": "UD3: EEA and unknown-country rows excluded from Google seed; EEA lookalike country rejected (tested)."}
+  ]
+}

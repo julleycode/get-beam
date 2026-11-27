@@ -382,6 +382,24 @@ async def _ad_conversions_sweep_job() -> None:
         logger.exception("ad_conversions_sweep_crashed")
 
 
+async def _poll_closed_won_job() -> None:
+    """Periodic job: CRM closed-won read-back (closed-won-lookalikes).
+
+    Gated at registration AND here at runtime (coop-expiry pattern).
+    """
+    from apps.api.config import settings
+
+    if not settings.closed_won_lookalikes_enabled:
+        return
+    try:
+        from apps.api.services.closed_won_seed import poll_closed_won_once
+
+        async with async_session() as db:
+            await poll_closed_won_once(db)
+    except Exception:
+        logger.exception("poll_closed_won_crashed")
+
+
 async def _ws2_classifier_sweep_job() -> None:
     """Periodic job: agent-OPERATED session detection (WS2 session classifier).
 
@@ -1036,6 +1054,16 @@ def start_scheduler() -> None:
             replace_existing=True,
             jitter=30,
             misfire_grace_time=300,
+        )
+    if settings.closed_won_lookalikes_enabled:
+        scheduler.add_job(
+            _poll_closed_won_job,
+            "interval",
+            hours=settings.closed_won_poll_interval_hours,
+            id="poll_closed_won",
+            replace_existing=True,
+            jitter=120,
+            misfire_grace_time=1800,
         )
     scheduler.start()
     logger.info(

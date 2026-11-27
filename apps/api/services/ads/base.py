@@ -94,6 +94,30 @@ class ConversionResult:
     transient: bool = False
 
 
+@dataclass
+class LookalikeSpec:
+    """Validated lookalike parameters (closed-won-lookalikes).
+
+    ``country`` is ISO-3166 alpha-2. Meta uses ``ratio`` (0.01–0.10); Google
+    uses ``expansion`` (NARROW / BALANCED / BROAD).
+    """
+
+    country: str
+    ratio: float | None = None
+    expansion: str | None = None
+
+
+@dataclass
+class LookalikeResult:
+    """Outcome of ``create_lookalike``."""
+
+    audience_id: str = ""
+    status: str = "created"  # created | exists | error
+    supported: bool = True
+    warning: str = ""
+    error: str = ""
+
+
 def sanitize_error(exc: BaseException, fallback: str = "Request failed") -> str:
     """Short, PII-free error string safe to persist in ``last_error``.
 
@@ -144,3 +168,12 @@ class AdsProvider(ABC):
         events: list[ConversionEvent],
     ) -> list[ConversionResult]:
         raise NotImplementedError(f"{self.provider or 'provider'} does not support conversions")
+
+    # closed-won-lookalikes: NON-abstract (additive), same rationale as above.
+    async def create_lookalike(
+        self,
+        connection,
+        seed_audience_id: str,
+        spec: LookalikeSpec,
+    ) -> LookalikeResult:
+        raise NotImplementedError(f"{self.provider or 'provider'} does not support lookalikes")

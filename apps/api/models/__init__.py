@@ -21,3 +21,4 @@ from apps.api.models.rpki_roa import RpkiRoa  # noqa: F401
 # conversion-apis: the sweep is the only writer; registered here so create_all /
 # alembic autogenerate always see both tables (same rationale as above).
 from apps.api.models.ad_conversion import AdConversionConfig, AdConversionDelivery  # noqa: F401,E402
+from apps.api.models.crm_closed_won import CrmClosedWonContact  # noqa: F401,E402

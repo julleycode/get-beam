@@ -46,6 +46,8 @@ from apps.api.services.ads.base import (
     ConversionEvent,
     ConversionResult,
     HashedContact,
+    LookalikeResult,
+    LookalikeSpec,
     sanitize_error,
 )
 from apps.api.services.click_ids import google_ad_identifier
@@ -454,6 +456,47 @@ class GoogleAdsProvider(AdsProvider):
 
     # ── conversion-apis: Data Manager events:ingest ──────
 
+    # ── closed-won-lookalikes: lookalike user list ───────
+
+    async def create_lookalike(
+        self, connection, seed_audience_id: str, spec: LookalikeSpec
+    ) -> LookalikeResult:
+        from apps.api.services.ads_push import EEA_COUNTRY_CODES
+
+        country = (spec.country or "").strip().upper()
+        # UD3: fail closed — no EEA (or unknown) country for Google.
+        if not country or country in EEA_COUNTRY_CODES:
+            return LookalikeResult(
+                status="error",
+                error="Google lookalikes are not available for EEA countries (no consent signal).",
+            )
+        if settings.mock_external_apis:
+            return LookalikeResult(
+                audience_id=f"customers/0/userLists/mock-lal-{uuid.uuid4().hex[:10]}",
+                warning=GOOGLE_DEMAND_GEN_NOTE,
+            )
+        token = _access_token(connection)
+        customer_id = _customer_id(connection)
+        payload = build_google_lookalike_request(seed_audience_id, spec)
+        try:
+            created = await self._ads_post(
+                f"{_GOOGLE_ADS_BASE}/customers/{customer_id}/userLists:mutate", payload, token
+            )
+        except httpx.HTTPStatusError as exc:
+            if "DUPLICATE_LOOKALIKE" in (exc.response.text or "")[:5000]:
+                return LookalikeResult(
+                    status="exists",
+                    warning="A lookalike with these settings already exists in Google Ads.",
+                )
+            return LookalikeResult(status="error", error=sanitize_error(exc, "Lookalike create failed"))
+        except httpx.HTTPError as exc:
+            return LookalikeResult(status="error", error=sanitize_error(exc, "Lookalike create failed"))
+        resource = ((created.get("results") or [{}])[0]).get("resourceName", "")
+        if not resource:
+            return LookalikeResult(status="error", error="Google did not return a lookalike list")
+        logger.info("google_lookalike_created")
+        return LookalikeResult(audience_id=resource, warning=GOOGLE_DEMAND_GEN_NOTE)
+
     async def send_conversions(
         self, connection, config, events: list[ConversionEvent]
     ) -> list[ConversionResult]:
@@ -555,6 +598,37 @@ def build_data_manager_events_request(config, events: list[ConversionEvent]) -> 
         "encoding": _HASH_ENCODING,
         "validateOnly": bool(getattr(config, "validate_only", True)),
     }
+
+GOOGLE_DEMAND_GEN_NOTE = "Google lookalike segments are usable in Demand Gen campaigns only."
+GOOGLE_EXPANSION_LEVELS = ("NARROW", "BALANCED", "BROAD")
+
+
+def build_google_lookalike_request(seed_audience_id: str, spec: LookalikeSpec) -> dict:
+    """``userLists:mutate`` body creating a lookalike from a Customer Match seed."""
+    return {
+        "operations": [
+            {
+                "create": {
+                    "name": f"Beam closed-won lookalike {spec.country} {spec.expansion} {uuid.uuid4().hex[:6]}",
+                    "lookalikeUserList": {
+                        "seedUserListIds": [_user_list_id(seed_audience_id)],
+                        "expansionLevel": spec.expansion,
+                        "countryCodes": [spec.country],
+                    },
+                }
+            }
+        ]
+    }
+
+
+def google_seed_warning(seed_size: int) -> str:
+    if seed_size < settings.google_lookalike_min_seed:
+        return (
+            f"Your seed has {seed_size} people. Google needs about "
+            f"{settings.google_lookalike_min_seed} matched people before a lookalike is useful."
+        )
+    return ""
+
 
 def _expiry_from(payload: dict) -> datetime | None:
     expires_in = int(payload.get("expires_in") or 0)

@@ -1,0 +1,6 @@
+{
+  "reviewer": "vc-execute-agent (self-review; independent vc-tester EVL + human operator review still required before flag flip)",
+  "decision": "REJECT",
+  "rationale": "Not yet finalizable: G1/G2/G2b/G3/G4/G6/G7/G8 green and targeted integration regression green, but the full integration lane (G5) was not re-run because host disk was ~240MB free. Re-evaluate to APPROVE after EVL runs the full lane green and confirms the company-exclusion import guard once the sibling module merges. Live provider legs (KG-L) remain known-gaps; closed_won_lookalikes_enabled stays OFF.",
+  "timestamp": "2026-11-27T17:05:00Z"
+}

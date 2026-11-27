@@ -19,11 +19,14 @@ from apps.api.config import settings
 from apps.api.services.crm.base import (
     HTTP_TIMEOUT,
     PUSH_CONCURRENCY,
+    ClosedWonDeal,
+    ClosedWonFetch,
     CRMContact,
     CRMConnector,
     CrmOAuthTokens,
     PushResult,
     _http_retry,
+    mock_closed_won_deals,
     sanitize_error,
 )
 
@@ -212,3 +215,76 @@ class PipedriveConnector(CRMConnector):
             if not ok and msg and msg not in errors:
                 errors.append(msg)
         return PushResult(pushed=pushed, failed=failed, errors=errors)
+
+    # ── closed-won-lookalikes: read-back ─────────────────
+
+    @_http_retry
+    async def _get_deals_page(self, instance_url: str, access_token: str, start: int) -> dict:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+            resp = await client.get(
+                f"{instance_url}/api/v1/deals",
+                params={"status": "won", "start": start, "limit": 100, "sort": "update_time ASC"},
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def fetch_closed_won(
+        self,
+        *,
+        access_token: str = "",
+        instance_url: str = "",
+        scopes: list[str] | None = None,
+        since: datetime | None = None,
+    ) -> ClosedWonFetch:
+        if settings.mock_external_apis:
+            return ClosedWonFetch(deals=mock_closed_won_deals("pipedrive"))
+        if not access_token or not instance_url:
+            return ClosedWonFetch()
+        deals: list[ClosedWonDeal] = []
+        cursor = since
+        start = 0
+        for _ in range(500):  # hard page cap (50k deals)
+            page = await self._get_deals_page(instance_url, access_token, start)
+            for deal in page.get("data") or []:
+                updated = parse_pipedrive_ts(deal.get("update_time"))
+                if since and updated and updated < since:
+                    continue
+                if updated and (cursor is None or updated > cursor):
+                    cursor = updated
+                deals.extend(pipedrive_deal_contacts(deal))
+            pagination = ((page.get("additional_data") or {}).get("pagination") or {})
+            if not pagination.get("more_items_in_collection"):
+                break
+            start = int(pagination.get("next_start") or 0)
+        logger.info("crm_pipedrive_closed_won_fetched", deals=len(deals))
+        return ClosedWonFetch(deals=deals, cursor=cursor)
+
+
+def parse_pipedrive_ts(value) -> datetime | None:
+    """Pipedrive timestamps are ``YYYY-MM-DD HH:MM:SS`` in UTC."""
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def pipedrive_deal_contacts(deal: dict) -> list[ClosedWonDeal]:
+    """Emails of the deal's linked person (``person_id`` is an expanded object)."""
+    person = deal.get("person_id") or {}
+    if not isinstance(person, dict):
+        return []
+    out: list[ClosedWonDeal] = []
+    for entry in person.get("email") or []:
+        email = ((entry or {}).get("value") or "").strip() if isinstance(entry, dict) else ""
+        if email:
+            out.append(
+                ClosedWonDeal(
+                    external_deal_id=str(deal.get("id")),
+                    email=email,
+                    closed_at=parse_pipedrive_ts(deal.get("won_time")),
+                )
+            )
+    return out
