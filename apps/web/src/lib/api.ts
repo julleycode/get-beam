@@ -1,5 +1,8 @@
 import type { CanaryResponse } from "@/lib/canary-format";
 import type {
+  ExclusionImportResult,
+  ExclusionReason,
+  SiteExclusion,
   KnownUploadResult,
   ImportContactsResult,
   ImportedContactList,
@@ -52,12 +55,23 @@ import type {
   SiteKpis,
   SiteTimeseries,
   SiteStats,
+  CtaClickCounts,
+  AccountListResponse,
+  AccountDetail,
+  AccountSort,
+  TopAdsResponse,
+  ContentOpportunity,
+  ContentOpportunityStatus,
   CostSummary,
   ApiKeyInfo,
   CrmConnection,
   CrmPushResult,
   AdConnection,
   AdPushResult,
+  ClosedWonSeedSummary,
+  ClosedWonCsvResult,
+  ClosedWonLookalikeRequest,
+  ClosedWonLookalikeResult,
   Platform,
   DraftStatus,
   SocialAccount,
@@ -784,6 +798,57 @@ class ApiClient {
     );
   }
 
+  /** Per-CTA-type click counts (click-level, not conversions). */
+  async getCtaClickCounts(siteId: string) {
+    return this.request<CtaClickCounts>(`/api/v1/campaigns/${siteId}/cta-clicks`);
+  }
+
+  // ── Account rollup (flag-gated; 404 when off) ──
+  async listAccounts(
+    siteId: string,
+    opts: { days?: number; sort?: AccountSort; page?: number; pageSize?: number } = {}
+  ) {
+    const q = new URLSearchParams({
+      days: String(opts.days ?? 30),
+      sort: opts.sort ?? "last_seen",
+      page: String(opts.page ?? 1),
+      page_size: String(opts.pageSize ?? 25),
+    });
+    return this.request<AccountListResponse>(`/api/v1/accounts/${siteId}?${q}`);
+  }
+
+  async getAccount(siteId: string, domain: string, days = 30) {
+    return this.request<AccountDetail>(
+      `/api/v1/accounts/${siteId}/${encodeURIComponent(domain)}?days=${days}`
+    );
+  }
+
+  // ── Ad insights → content opportunities (suggestions only) ──
+  async getTopAds(siteId: string) {
+    return this.request<TopAdsResponse>(`/api/v1/ad-insights/${siteId}/top-ads`);
+  }
+
+  async listContentOpportunities(siteId: string) {
+    return this.request<ContentOpportunity[]>(`/api/v1/ad-insights/${siteId}/opportunities`);
+  }
+
+  async setContentOpportunityStatus(
+    siteId: string,
+    opportunityId: string,
+    status: ContentOpportunityStatus
+  ) {
+    return this.request<ContentOpportunity>(
+      `/api/v1/ad-insights/${siteId}/opportunities/${opportunityId}`,
+      { method: "PATCH", body: JSON.stringify({ status }) }
+    );
+  }
+
+  async refreshAdInsights(siteId: string) {
+    return this.request<{ scheduled: boolean }>(`/api/v1/ad-insights/${siteId}/refresh`, {
+      method: "POST",
+    });
+  }
+
   // ── Conversion outcomes ──
   async getConversionGoals(siteId: string) {
     return this.request<GoalListResponse>(`/api/v1/outcomes/${siteId}/goals`);
@@ -1072,6 +1137,25 @@ class ApiClient {
         body: JSON.stringify({ segment_id: segmentId }),
       }
     );
+  }
+
+  // Closed-won lookalikes (404 when the feature flag is off)
+  async getClosedWonSeed(siteId: string) {
+    return this.request<ClosedWonSeedSummary>(`/api/v1/ads/${siteId}/closed-won/seed`);
+  }
+
+  async uploadClosedWonCsv(siteId: string, csv: string) {
+    return this.request<ClosedWonCsvResult>(`/api/v1/ads/${siteId}/closed-won/csv`, {
+      method: "POST",
+      body: JSON.stringify({ csv }),
+    });
+  }
+
+  async createClosedWonLookalike(siteId: string, body: ClosedWonLookalikeRequest) {
+    return this.request<ClosedWonLookalikeResult>(`/api/v1/ads/${siteId}/closed-won/lookalike`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   }
 
   async disconnectAdProvider(siteId: string, provider: string) {
@@ -1727,6 +1811,56 @@ class ApiClient {
     );
   }
 
+  // ── Company exclusion list (customers / competitors) ───────────────────
+  async listExclusions(siteId: string) {
+    return this.request<SiteExclusion[]>(`/api/v1/sites/${siteId}/exclusions`);
+  }
+
+  async createExclusion(
+    siteId: string,
+    body: { domain: string; reason: ExclusionReason; company_name?: string; note?: string },
+  ) {
+    return this.request<SiteExclusion>(`/api/v1/sites/${siteId}/exclusions`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteExclusion(siteId: string, id: string) {
+    return this.request<void>(`/api/v1/sites/${siteId}/exclusions/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async importExclusions(siteId: string, file: File): Promise<ExclusionImportResult> {
+    // Multipart — bypass the JSON request helper (browser sets the boundary).
+    const form = new FormData();
+    form.append("file", file);
+    const send = (token: string | null) =>
+      fetch(`${API_BASE}/api/v1/sites/${siteId}/exclusions/import`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      });
+    let res = await send(this.getToken());
+    if (res.status === 401 && this.clerkTokenGetter) {
+      try {
+        const fresh = await this.clerkTokenGetter();
+        if (fresh) {
+          this.setClerkToken(fresh);
+          res = await send(fresh);
+        }
+      } catch {
+        // fall through to the error handling below
+      }
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Import failed: ${res.status}`);
+    }
+    return res.json() as Promise<ExclusionImportResult>;
+  }
+
   // ── Imported contacts (Phase 4) ────────────────────────────────────────
   // NOT the same as known contacts above. Known contacts are a hash-only
   // EXCLUSION list (no visitor created, no plaintext email kept). These are
@@ -1905,6 +2039,10 @@ export type {
   AdProvider,
   AdConnection,
   AdPushResult,
+  ClosedWonSeedSummary,
+  ClosedWonCsvResult,
+  ClosedWonLookalikeRequest,
+  ClosedWonLookalikeResult,
   Platform,
   DraftStatus,
   SocialAccount,

@@ -1,0 +1,14 @@
+{
+  "steps": [
+    {"step": "AC1 selector", "command": ".venv/bin/pytest tests/unit/test_signal_angle.py -q", "result": "PASS", "notes": "15 passed"},
+    {"step": "AC2/AC3 planner flag-OFF unchanged + flag-ON angle/CTA + coercion", "command": ".venv/bin/pytest tests/unit/test_campaign_planner_prompt.py -q", "result": "PASS", "notes": "6 passed; flag-OFF asserts zero db.execute calls"},
+    {"step": "AC3 render + send path (tp == pre-assigned touchpoint id) + 3 harnesses on 6-item site_row", "command": ".venv/bin/pytest tests/unit/test_personalize.py tests/unit/test_campaign_send_cta_link.py tests/unit/test_campaign_send_booking_link.py tests/unit/test_gmail_sender_decoration_parity.py tests/unit/test_agent_origin_exclusion.py -q", "result": "PASS", "notes": "43 passed"},
+    {"step": "AC5 unit (flag OFF legacy; stored URL; foreign u never used; reply/unknown fallback; redirect-time recheck; invalid cid/tp dropped; foreign tp ignored)", "command": ".venv/bin/pytest tests/unit/test_click_redirect.py -q", "result": "PASS", "notes": "24 passed"},
+    {"step": "AC4/AC5/AC6 hybrid flag ON, real PG; failure cases 422 + foreign site 404", "command": "DATABASE_URL=postgresql+asyncpg://retarget:retarget_dev@localhost:5433/retarget_agent_test_lane_a .venv/bin/pytest tests/integration/test_cta_attribution.py tests/integration/test_click_redirect.py -q", "result": "PASS", "notes": "15 passed"},
+    {"step": "Migration up/down/up, disposable postgres:16-alpine", "command": "DATABASE_URL=postgresql+asyncpg://u:p@localhost:55433/d alembic -c apps/api/alembic.ini upgrade head; downgrade -1; upgrade head", "result": "PASS", "notes": "e9c4a7d2f318 <-> d3f8a2c61b47 clean; container removed"},
+    {"step": "Full unit lane", "command": ".venv/bin/pytest tests/unit -q", "result": "PASS", "notes": "3149 passed / 2 skipped / 1 failed; the failure (test_paid_x402.py) also fails on the base tree without this change, so it is pre-existing"},
+    {"step": "Full integration lane (pinned lane DB, Redis db 13)", "command": "DATABASE_URL=...lane_a REDIS_URL=redis://localhost:6379/13 .venv/bin/pytest tests/integration -q", "result": "PASS", "notes": "705 passed, 5 skipped, 0 failed (17m14s)"},
+    {"step": "Web types", "command": "cd apps/web && npx tsc --noEmit (symlinked shared node_modules, removed after)", "result": "PASS", "notes": "no errors in touched files; only pre-existing @sentry/nextjs missing-module errors"},
+    {"step": "Live Gemini honors angle/CTA", "command": "n/a", "result": "SKIP", "notes": "Agent-Probe known-gap (needs GEMINI key)"}
+  ]
+}

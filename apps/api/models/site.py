@@ -115,6 +115,16 @@ class Site(Base):
     # Validated at the API boundary (http(s) only, no HTML-injection or
     # link-decorator-terminator characters) — nothing downstream escapes it.
     booking_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Structured CTA set (signal-creative-cta): {default, types: {type: {url, label}}}.
+    # Validated in schemas/sites.py; book_demo reuses booking_url above.
+    cta_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    # On-site company greeting (onsite-greeting). Default OFF; also needs
+    # settings.onsite_greeting_enabled. greeting_templates is
+    # {"default": {"text": str, "cta_url": str|None}} — validated in schemas/sites.py.
+    greeting_enabled: Mapped[bool] = mapped_column(
+        default=False, nullable=False, server_default="false"
+    )
+    greeting_templates: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     # Campaign-benchmark opt-in (marketing-claims-gap Phase 3). When True AND
     # settings.campaign_benchmark_enabled is True, this site's ZERO-PII campaign
     # counters (sends/opens/clicks/conversions) are pooled into a k-anonymous

@@ -1,0 +1,18 @@
+{
+  "task": "company-exclusion-list",
+  "commands": [
+    {"gate": "G1+G5", "command": ".venv/bin/python -m pytest tests/unit/test_company_exclusion.py -q", "result": "PASS", "notes": "26 passed"},
+    {"gate": "G7", "command": ".venv/bin/python -m pytest tests/unit/test_company_exclusion_census.py -q", "result": "PASS", "notes": "6 passed"},
+    {"gate": "G2", "command": "DATABASE_URL=...localhost:5433/retarget_agent_test .venv/bin/python -m pytest tests/integration/test_company_exclusion.py -q -k crud", "result": "PASS", "notes": "7 passed (incl. foreign-site 404, 413 cap, site-delete cascade)"},
+    {"gate": "G3", "command": "same file -k flag_on", "result": "PASS", "notes": "14 passed — real flag-ON path: send skip+counter, export drop, LinkedIn drop, segmentation (direct/all-excluded/Celery/route), planner, AutoDrafter, approve/retry 409 status unchanged, send_draft typed error, badge"},
+    {"gate": "G4", "command": "same file -k flag_off", "result": "PASS", "notes": "1 passed — helpers patched to raise; no SQL touched site_exclusions; summary shape unchanged; excluded_reason null"},
+    {"gate": "G6", "command": "alembic upgrade head / downgrade -1 / upgrade head on disposable postgres:16-alpine :55439 (pinned DSN)", "result": "PASS", "notes": "d3f8a2c61b47 <-> e8c4b2a7d913 clean; FK confdeltype=c; indexes present"},
+    {"gate": "G8", "command": ".venv/bin/python -m pytest tests/unit -q", "result": "PASS", "notes": "3114 passed, 2 skipped, 1 failed: test_paid_x402::test_no_payment_returns_402_with_requirements — pre-existing, fails identically with this change stashed"},
+    {"gate": "G9", "command": "cd apps/web && npx tsc --noEmit", "result": "PASS", "notes": "0 errors in src/; 4 pre-existing errors only in stale generated .next/types for removed app/api routes"},
+    {"gate": "extra", "command": ".venv/bin/python -m pytest tests/integration -q", "result": "SKIP", "notes": "env-blocked mid-run: :5433 dropped (colima disk I/O errors). Before the drop 417 passed incl. campaign_*, crm_push, draft_rejection, company_exclusion; 1 failure test_demo_canary_public (geo 'Hanoi', unrelated); 298 connection-refused errors"}
+  ],
+  "manualChecks": [
+    {"gate": "G10", "check": "connectors-page Excluded companies panel add/import/delete + visitors badge priority", "result": "NOT RUN", "notes": "Agent-Probe; Clerk auth harness gap — manual dev-server walk required"}
+  ],
+  "result": "PASS-with-gaps"
+}

@@ -1,0 +1,55 @@
+{
+  "task": "onsite-greeting (gap #5) \u2014 company-level on-site greeting, flag OFF",
+  "scenarios": [
+    {
+      "scenario": "Origin spoof (missing / 'null' / mismatched / subdomain / suffix-lookalike)",
+      "ruled_out": true,
+      "expected": "show:false",
+      "observed": "show:false (G1 param matrix, G2 4 cases)",
+      "rationale": "exact normalized host match; curl can forge Origin but output is owner copy only + rate limited"
+    },
+    {
+      "scenario": "Forged v to unlock a greeting",
+      "ruled_out": true,
+      "expected": "v can only suppress",
+      "observed": "unknown v proceeds to IP-only checks; blocked v \u2192 show:false",
+      "rationale": "v only adds a negative check"
+    },
+    {
+      "scenario": "IP\u2192company oracle probing",
+      "ruled_out": true,
+      "expected": "only templated text, 429 after 30/min, org-kind gate",
+      "observed": "G2 429 test; eyeball \u2192 show:false; no IP/ASN/domain in body",
+      "rationale": "requires enabled site + matching Origin; per-IP and per-site limits"
+    },
+    {
+      "scenario": "Cross-visitor cache leak on shared IP",
+      "ruled_out": true,
+      "expected": "do_not_resolve visitor B on same IP \u2192 show:false",
+      "observed": "G1 + G2 visitor A/B tests",
+      "rationale": "only greeting_company:{ip} cached; decision recomputed per request"
+    },
+    {
+      "scenario": "Consent bypass",
+      "ruled_out": true,
+      "expected": "greeting.js never requested when pending/declined/GPC/attr off",
+      "observed": "G4 4 negative cases",
+      "rationale": "loader gated client-side; server rechecks v do_not_resolve"
+    },
+    {
+      "scenario": "HTML injection via template or org name",
+      "ruled_out": true,
+      "expected": "text only",
+      "observed": "schema rejects <>/other placeholders; service strips <>{}; greeting.js uses textContent (G4 img test)",
+      "rationale": "defense in depth"
+    },
+    {
+      "scenario": "Paid provider call on hot path",
+      "ruled_out": true,
+      "expected": "zero",
+      "observed": "G1 monkeypatches resolve_company_cached/check_ip_privacy/rDNS/httpx to raise",
+      "rationale": "only Redis + local ip_org reads"
+    }
+  ],
+  "rollback": "Both flags OFF = zero behavior. Downgrade a2d6e8f41c93 drops the 2 columns (proven in G5)."
+}

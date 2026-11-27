@@ -337,7 +337,15 @@ async def delete_site(
             "agent_fetch_events",
             "agent_handoff_links",
             "request_logs",
+            # ad-insights-seo-aeo (G-3): delete before ad_connections (FK).
+            "ad_performance_daily",
+            "content_opportunities",
             "ad_connections",
+            # conversion-apis (N3): conversion outbox + config rows.
+            "ad_conversion_deliveries",
+            "ad_conversion_configs",
+            # closed-won-lookalikes (Gap 8): CRM closed-won seed contacts.
+            "crm_closed_won_contacts",
             # H1: close the site_id-reuse gap for spendable co-op credit.
             # identity_contribution_consent_acceptances is DELIBERATELY retained
             # (append-only legal audit trail, inert alone) — plan decision H1-D.
@@ -418,6 +426,26 @@ async def update_site(
     # security contract, since nothing downstream escapes this value.
     if body.booking_url is not None:
         site.booking_url = body.booking_url
+    # Structured CTA set (signal-creative-cta). Site-host types must stay on
+    # the site's own host — the same check /c/ re-runs at redirect time.
+    if body.cta_config is not None:
+        from apps.api.routers.click import safe_dest
+
+        for cta_type, entry in body.cta_config.types.items():
+            if safe_dest(entry.url, site.url) != entry.url:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"cta_config.types.{cta_type}.url must be on the site's own host",
+                )
+        cfg = body.cta_config.model_dump(exclude_none=True)
+        site.cta_config = cfg if (cfg.get("default") or cfg.get("types")) else None
+    # On-site greeting (onsite-greeting). Template text/cta_url validated in
+    # GreetingTemplates ({company} only, <=200 chars, https-only cta_url).
+    if body.greeting_enabled is not None:
+        site.greeting_enabled = body.greeting_enabled
+    if body.greeting_templates is not None:
+        tpl = body.greeting_templates.model_dump(exclude_none=True)
+        site.greeting_templates = tpl if tpl.get("default") else None
 
     # Identity co-op opt-in (AC-10). Turning it ON requires accepting the exact
     # currently-pinned terms, and the acceptance row is written in the SAME

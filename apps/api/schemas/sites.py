@@ -40,6 +40,112 @@ def validate_booking_url(v: str | None) -> str | None:
     return v
 
 
+_CTA_TYPES = ("book_demo", "free_trial", "pricing_page", "resource", "reply")
+# Types that carry their own stored URL. book_demo reuses Site.booking_url and
+# reply has no link, so neither may appear under ``types``.
+_CTA_LINKED_TYPES = ("free_trial", "pricing_page", "resource")
+
+
+class CtaTypeEntry(BaseModel):
+    url: str
+    label: str | None = Field(default=None, max_length=80)
+
+    @field_validator("url")
+    @classmethod
+    def _valid_url(cls, v: str) -> str:
+        # Same security contract as booking_url (substituted unescaped into
+        # outbound HTML), plus https only.
+        out = validate_booking_url(v)
+        if not out or not out.startswith("https://"):
+            raise ValueError("CTA url must be an absolute https URL")
+        return out
+
+    @field_validator("label")
+    @classmethod
+    def _valid_label(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if any(c in v for c in _BOOKING_URL_FORBIDDEN):
+            raise ValueError("CTA label must not contain any of < > \" ' )")
+        return v or None
+
+
+class CtaConfig(BaseModel):
+    """Owner-set CTA set: ``{default, types: {type: {url, label}}}``.
+
+    The site-host rule for free_trial/pricing_page/resource
+    (``safe_dest(url, site.url) == url``) needs the site URL, so it is enforced
+    in the router; it is re-checked again at redirect time in /c/.
+    """
+
+    default: str | None = None
+    types: dict[str, CtaTypeEntry] = Field(default_factory=dict)
+
+    @field_validator("default")
+    @classmethod
+    def _valid_default(cls, v: str | None) -> str | None:
+        if v is not None and v not in _CTA_TYPES:
+            raise ValueError(f"default must be one of {list(_CTA_TYPES)}")
+        return v
+
+    @field_validator("types")
+    @classmethod
+    def _valid_types(cls, v: dict) -> dict:
+        bad = [k for k in v if k not in _CTA_LINKED_TYPES]
+        if bad:
+            raise ValueError(
+                f"types keys must be among {list(_CTA_LINKED_TYPES)} "
+                "(book_demo uses booking_url; reply has no link)"
+            )
+        return v
+
+
+def validate_https_url(v: str | None) -> str | None:
+    """``validate_booking_url`` plus https-only (it allows http today)."""
+    out = validate_booking_url(v)
+    if out is not None and not out.startswith("https://"):
+        raise ValueError("url must be an absolute https URL")
+    return out
+
+
+GREETING_TEXT_MAX = 200
+_GREETING_PLACEHOLDER = "{company}"
+
+
+class GreetingTemplate(BaseModel):
+    """One owner greeting template. ``{company}`` is the ONLY placeholder."""
+
+    text: str = Field(..., min_length=1, max_length=GREETING_TEXT_MAX)
+    cta_url: str | None = None
+
+    @field_validator("text")
+    @classmethod
+    def _valid_text(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("greeting text must not be empty")
+        if any(c in v for c in "<>"):
+            raise ValueError("greeting text must not contain < or >")
+        rest = v.replace(_GREETING_PLACEHOLDER, "")
+        if "{" in rest or "}" in rest:
+            raise ValueError("greeting text may only use the {company} placeholder")
+        return v
+
+    @field_validator("cta_url")
+    @classmethod
+    def _valid_cta(cls, v: str | None) -> str | None:
+        return validate_https_url(v)
+
+
+class GreetingTemplates(BaseModel):
+    """v1: default template only (no per-industry templates — U4)."""
+
+    model_config = {"extra": "forbid"}
+
+    default: GreetingTemplate | None = None
+
+
 class SiteCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     url: str = Field(..., min_length=1, max_length=500)
@@ -74,6 +180,11 @@ class SiteOut(BaseModel):
     # Owner's demo/meeting booking link, rendered into drafts via
     # {{booking_link}}. Additive + optional; None = not configured.
     booking_url: str | None = None
+    # Structured CTA set (signal-creative-cta). Additive + optional.
+    cta_config: dict | None = None
+    # On-site greeting (onsite-greeting). Additive; default OFF.
+    greeting_enabled: bool = False
+    greeting_templates: dict | None = None
     consent_mode: str
     created_at: datetime
 
@@ -81,6 +192,7 @@ class SiteOut(BaseModel):
         "internal_damping_enabled",
         "contribution_enabled",
         "benchmark_contribution_enabled",
+        "greeting_enabled",
         mode="before",
     )
     @classmethod
@@ -123,6 +235,12 @@ class SiteUpdate(BaseModel):
     benchmark_contribution_enabled: bool | None = None
     # Demo/meeting booking link. Validated below — see validate_booking_url.
     booking_url: str | None = None
+    # Structured CTA set. ``{}`` (or a config with no default and no types)
+    # clears it. Site-host URL rule enforced in the router.
+    cta_config: CtaConfig | None = None
+    # On-site greeting opt-in + owner copy. ``{}`` clears the templates.
+    greeting_enabled: bool | None = None
+    greeting_templates: GreetingTemplates | None = None
 
     @field_validator("booking_url")
     @classmethod

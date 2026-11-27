@@ -122,6 +122,7 @@ class TestSchedulerInventory:
             "daily_digest",
             "reengagement_sweep",
             "campaign_benchmark",
+            "ad_insights_daily",
         }
 
 
@@ -177,7 +178,24 @@ class TestAC13IntervalJobHardening:
         assert [c for c in cron if "jitter" in _kwargs(c)] == []
 
     def test_the_asserted_set_is_derived_not_hardcoded(self):
-        """E20 arithmetic: 28 total / 24 interval / 3 cron — all AST-derived.
+        """E20 arithmetic: 30 total / 26 interval / 4 cron — all AST-derived.
+
+        Re-derived 27-11-26 after merging conversion-apis (#11) + closed-won
+        lookalikes (#12) onto main: both jobs present exactly once.
+
+        Was 29/25/4; +1 interval job for poll_closed_won (closed-won-lookalikes —
+        CRM closed-won read-back; flag-gated OFF on closed_won_lookalikes_enabled
+        at the registration site AND in the wrapper; literal jitter 120 +
+        misfire_grace_time, no next_run_time).
+
+        Was 30/26/4; +1 CRON job for ad_insights_daily (ad-insights-seo-aeo —
+        daily 04:30 UTC read-only ad-report ingest + content suggestions;
+        flag-gated OFF on ad_insights_enabled at the registration site AND in
+        the wrapper; cron, so excluded from the jitter assertion) -> 31/26/5.
+        Was 28/24/4; +1 interval job for ad_conversions_sweep (conversion-apis —
+        server-side ad conversions outbox; flag-gated OFF on
+        ad_conversions_enabled at the registration site AND in the wrapper;
+        literal jitter 30 + misfire_grace_time, no next_run_time).
 
         Re-derived 17-08-26 against the live scheduler in the same change that
         added the jobs (engage-learning-agent Phase 1), per this gate's own
@@ -243,8 +261,37 @@ class TestAC13IntervalJobHardening:
         """
         calls = _add_job_calls()
         interval = [c for c in calls if _is_interval(c)]
-        assert len(calls) == 28, f"expected 28 add_job calls, found {len(calls)}"
-        assert len(interval) == 24, (
-            f"expected 24 interval calls, found {len(interval)}; if a job was "
+        assert len(calls) == 31, f"expected 31 add_job calls, found {len(calls)}"
+        assert len(interval) == 26, (
+            f"expected 26 interval calls, found {len(interval)}; if a job was "
             "added or removed, update E20's arithmetic — do not relax this gate"
         )
+
+
+class TestAdInsightsDailyGating:
+    """ad-insights-seo-aeo G1b: the cron job exists only inside the flag branch."""
+
+    def test_registered_only_inside_the_ad_insights_enabled_branch(self):
+        tree = ast.parse(SCHEDULER_PATH.read_text(encoding="utf-8"))
+        target = _job("ad_insights_daily")
+        gated = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.If)
+            and isinstance(node.test, ast.Attribute)
+            and node.test.attr == "ad_insights_enabled"
+            and any(
+                isinstance(n, ast.Call) and n.lineno == target.lineno
+                for stmt in node.body
+                for n in ast.walk(stmt)
+            )
+        ]
+        assert gated, "ad_insights_daily add_job must sit inside `if settings.ad_insights_enabled:`"
+
+    def test_it_is_a_cron_job_with_a_grace_window(self):
+        call = _job("ad_insights_daily")
+        assert not _is_interval(call)
+        kw = _kwargs(call)
+        assert isinstance(kw["misfire_grace_time"], ast.Constant)
+        assert kw["misfire_grace_time"].value == 3600
+        assert "jitter" not in kw

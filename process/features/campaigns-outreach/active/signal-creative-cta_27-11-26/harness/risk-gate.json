@@ -1,0 +1,6 @@
+{
+  "riskClass": "permission, secret, or trust-boundary logic; schema/data migration; public API or external contract changes",
+  "workDescription": "signal-creative-cta: /c/ click redirect honors ct= (owner-stored CTA URLs only), new cta_click_events table + sites.cta_config JSONB (migration e9c4a7d2f318), additive SiteUpdate.cta_config + GET /campaigns/{site_id}/cta-clicks. Both flags default OFF.",
+  "approver": "vc-execute-agent (Lane A); pending independent vc-tester EVL + orchestrator review",
+  "mustStopBeforeFinalize": true
+}

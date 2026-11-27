@@ -1,0 +1,14 @@
+{
+  "scenarios": [
+    {"scenario": "Visitor opts out (GPC/DNT) or is suppressed after enqueue but before send", "ruled_out": true, "rationale": "prepare_event re-runs evaluate_gates per row immediately before each batch; G9 covers it (integration, pending EVL)."},
+    {"scenario": "Third-party graph guess (rb2b/leadpipe/beam_identity_network) or company-level guess (hunter/apollo) uploaded as a conversion", "ruled_out": true, "rationale": "FIRST_PARTY_PROVIDERS pinned to {form_capture, pdl_person_enrich}; checked at discovery, enqueue and send. Unit-pinned."},
+    {"scenario": "EEA visitor PII sent to Meta without consent", "ruled_out": true, "rationale": "D3: EEA and unknown country skipped for BOTH platforms (fail closed)."},
+    {"scenario": "Plaintext PII leaking via logs or last_error", "ruled_out": true, "rationale": "last_error holds reason codes or sanitize_error output only; grep proof in verification.json; provider body never persisted."},
+    {"scenario": "Cross-tenant read of another site's config/deliveries", "ruled_out": true, "rationale": "verify_site_access on every route returns 404 for foreign sites (G4 foreign-site test, pending EVL)."},
+    {"scenario": "Duplicate conversions inflating ad metrics", "ruled_out": true, "rationale": "UNIQUE(site_id, platform, dedup_id) + ON CONFLICT DO NOTHING; stable row-id dedup (E11) also sent as event_id/transactionId."},
+    {"scenario": "Agent-origin or abuse-flagged identity sent", "ruled_out": true, "rationale": "is_emailable_identity + explicit agent/abuse/bot gates."},
+    {"scenario": "Erased visitor resurrected via outbox", "ruled_out": true, "rationale": "per-visitor erasure deletes ad_conversion_deliveries; a pending row whose identity was erased is skipped_erased at send time."},
+    {"scenario": "Retry storm against provider", "ruled_out": true, "rationale": "One HTTP call per outbox attempt (no tenacity stacking), backoff min(2^n*60, 3600)s, max attempts 5."},
+    {"scenario": "Company-excluded visitor sent (company-exclusion-list sibling plan)", "ruled_out": false, "rationale": "Guarded by optional import: active only once services/company_exclusion.py exists on the merged branch. Merge note: verify the gate is live after both plans land."}
+  ]
+}

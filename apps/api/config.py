@@ -404,6 +404,13 @@ class Settings(BaseSettings):
     # same posture as agent_detection_enabled / company_graph_enabled.
     candidate_outreach_enabled: bool = False
 
+    # ─── Company exclusion list (campaigns-outreach, 27-11-26) ───
+    # Per-site customer/competitor domain list. ON: matching visitors are
+    # skipped at send, export/ads/CRM push, LinkedIn targets, segmentation,
+    # planner input, auto-drafts and draft approve/retry (409). They stay
+    # visible (badged). OFF: zero new queries on every touched path.
+    company_exclusion_enabled: bool = False
+
     # ─── Fingerprint v2 fallback (WS3, per-site Check 2) ───
     # Check 2 (per-site fingerprint match) historically selected ONE column —
     # fingerprint_v3 when the visitor carried an fp3, else fingerprint (fp2) —
@@ -1085,6 +1092,32 @@ class Settings(BaseSettings):
     ads_async_push: bool = False
     ads_async_push_threshold: int = 200  # segment member count above which async kicks in
 
+    # ─── Conversion APIs (conversion-apis_27-11-26) ───
+    # Server-side conversions to Meta CAPI + Google Data Manager events:ingest.
+    # OFF by default: while false the sweep job is NOT registered, the runtime
+    # wrapper returns immediately, and enqueue writes zero rows. Flipping it on
+    # is an explicit operator action after the migration is live-applied.
+    ad_conversions_enabled: bool = False
+    ad_conversions_sweep_interval_s: int = 300
+    ad_conversions_max_attempts: int = 5
+
+    # closed-won-lookalikes: CRM closed-won read-back + seed + lookalike.
+    # OFF by default: routes 404, poll job NOT registered, webhook 404.
+    closed_won_lookalikes_enabled: bool = False
+    closed_won_poll_interval_hours: int = 6
+    meta_lookalike_min_seed: int = 100
+    google_lookalike_min_seed: int = 1000
+
+    # ad-insights-seo-aeo: read-only Meta/Google ad reporting -> winning-message
+    # ranking -> Gemini "Content opportunities" suggestions (never published).
+    # OFF by default: routes 404, daily job NOT registered, wrapper no-ops.
+    ad_insights_enabled: bool = False
+    ad_insights_lookback_days: int = 30
+    ad_insights_min_impressions: int = 500
+    # Ordered, first-match (no summing — `lead` already includes pixel lead).
+    ad_insights_meta_conversion_action_types: list[str] = ["lead"]
+    ad_insights_min_qualifying_ads: int = 3
+
     # Per-site cap on CRM push operations per clock hour (abuse / runaway guard).
     max_crm_pushes_per_hour_per_site: int = 20
     # Offload large pushes to Celery. OFF by default — only safe when a Celery
@@ -1496,6 +1529,30 @@ class Settings(BaseSettings):
     # `sites.benchmark_contribution_enabled` — a SEPARATE consent basis from
     # the identity co-op's `contribution_enabled` (purpose limitation).
     campaign_benchmark_enabled: bool = False
+
+    # ─── Signal-aware creative + structured CTA types (signal-creative-cta) ───
+    # signal_creative_enabled: the campaign planner picks ONE deterministic
+    # creative angle per segment (job change / pricing intent / AI referral /
+    # ICP fit / repeat visit / general) and tells the model to write for it.
+    # cta_types_enabled: the planner may pick a per-touchpoint cta_type from the
+    # site's configured CTA set; the send path renders {{cta_link}} as a /c/
+    # click link carrying ct=, and /c/ records one cta_click_events row per hit.
+    # Both default OFF — flag-off planner prompt, send body and /c/ behavior are
+    # byte-identical to before. MUST be declared here (`extra: ignore`).
+    signal_creative_enabled: bool = False
+    cta_types_enabled: bool = False
+
+    # ─── On-site company greeting (onsite-greeting, gap #5) ───
+    # Global kill switch for GET /api/v1/greeting. Default OFF: the endpoint
+    # always answers {"show": false}. A site ALSO needs sites.greeting_enabled.
+    # Production enable preconditions (trusted_proxy_hops, prod ip_org ingest +
+    # ip_org_lookup_enabled) are in the onsite-greeting plan. MUST be declared.
+    onsite_greeting_enabled: bool = False
+
+    # ─── Account rollup (account-measurement, gap #14) ───
+    # Read-only per-company-domain rollup API + Accounts dashboard. Default OFF:
+    # both /api/v1/accounts routes return 404. MUST be declared (`extra: ignore`).
+    account_rollup_enabled: bool = False
 
     # ─── Engage outcome capture (Phase 1) ───
     # Master flag for the two new outcome-capture jobs (reply-back correlation

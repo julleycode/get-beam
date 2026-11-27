@@ -76,6 +76,13 @@ class AutoDrafter:
         Returns:
             A saved Draft instance, or None if generation is not possible.
         """
+        # Company exclusion list: first statement, before any LLM call.
+        if settings.company_exclusion_enabled:
+            from apps.api.services.company_exclusion import excluded_visitor_ids, log_applied
+
+            if await excluded_visitor_ids(self.db, visitor.site_id, [visitor.visitor_id]):
+                log_applied(visitor.site_id, "auto_draft", 1)
+                return None
         recent_posts = social_context.get("recent_posts", [])
         if len(recent_posts) < _MIN_POSTS_FOR_DRAFT:
             if not trigger_reason:

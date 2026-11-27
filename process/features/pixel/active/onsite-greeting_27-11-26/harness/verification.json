@@ -1,0 +1,53 @@
+{
+  "task": "onsite-greeting (gap #5) \u2014 company-level on-site greeting, flag OFF",
+  "commands": [
+    {
+      "gate": "G1+G6",
+      "command": ".venv/bin/python -m pytest tests/unit/test_greeting_service.py -q",
+      "exitCode": 0,
+      "result": "43 passed"
+    },
+    {
+      "gate": "G2+G6",
+      "command": "DATABASE_URL=postgresql+asyncpg://retarget:retarget_dev@localhost:5433/retarget_agent_test .venv/bin/python -m pytest tests/integration/test_greeting_endpoint.py -q",
+      "exitCode": 0,
+      "result": "13 passed (both flags ON, mock_external_apis False, \u22651 show:true observed)"
+    },
+    {
+      "gate": "G3",
+      "command": ".venv/bin/python -m pytest tests/unit/test_pixel_fingerprint.py tests/unit/test_pixel.py -q",
+      "exitCode": 0,
+      "result": "88 passed; tracker.min.js 6090 B gz (was 6022, +68), tracker.js 35958 B raw"
+    },
+    {
+      "gate": "G4",
+      "command": "apps/web/node_modules/.bin/playwright test --config=<scratch config: testDir apps/pixel/e2e, testMatch greeting.spec.ts, channel chrome>",
+      "exitCode": 0,
+      "result": "9 passed on installed Google Chrome (no bundled chromium cached; channel deviation)"
+    },
+    {
+      "gate": "G5",
+      "command": "CREATE DATABASE retarget_agent_g5_greeting on localhost:5433; DATABASE_URL pinned; alembic upgrade head \u2192 downgrade -1 \u2192 upgrade head; DROP DATABASE",
+      "exitCode": 0,
+      "result": "empty\u2192a2d6e8f41c93, down to f7d1b3c84e29, up to a2d6e8f41c93; single head; log harness/migration-roundtrip.log"
+    },
+    {
+      "gate": "G7 (targeted subset)",
+      "command": "DATABASE_URL=postgresql+asyncpg://retarget:retarget_dev@localhost:5433/retarget_agent_test .venv/bin/python -m pytest <site/config/cta/pixel-snippet/agent-gateway unit + cta_attribution/site_analysis_api/site_delete/booking_goal_preset integration>",
+      "exitCode": 0,
+      "result": "68 + 129 unit, 42 integration passed; full lanes left to EVL tester"
+    },
+    {
+      "gate": "G7 pixel e2e subset",
+      "command": "playwright (channel chrome) optout-guardrail|url-param-consent-gated|per-site-config|capture-baseline",
+      "exitCode": 0,
+      "result": "4 passed"
+    }
+  ],
+  "manualChecks": [
+    "Loader byte cost measured with gzip.compress before/after (6022 \u2192 6090, target \u2264 +70, abort \u2265 6130 not reached)",
+    "alembic heads checked with DATABASE_URL pinned to localhost:5433 before writing the migration: single head f7d1b3c84e29",
+    "Local esbuild 0.21.5 reproduced the committed tracker.min.js byte-for-byte before the edit, so the rebuild is faithful"
+  ],
+  "result": "pass (G1,G2,G3,G4,G5 green; G7 full lanes + G8 pending independent EVL)"
+}

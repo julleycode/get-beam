@@ -57,6 +57,18 @@ async def _get_segment_visitors(
         )
         known_hashes = {h for (h,) in kc_rows.all()}
 
+    # Company exclusion list (flag-guarded: zero new queries when OFF). Covers
+    # every caller: CSV exports, ads push, CRM push.
+    if settings.company_exclusion_enabled and members:
+        from apps.api.services.company_exclusion import excluded_visitor_ids, log_applied
+
+        _excl = await excluded_visitor_ids(
+            db, members[0].site_id, [m.visitor_id for m in members]
+        )
+        if _excl:
+            log_applied(members[0].site_id, "segment_export", len(_excl))
+            members = [m for m in members if m.visitor_id not in _excl]
+
     visitors: list[dict] = []
     for member in members:
         id_result = await db.execute(

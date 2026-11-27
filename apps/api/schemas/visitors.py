@@ -43,6 +43,10 @@ class VisitorOut(BaseModel):
     # known-contacts list (existing customer / prior lead). Matched by hash.
     is_known: bool = False
     known_source: str | None = None  # "csv" | "crm" | ...
+    # Company exclusion list reason ("customer"/"competitor"/"other") when this
+    # visitor matches the site's exclusion list. Badge only (never hidden).
+    # Always None while company_exclusion_enabled is OFF.
+    excluded_reason: str | None = None
     # One-line "why this person matters" — derived from behaviour (+ enrichment
     # on the detail view). None when there's no signal worth surfacing.
     conviction: str | None = None

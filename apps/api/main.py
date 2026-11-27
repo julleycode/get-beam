@@ -55,6 +55,7 @@ from apps.api.models.paid_request import PaidRequest  # noqa: F401 — register 
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo, onboarding
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
+from apps.api.routers import exclusions as exclusions_router
 from apps.api.routers import known_contacts, costs, ai, dashboard, crm, changelog, click, open_pixel
 from apps.api.routers import email_sender_oauth, outcomes, referrals, agents, ads
 from apps.api.routers import ingest_health
@@ -63,6 +64,8 @@ from apps.api.routers import hot_contacts
 from apps.api.routers import request_logs
 from apps.api.routers import agent_profile, agent_gateway, agent_mcp
 from apps.api.routers import paid
+from apps.api.routers import accounts
+from apps.api.routers import greeting as greeting_router
 from apps.api.services.x402_seller import redact_payment_headers, setup_gate, teardown_gate
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
@@ -194,7 +197,8 @@ class PixelCORSMiddleware:
     """
 
     _INGEST_PATH = "/api/v1/events/ingest"
-    _PIXEL_PATHS = {_INGEST_PATH, "/pixel/tracker.js"}
+    # greeting: wildcard origin, NO credentials (onsite-greeting U2).
+    _PIXEL_PATHS = {_INGEST_PATH, "/pixel/tracker.js", "/pixel/greeting.js", "/api/v1/greeting"}
 
     def __init__(self, app):
         self.app = app
@@ -518,8 +522,10 @@ app.add_middleware(RequestResponseLogMiddleware)
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(events.router, prefix="/api/v1/events", tags=["events"])
+app.include_router(greeting_router.router, prefix="/api/v1/greeting", tags=["greeting"])
 app.include_router(sites.router, prefix="/api/v1/sites", tags=["sites"])
 app.include_router(known_contacts.router, prefix="/api/v1/sites", tags=["known-contacts"])
+app.include_router(exclusions_router.router, prefix="/api/v1/sites", tags=["exclusions"])
 app.include_router(ingest_health.router, prefix="/api/v1/sites", tags=["ingest-health"])
 # Imported contacts (Phase 4) — distinct surface from known-contacts above:
 # creates contactable identities, not a hash-only exclusion list.
@@ -547,6 +553,12 @@ app.include_router(exports.router, prefix="/api/v1/exports", tags=["exports"])
 app.include_router(api_keys.router, prefix="/api/v1/api-keys", tags=["api-keys"])
 app.include_router(crm.router, prefix="/api/v1/crm", tags=["crm"])
 app.include_router(ads.router, prefix="/api/v1/ads", tags=["ads"])
+from apps.api.routers import ad_conversions as _ad_conversions_router  # noqa: E402
+
+app.include_router(_ad_conversions_router.router, prefix="/api/v1/ad-conversions", tags=["ad-conversions"])
+from apps.api.routers import ad_insights as _ad_insights_router  # noqa: E402
+
+app.include_router(_ad_insights_router.router, prefix="/api/v1/ad-insights", tags=["ad-insights"])
 app.include_router(privacy.router, prefix="/api/v1/privacy", tags=["privacy"])
 
 # ── Agent gateway (agent-gateway Phase 1+2) ─────────────
@@ -571,6 +583,8 @@ app.include_router(social_accounts.router, prefix="/api/v1/social", tags=["socia
 app.include_router(drafts.router, prefix="/api/v1/drafts", tags=["drafts"])
 app.include_router(feed.router, prefix="/api/v1/feed", tags=["feed"])
 app.include_router(companies.router, prefix="/api/v1/companies", tags=["companies"])
+# Per-account rollup (account-measurement) — flag-gated, 404 when OFF.
+app.include_router(accounts.router, prefix="/api/v1/accounts", tags=["accounts"])
 app.include_router(feature_requests.router, prefix="/api/v1/feature-requests", tags=["feature-requests"])
 app.include_router(demo.router, prefix="/api/v1/demo", tags=["demo"])
 app.include_router(onboarding.router, prefix="/api/v1/onboarding", tags=["onboarding"])
@@ -627,6 +641,28 @@ async def serve_pixel() -> Response:
         _pixel_js_cache = pixel_path.read_text() if pixel_path.exists() else "// pixel not found"
     return Response(
         content=_pixel_js_cache,
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*"},
+    )
+
+
+_greeting_js_cache: str | None = None
+
+
+@app.get("/pixel/greeting.js")
+async def serve_greeting_js() -> Response:
+    """Lazy on-site greeting snippet (onsite-greeting). Loaded by tracker.js only
+    when data-greeting="on" AND consent granted AND no GPC/DNT."""
+    global _greeting_js_cache
+    if _greeting_js_cache is None:
+        import pathlib
+        pixel_dir = pathlib.Path(__file__).parent.parent / "pixel" / "src"
+        minified = pixel_dir / "greeting.min.js"
+        source = pixel_dir / "greeting.js"
+        path = minified if minified.exists() else source
+        _greeting_js_cache = path.read_text() if path.exists() else "// greeting not found"
+    return Response(
+        content=_greeting_js_cache,
         media_type="application/javascript",
         headers={"Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*"},
     )

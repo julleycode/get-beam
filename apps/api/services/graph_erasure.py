@@ -372,6 +372,16 @@ def _identity_signals_delete_stmt(bidx_list: list[str]):
     )
 
 
+def _closed_won_delete_stmt(bidx_list: list[str]):
+    """Delete closed-won seed contacts for every erased blind index."""
+    from apps.api.models.crm_closed_won import CrmClosedWonContact
+
+    b = cast(bidx_list, ARRAY(String))
+    return CrmClosedWonContact.__table__.delete().where(
+        CrmClosedWonContact.email_bidx == func.any(b)
+    )
+
+
 async def _process_claimed(db: AsyncSession, claimed: dict) -> bool:
     """Run one claimed row's destructive work. Never raises."""
     bidx = claimed["email_bidx_list"]
@@ -394,6 +404,10 @@ async def _process_claimed(db: AsyncSession, claimed: dict) -> bool:
                             await db.execute(_identity_signals_delete_stmt(bidx))
                     else:
                         logger.warning("erasure_unknown_target", target=target)
+                # closed-won-lookalikes (Gap 8): per-site seed contacts are
+                # erased by blind index on every request that carries one.
+                if bidx:
+                    await db.execute(_closed_won_delete_stmt(bidx))
 
         await db.execute(
             update(ErasureRequest)

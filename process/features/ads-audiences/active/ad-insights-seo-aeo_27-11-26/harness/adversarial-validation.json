@@ -1,0 +1,12 @@
+{
+  "task": "ad-insights-seo-aeo",
+  "scenarios": [
+    {"scenario": "Ad headline forges </untrusted_visitor_data> to break out of the fence and inject instructions", "ruled_out": true, "rationale": "clean_text + wrap_untrusted strip < >; G3 asserts exactly one close tag and every hostile token index lies between open and first close"},
+    {"scenario": "Landing URL / fetched page_path carries query-string or <script> payload", "ruled_out": true, "rationale": "urlsplit(x).path applied before clean_text for both full URLs and path-only values; G3 asserts no '<script', 'q=', fragment, host"},
+    {"scenario": "Model output tries to write llms.txt / AgentProfile or set an arbitrary status", "ruled_out": true, "rationale": "No import of agent_profile/agent_gateway/llms (AST gate); PATCH accepts only Literal new|dismissed|copied (422 otherwise); extra fields ignored"},
+    {"scenario": "Cross-tenant read/patch of another site's suggestions", "ruled_out": true, "rationale": "verify_site_access 404 and opportunity lookup filters site_id; G4 asserts foreign user 404 and cross-site PATCH 404"},
+    {"scenario": "Quota burn: repeated refresh or failed generations retried all day", "ruled_out": true, "rationale": "Redis SET NX EX 86400 before work, not deleted on failure; Redis error fails closed 429; generated_today DB check; G4 covers"},
+    {"scenario": "Model returns top-level list / invalid dict after repair exhaustion", "ruled_out": true, "rationale": "normalize() re-validates; ValueError/GeminiError -> 0 rows, no crash (G3 parametrized)"},
+    {"scenario": "Ad copy / prompt bodies leak to logs", "ruled_out": true, "rationale": "Logs carry site/connection ids, counts, exception class names only; G3 asserts no ad text in structlog capture or caplog"}
+  ]
+}

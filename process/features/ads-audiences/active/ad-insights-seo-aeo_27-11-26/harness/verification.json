@@ -1,0 +1,21 @@
+{
+  "task": "ad-insights-seo-aeo",
+  "commands": [
+    {"gate": "G1", "command": ".venv/bin/python -m pytest tests/unit/test_ad_insights_rank.py -q", "result": "PASS 8/8"},
+    {"gate": "G2", "command": ".venv/bin/python -m pytest tests/unit/test_ad_report_parsing.py -q", "result": "PASS 8/8"},
+    {"gate": "G3", "command": ".venv/bin/python -m pytest tests/unit/test_content_opportunities.py -q", "result": "PASS 15/15"},
+    {"gate": "G1b", "command": ".venv/bin/python -m pytest tests/unit/test_scheduler_job_config.py -q", "result": "PASS 14/14 (31 add_job / 26 interval / 5 cron)"},
+    {"gate": "G4", "command": "DATABASE_URL=postgresql+asyncpg://retarget:retarget_dev@localhost:5433/retarget_agent_test MOCK_EXTERNAL_APIS=true .venv/bin/python -m pytest tests/integration/test_ad_insights.py -q", "result": "PASS 7/7 flag-ON (+ flag-OFF 404/no-op, site delete, refresh 1/day incl. failed gen, Redis fail-closed)"},
+    {"gate": "G5", "command": "throwaway DB retarget_agent_g5_adinsights on existing :5433 container; alembic upgrade head / downgrade -1 / upgrade head (DSN pinned)", "result": "PASS — log harness/g5-migration-roundtrip.log; DB dropped"},
+    {"gate": "G6-unit", "command": ".venv/bin/python -m pytest tests/unit -m unit -q", "result": "2408 passed / 1 failed (test_paid_x402 — pre-existing, fails on baseline without this change)"},
+    {"gate": "G7", "command": "cd apps/web && npx tsc --noEmit", "result": "0 errors in touched files; 12 pre-existing env errors (@sentry/nextjs not installed, stale .next types)"},
+    {"gate": "G8", "command": "cd apps/web && npx playwright test e2e/content-opportunities.spec.ts --list", "result": "spec loads; skip-guarded on Clerk auth harness (known-gap)"}
+  ],
+  "manualChecks": [
+    "alembic heads (pinned local DSN) -> single head b3e9c4d71a58",
+    "boundary: ads below impression floor excluded (m-104 absent from top-ads)",
+    "boundary: invalid PATCH status -> 422; foreign site -> 404; refresh after failed generation -> 429",
+    "no live provider / Gemini calls: mock_external_apis paths only; G2 asserts httpx send never called"
+  ],
+  "result": "PASS (CODE DONE); EVL re-run by vc-tester pending; KG-1 live shapes + G8 Clerk harness open"
+}

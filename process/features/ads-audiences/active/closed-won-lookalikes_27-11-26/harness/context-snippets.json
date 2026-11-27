@@ -1,0 +1,13 @@
+{
+  "snippets": [
+    {"file": "apps/api/services/closed_won_seed.py", "lines": "ingest_deals", "description": "Upsert ON CONFLICT uq_crm_closed_won_deal_email (replay-idempotent); erased tombstone skip (N5); bidx + ciphertext only", "content": "erased = await _erased_bidx(db, ...)"},
+    {"file": "apps/api/services/closed_won_seed.py", "lines": "build_seed", "description": "N6 site-scoped bidx match (IdentifiedVisitor.site_id == site_id); suppression do_not_sell/all/erased; do_not_email, do_not_resolve (Visitor join), agent-origin, abuse, non-person provider; company exclusion import-guarded; Google EEA+unknown fail closed", "content": "IdentifiedVisitor.site_id == site_id, IdentifiedVisitor.email_bidx.in_(bidx_list)"},
+    {"file": "apps/api/services/closed_won_seed.py", "lines": "validate_spec / create_or_reuse_lookalike", "description": "E7: allow-list before segment_id build; SELECT FOR UPDATE on closed_won_seed link; same key -> stored id, zero adapter calls; different -> new id + previous_lookalike_id; one lookalike row", "content": "seed = await _get_link(db, conn.id, SEED_SEGMENT_ID, lock=True)"},
+    {"file": "apps/api/routers/crm.py", "lines": "closed_won_deal_webhook", "description": "E6 order: limiter 60/min; flag 404; declared+actual 256KB 413; generic_webhook connection 404; HMAC compare_digest 400; body never logged", "content": "@limiter.limit(\"60/minute\")"},
+    {"file": "apps/api/routers/ads.py", "lines": "closed-won routes", "description": "UD4: closed-won flag OFF -> 404 first; ad_audiences OFF -> 501 on lookalike; verify_site_access 404 for foreign sites", "content": "_require_closed_won_enabled()"},
+    {"file": "apps/api/services/graph_erasure.py", "lines": "_closed_won_delete_stmt", "description": "Erasure sweep deletes crm_closed_won_contacts by email_bidx inside the tombstone-first transaction", "content": "CrmClosedWonContact.email_bidx == func.any(b)"},
+    {"file": "apps/api/routers/sites.py", "lines": "site delete table list", "description": "crm_closed_won_contacts deleted on site delete; sentinel links cascade via ad_connections FK", "content": "\"crm_closed_won_contacts\","},
+    {"file": "apps/api/services/crm/hubspot.py", "lines": "won_stage_ids / fetch_closed_won", "description": "Won stages from pipelines metadata (isClosed + probability 1.0); 10k-cap re-window; deals.read scope check -> needs_reconnect", "content": "if not has_deals_scope(scopes): return ClosedWonFetch(needs_reconnect=True)"},
+    {"file": "apps/api/migrations/versions/f7d1b3c84e29_add_crm_closed_won_contacts.py", "lines": "1-60", "description": "Additive; down_revision e5c2a9f71d36", "content": "revision = \"f7d1b3c84e29\""}
+  ]
+}

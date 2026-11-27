@@ -1,0 +1,6 @@
+{
+  "reviewer": "vc-execute-agent (Lane A self-review) — provisional; independent vc-tester EVL + orchestrator must confirm",
+  "decision": "APPROVE",
+  "rationale": "Trust-boundary scenarios are ruled out by passing automated tests, except count inflation, which is an accepted residual. The migration is additive and passed up/down/up on a disposable DB. Both flags default OFF, and the flag-OFF paths are shown unchanged (no extra queries in the planner or /c/). The independent EVL run is still required before finalize.",
+  "timestamp": "2026-11-27T16:00:00Z"
+}

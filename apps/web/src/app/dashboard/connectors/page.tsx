@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/page-header";
 import { ConnectorsHelp } from "@/components/page-help";
 import { CrmConnectPanel } from "@/components/crm-connect-panel";
 import { AdConnectPanel } from "@/components/ad-connect-panel";
+import { ExclusionsPanel } from "@/components/exclusions-panel";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -272,6 +273,7 @@ export default function ConnectorsPage() {
               )}
             </CardContent>
           </Card>
+          <ExclusionsPanel siteId={siteId} />
         </TabsContent>
       </Tabs>
     </div>

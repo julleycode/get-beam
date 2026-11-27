@@ -269,6 +269,15 @@ async def list_visitors(
             if v.visitor_id in handoff_map:
                 v.handoff_confidence = handoff_map[v.visitor_id]
 
+    # Company exclusion list badge (flag ON only — zero queries when OFF).
+    if settings.company_exclusion_enabled and vids:
+        from apps.api.services.company_exclusion import excluded_visitor_ids
+
+        excl = await excluded_visitor_ids(db, site_id, vids)
+        for v in visitors:
+            if v.visitor_id in excl:
+                v.excluded_reason = excl[v.visitor_id]
+
     for v in visitors:
         v.conviction = build_conviction(v.model_dump())
 
@@ -459,6 +468,8 @@ async def delete_visitor_data(
         # here explicitly. Table names in this tuple are hardcoded literals, not
         # user input — no injection surface.
         "job_change_events",
+        # conversion-apis (N3): outbox rows reference the visitor by id.
+        "ad_conversion_deliveries",
         # visitor_emails holds the visitor's PLAINTEXT captured email addresses
         # (no FK cascade onto visitors), so its rows would survive an otherwise-
         # complete erasure and re-identify the person on next visit unless listed

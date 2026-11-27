@@ -38,14 +38,22 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 
 from apps.api.config import settings
 from apps.api.services.ads.base import (
+    AdPerformanceRow,
+    coerce_float,
+    coerce_int,
     HTTP_TIMEOUT,
     AdOAuthTokens,
     AdsProvider,
     AdTestOutcome,
     AudienceResult,
+    ConversionEvent,
+    ConversionResult,
     HashedContact,
+    LookalikeResult,
+    LookalikeSpec,
     sanitize_error,
 )
+from apps.api.services.click_ids import google_ad_identifier
 from apps.api.services.encryption import decrypt_token
 
 logger = structlog.get_logger()
@@ -359,6 +367,23 @@ class GoogleAdsProvider(AdsProvider):
         )
         return AudienceResult(platform_audience_id=audience_id, pushed=pushed)
 
+    # ── ad-insights-seo-aeo: read-only reporting ──
+
+    async def fetch_ad_performance(self, connection, since, until) -> list[AdPerformanceRow]:
+        """GAQL searchStream over ``ad_group_ad``. Read-only; no
+        ``login-customer-id`` header (direct-customer model, G-4)."""
+        if settings.mock_external_apis:
+            return parse_google_search_stream(mock_google_report())
+        customer_id = _customer_id(connection)
+        token = _access_token(connection)
+        query = build_google_ad_report_query(since, until)
+        batches = await self._ads_post(
+            f"{_GOOGLE_ADS_BASE}/customers/{customer_id}/googleAds:searchStream",
+            {"query": query},
+            token,
+        )
+        return parse_google_search_stream(batches)
+
     async def _create_user_list(self, customer_id: str, connection, token: str) -> str:
         """Create a Customer Match UserList and return its resource name."""
         site_id = getattr(connection, "site_id", "")
@@ -449,8 +474,274 @@ class GoogleAdsProvider(AdsProvider):
         return sent
 
 
+    # ── conversion-apis: Data Manager events:ingest ──────
+
+    # ── closed-won-lookalikes: lookalike user list ───────
+
+    async def create_lookalike(
+        self, connection, seed_audience_id: str, spec: LookalikeSpec
+    ) -> LookalikeResult:
+        from apps.api.services.ads_push import EEA_COUNTRY_CODES
+
+        country = (spec.country or "").strip().upper()
+        # UD3: fail closed — no EEA (or unknown) country for Google.
+        if not country or country in EEA_COUNTRY_CODES:
+            return LookalikeResult(
+                status="error",
+                error="Google lookalikes are not available for EEA countries (no consent signal).",
+            )
+        if settings.mock_external_apis:
+            return LookalikeResult(
+                audience_id=f"customers/0/userLists/mock-lal-{uuid.uuid4().hex[:10]}",
+                warning=GOOGLE_DEMAND_GEN_NOTE,
+            )
+        token = _access_token(connection)
+        customer_id = _customer_id(connection)
+        payload = build_google_lookalike_request(seed_audience_id, spec)
+        try:
+            created = await self._ads_post(
+                f"{_GOOGLE_ADS_BASE}/customers/{customer_id}/userLists:mutate", payload, token
+            )
+        except httpx.HTTPStatusError as exc:
+            if "DUPLICATE_LOOKALIKE" in (exc.response.text or "")[:5000]:
+                return LookalikeResult(
+                    status="exists",
+                    warning="A lookalike with these settings already exists in Google Ads.",
+                )
+            return LookalikeResult(status="error", error=sanitize_error(exc, "Lookalike create failed"))
+        except httpx.HTTPError as exc:
+            return LookalikeResult(status="error", error=sanitize_error(exc, "Lookalike create failed"))
+        resource = ((created.get("results") or [{}])[0]).get("resourceName", "")
+        if not resource:
+            return LookalikeResult(status="error", error="Google did not return a lookalike list")
+        logger.info("google_lookalike_created")
+        return LookalikeResult(audience_id=resource, warning=GOOGLE_DEMAND_GEN_NOTE)
+
+    async def send_conversions(
+        self, connection, config, events: list[ConversionEvent]
+    ) -> list[ConversionResult]:
+        """Ingest conversions via Data Manager ``events:ingest``.
+
+        NOT ``uploadClickConversions`` (closed to new integrations 15-06-2026).
+        EEA + unknown-country rows are excluded upstream by the sweep. One outbox
+        attempt = one HTTP call per chunk; no tenacity stacking (E6).
+        """
+        if not events:
+            return []
+        if settings.mock_external_apis:
+            return [ConversionResult(delivery_id=e.delivery_id, ok=True) for e in events]
+        if not (
+            (getattr(config, "google_operating_account_id", "") or "").strip()
+            and (getattr(config, "google_product_destination_id", "") or "").strip()
+        ):
+            return [
+                ConversionResult(delivery_id=e.delivery_id, ok=False, error="no_destination")
+                for e in events
+            ]
+        token = _access_token(connection)
+        results: list[ConversionResult] = []
+        for batch in chunk_conversion_events(events):
+            payload = build_data_manager_events_request(config, batch)
+            try:
+                async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                    resp = await client.post(
+                        f"{_DATA_MANAGER_BASE}/events:ingest",
+                        json=payload,
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                resp.raise_for_status()
+                request_id = (resp.json() or {}).get("requestId", "")
+            except Exception as exc:  # noqa: BLE001 — classified, sanitized
+                transient = _is_transient_http_error(exc)
+                reason = sanitize_error(exc)
+                results.extend(
+                    ConversionResult(
+                        delivery_id=e.delivery_id, ok=False, error=reason, transient=transient
+                    )
+                    for e in batch
+                )
+                continue
+            results.extend(ConversionResult(delivery_id=e.delivery_id, ok=True) for e in batch)
+            logger.info("google_dm_events_ack", request_id=request_id, events=len(batch))
+        return results
+
+
+# Data Manager events:ingest accepts up to 2000 events per request.
+DM_EVENTS_BATCH_SIZE = 2000
+
+
+def chunk_conversion_events(events: list[ConversionEvent]) -> list[list[ConversionEvent]]:
+    return [
+        events[i : i + DM_EVENTS_BATCH_SIZE] for i in range(0, len(events), DM_EVENTS_BATCH_SIZE)
+    ]
+
+
+def _rfc3339(when: datetime) -> str:
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def build_data_manager_event(event: ConversionEvent) -> dict:
+    identifiers: list[dict] = []
+    if event.email_sha256:
+        identifiers.append({"emailAddress": event.email_sha256})
+    if event.phone_sha256:
+        identifiers.append({"phoneNumber": event.phone_sha256})
+    body: dict = {
+        "transactionId": event.dedup_id,
+        "eventTimestamp": _rfc3339(event.event_time),
+        "userData": {"userIdentifiers": identifiers},
+        # Every row reaching here is non-EEA and known-country (sweep gate D3).
+        "consent": {
+            "adUserData": "CONSENT_GRANTED",
+            "adPersonalization": "CONSENT_GRANTED",
+        },
+    }
+    ad_id = google_ad_identifier(event.click_ids)
+    if ad_id:
+        body["adIdentifiers"] = {ad_id[0]: ad_id[1]}
+    return body
+
+
+def build_data_manager_events_request(config, events: list[ConversionEvent]) -> dict:
+    destination = {
+        "operatingAccount": {
+            "accountId": (config.google_operating_account_id or "").replace("-", ""),
+            "accountType": "GOOGLE_ADS",
+        },
+        "productDestinationId": config.google_product_destination_id,
+    }
+    return {
+        "destinations": [destination],
+        "events": [build_data_manager_event(e) for e in events],
+        "encoding": _HASH_ENCODING,
+        "validateOnly": bool(getattr(config, "validate_only", True)),
+    }
+
+GOOGLE_DEMAND_GEN_NOTE = "Google lookalike segments are usable in Demand Gen campaigns only."
+GOOGLE_EXPANSION_LEVELS = ("NARROW", "BALANCED", "BROAD")
+
+
+def build_google_lookalike_request(seed_audience_id: str, spec: LookalikeSpec) -> dict:
+    """``userLists:mutate`` body creating a lookalike from a Customer Match seed."""
+    return {
+        "operations": [
+            {
+                "create": {
+                    "name": f"Beam closed-won lookalike {spec.country} {spec.expansion} {uuid.uuid4().hex[:6]}",
+                    "lookalikeUserList": {
+                        "seedUserListIds": [_user_list_id(seed_audience_id)],
+                        "expansionLevel": spec.expansion,
+                        "countryCodes": [spec.country],
+                    },
+                }
+            }
+        ]
+    }
+
+
+def google_seed_warning(seed_size: int) -> str:
+    if seed_size < settings.google_lookalike_min_seed:
+        return (
+            f"Your seed has {seed_size} people. Google needs about "
+            f"{settings.google_lookalike_min_seed} matched people before a lookalike is useful."
+        )
+    return ""
+
+
 def _expiry_from(payload: dict) -> datetime | None:
     expires_in = int(payload.get("expires_in") or 0)
     if not expires_in:
         return None
     return datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+
+
+# ── ad-insights-seo-aeo: report parsing (pure, docs-derived — KG-1) ──
+
+
+def build_google_ad_report_query(since, until) -> str:
+    return (
+        "SELECT ad_group_ad.ad.id, ad_group_ad.ad.responsive_search_ad.headlines, "
+        "ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.ad.final_urls, "
+        "campaign.name, segments.date, metrics.impressions, metrics.clicks, "
+        "metrics.ctr, metrics.conversions FROM ad_group_ad "
+        f"WHERE segments.date BETWEEN '{since.isoformat()}' AND '{until.isoformat()}'"
+    )
+
+
+def _asset_texts(items, limit: int) -> list[str]:
+    out: list[str] = []
+    for it in items or []:
+        if isinstance(it, dict) and isinstance(it.get("text"), str) and it["text"].strip():
+            out.append(it["text"].strip())
+        if len(out) >= limit:
+            break
+    return out
+
+
+def parse_google_search_stream(batches) -> list[AdPerformanceRow]:
+    """searchStream returns a JSON ARRAY of batches, each with ``results[]``.
+
+    RSA headlines/descriptions are objects — read ``.text``. int64 metrics
+    arrive as strings. Unknown fields are ignored.
+    """
+    from datetime import date as _date
+
+    if isinstance(batches, dict):
+        batches = [batches]
+    rows: list[AdPerformanceRow] = []
+    for batch in batches or []:
+        for r in (batch or {}).get("results") or [] if isinstance(batch, dict) else []:
+            if not isinstance(r, dict):
+                continue
+            ad = ((r.get("adGroupAd") or {}).get("ad")) or {}
+            ad_id = ad.get("id")
+            if not ad_id:
+                continue
+            try:
+                day = _date.fromisoformat(str((r.get("segments") or {}).get("date"))[:10])
+            except ValueError:
+                continue
+            rsa = ad.get("responsiveSearchAd") or {}
+            metrics = r.get("metrics") or {}
+            urls = ad.get("finalUrls") or []
+            rows.append(
+                AdPerformanceRow(
+                    platform_ad_id=str(ad_id),
+                    date=day,
+                    impressions=coerce_int(metrics.get("impressions")),
+                    clicks=coerce_int(metrics.get("clicks")),
+                    conversions=coerce_float(metrics.get("conversions")),
+                    campaign_name=str((r.get("campaign") or {}).get("name") or ""),
+                    headline=" | ".join(_asset_texts(rsa.get("headlines"), 3)),
+                    body=" ".join(_asset_texts(rsa.get("descriptions"), 2)),
+                    landing_url=str(urls[0]) if urls and isinstance(urls, list) else "",
+                )
+            )
+    return rows
+
+
+def mock_google_report() -> list[dict]:
+    """Deterministic mock searchStream; date relative to today (UTC)."""
+    day = (datetime.now(timezone.utc).date() - timedelta(days=3)).isoformat()
+    specs = [
+        ("g-201", ["Know your website visitors", "Identify B2B leads"], "/pricing", "5000", "200", 9.0),
+        ("g-202", ["AI drafts, you send"], "/features", "1200", "18", 1.0),
+    ]
+    results = []
+    for ad_id, heads, path, imp, clk, conv in specs:
+        results.append({
+            "adGroupAd": {"ad": {
+                "id": ad_id,
+                "responsiveSearchAd": {
+                    "headlines": [{"text": h} for h in heads],
+                    "descriptions": [{"text": "Beam finds who is on your site."}],
+                },
+                "finalUrls": [f"https://example.com{path}"],
+            }},
+            "campaign": {"name": "Mock search"},
+            "segments": {"date": day},
+            "metrics": {"impressions": imp, "clicks": clk, "conversions": conv},
+        })
+    return [{"results": results}]

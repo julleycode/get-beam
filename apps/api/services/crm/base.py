@@ -11,7 +11,7 @@ policy as services/enricher.py, per CLAUDE.md.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -79,6 +79,44 @@ class PushResult:
     errors: list[str] = field(default_factory=list)
 
 
+@dataclass
+class ClosedWonDeal:
+    """One contact on one closed-won deal (closed-won-lookalikes read-back).
+
+    Holds a plaintext email only transiently in-process; callers hash/encrypt
+    it on ingest and drop the plaintext. Never log it.
+    """
+
+    external_deal_id: str
+    email: str
+    closed_at: Optional[datetime] = None
+    company_domain: str = ""
+    country: str = ""
+
+
+@dataclass
+class ClosedWonFetch:
+    deals: list[ClosedWonDeal] = field(default_factory=list)
+    # Old HubSpot tokens lack the deals scope: the UI must prompt a reconnect.
+    needs_reconnect: bool = False
+    # Max modified-time seen; the next poll's ``since``.
+    cursor: Optional[datetime] = None
+
+
+def mock_closed_won_deals(provider: str) -> list[ClosedWonDeal]:
+    """Deterministic mock deals (3 per provider) for MOCK_EXTERNAL_APIS."""
+    base = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    return [
+        ClosedWonDeal(
+            external_deal_id=f"mock-{provider}-deal-{i}",
+            email=f"buyer{i}@{provider}-customer.example",
+            closed_at=base,
+            company_domain=f"{provider}-customer.example",
+        )
+        for i in range(1, 4)
+    ]
+
+
 def sanitize_error(exc: BaseException, fallback: str = "Request failed") -> str:
     """Short, PII-free error string safe to persist in `last_error` / return.
 
@@ -131,3 +169,15 @@ class CRMConnector(ABC):
         instance_url: str = "",
     ) -> PushResult:
         ...
+
+    # closed-won-lookalikes: NON-abstract (additive) — webhook-style providers
+    # receive deals inbound instead and keep this default.
+    async def fetch_closed_won(
+        self,
+        *,
+        access_token: str = "",
+        instance_url: str = "",
+        scopes: Optional[list[str]] = None,
+        since: Optional[datetime] = None,
+    ) -> ClosedWonFetch:
+        raise NotImplementedError(f"{self.provider} does not support closed-won read-back")

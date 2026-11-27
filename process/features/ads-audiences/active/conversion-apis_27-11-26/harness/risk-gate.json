@@ -1,0 +1,11 @@
+{
+  "riskClass": "PII egress to third parties (hashed email/phone + click ids to Meta CAPI and Google Data Manager) / schema migration (e5c2a9f71d36) / public API (/api/v1/ad-conversions)",
+  "workDescription": "conversion-apis v1: outbox table + flag-gated APScheduler sweep sending lead/goal conversions via send_conversions on Meta and Google providers; LinkedIn CSV export; visitors.click_ids write-once from events.url. ad_conversions_enabled default OFF.",
+  "approver": "vc-execute-agent (self-classification); human operator must approve before flag flip",
+  "mustStopBeforeFinalize": true,
+  "dataFlow": {
+    "meta": ["event_name", "event_time (unix s)", "event_id = dedup id", "action_source=website", "event_source_url (latest non-abuse event URL)", "user_data.em = [sha256(lower(trim(email)))]", "user_data.ph = [sha256(E.164 digits)]", "user_data.fbc = fb.1.{fbc_ts}.{fbclid}", "user_data.client_user_agent (latest non-abuse event UA)", "NO raw IP (D4)"],
+    "google": ["transactionId = dedup id", "eventTimestamp (RFC3339 UTC)", "userData.userIdentifiers emailAddress/phoneNumber (sha256 hex, encoding HEX)", "consent GRANTED (EEA + unknown country excluded upstream)", "adIdentifiers: exactly one of gclid > wbraid > gbraid", "destinations operatingAccount + productDestinationId", "validateOnly from config (default true)"],
+    "linkedin": ["CSV only, operator download: email_sha256, li_fat_id, conversion_type, event_name, event_time, dedup_id"]
+  }
+}

@@ -1,0 +1,6 @@
+iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_status	loop_status	notes
+0	2026-11-27T00:00	7	3	4	0	n/a	baseline	full PVL pass 1 (outer-pvl): BLOCKED 3 FAIL 4 CONCERN
+1	2026-11-27T00:00	7	3	4	7	n/a	CONTINUE	supplement cycle 1 applied 7/7; revalidate from V1
+2	2026-11-27T00:00	3	0	3	3	improving	CONTINUE	supplement cycle 2 applied 3/3 (N1-N3); revalidate from V1
+3	2026-11-27T00:00	2	0	2	2	improving	CONTINUE	cycle 3 applied 2/2; revalidate
+4	2026-11-27T00:00	0	0	0	0	converged	HALTED_SUCCESS	revalidate after cycle 3: Gate PASS; E9-E10

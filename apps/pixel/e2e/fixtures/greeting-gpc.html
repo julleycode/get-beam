@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Beam pixel harness — on-site greeting ON + GPC</title>
+  <script>
+    Object.defineProperty(navigator, "webdriver", { get: function () { return false; } });
+    Object.defineProperty(navigator, "globalPrivacyControl", { get: function () { return true; } });
+  </script>
+  <script src="/src/tracker.js" data-site="test-site" data-api="http://127.0.0.1:8788" data-greeting="on"></script>
+</head>
+<body>
+  <h1>greeting-gpc</h1>
+</body>
+</html>

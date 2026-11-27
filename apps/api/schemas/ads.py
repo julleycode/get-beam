@@ -55,3 +55,47 @@ class PushAdSegmentResult(BaseModel):
     minimum_threshold: int = 0
     errors: list[str] = Field(default_factory=list)
     queued: bool = False  # true when the push was offloaded to a background worker
+
+
+# ── closed-won-lookalikes ────────────────────────────────
+
+# 10k rows x ~100 bytes; the route also caps raw bytes.
+CLOSED_WON_CSV_MAX_CHARS = 2_000_000
+
+
+class ClosedWonCsvUpload(BaseModel):
+    csv: str = Field(..., max_length=CLOSED_WON_CSV_MAX_CHARS)
+
+
+class ClosedWonCsvResult(BaseModel):
+    upserted: int
+    skipped_erased: int
+    skipped_invalid: int
+
+
+class ClosedWonSeedSummary(BaseModel):
+    total: int  # distinct closed-won emails
+    matched: int  # of those, matched to an identified visitor on this site
+    eligible: int  # after exclusions
+    excluded: int
+    needs_reconnect: bool = False
+
+
+class ClosedWonLookalikeRequest(BaseModel):
+    provider: str
+    country: str = Field(..., min_length=2, max_length=2)
+    ratio: str | None = Field(default=None, max_length=5)  # Meta
+    expansion: str | None = Field(default=None, max_length=10)  # Google
+    push_seed: bool = False  # re-push the seed before creating
+
+
+class ClosedWonLookalikeResult(BaseModel):
+    provider: str
+    seed_audience_id: str = ""
+    seed_pushed: int | None = None
+    lookalike_audience_id: str = ""
+    status: str = ""
+    reused: bool = False
+    previous_lookalike_id: str | None = None
+    warning: str = ""
+    error: str = ""

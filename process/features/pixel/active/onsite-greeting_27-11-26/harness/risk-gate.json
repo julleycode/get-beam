@@ -1,0 +1,14 @@
+{
+  "task": "onsite-greeting (gap #5) \u2014 company-level on-site greeting, flag OFF",
+  "planPath": "process/features/pixel/active/onsite-greeting_27-11-26/onsite-greeting_PLAN_27-11-26.md",
+  "riskLevel": "high",
+  "riskClasses": [
+    "public-api",
+    "schema-migration",
+    "privacy/trust-boundary"
+  ],
+  "mustStopBeforeFinalize": true,
+  "humanApprovalRequired": true,
+  "why": "New unauthenticated public endpoint that maps a client IP to a company display name (oracle risk), a schema migration on sites, and a consent/trust boundary in the pixel. Both flags default OFF; prod enable gated on KG-1/KG-2.",
+  "approver": "pending human review (auto-stop)"
+}
