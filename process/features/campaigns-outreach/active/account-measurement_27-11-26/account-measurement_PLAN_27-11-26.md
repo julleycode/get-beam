@@ -9,7 +9,7 @@ feature: campaigns-outreach
 TL;DR: new read-only service `services/account_rollup.py` aggregating existing tables by `visitors.company_domain`; new router `routers/accounts.py` (2 GETs, flag `account_rollup_enabled` default OFF → 404); new dashboard page `/dashboard/accounts`. **No migration.** Replies + CRM pipeline returned `null` as known-gaps.
 
 Complexity: SIMPLE
-Status: PLANNED — validate-contract PASS (outer PVL re-run after supplement cycle 2, 27-11-26; 0 FAIL / 0 CONCERN)
+Status: CODE DONE (merged on feat/inbound-playbook-gaps 27-11-26; U1–U3 CONFIRMED; U2 resolved to company_exclusion FREEMAIL_DOMAINS)
 
 ## Overview
 Gap #14: today ranking is per-company intent (`routers/companies.py`) and outcomes are per-campaign (`routers/outcomes.py`); nothing rolls visitors, people, campaigns, clicks and conversions up per account.
@@ -85,10 +85,10 @@ New additive endpoints `GET /api/v1/accounts/{site_id}` and `/{site_id}/{domain}
 - G2 must run the flag-ON path (flag-OFF-only evidence is vacuous).
 
 ## Open User Decisions
-All pending user confirmation; plan proceeds on these PROVISIONAL defaults.
-- **U1 (pending user confirmation):** demo bookings = conversions on the existing "Demo booked" goal preset (`site-settings-dialog.tsx:328`), not a `booking_url` host match.
-- **U2 (pending user confirmation):** freemail filter uses `enricher._FREE_MAIL_DOMAINS` now; switch to `company_exclusion.is_freemail()` if company-exclusion-list ships first. Note: the EXECUTE order places company-exclusion-list FIRST, so EXECUTE must check whether `is_freemail()` exists and prefer it.
-- **U3 (pending user confirmation):** exclude agent-derived + abuse-flagged rows only; `is_bot_suspect` / `is_agent_operated` stay counted (visibility-only flags).
+All CONFIRMED 27-11-26.
+- **U1 (CONFIRMED 27-11-26):** demo bookings = conversions on the existing "Demo booked" goal preset (`site-settings-dialog.tsx:328`), not a `booking_url` host match.
+- **U2 (CONFIRMED 27-11-26):** freemail filter uses `enricher._FREE_MAIL_DOMAINS` now; switch to `company_exclusion.is_freemail()` if company-exclusion-list ships first. Note: the EXECUTE order places company-exclusion-list FIRST, so EXECUTE must check whether `is_freemail()` exists and prefer it.
+- **U3 (CONFIRMED 27-11-26):** exclude agent-derived + abuse-flagged rows only; `is_bot_suspect` / `is_agent_operated` stay counted (visibility-only flags).
 
 ## Test Infra Improvement Notes
 (none identified yet) — Clerk Playwright auth harness remains a cross-feature gap.

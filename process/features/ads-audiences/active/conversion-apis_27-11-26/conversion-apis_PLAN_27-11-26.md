@@ -9,7 +9,7 @@ feature: ads-audiences
 TL;DR: Parse click ids server-side from event URLs, enqueue conversions from 4 Beam outcome triggers into a new delivery-log table, and a flag-gated sweep sends them via new `send_conversions()` on the existing Meta/Google providers. Default OFF, mock parity, no pixel change.
 
 Complexity: COMPLEX
-Status: PLANNED (validate CONDITIONAL; PVL supplement cycle 2 applied, re-validate pending)
+Status: CODE DONE (merged on feat/inbound-playbook-gaps 27-11-26; D1–D4 CONFIRMED)
 
 ## Overview
 Gap #11 of the inbound-playbook analysis: no server-side conversion feedback to ad platforms exists today (0 hits for CAPI/offline/enhanced conversions; tracker.js captures UTMs only, no click ids). This plan adds it on top of the ad-audiences infrastructure.
@@ -128,11 +128,11 @@ Gate preconditions: Python 3.11 `.venv` must exist (`python3.11 -m venv .venv &&
 Meta: dataset/pixel id + Events Manager test_event_code; Google: Data Manager destination (conversion action linked as a Data Manager destination, customer data terms accepted) + `datamanager` scope consent on the ad connection — no UPLOAD_CLICKS / developer token needed; LinkedIn: none v1.
 
 ## Open User Decisions
-PROVISIONAL defaults — pending user confirmation:
-- D1: v1 = `lead` + `goal` only; reply/crm_stage deferred → backlog NOTE `conversion-apis-reply-crm-stage_NOTE_27-11-26.md`. (pending user confirmation)
-- D2: send only first-party identities; never candidate/third-party graph matches. (pending user confirmation)
-- D3: exclude EEA + unknown-country for Meta as well as Google. (pending user confirmation)
-- D4: Meta `website` events with client_user_agent; no raw IP in v1. (pending user confirmation)
+Decisions CONFIRMED 27-11-26:
+- D1: v1 = `lead` + `goal` only; reply/crm_stage deferred → backlog NOTE `conversion-apis-reply-crm-stage_NOTE_27-11-26.md`. CONFIRMED 27-11-26.
+- D2: send only first-party identities; never candidate/third-party graph matches. CONFIRMED 27-11-26.
+- D3: exclude EEA + unknown-country for Meta as well as Google. CONFIRMED 27-11-26.
+- D4: Meta `website` events with client_user_agent; no raw IP in v1. CONFIRMED 27-11-26.
 
 ## Resume and Execution Handoff
 1. Selected plan: this file. 2. Last completed: PLAN (fast-mode) + outer PVL validate pass 27-11-26. 3. Validate-contract: written below, Gate BLOCKED (1 FAIL, missing-detail class). 4. Context: `process/context/all-context.md`, `process/context/tests/all-tests.md`, ad-audiences umbrella + phase-2/3 plans. 5. PVL supplement cycle 1 APPLIED 27-11-26 (Gaps 1-5). Next: re-validate from V1; earlier note: PVL supplement cycle 1 (vc-plan-agent, SUPPLEMENT REQUEST in the validate report), then re-validate from V1, then ENTER EXECUTE MODE.

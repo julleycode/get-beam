@@ -7,7 +7,7 @@ feature: campaigns-outreach
 # PLAN (COMPLEX) — signal-creative-cta
 
 Complexity: COMPLEX
-Status: PLANNED (outer PVL pass 3: CONDITIONAL C1-C2; supplement cycle 3 applied — revalidate)
+Status: CODE DONE (merged on feat/inbound-playbook-gaps 27-11-26; decisions CONFIRMED)
 
 ## Overview
 Closes inbound-playbook gaps #8 (one creative per signal) and #9 (only "Book a demo" CTA); verifies #10 (no auto-send gap found).
@@ -105,10 +105,10 @@ Preconditions (every row): run from repo root with `.venv` present (`.venv/bin/p
 Send only via `send_draft`, which rejects non-approved; `approved` set only at routers/drafts.py:281 (human approve) and :370 (human retry of a failed draft). social_accounts.py:104-203 = LinkedIn connect/status; extension = session reader. Approved-draft→human-send holds everywhere.
 
 ## Open User Decisions
-PROVISIONAL defaults — pending user confirmation (plan proceeds on these):
-- 40% share rule for segment angle: KEPT (pending user confirmation).
-- Cross-domain CTA URL: allowed for `book_demo` only (via Site.booking_url) (pending user confirmation).
-- `reply` CTA: untracked — recorded known-gap, no click attribution (pending user confirmation).
+Decisions CONFIRMED 27-11-26:
+- 40% share rule for segment angle: KEPT — CONFIRMED.
+- Cross-domain CTA URL: allowed for `book_demo` only (via Site.booking_url) — CONFIRMED.
+- `reply` CTA: untracked — recorded known-gap, no click attribution — CONFIRMED.
 
 ## Test Infra Improvement Notes
 (none identified yet)
