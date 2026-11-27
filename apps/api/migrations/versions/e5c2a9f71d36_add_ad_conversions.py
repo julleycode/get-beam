@@ -4,7 +4,7 @@ Additive only (conversion-apis_27-11-26). Two new tables and one nullable
 JSONB column. Dormant until AD_CONVERSIONS_ENABLED is flipped on.
 
 Revision ID: e5c2a9f71d36
-Revises: d3f8a2c61b47
+Revises: e9c4a7d2f318
 Create Date: 2026-11-27
 
 """
@@ -13,7 +13,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "e5c2a9f71d36"
-down_revision = "d3f8a2c61b47"
+down_revision = "e9c4a7d2f318"
 branch_labels = None
 depends_on = None
 

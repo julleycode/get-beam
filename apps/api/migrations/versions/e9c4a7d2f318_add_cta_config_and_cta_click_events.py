@@ -4,7 +4,7 @@ Additive only: one nullable JSONB column on ``sites`` and one new append-only
 table ``cta_click_events`` (no PII). Chained off the live head at EXECUTE time.
 
 Revision ID: e9c4a7d2f318
-Revises: d3f8a2c61b47
+Revises: e8c4b2a7d913
 Create Date: 2026-11-27
 
 """
@@ -14,7 +14,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "e9c4a7d2f318"
-down_revision = "d3f8a2c61b47"
+down_revision = "e8c4b2a7d913"
 branch_labels = None
 depends_on = None
 
