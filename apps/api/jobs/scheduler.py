@@ -363,6 +363,43 @@ async def _coop_expiry_sweep_job() -> None:
         logger.exception("coop_expiry_sweep_crashed")
 
 
+async def _ad_conversions_sweep_job() -> None:
+    """Periodic job: server-side ad conversions (conversion-apis).
+
+    Gated at registration AND here at runtime (N6): a runtime flip to OFF in a
+    process that booted flag-ON must stop sending immediately.
+    """
+    from apps.api.config import settings
+
+    if not settings.ad_conversions_enabled:
+        return
+    try:
+        from apps.api.services.ad_conversions import run_conversion_sweep_once
+
+        async with async_session() as db:
+            await run_conversion_sweep_once(db)
+    except Exception:
+        logger.exception("ad_conversions_sweep_crashed")
+
+
+async def _poll_closed_won_job() -> None:
+    """Periodic job: CRM closed-won read-back (closed-won-lookalikes).
+
+    Gated at registration AND here at runtime (coop-expiry pattern).
+    """
+    from apps.api.config import settings
+
+    if not settings.closed_won_lookalikes_enabled:
+        return
+    try:
+        from apps.api.services.closed_won_seed import poll_closed_won_once
+
+        async with async_session() as db:
+            await poll_closed_won_once(db)
+    except Exception:
+        logger.exception("poll_closed_won_crashed")
+
+
 async def _ws2_classifier_sweep_job() -> None:
     """Periodic job: agent-OPERATED session detection (WS2 session classifier).
 
@@ -1006,6 +1043,27 @@ def start_scheduler() -> None:
             # run_reengagement_sweep is what keeps replicas from double-sending.
             # Thresholds are day-granular, so a generous grace window is safe.
             misfire_grace_time=3600,
+        )
+    # conversion-apis: flag-OFF process registers NO job (runtime re-check in wrapper).
+    if settings.ad_conversions_enabled:
+        scheduler.add_job(
+            _ad_conversions_sweep_job,
+            "interval",
+            seconds=settings.ad_conversions_sweep_interval_s,
+            id="ad_conversions_sweep",
+            replace_existing=True,
+            jitter=30,
+            misfire_grace_time=300,
+        )
+    if settings.closed_won_lookalikes_enabled:
+        scheduler.add_job(
+            _poll_closed_won_job,
+            "interval",
+            hours=settings.closed_won_poll_interval_hours,
+            id="poll_closed_won",
+            replace_existing=True,
+            jitter=120,
+            misfire_grace_time=1800,
         )
     scheduler.start()
     logger.info(

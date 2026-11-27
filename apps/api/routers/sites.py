@@ -338,6 +338,11 @@ async def delete_site(
             "agent_handoff_links",
             "request_logs",
             "ad_connections",
+            # conversion-apis (N3): conversion outbox + config rows.
+            "ad_conversion_deliveries",
+            "ad_conversion_configs",
+            # closed-won-lookalikes (Gap 8): CRM closed-won seed contacts.
+            "crm_closed_won_contacts",
             # H1: close the site_id-reuse gap for spendable co-op credit.
             # identity_contribution_consent_acceptances is DELIBERATELY retained
             # (append-only legal audit trail, inert alone) — plan decision H1-D.

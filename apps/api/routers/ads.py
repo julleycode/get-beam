@@ -19,12 +19,13 @@ from urllib.parse import urlencode
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.api.config import settings
 from apps.api.dependencies import get_current_user, verify_site_access as _owned_site
+from apps.api.models.ad_audience_link import AdAudienceLink
 from apps.api.models.ad_connection import AdConnection
 from apps.api.models.database import get_db
 from apps.api.models.segment import Segment
@@ -34,11 +35,29 @@ from apps.api.schemas.ads import (
     AdConnectionOut,
     AdConnectResponse,
     AdTestResult,
+    ClosedWonCsvResult,
+    ClosedWonCsvUpload,
+    ClosedWonLookalikeRequest,
+    ClosedWonLookalikeResult,
+    ClosedWonSeedSummary,
     PushAdSegmentRequest,
     PushAdSegmentResult,
 )
 from apps.api.services.ads.factory import get_provider, is_ready
-from apps.api.services.ads_push import get_connection, push_segment_to_ads
+from apps.api.services.ads.linkedin import build_linkedin_seed_csv
+from apps.api.services.ads_push import build_hashed_contacts, get_connection, push_segment_to_ads
+from apps.api.services.closed_won_seed import (
+    SEED_SEGMENT_ID,
+    LookalikeSpecError,
+    SeedNotReadyError,
+    build_seed,
+    create_or_reuse_lookalike,
+    ingest_deals,
+    parse_closed_won_csv,
+    push_seed,
+    seed_summary,
+    validate_spec,
+)
 from apps.api.services.ads_rate_limiter import check_and_reserve_push
 from apps.api.services.encryption import encrypt_token
 from apps.api.services.oauth_state import store_oauth_state, validate_oauth_state
@@ -295,3 +314,136 @@ async def disconnect(
     conn.is_valid = False
     await db.commit()
     return {"status": "disconnected", "provider": provider}
+
+
+# ── closed-won-lookalikes ────────────────────────────────
+# UD4: closed-won flag OFF -> 404 (route does not exist); ad_audiences OFF ->
+# the existing 501 for anything that talks to an ad platform.
+
+
+def _require_closed_won_enabled() -> None:
+    if not settings.closed_won_lookalikes_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+@router.post("/{site_id}/closed-won/csv", response_model=ClosedWonCsvResult)
+async def upload_closed_won_csv(
+    site_id: str,
+    body: ClosedWonCsvUpload,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ClosedWonCsvResult:
+    _require_closed_won_enabled()
+    await _owned_site(db, site_id, user)
+    try:
+        deals = parse_closed_won_csv(body.csv)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    outcome = await ingest_deals(db, site_id, deals, source="csv")
+    return ClosedWonCsvResult(
+        upserted=outcome.upserted,
+        skipped_erased=outcome.skipped_erased,
+        skipped_invalid=outcome.skipped_invalid,
+    )
+
+
+@router.get("/{site_id}/closed-won/seed", response_model=ClosedWonSeedSummary)
+async def get_closed_won_seed(
+    site_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ClosedWonSeedSummary:
+    _require_closed_won_enabled()
+    await _owned_site(db, site_id, user)
+    return ClosedWonSeedSummary(**(await seed_summary(db, site_id)))
+
+
+@router.get("/{site_id}/closed-won/linkedin.csv")
+async def export_closed_won_linkedin_csv(
+    site_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """LinkedIn stays CSV-only: hashed seed for manual Matched Audiences upload."""
+    _require_closed_won_enabled()
+    await _owned_site(db, site_id, user)
+    build = await build_seed(db, site_id)
+    contacts = build_hashed_contacts([{"email": r.email} for r in build.rows])
+    return Response(
+        content=build_linkedin_seed_csv(contacts),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="closed-won-seed-linkedin.csv"'},
+    )
+
+
+@router.post("/{site_id}/closed-won/lookalike", response_model=ClosedWonLookalikeResult)
+async def create_closed_won_lookalike(
+    site_id: str,
+    body: ClosedWonLookalikeRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ClosedWonLookalikeResult:
+    _require_closed_won_enabled()
+    _require_provider(body.provider)
+    _require_feature_enabled()
+    await _owned_site(db, site_id, user)
+    try:
+        spec, segment_key = validate_spec(body.provider, body.country, body.ratio, body.expansion)
+    except LookalikeSpecError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    conn = await get_connection(db, site_id, body.provider)
+    if conn is None:
+        raise HTTPException(status_code=404, detail="Connection not found")
+
+    seed_link = (
+        await db.execute(
+            select(AdAudienceLink).where(
+                AdAudienceLink.connection_id == conn.id,
+                AdAudienceLink.segment_id == SEED_SEGMENT_ID,
+            )
+        )
+    ).scalar_one_or_none()
+    seed_pushed: int | None = None
+    seed_warning = ""
+    if seed_link is None or body.push_seed:
+        if not await check_and_reserve_push(site_id):
+            raise HTTPException(
+                status_code=429,
+                detail="Hourly ad push limit reached for this site. Try again later.",
+            )
+        try:
+            seed = await push_seed(db, site_id, body.provider)
+        except NotImplementedError:
+            raise HTTPException(status_code=501, detail=_NOT_IMPLEMENTED_DETAIL)
+        if seed.errors and not seed.platform_audience_id:
+            return ClosedWonLookalikeResult(provider=body.provider, error="; ".join(seed.errors))
+        seed_pushed = seed.pushed
+        seed_warning = seed.warning
+
+    try:
+        outcome = await create_or_reuse_lookalike(db, site_id, body.provider, spec, segment_key)
+    except SeedNotReadyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except NotImplementedError:
+        raise HTTPException(status_code=501, detail=_NOT_IMPLEMENTED_DETAIL)
+
+    seed_link = (
+        await db.execute(
+            select(AdAudienceLink).where(
+                AdAudienceLink.connection_id == conn.id,
+                AdAudienceLink.segment_id == SEED_SEGMENT_ID,
+            )
+        )
+    ).scalar_one_or_none()
+    return ClosedWonLookalikeResult(
+        provider=body.provider,
+        seed_audience_id=seed_link.platform_audience_id if seed_link else "",
+        seed_pushed=seed_pushed,
+        lookalike_audience_id=outcome.audience_id,
+        status=outcome.status,
+        reused=outcome.reused,
+        previous_lookalike_id=outcome.previous_lookalike_id,
+        warning=" ".join(w for w in (seed_warning, outcome.warning) if w),
+        error=outcome.error,
+    )

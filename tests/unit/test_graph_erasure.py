@@ -79,6 +79,8 @@ def _work_session(delete_raises: bool = False) -> MagicMock:
                 raise RuntimeError(f"boom for {EMAIL}")
         elif "identity_signals" in text:
             label = "identity_signals_delete"
+        elif "crm_closed_won_contacts" in text:
+            label = "closed_won_delete"
         elif "erasure_requests" in text:
             label = "erasure_status_update"
         calls.append(label)
@@ -372,7 +374,11 @@ async def test_t_u8_boundary2_single_transaction_tombstone_first_happy_path():
     assert aexit.await_args.args[0] is None, "the happy path exited with an exception"
 
     inside = db.recorded[: db.recorded.index("erasure_status_update")]
-    assert inside == ["tombstone_insert", "graph_delete", "identity_signals_delete"], (
+    # closed-won-lookalikes (Gap 8): seed contacts are erased by bidx inside the
+    # same transaction, after the tombstone.
+    assert inside == [
+        "tombstone_insert", "graph_delete", "identity_signals_delete", "closed_won_delete"
+    ], (
         f"wrong Boundary-2 statement order / extra statement between: {inside}"
     )
     # H6 positive assertion: the identity_signals DELETE for the erased bidx was

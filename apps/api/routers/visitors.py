@@ -468,6 +468,8 @@ async def delete_visitor_data(
         # here explicitly. Table names in this tuple are hardcoded literals, not
         # user input — no injection surface.
         "job_change_events",
+        # conversion-apis (N3): outbox rows reference the visitor by id.
+        "ad_conversion_deliveries",
         # visitor_emails holds the visitor's PLAINTEXT captured email addresses
         # (no FK cascade onto visitors), so its rows would survive an otherwise-
         # complete erasure and re-identify the person on next visit unless listed

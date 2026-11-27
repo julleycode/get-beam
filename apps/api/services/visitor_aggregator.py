@@ -526,6 +526,9 @@ async def aggregate_visitors_for_site(
     else:
         count = await _bulk_upsert_visitors_incremental(db, site_id, rows)
 
+    # conversion-apis: write-once first-ad-click ids, both paths (full + incremental).
+    await _write_click_ids(db, site_id, since)
+
     await db.commit()
 
     # Returning-visitor revive: a fresh IP on a previously unresolvable row is a
@@ -760,6 +763,57 @@ _INCREMENTAL_SET = {
         "visitors.has_unstable_fingerprint OR EXCLUDED.has_unstable_fingerprint"
     ),
 }
+
+
+# conversion-apis (AC-1): the FIRST non-abuse event whose URL carries a non-empty
+# click-id param — NOT the first pageview, so an organic-first-then-ad-click
+# visitor is still captured. Only visitors whose click_ids is still NULL are
+# considered, and the UPDATE re-checks `click_ids IS NULL` — write-once.
+# Kept as a separate query (not a column in _AGGREGATE_SQL_TEMPLATE) so the frozen
+# full-recompute aggregation SQL stays byte-identical (contract E4).
+_CLICK_ID_EVENTS_SQL = """
+    SELECT DISTINCT ON (e.visitor_id) e.visitor_id, e.url, e.created_at
+    FROM events e
+    JOIN visitors v ON v.site_id = e.site_id AND v.visitor_id = e.visitor_id
+    WHERE e.site_id = :site_id
+      AND v.click_ids IS NULL
+      AND NOT e.is_flagged_abuse
+      AND e.url ~ :click_re{window_clause}
+    ORDER BY e.visitor_id, e.created_at ASC
+"""
+_CLICK_ID_WINDOW_CLAUSE = """
+      AND e.visitor_id IN (
+          SELECT visitor_id FROM events WHERE site_id = :site_id AND created_at > :since
+      )"""
+
+
+async def _write_click_ids(db: AsyncSession, site_id: str, since: datetime | None) -> int:
+    """Persist first-ad-click ids onto visitors.click_ids (write-once)."""
+    from apps.api.services.click_ids import CLICK_ID_URL_REGEX, build_visitor_click_ids
+
+    params: dict = {"site_id": site_id, "click_re": CLICK_ID_URL_REGEX}
+    window = ""
+    if since is not None:
+        params["since"] = _strip_tz(since)
+        window = _CLICK_ID_WINDOW_CLAUSE
+    rows = (await db.execute(text(_CLICK_ID_EVENTS_SQL.format(window_clause=window)), params)).fetchall()
+    written = 0
+    for visitor_id, url, created_at in rows:
+        created = created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+        value = build_visitor_click_ids(url, int(created.timestamp() * 1000))
+        if value is None:
+            continue
+        await db.execute(
+            update(Visitor)
+            .where(
+                Visitor.site_id == site_id,
+                Visitor.visitor_id == visitor_id,
+                Visitor.click_ids.is_(None),
+            )
+            .values(click_ids=value)
+        )
+        written += 1
+    return written
 
 
 async def _bulk_upsert_visitors_incremental(

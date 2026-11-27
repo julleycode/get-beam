@@ -1092,6 +1092,22 @@ class Settings(BaseSettings):
     ads_async_push: bool = False
     ads_async_push_threshold: int = 200  # segment member count above which async kicks in
 
+    # ─── Conversion APIs (conversion-apis_27-11-26) ───
+    # Server-side conversions to Meta CAPI + Google Data Manager events:ingest.
+    # OFF by default: while false the sweep job is NOT registered, the runtime
+    # wrapper returns immediately, and enqueue writes zero rows. Flipping it on
+    # is an explicit operator action after the migration is live-applied.
+    ad_conversions_enabled: bool = False
+    ad_conversions_sweep_interval_s: int = 300
+    ad_conversions_max_attempts: int = 5
+
+    # closed-won-lookalikes: CRM closed-won read-back + seed + lookalike.
+    # OFF by default: routes 404, poll job NOT registered, webhook 404.
+    closed_won_lookalikes_enabled: bool = False
+    closed_won_poll_interval_hours: int = 6
+    meta_lookalike_min_seed: int = 100
+    google_lookalike_min_seed: int = 1000
+
     # Per-site cap on CRM push operations per clock hour (abuse / runaway guard).
     max_crm_pushes_per_hour_per_site: int = 20
     # Offload large pushes to Celery. OFF by default — only safe when a Celery

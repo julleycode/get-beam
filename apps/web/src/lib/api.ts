@@ -65,6 +65,10 @@ import type {
   CrmPushResult,
   AdConnection,
   AdPushResult,
+  ClosedWonSeedSummary,
+  ClosedWonCsvResult,
+  ClosedWonLookalikeRequest,
+  ClosedWonLookalikeResult,
   Platform,
   DraftStatus,
   SocialAccount,
@@ -1106,6 +1110,25 @@ class ApiClient {
     );
   }
 
+  // Closed-won lookalikes (404 when the feature flag is off)
+  async getClosedWonSeed(siteId: string) {
+    return this.request<ClosedWonSeedSummary>(`/api/v1/ads/${siteId}/closed-won/seed`);
+  }
+
+  async uploadClosedWonCsv(siteId: string, csv: string) {
+    return this.request<ClosedWonCsvResult>(`/api/v1/ads/${siteId}/closed-won/csv`, {
+      method: "POST",
+      body: JSON.stringify({ csv }),
+    });
+  }
+
+  async createClosedWonLookalike(siteId: string, body: ClosedWonLookalikeRequest) {
+    return this.request<ClosedWonLookalikeResult>(`/api/v1/ads/${siteId}/closed-won/lookalike`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
   async disconnectAdProvider(siteId: string, provider: string) {
     return this.request<{ status: string }>(
       `/api/v1/ads/${siteId}/connections/${provider}`,
@@ -1987,6 +2010,10 @@ export type {
   AdProvider,
   AdConnection,
   AdPushResult,
+  ClosedWonSeedSummary,
+  ClosedWonCsvResult,
+  ClosedWonLookalikeRequest,
+  ClosedWonLookalikeResult,
   Platform,
   DraftStatus,
   SocialAccount,

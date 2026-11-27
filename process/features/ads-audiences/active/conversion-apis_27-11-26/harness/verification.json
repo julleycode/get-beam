@@ -1,0 +1,15 @@
+{
+  "steps": [
+    {"step": "G1 click-id parsing", "command": ".venv/bin/python -m pytest tests/unit/test_click_ids.py -q", "result": "PASS", "notes": "18 passed"},
+    {"step": "G2 consent gate matrix + dedup + FIRST_PARTY_PROVIDERS pin + flag-OFF zero rows", "command": ".venv/bin/python -m pytest tests/unit/test_ad_conversions_gates.py -q", "result": "PASS", "notes": "56 passed; consent matrix test ids: test_should_skip_conversion_for_each_fail_closed_gate[*] (21 rows), test_internal_suspect_cleared_by_explicit_not_internal_override, test_first_party_providers_exact_membership_pinned, test_non_first_party_providers_never_qualify[*], test_flag_off_enqueue_writes_zero_rows"},
+    {"step": "G8 stale guard", "command": "... test_ad_conversions_gates.py -q -k stale", "result": "PASS", "notes": "3 tests: >6d skipped_stale, Meta-only, remaining batch still sends"},
+    {"step": "G3/G12 payload shapes, no plaintext, missing UA zero Meta calls", "command": ".venv/bin/python -m pytest tests/unit/test_ads_conversion_payloads.py -q", "result": "PASS", "notes": "12 passed"},
+    {"step": "G7 pixel size unchanged", "command": ".venv/bin/python -m pytest tests/unit/test_pixel.py -q", "result": "PASS", "notes": "tracker.js untouched"},
+    {"step": "G6 unit regression", "command": ".venv/bin/python -m pytest tests/unit -q", "result": "PASS", "notes": "3200 passed / 2 skipped / 0 failed after updating E20 scheduler arithmetic 28/24/3 -> 29/25/3 per that gate's own instruction"},
+    {"step": "PII grep: no email/phone/IP/UA/click id in structlog calls of new modules", "command": "grep logger.* in services/ad_conversions.py, services/click_ids.py, routers/ad_conversions.py, ads send_conversions", "result": "PASS", "notes": "only counts, site_id, platform, request_id, error_type"},
+    {"step": "Flag-OFF proof", "command": "test_flag_off_enqueue_writes_zero_rows; scheduler registration gated; wrapper runtime check", "result": "PASS", "notes": "enqueue returns None with zero DB calls; run_conversion_sweep_once returns immediately"},
+    {"step": "G4/G9/G10/G11/G13 integration (flag ON)", "command": "DATABASE_URL=postgresql+asyncpg://retarget:retarget_dev@localhost:5433/retarget_agent_test_lane_b REDIS_URL=redis://localhost:6379/14 .venv/bin/python -m pytest tests/integration/test_ad_conversions.py -q", "result": "PASS", "notes": "8 passed in 12.1s (27-11-26, after Postgres recovered)"},
+    {"step": "G5 migration up/down/up", "command": "fresh DB retarget_lane_b_mig on :5433 (dropped after): alembic upgrade e5c2a9f71d36 -> downgrade d3f8a2c61b47 -> upgrade e5c2a9f71d36", "result": "PASS", "notes": "full chain from empty DB to e5c2a9f71d36, down/up clean, current = e5c2a9f71d36 (head)"},
+    {"step": "G6 integration lane regression", "command": "same pinned DSN: .venv/bin/python -m pytest tests/integration -q", "result": "PASS", "notes": "702 passed, 5 skipped, 0 failed in 21m15s"}
+  ]
+}

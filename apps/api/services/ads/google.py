@@ -43,9 +43,14 @@ from apps.api.services.ads.base import (
     AdsProvider,
     AdTestOutcome,
     AudienceResult,
+    ConversionEvent,
+    ConversionResult,
     HashedContact,
+    LookalikeResult,
+    LookalikeSpec,
     sanitize_error,
 )
+from apps.api.services.click_ids import google_ad_identifier
 from apps.api.services.encryption import decrypt_token
 
 logger = structlog.get_logger()
@@ -447,6 +452,182 @@ class GoogleAdsProvider(AdsProvider):
                 members=len(batch),
             )
         return sent
+
+
+    # ── conversion-apis: Data Manager events:ingest ──────
+
+    # ── closed-won-lookalikes: lookalike user list ───────
+
+    async def create_lookalike(
+        self, connection, seed_audience_id: str, spec: LookalikeSpec
+    ) -> LookalikeResult:
+        from apps.api.services.ads_push import EEA_COUNTRY_CODES
+
+        country = (spec.country or "").strip().upper()
+        # UD3: fail closed — no EEA (or unknown) country for Google.
+        if not country or country in EEA_COUNTRY_CODES:
+            return LookalikeResult(
+                status="error",
+                error="Google lookalikes are not available for EEA countries (no consent signal).",
+            )
+        if settings.mock_external_apis:
+            return LookalikeResult(
+                audience_id=f"customers/0/userLists/mock-lal-{uuid.uuid4().hex[:10]}",
+                warning=GOOGLE_DEMAND_GEN_NOTE,
+            )
+        token = _access_token(connection)
+        customer_id = _customer_id(connection)
+        payload = build_google_lookalike_request(seed_audience_id, spec)
+        try:
+            created = await self._ads_post(
+                f"{_GOOGLE_ADS_BASE}/customers/{customer_id}/userLists:mutate", payload, token
+            )
+        except httpx.HTTPStatusError as exc:
+            if "DUPLICATE_LOOKALIKE" in (exc.response.text or "")[:5000]:
+                return LookalikeResult(
+                    status="exists",
+                    warning="A lookalike with these settings already exists in Google Ads.",
+                )
+            return LookalikeResult(status="error", error=sanitize_error(exc, "Lookalike create failed"))
+        except httpx.HTTPError as exc:
+            return LookalikeResult(status="error", error=sanitize_error(exc, "Lookalike create failed"))
+        resource = ((created.get("results") or [{}])[0]).get("resourceName", "")
+        if not resource:
+            return LookalikeResult(status="error", error="Google did not return a lookalike list")
+        logger.info("google_lookalike_created")
+        return LookalikeResult(audience_id=resource, warning=GOOGLE_DEMAND_GEN_NOTE)
+
+    async def send_conversions(
+        self, connection, config, events: list[ConversionEvent]
+    ) -> list[ConversionResult]:
+        """Ingest conversions via Data Manager ``events:ingest``.
+
+        NOT ``uploadClickConversions`` (closed to new integrations 15-06-2026).
+        EEA + unknown-country rows are excluded upstream by the sweep. One outbox
+        attempt = one HTTP call per chunk; no tenacity stacking (E6).
+        """
+        if not events:
+            return []
+        if settings.mock_external_apis:
+            return [ConversionResult(delivery_id=e.delivery_id, ok=True) for e in events]
+        if not (
+            (getattr(config, "google_operating_account_id", "") or "").strip()
+            and (getattr(config, "google_product_destination_id", "") or "").strip()
+        ):
+            return [
+                ConversionResult(delivery_id=e.delivery_id, ok=False, error="no_destination")
+                for e in events
+            ]
+        token = _access_token(connection)
+        results: list[ConversionResult] = []
+        for batch in chunk_conversion_events(events):
+            payload = build_data_manager_events_request(config, batch)
+            try:
+                async with httpx.AsyncClient(timeout=HTTP_TIMEOUT) as client:
+                    resp = await client.post(
+                        f"{_DATA_MANAGER_BASE}/events:ingest",
+                        json=payload,
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                resp.raise_for_status()
+                request_id = (resp.json() or {}).get("requestId", "")
+            except Exception as exc:  # noqa: BLE001 — classified, sanitized
+                transient = _is_transient_http_error(exc)
+                reason = sanitize_error(exc)
+                results.extend(
+                    ConversionResult(
+                        delivery_id=e.delivery_id, ok=False, error=reason, transient=transient
+                    )
+                    for e in batch
+                )
+                continue
+            results.extend(ConversionResult(delivery_id=e.delivery_id, ok=True) for e in batch)
+            logger.info("google_dm_events_ack", request_id=request_id, events=len(batch))
+        return results
+
+
+# Data Manager events:ingest accepts up to 2000 events per request.
+DM_EVENTS_BATCH_SIZE = 2000
+
+
+def chunk_conversion_events(events: list[ConversionEvent]) -> list[list[ConversionEvent]]:
+    return [
+        events[i : i + DM_EVENTS_BATCH_SIZE] for i in range(0, len(events), DM_EVENTS_BATCH_SIZE)
+    ]
+
+
+def _rfc3339(when: datetime) -> str:
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def build_data_manager_event(event: ConversionEvent) -> dict:
+    identifiers: list[dict] = []
+    if event.email_sha256:
+        identifiers.append({"emailAddress": event.email_sha256})
+    if event.phone_sha256:
+        identifiers.append({"phoneNumber": event.phone_sha256})
+    body: dict = {
+        "transactionId": event.dedup_id,
+        "eventTimestamp": _rfc3339(event.event_time),
+        "userData": {"userIdentifiers": identifiers},
+        # Every row reaching here is non-EEA and known-country (sweep gate D3).
+        "consent": {
+            "adUserData": "CONSENT_GRANTED",
+            "adPersonalization": "CONSENT_GRANTED",
+        },
+    }
+    ad_id = google_ad_identifier(event.click_ids)
+    if ad_id:
+        body["adIdentifiers"] = {ad_id[0]: ad_id[1]}
+    return body
+
+
+def build_data_manager_events_request(config, events: list[ConversionEvent]) -> dict:
+    destination = {
+        "operatingAccount": {
+            "accountId": (config.google_operating_account_id or "").replace("-", ""),
+            "accountType": "GOOGLE_ADS",
+        },
+        "productDestinationId": config.google_product_destination_id,
+    }
+    return {
+        "destinations": [destination],
+        "events": [build_data_manager_event(e) for e in events],
+        "encoding": _HASH_ENCODING,
+        "validateOnly": bool(getattr(config, "validate_only", True)),
+    }
+
+GOOGLE_DEMAND_GEN_NOTE = "Google lookalike segments are usable in Demand Gen campaigns only."
+GOOGLE_EXPANSION_LEVELS = ("NARROW", "BALANCED", "BROAD")
+
+
+def build_google_lookalike_request(seed_audience_id: str, spec: LookalikeSpec) -> dict:
+    """``userLists:mutate`` body creating a lookalike from a Customer Match seed."""
+    return {
+        "operations": [
+            {
+                "create": {
+                    "name": f"Beam closed-won lookalike {spec.country} {spec.expansion} {uuid.uuid4().hex[:6]}",
+                    "lookalikeUserList": {
+                        "seedUserListIds": [_user_list_id(seed_audience_id)],
+                        "expansionLevel": spec.expansion,
+                        "countryCodes": [spec.country],
+                    },
+                }
+            }
+        ]
+    }
+
+
+def google_seed_warning(seed_size: int) -> str:
+    if seed_size < settings.google_lookalike_min_seed:
+        return (
+            f"Your seed has {seed_size} people. Google needs about "
+            f"{settings.google_lookalike_min_seed} matched people before a lookalike is useful."
+        )
+    return ""
 
 
 def _expiry_from(payload: dict) -> datetime | None:

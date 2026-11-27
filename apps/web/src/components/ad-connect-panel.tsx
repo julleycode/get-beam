@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { Megaphone, Unplug } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
+import { ClosedWonLookalikeCard } from "@/components/closed-won-lookalike-card";
 
 // Ad platforms. Meta + Google ship a live connect flow; LinkedIn has no usable
 // Matched Audiences API for us, so it stays disabled — discoverable without
@@ -336,6 +337,8 @@ export function AdConnectPanel({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ClosedWonLookalikeCard siteId={siteId} />
     </div>
   );
 }

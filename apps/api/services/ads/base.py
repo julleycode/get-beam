@@ -63,6 +63,61 @@ class AudienceResult:
     errors: list[str] = field(default_factory=list)
 
 
+@dataclass
+class ConversionEvent:
+    """One server-side conversion, hashed. Never holds a plaintext identifier.
+
+    ``dedup_id`` is the platform dedup key (Meta ``event_id`` / Google
+    ``transactionId``): IdentifiedVisitor.id for leads, Conversion.id for goals.
+    """
+
+    delivery_id: str
+    dedup_id: str
+    conversion_type: str
+    event_name: str  # Meta event name / Google conversion label (from goal_event_map)
+    event_time: datetime
+    email_sha256: str = ""
+    phone_sha256: str = ""
+    click_ids: dict = field(default_factory=dict)
+    user_agent: str = ""
+    event_source_url: str = ""
+
+
+@dataclass
+class ConversionResult:
+    """Per-event outcome of ``send_conversions``."""
+
+    delivery_id: str
+    ok: bool
+    # Sanitized reason code — never provider body text, never PII.
+    error: str = ""
+    transient: bool = False
+
+
+@dataclass
+class LookalikeSpec:
+    """Validated lookalike parameters (closed-won-lookalikes).
+
+    ``country`` is ISO-3166 alpha-2. Meta uses ``ratio`` (0.01–0.10); Google
+    uses ``expansion`` (NARROW / BALANCED / BROAD).
+    """
+
+    country: str
+    ratio: float | None = None
+    expansion: str | None = None
+
+
+@dataclass
+class LookalikeResult:
+    """Outcome of ``create_lookalike``."""
+
+    audience_id: str = ""
+    status: str = "created"  # created | exists | error
+    supported: bool = True
+    warning: str = ""
+    error: str = ""
+
+
 def sanitize_error(exc: BaseException, fallback: str = "Request failed") -> str:
     """Short, PII-free error string safe to persist in ``last_error``.
 
@@ -102,3 +157,23 @@ class AdsProvider(ABC):
         hashed_contacts: list[HashedContact],
     ) -> AudienceResult:
         ...
+
+    # conversion-apis: NON-abstract on purpose (additive base edit, E5) so every
+    # existing provider keeps instantiating; providers that support server-side
+    # conversions override it.
+    async def send_conversions(
+        self,
+        connection,
+        config,
+        events: list[ConversionEvent],
+    ) -> list[ConversionResult]:
+        raise NotImplementedError(f"{self.provider or 'provider'} does not support conversions")
+
+    # closed-won-lookalikes: NON-abstract (additive), same rationale as above.
+    async def create_lookalike(
+        self,
+        connection,
+        seed_audience_id: str,
+        spec: LookalikeSpec,
+    ) -> LookalikeResult:
+        raise NotImplementedError(f"{self.provider or 'provider'} does not support lookalikes")

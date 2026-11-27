@@ -4,12 +4,17 @@ REST surface (all under /api/v1/crm), scoped to a site owned by the caller,
 except the OAuth callback which is validated by the OAuth state token instead.
 """
 
+import hashlib
+import hmac
 import uuid
+from datetime import datetime
 from urllib.parse import urlencode
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse
+from pydantic import BaseModel, ValidationError
+from pydantic import Field as PydField
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,7 +36,10 @@ from apps.api.schemas.crm import (
     PushSegmentRequest,
     PushSegmentResult,
 )
+from apps.api.services.closed_won_seed import ingest_deals
 from apps.api.services.crm import get_crm_connector
+from apps.api.services.crm.base import ClosedWonDeal
+from apps.api.services.rate_limiter import limiter
 from apps.api.services.crm_push import fresh_access_token, get_connection, push_segment
 from apps.api.services.crm_rate_limiter import check_and_reserve_push
 from apps.api.services.encryption import encrypt_token
@@ -372,3 +380,83 @@ async def disconnect(
     await db.delete(conn)
     await db.commit()
     return {"status": "disconnected", "provider": provider}
+
+
+# ── closed-won-lookalikes: inbound deal webhook ──────────
+
+MAX_DEAL_WEBHOOK_BYTES = 256 * 1024
+
+
+class ClosedWonWebhookPayload(BaseModel):
+    deal_id: str = PydField(..., min_length=1, max_length=255)
+    emails: list[str] = PydField(..., min_length=1, max_length=100)
+    closed_at: datetime | None = None
+    company_domain: str | None = PydField(default=None, max_length=253)
+    country: str | None = PydField(default=None, max_length=5)
+
+
+@router.post("/{site_id}/webhook/deal", status_code=202)
+@limiter.limit("60/minute")
+async def closed_won_deal_webhook(
+    site_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Closed-won deal from Zapier/Make/any backend (UD5: signed with the
+    site's existing generic_webhook secret). NO bearer auth.
+
+    Order (E6): flag -> 404; body cap -> 413; connection -> 404; HMAC -> 400.
+    The body is never logged.
+    """
+    if not settings.closed_won_lookalikes_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    declared = request.headers.get("content-length")
+    if declared is not None:
+        try:
+            if int(declared) > MAX_DEAL_WEBHOOK_BYTES:
+                raise HTTPException(status_code=413, detail="Request body too large")
+        except ValueError:
+            pass  # unparseable header: rely on the actual-bytes check
+    raw = await request.body()
+    if len(raw) > MAX_DEAL_WEBHOOK_BYTES:
+        raise HTTPException(status_code=413, detail="Request body too large")
+
+    conn = await get_connection(db, site_id, "generic_webhook")
+    if conn is None or not conn.encrypted_secret:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    signature = (request.headers.get("X-Beam-Signature") or "").strip().lower()
+    if not signature:
+        raise HTTPException(status_code=400, detail="Missing X-Beam-Signature header")
+    try:
+        secret = decrypt_key(conn.encrypted_secret)
+    except ValueError:
+        logger.error("crm_deal_webhook_secret_undecryptable", site_id=site_id)
+        raise HTTPException(status_code=503, detail="Webhook secret unavailable")
+    expected = hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        logger.warning("crm_deal_webhook_invalid_signature", site_id=site_id)
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    try:
+        payload = ClosedWonWebhookPayload.model_validate_json(raw)
+    except ValidationError:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+
+    deals = [
+        ClosedWonDeal(
+            external_deal_id=payload.deal_id,
+            email=email,
+            closed_at=payload.closed_at,
+            company_domain=payload.company_domain or "",
+            country=payload.country or "",
+        )
+        for email in payload.emails
+    ]
+    outcome = await ingest_deals(db, site_id, deals, source="webhook", connection_id=conn.id)
+    return {
+        "accepted": outcome.upserted,
+        "skipped_erased": outcome.skipped_erased,
+        "skipped_invalid": outcome.skipped_invalid,
+    }

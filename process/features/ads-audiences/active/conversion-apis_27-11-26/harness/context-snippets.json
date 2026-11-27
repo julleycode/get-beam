@@ -1,0 +1,14 @@
+{
+  "snippets": [
+    {"file": "apps/api/services/ad_conversions.py", "lines": "FIRST_PARTY_PROVIDERS", "description": "D2/E8 allow-list frozenset({form_capture, pdl_person_enrich})", "content": "FIRST_PARTY_PROVIDERS = frozenset({\"form_capture\", \"pdl_person_enrich\"})"},
+    {"file": "apps/api/services/ad_conversions.py", "lines": "evaluate_gates", "description": "Fail-closed gate matrix: flag, erased, do_not_resolve, agent origin, abuse, bot, internal (E9), first-party, do_not_email, suppression, EEA+unknown (D3), company exclusion (optional import), no identifier", "content": "def evaluate_gates(ctx: GateContext) -> str | None"},
+    {"file": "apps/api/services/ad_conversions.py", "lines": "prepare_event / _send_group", "description": "Send-time recheck per row immediately before each batch; Meta stale (>6d) and missing-UA skips before provider call", "content": "event, skip = await prepare_event(db, row, cfg, now)"},
+    {"file": "apps/api/services/ad_conversions.py", "lines": "_company_excluded", "description": "Optional import of services.company_exclusion.excluded_visitor_ids; absent module = no-op, error = fail closed", "content": "from apps.api.services.company_exclusion import excluded_visitor_ids"},
+    {"file": "apps/api/services/ads/meta.py", "lines": "send_conversions / build_meta_capi_event", "description": "POST /{dataset_id}/events, one HTTP call per attempt (no tenacity stacking, E6), sanitized errors", "content": "resp = await client.post(f\"{_GRAPH_BASE}/{dataset_id}/events\", data=data)"},
+    {"file": "apps/api/services/ads/google.py", "lines": "send_conversions / build_data_manager_events_request", "description": "Data Manager events:ingest, <=2000 per chunk, encoding HEX, validateOnly from config", "content": "f\"{_DATA_MANAGER_BASE}/events:ingest\""},
+    {"file": "apps/api/jobs/scheduler.py", "lines": "_ad_conversions_sweep_job + registration", "description": "Gated at registration AND runtime (N6)", "content": "if settings.ad_conversions_enabled: scheduler.add_job(_ad_conversions_sweep_job, ...)"},
+    {"file": "apps/api/routers/visitors.py", "lines": "per-visitor erasure tuple", "description": "ad_conversion_deliveries added (N3)", "content": "\"ad_conversion_deliveries\","},
+    {"file": "apps/api/routers/sites.py", "lines": "site delete table list", "description": "ad_conversion_deliveries + ad_conversion_configs added (N3); both tables also FK sites.site_id ON DELETE CASCADE", "content": "\"ad_conversion_deliveries\", \"ad_conversion_configs\","},
+    {"file": "apps/api/migrations/versions/e5c2a9f71d36_add_ad_conversions.py", "lines": "1-90", "description": "Additive migration, down_revision d3f8a2c61b47; downgrade drops both tables + visitors.click_ids", "content": "revision = \"e5c2a9f71d36\"; down_revision = \"d3f8a2c61b47\""}
+  ]
+}
