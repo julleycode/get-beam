@@ -11,7 +11,7 @@ Phase 3 (Google). LinkedIn stays permanently unready.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 HTTP_TIMEOUT = 10.0
@@ -177,3 +177,45 @@ class AdsProvider(ABC):
         spec: LookalikeSpec,
     ) -> LookalikeResult:
         raise NotImplementedError(f"{self.provider or 'provider'} does not support lookalikes")
+
+    # ad-insights-seo-aeo: NON-abstract (additive), read-only reporting.
+    async def fetch_ad_performance(
+        self,
+        connection,
+        since: date,
+        until: date,
+    ) -> list["AdPerformanceRow"]:
+        raise NotImplementedError(f"{self.provider or 'provider'} does not support ad reporting")
+
+
+@dataclass
+class AdPerformanceRow:
+    """One ad's metrics for one day, parsed from a platform report.
+
+    Ad copy (headline/body) is third-party text: never log it.
+    """
+
+    platform_ad_id: str
+    date: date
+    impressions: int = 0
+    clicks: int = 0
+    conversions: float = 0.0
+    campaign_name: str = ""
+    headline: str = ""
+    body: str = ""
+    landing_url: str = ""
+
+
+def coerce_int(value) -> int:
+    """Platform numerics arrive as strings (Meta, Google int64); tolerate junk."""
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def coerce_float(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0

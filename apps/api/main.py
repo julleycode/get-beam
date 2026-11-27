@@ -556,6 +556,9 @@ app.include_router(ads.router, prefix="/api/v1/ads", tags=["ads"])
 from apps.api.routers import ad_conversions as _ad_conversions_router  # noqa: E402
 
 app.include_router(_ad_conversions_router.router, prefix="/api/v1/ad-conversions", tags=["ad-conversions"])
+from apps.api.routers import ad_insights as _ad_insights_router  # noqa: E402
+
+app.include_router(_ad_insights_router.router, prefix="/api/v1/ad-insights", tags=["ad-insights"])
 app.include_router(privacy.router, prefix="/api/v1/privacy", tags=["privacy"])
 
 # ── Agent gateway (agent-gateway Phase 1+2) ─────────────

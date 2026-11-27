@@ -382,6 +382,26 @@ async def _ad_conversions_sweep_job() -> None:
         logger.exception("ad_conversions_sweep_crashed")
 
 
+async def _ad_insights_job() -> None:
+    """Daily job: ad-insights ingest -> rank -> content suggestions.
+
+    Gated at registration AND here at runtime (coop-expiry pattern): a runtime
+    flip to OFF in a process that booted flag-ON must stop immediately.
+    run_ad_insights_once owns the advisory lock.
+    """
+    from apps.api.config import settings
+
+    if not settings.ad_insights_enabled:
+        return
+    try:
+        from apps.api.services.ad_insights_ingest import run_ad_insights_once
+
+        async with async_session() as db:
+            await run_ad_insights_once(db)
+    except Exception:
+        logger.exception("ad_insights_crashed")
+
+
 async def _poll_closed_won_job() -> None:
     """Periodic job: CRM closed-won read-back (closed-won-lookalikes).
 
@@ -1064,6 +1084,19 @@ def start_scheduler() -> None:
             replace_existing=True,
             jitter=120,
             misfire_grace_time=1800,
+        )
+    # ad-insights-seo-aeo: flag-OFF process registers NO job (runtime re-check in wrapper).
+    if settings.ad_insights_enabled:
+        from apscheduler.triggers.cron import CronTrigger
+
+        scheduler.add_job(
+            _ad_insights_job,
+            CronTrigger(hour=4, minute=30, timezone="UTC"),
+            id="ad_insights_daily",
+            replace_existing=True,
+            # Cron, so no jitter (E20 excludes cron jobs); the advisory lock in
+            # run_ad_insights_once keeps replicas from double-running.
+            misfire_grace_time=3600,
         )
     scheduler.start()
     logger.info(

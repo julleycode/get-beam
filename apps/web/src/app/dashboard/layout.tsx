@@ -24,6 +24,7 @@ import {
   Bot,
   Target,
   Building2,
+  Sparkles,
 } from "lucide-react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { api } from "@/lib/api";
@@ -63,6 +64,7 @@ const EASYTRACK_ITEMS: NavItem[] = [
   { href: "/dashboard/campaigns", label: "Campaigns", icon: Megaphone, tour: "campaigns" },
   { href: "/dashboard/outcomes", label: "Outcomes", icon: Target },
   { href: "/dashboard/accounts", label: "Accounts", icon: Building2 },
+  { href: "/dashboard/content-opportunities", label: "Content Ideas", icon: Sparkles },
   { href: "/dashboard/connectors", label: "Connectors", icon: Plug, tour: "connectors" },
 ];
 

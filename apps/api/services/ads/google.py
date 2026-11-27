@@ -38,6 +38,9 @@ from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponen
 
 from apps.api.config import settings
 from apps.api.services.ads.base import (
+    AdPerformanceRow,
+    coerce_float,
+    coerce_int,
     HTTP_TIMEOUT,
     AdOAuthTokens,
     AdsProvider,
@@ -364,6 +367,23 @@ class GoogleAdsProvider(AdsProvider):
         )
         return AudienceResult(platform_audience_id=audience_id, pushed=pushed)
 
+    # ── ad-insights-seo-aeo: read-only reporting ──
+
+    async def fetch_ad_performance(self, connection, since, until) -> list[AdPerformanceRow]:
+        """GAQL searchStream over ``ad_group_ad``. Read-only; no
+        ``login-customer-id`` header (direct-customer model, G-4)."""
+        if settings.mock_external_apis:
+            return parse_google_search_stream(mock_google_report())
+        customer_id = _customer_id(connection)
+        token = _access_token(connection)
+        query = build_google_ad_report_query(since, until)
+        batches = await self._ads_post(
+            f"{_GOOGLE_ADS_BASE}/customers/{customer_id}/googleAds:searchStream",
+            {"query": query},
+            token,
+        )
+        return parse_google_search_stream(batches)
+
     async def _create_user_list(self, customer_id: str, connection, token: str) -> str:
         """Create a Customer Match UserList and return its resource name."""
         site_id = getattr(connection, "site_id", "")
@@ -635,3 +655,94 @@ def _expiry_from(payload: dict) -> datetime | None:
     if not expires_in:
         return None
     return datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+
+
+# ── ad-insights-seo-aeo: report parsing (pure, docs-derived — KG-1) ──
+
+
+def build_google_ad_report_query(since, until) -> str:
+    return (
+        "SELECT ad_group_ad.ad.id, ad_group_ad.ad.responsive_search_ad.headlines, "
+        "ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.ad.final_urls, "
+        "campaign.name, segments.date, metrics.impressions, metrics.clicks, "
+        "metrics.ctr, metrics.conversions FROM ad_group_ad "
+        f"WHERE segments.date BETWEEN '{since.isoformat()}' AND '{until.isoformat()}'"
+    )
+
+
+def _asset_texts(items, limit: int) -> list[str]:
+    out: list[str] = []
+    for it in items or []:
+        if isinstance(it, dict) and isinstance(it.get("text"), str) and it["text"].strip():
+            out.append(it["text"].strip())
+        if len(out) >= limit:
+            break
+    return out
+
+
+def parse_google_search_stream(batches) -> list[AdPerformanceRow]:
+    """searchStream returns a JSON ARRAY of batches, each with ``results[]``.
+
+    RSA headlines/descriptions are objects — read ``.text``. int64 metrics
+    arrive as strings. Unknown fields are ignored.
+    """
+    from datetime import date as _date
+
+    if isinstance(batches, dict):
+        batches = [batches]
+    rows: list[AdPerformanceRow] = []
+    for batch in batches or []:
+        for r in (batch or {}).get("results") or [] if isinstance(batch, dict) else []:
+            if not isinstance(r, dict):
+                continue
+            ad = ((r.get("adGroupAd") or {}).get("ad")) or {}
+            ad_id = ad.get("id")
+            if not ad_id:
+                continue
+            try:
+                day = _date.fromisoformat(str((r.get("segments") or {}).get("date"))[:10])
+            except ValueError:
+                continue
+            rsa = ad.get("responsiveSearchAd") or {}
+            metrics = r.get("metrics") or {}
+            urls = ad.get("finalUrls") or []
+            rows.append(
+                AdPerformanceRow(
+                    platform_ad_id=str(ad_id),
+                    date=day,
+                    impressions=coerce_int(metrics.get("impressions")),
+                    clicks=coerce_int(metrics.get("clicks")),
+                    conversions=coerce_float(metrics.get("conversions")),
+                    campaign_name=str((r.get("campaign") or {}).get("name") or ""),
+                    headline=" | ".join(_asset_texts(rsa.get("headlines"), 3)),
+                    body=" ".join(_asset_texts(rsa.get("descriptions"), 2)),
+                    landing_url=str(urls[0]) if urls and isinstance(urls, list) else "",
+                )
+            )
+    return rows
+
+
+def mock_google_report() -> list[dict]:
+    """Deterministic mock searchStream; date relative to today (UTC)."""
+    day = (datetime.now(timezone.utc).date() - timedelta(days=3)).isoformat()
+    specs = [
+        ("g-201", ["Know your website visitors", "Identify B2B leads"], "/pricing", "5000", "200", 9.0),
+        ("g-202", ["AI drafts, you send"], "/features", "1200", "18", 1.0),
+    ]
+    results = []
+    for ad_id, heads, path, imp, clk, conv in specs:
+        results.append({
+            "adGroupAd": {"ad": {
+                "id": ad_id,
+                "responsiveSearchAd": {
+                    "headlines": [{"text": h} for h in heads],
+                    "descriptions": [{"text": "Beam finds who is on your site."}],
+                },
+                "finalUrls": [f"https://example.com{path}"],
+            }},
+            "campaign": {"name": "Mock search"},
+            "segments": {"date": day},
+            "metrics": {"impressions": imp, "clicks": clk, "conversions": conv},
+        })
+    return [{"results": results}]
+

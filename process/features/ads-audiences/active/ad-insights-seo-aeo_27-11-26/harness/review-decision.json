@@ -1,0 +1,14 @@
+{
+  "task": "ad-insights-seo-aeo",
+  "reviewer": "vc-execute-agent self-review (independent vc-tester EVL + human review still required)",
+  "decision": "approved-with-concerns",
+  "blockingFindings": [],
+  "nonBlockingFindings": [
+    "KG-1: Meta insights/creative and Google searchStream shapes are docs-derived, not live-confirmed; scopes/dev-token access level unverified",
+    "G8: Playwright spec skip-guarded until the Clerk auth harness lands",
+    "Advisory-lock residual: fresh_access_token commits may return the connection to the pool so unlock may no-op (repo-wide accepted shape)",
+    "Integration regression lane not run here (delegated to vc-tester)"
+  ],
+  "notes": "Flag ad_insights_enabled OFF; prod migration apply and flag flip are explicit operator actions.",
+  "timestamp": "2026-11-27T14:55:00Z"
+}

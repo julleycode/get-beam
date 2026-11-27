@@ -1,0 +1,12 @@
+{
+  "task": "ad-insights-seo-aeo",
+  "snippets": [
+    {"file": "apps/api/migrations/versions/b3e9c4d71a58_add_ad_insights.py", "lines": "14-17", "description": "chains off live single head a2d6e8f41c93; additive create_table x2, reversible downgrade"},
+    {"file": "apps/api/routers/sites.py", "lines": "~338-342", "description": "ad_performance_daily + content_opportunities deleted by site_id BEFORE ad_connections (FK)"},
+    {"file": "apps/api/services/content_opportunities.py", "lines": "build_prompt", "description": "all ad/page text reduced (urlsplit path, clean_text caps) and placed only inside one wrap_untrusted payload"},
+    {"file": "apps/api/services/content_opportunities.py", "lines": "generate_for_site", "description": "mock branch after prompt build; normalize() re-validates; ValueError/GeminiError -> 0 rows; logs ids/counts only"},
+    {"file": "apps/api/services/ad_insights_ingest.py", "lines": "run_ad_insights_once", "description": "flag check, pg_try_advisory_lock(hashtext) skip only on is False, unlock in finally; connected-only; status re-check after fresh_access_token"},
+    {"file": "apps/api/routers/ad_insights.py", "lines": "refresh", "description": "flag-off 404, verify_site_access 404, generated_today 429, Redis SET NX EX 86400 before work, Redis error -> 429 (fail closed)"},
+    {"file": "apps/api/jobs/scheduler.py", "lines": "ad_insights_daily", "description": "CronTrigger 04:30 UTC registered only inside if settings.ad_insights_enabled; wrapper re-checks flag"}
+  ]
+}

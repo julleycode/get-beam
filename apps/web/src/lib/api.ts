@@ -59,6 +59,9 @@ import type {
   AccountListResponse,
   AccountDetail,
   AccountSort,
+  TopAdsResponse,
+  ContentOpportunity,
+  ContentOpportunityStatus,
   CostSummary,
   ApiKeyInfo,
   CrmConnection,
@@ -818,6 +821,32 @@ class ApiClient {
     return this.request<AccountDetail>(
       `/api/v1/accounts/${siteId}/${encodeURIComponent(domain)}?days=${days}`
     );
+  }
+
+  // ── Ad insights → content opportunities (suggestions only) ──
+  async getTopAds(siteId: string) {
+    return this.request<TopAdsResponse>(`/api/v1/ad-insights/${siteId}/top-ads`);
+  }
+
+  async listContentOpportunities(siteId: string) {
+    return this.request<ContentOpportunity[]>(`/api/v1/ad-insights/${siteId}/opportunities`);
+  }
+
+  async setContentOpportunityStatus(
+    siteId: string,
+    opportunityId: string,
+    status: ContentOpportunityStatus
+  ) {
+    return this.request<ContentOpportunity>(
+      `/api/v1/ad-insights/${siteId}/opportunities/${opportunityId}`,
+      { method: "PATCH", body: JSON.stringify({ status }) }
+    );
+  }
+
+  async refreshAdInsights(siteId: string) {
+    return this.request<{ scheduled: boolean }>(`/api/v1/ad-insights/${siteId}/refresh`, {
+      method: "POST",
+    });
   }
 
   // ── Conversion outcomes ──

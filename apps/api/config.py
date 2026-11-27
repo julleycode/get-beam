@@ -1108,6 +1108,16 @@ class Settings(BaseSettings):
     meta_lookalike_min_seed: int = 100
     google_lookalike_min_seed: int = 1000
 
+    # ad-insights-seo-aeo: read-only Meta/Google ad reporting -> winning-message
+    # ranking -> Gemini "Content opportunities" suggestions (never published).
+    # OFF by default: routes 404, daily job NOT registered, wrapper no-ops.
+    ad_insights_enabled: bool = False
+    ad_insights_lookback_days: int = 30
+    ad_insights_min_impressions: int = 500
+    # Ordered, first-match (no summing — `lead` already includes pixel lead).
+    ad_insights_meta_conversion_action_types: list[str] = ["lead"]
+    ad_insights_min_qualifying_ads: int = 3
+
     # Per-site cap on CRM push operations per clock hour (abuse / runaway guard).
     max_crm_pushes_per_hour_per_site: int = 20
     # Offload large pushes to Celery. OFF by default — only safe when a Celery

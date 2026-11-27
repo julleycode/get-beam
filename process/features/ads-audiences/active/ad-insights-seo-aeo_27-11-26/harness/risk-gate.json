@@ -1,0 +1,10 @@
+{
+  "task": "ad-insights-seo-aeo: Meta/Google read-only ad reporting -> ranking -> Gemini content suggestions (flag OFF)",
+  "planPath": "process/features/ads-audiences/active/ad-insights-seo-aeo_27-11-26/ad-insights-seo-aeo_PLAN_27-11-26.md",
+  "riskLevel": "high",
+  "riskClasses": ["schema/data migration", "external API integration (read-only)", "AI prompt surface", "destructive site-delete cascade"],
+  "mustStopBeforeFinalize": true,
+  "humanApprovalRequired": true,
+  "why": "Adds 2 tables via migration b3e9c4d71a58, adds both to delete_site, sends third-party ad copy into a Gemini prompt. Flag ad_insights_enabled defaults OFF; prod apply + flag flip are operator steps.",
+  "approver": "vc-execute-agent (self-classified); human approval required before prod apply / flag flip"
+}

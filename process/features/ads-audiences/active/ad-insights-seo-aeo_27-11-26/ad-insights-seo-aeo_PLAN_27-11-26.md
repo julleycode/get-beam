@@ -9,7 +9,7 @@ feature: ads-audiences
 TL;DR: 2 new tables, 1 reporting method per provider, 1 pure ranker, 1 Gemini suggestion service, 1 daily job, 3 read endpoints + 1 status PATCH, 1 dashboard card. Flag `ad_insights_enabled` OFF. EXECUTE only after conversion-apis lands.
 
 Complexity: COMPLEX
-Status: PLANNED (validated CONDITIONAL, not executed)
+Status: CODE DONE (27-11-26, EXECUTE; EVL re-run by vc-tester pending; KG-1 + G8 open) — migration b3e9c4d71a58, flag ad_insights_enabled OFF
 
 ## Overview
 Gap #13 (inbound playbook): ad tests should shape SEO/AEO. Beam has GEO/AEO analytics (EvalLayer, ai_referral) but no ad-performance data. This plan adds it, lean v1.
@@ -239,3 +239,12 @@ Hard stops: no live Meta/Google/Gemini calls; no alembic or DB script against th
 Next phase: EXECUTE: process/features/ads-audiences/active/ad-insights-seo-aeo_27-11-26/ad-insights-seo-aeo_PLAN_27-11-26.md (Sections A->B->C; preferably after conversion-apis + closed-won-lookalikes land, see E2)
 Validate contract: inline in plan (Gate: PASS, 2026-11-27)
 Execute start: setup .venv py3.11 + infra/docker-compose (verify :5433 + :6379) | test_ad_insights_rank, test_ad_report_parsing, test_content_opportunities, test_scheduler_job_config, tsc | integration test_ad_insights.py flag-ON pinned DSN | e2e: e2e/content-opportunities.spec.ts (Clerk-conditional) | high-risk pack: yes (schema migration)
+
+## Deviations
+(EXECUTE 27-11-26 — all within blast radius; none touch auth/billing/public API beyond the planned additive endpoints)
+- Meta insights uses `time_range={since,until}` instead of `date_preset=last_30d`; Google GAQL uses `segments.date BETWEEN since AND until` instead of `DURING LAST_30_DAYS`. Why: honors `ad_insights_lookback_days`. Impact: none (same window at default 30).
+- Meta creative text fetched via Graph multi-id lookup `GET /?ids=a,b,...&fields=creative{...}` in chunks of 50 (plan: "batched"). Impact: none; KG-1 covers live shape.
+- Scheduler arithmetic re-derived at EXECUTE (E2): 30/26/4 -> 31/26/5 (plan text said 28 -> 29 before conversion-apis/closed-won landed).
+- Mock report fixtures use dates relative to today (UTC) so mock rows never age out of the lookback window (avoids a test time-bomb).
+- Nav label "Content Ideas" for `/dashboard/content-opportunities`; the opportunities list hides `dismissed` rows.
+- Orchestrator hint to reuse `services/company_exclusion.py` not applied: this plan handles ad-level aggregates only (no visitor/company rows), so there is nothing to exclude.

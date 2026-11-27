@@ -337,6 +337,9 @@ async def delete_site(
             "agent_fetch_events",
             "agent_handoff_links",
             "request_logs",
+            # ad-insights-seo-aeo (G-3): delete before ad_connections (FK).
+            "ad_performance_daily",
+            "content_opportunities",
             "ad_connections",
             # conversion-apis (N3): conversion outbox + config rows.
             "ad_conversion_deliveries",

@@ -1334,3 +1334,42 @@ export interface RequestLogStats {
   by_status: { status_code: number; count: number }[];
   by_site: { site_id: string; count: number }[];
 }
+
+// ── Ad insights → SEO/AEO content opportunities (ad-insights-seo-aeo) ──
+export interface TopAd {
+  rank: number;
+  platform_ad_id: string;
+  provider: string;
+  headline: string;
+  landing_url: string;
+  campaign_name: string;
+  impressions: number;
+  clicks: number;
+  conversions: number;
+  ctr: number;
+  conv_rate: number;
+  angles: string[];
+}
+
+export interface TopAdsResponse {
+  min_impressions: number;
+  min_qualifying_ads: number;
+  enough_data: boolean;
+  ads: TopAd[];
+}
+
+export type ContentOpportunityKind = "page_title" | "faq" | "llms_txt";
+export type ContentOpportunityStatus = "new" | "dismissed" | "copied";
+
+export interface ContentOpportunity {
+  id: string;
+  kind: ContentOpportunityKind;
+  title: string;
+  body: string;
+  rationale: string | null;
+  source_ad_ids: string[];
+  signals: Record<string, unknown>;
+  status: ContentOpportunityStatus;
+  generated_on: string;
+  created_at: string | null;
+}
