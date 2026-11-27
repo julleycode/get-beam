@@ -63,6 +63,7 @@ from apps.api.routers import hot_contacts
 from apps.api.routers import request_logs
 from apps.api.routers import agent_profile, agent_gateway, agent_mcp
 from apps.api.routers import paid
+from apps.api.routers import accounts
 from apps.api.services.x402_seller import redact_payment_headers, setup_gate, teardown_gate
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
@@ -571,6 +572,8 @@ app.include_router(social_accounts.router, prefix="/api/v1/social", tags=["socia
 app.include_router(drafts.router, prefix="/api/v1/drafts", tags=["drafts"])
 app.include_router(feed.router, prefix="/api/v1/feed", tags=["feed"])
 app.include_router(companies.router, prefix="/api/v1/companies", tags=["companies"])
+# Per-account rollup (account-measurement) — flag-gated, 404 when OFF.
+app.include_router(accounts.router, prefix="/api/v1/accounts", tags=["accounts"])
 app.include_router(feature_requests.router, prefix="/api/v1/feature-requests", tags=["feature-requests"])
 app.include_router(demo.router, prefix="/api/v1/demo", tags=["demo"])
 app.include_router(onboarding.router, prefix="/api/v1/onboarding", tags=["onboarding"])

@@ -206,6 +206,64 @@ export interface CtaClickCounts {
   counts: Partial<Record<CtaType, number>>;
 }
 
+// ── Account rollup (account-measurement) — counts only, no PII ──
+export type AccountSort =
+  | "last_seen"
+  | "visitors"
+  | "identified"
+  | "sessions"
+  | "pricing"
+  | "touched"
+  | "clicks"
+  | "conversions";
+
+export interface AccountRow {
+  domain: string;
+  company_name: string | null;
+  industry: string | null;
+  employee_count: string | null;
+  visitors: number;
+  identified_people: number;
+  sessions: number;
+  pageviews: number;
+  pricing_visitors: number;
+  touched: number;
+  clicks: number;
+  conversions: number;
+  demo_bookings: number;
+  /** Always null today — see known_gaps. */
+  replies: number | null;
+  /** Always null today — see known_gaps. */
+  pipeline_value_cents: number | null;
+  last_seen: string | null;
+}
+
+export interface AccountListResponse {
+  accounts: AccountRow[];
+  total: number;
+  page: number;
+  page_size: number;
+  days: number;
+  sort: AccountSort;
+  definitions: Record<string, string>;
+  known_gaps: string[];
+}
+
+export interface AccountCampaign {
+  campaign_id: string;
+  name: string;
+  touched: number;
+  clicks: number;
+  conversions: number;
+}
+
+export interface AccountDetail extends AccountRow {
+  days: number;
+  campaigns: AccountCampaign[];
+  definitions: Record<string, string>;
+  known_gaps: string[];
+}
+
 // ── Agent gateway (agent-facing site content) ─────────────
 
 /** One sellable thing, as authored by the customer in the dashboard. */

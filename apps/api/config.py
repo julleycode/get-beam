@@ -1509,6 +1509,11 @@ class Settings(BaseSettings):
     signal_creative_enabled: bool = False
     cta_types_enabled: bool = False
 
+    # ─── Account rollup (account-measurement, gap #14) ───
+    # Read-only per-company-domain rollup API + Accounts dashboard. Default OFF:
+    # both /api/v1/accounts routes return 404. MUST be declared (`extra: ignore`).
+    account_rollup_enabled: bool = False
+
     # ─── Engage outcome capture (Phase 1) ───
     # Master flag for the two new outcome-capture jobs (reply-back correlation
     # sweep + public-metrics poller). Default OFF: both make outward READ calls

@@ -53,6 +53,9 @@ import type {
   SiteTimeseries,
   SiteStats,
   CtaClickCounts,
+  AccountListResponse,
+  AccountDetail,
+  AccountSort,
   CostSummary,
   ApiKeyInfo,
   CrmConnection,
@@ -788,6 +791,26 @@ class ApiClient {
   /** Per-CTA-type click counts (click-level, not conversions). */
   async getCtaClickCounts(siteId: string) {
     return this.request<CtaClickCounts>(`/api/v1/campaigns/${siteId}/cta-clicks`);
+  }
+
+  // ── Account rollup (flag-gated; 404 when off) ──
+  async listAccounts(
+    siteId: string,
+    opts: { days?: number; sort?: AccountSort; page?: number; pageSize?: number } = {}
+  ) {
+    const q = new URLSearchParams({
+      days: String(opts.days ?? 30),
+      sort: opts.sort ?? "last_seen",
+      page: String(opts.page ?? 1),
+      page_size: String(opts.pageSize ?? 25),
+    });
+    return this.request<AccountListResponse>(`/api/v1/accounts/${siteId}?${q}`);
+  }
+
+  async getAccount(siteId: string, domain: string, days = 30) {
+    return this.request<AccountDetail>(
+      `/api/v1/accounts/${siteId}/${encodeURIComponent(domain)}?days=${days}`
+    );
   }
 
   // ── Conversion outcomes ──
