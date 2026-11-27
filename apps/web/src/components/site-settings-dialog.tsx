@@ -4,7 +4,12 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Settings } from "lucide-react";
 import { api, ConsentMode } from "@/lib/api";
-import type { GoalCreatePayload } from "@/lib/api-types";
+import type {
+  CtaConfig,
+  CtaLinkedType,
+  CtaType,
+  GoalCreatePayload,
+} from "@/lib/api-types";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Separator } from "@/components/ui/separator";
@@ -295,6 +300,13 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
           didn&apos;t.
         </p>
 
+        <CtaEditor
+          siteId={siteId}
+          initial={site.cta_config ?? null}
+          hasBookingUrl={Boolean(site.booking_url)}
+          onSaved={invalidateSite}
+        />
+
         {/* D3 — one-click "Demo booked" conversion goal preset. Pre-fills the
             normal goal form and posts to the existing goals endpoint; nothing is
             created automatically when the booking URL is saved. */}
@@ -508,6 +520,110 @@ function SiteSettingsBody({ siteId }: { siteId: string }) {
           />
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+const CTA_LINKED: { type: CtaLinkedType; label: string; placeholder: string }[] = [
+  { type: "free_trial", label: "Free trial", placeholder: "https://yoursite.com/signup" },
+  { type: "pricing_page", label: "Pricing page", placeholder: "https://yoursite.com/pricing" },
+  { type: "resource", label: "Resource", placeholder: "https://yoursite.com/guide" },
+];
+
+const CTA_DEFAULTS: { value: CtaType; label: string }[] = [
+  { value: "book_demo", label: "Book a demo (booking link)" },
+  { value: "free_trial", label: "Free trial" },
+  { value: "pricing_page", label: "Pricing page" },
+  { value: "resource", label: "Resource" },
+  { value: "reply", label: "Reply to the email" },
+];
+
+/**
+ * Structured CTA set (signal-creative-cta). Campaign drafts may use
+ * {{cta_link}}; it resolves to a tracked link for the touchpoint's CTA type.
+ * Book-a-demo reuses the booking link above. Other links must be https on
+ * this site's own domain.
+ */
+function CtaEditor({
+  siteId,
+  initial,
+  hasBookingUrl,
+  onSaved,
+}: {
+  siteId: string;
+  initial: CtaConfig | null;
+  hasBookingUrl: boolean;
+  onSaved: () => void;
+}) {
+  const [urls, setUrls] = useState<Record<CtaLinkedType, string>>(() => ({
+    free_trial: initial?.types?.free_trial?.url ?? "",
+    pricing_page: initial?.types?.pricing_page?.url ?? "",
+    resource: initial?.types?.resource?.url ?? "",
+  }));
+  const [defaultType, setDefaultType] = useState<CtaType | "">(initial?.default ?? "");
+
+  const mut = useMutation({
+    mutationFn: () => {
+      const types: CtaConfig["types"] = {};
+      for (const { type } of CTA_LINKED) {
+        const url = urls[type].trim();
+        if (url) types[type] = { url };
+      }
+      return api.updateSite(siteId, {
+        cta_config: { default: defaultType || null, types },
+      });
+    },
+    onSuccess: onSaved,
+  });
+
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <p className="text-xs font-medium text-foreground">Call-to-action links</p>
+      <p className="text-xs text-muted-foreground">
+        Drafts can use{" "}
+        <code className="rounded bg-muted px-1">{"{{cta_link}}"}</code> — it becomes a
+        tracked link for that email&apos;s call to action.{" "}
+        {hasBookingUrl
+          ? "Book a demo uses the booking link above."
+          : "Set a booking link above to enable Book a demo."}
+      </p>
+      {CTA_LINKED.map(({ type, label, placeholder }) => (
+        <label key={type} className="flex items-center gap-2 text-xs">
+          <span className="w-24 shrink-0">{label}</span>
+          <input
+            type="url"
+            className="flex-1 rounded-md border bg-muted px-3 py-1.5 text-sm"
+            placeholder={placeholder}
+            value={urls[type]}
+            onChange={(e) => setUrls((u) => ({ ...u, [type]: e.target.value }))}
+            disabled={mut.isPending}
+          />
+        </label>
+      ))}
+      <label className="flex items-center gap-2 text-xs">
+        <span className="w-24 shrink-0">Default</span>
+        <select
+          className="flex-1 rounded-md border bg-muted px-3 py-1.5 text-sm"
+          value={defaultType}
+          onChange={(e) => setDefaultType(e.target.value as CtaType | "")}
+          disabled={mut.isPending}
+        >
+          <option value="">None</option>
+          {CTA_DEFAULTS.map((d) => (
+            <option key={d.value} value={d.value}>
+              {d.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <Button variant="outline" size="sm" onClick={() => mut.mutate()} disabled={mut.isPending}>
+        {mut.isPending ? "Saving…" : "Save CTA links"}
+      </Button>
+      {mut.isError && (
+        <p className="text-xs text-warning">
+          Rejected. Links must be full https URLs on this site&apos;s own domain.
+        </p>
+      )}
     </div>
   );
 }

@@ -46,6 +46,8 @@ interface Touchpoint {
   ad_headline?: string;
   ad_body?: string;
   cta?: string;
+  /** Structured CTA type chosen server-side (signal-creative-cta). */
+  cta_type?: string;
   audience_description?: string;
 }
 
@@ -416,6 +418,11 @@ export default function CampaignDetailPage() {
               <div>
                 <span className="text-muted-foreground">CTA: </span>
                 <span>{tp.cta}</span>
+              </div>
+            )}
+            {tp.cta_type && (
+              <div>
+                <Badge variant="outline">CTA type: {tp.cta_type.replace(/_/g, " ")}</Badge>
               </div>
             )}
 

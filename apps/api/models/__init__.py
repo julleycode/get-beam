@@ -17,3 +17,6 @@ import safety.
 
 from apps.api.models.ip_org_prefix import IpOrgPrefix  # noqa: F401
 from apps.api.models.rpki_roa import RpkiRoa  # noqa: F401
+# Registered here too: written only by routers/click.py and read by
+# routers/campaigns.py, but neither imports it at module load.
+from apps.api.models.cta_click_event import CtaClickEvent  # noqa: F401

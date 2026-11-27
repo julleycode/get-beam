@@ -40,6 +40,67 @@ def validate_booking_url(v: str | None) -> str | None:
     return v
 
 
+_CTA_TYPES = ("book_demo", "free_trial", "pricing_page", "resource", "reply")
+# Types that carry their own stored URL. book_demo reuses Site.booking_url and
+# reply has no link, so neither may appear under ``types``.
+_CTA_LINKED_TYPES = ("free_trial", "pricing_page", "resource")
+
+
+class CtaTypeEntry(BaseModel):
+    url: str
+    label: str | None = Field(default=None, max_length=80)
+
+    @field_validator("url")
+    @classmethod
+    def _valid_url(cls, v: str) -> str:
+        # Same security contract as booking_url (substituted unescaped into
+        # outbound HTML), plus https only.
+        out = validate_booking_url(v)
+        if not out or not out.startswith("https://"):
+            raise ValueError("CTA url must be an absolute https URL")
+        return out
+
+    @field_validator("label")
+    @classmethod
+    def _valid_label(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if any(c in v for c in _BOOKING_URL_FORBIDDEN):
+            raise ValueError("CTA label must not contain any of < > \" ' )")
+        return v or None
+
+
+class CtaConfig(BaseModel):
+    """Owner-set CTA set: ``{default, types: {type: {url, label}}}``.
+
+    The site-host rule for free_trial/pricing_page/resource
+    (``safe_dest(url, site.url) == url``) needs the site URL, so it is enforced
+    in the router; it is re-checked again at redirect time in /c/.
+    """
+
+    default: str | None = None
+    types: dict[str, CtaTypeEntry] = Field(default_factory=dict)
+
+    @field_validator("default")
+    @classmethod
+    def _valid_default(cls, v: str | None) -> str | None:
+        if v is not None and v not in _CTA_TYPES:
+            raise ValueError(f"default must be one of {list(_CTA_TYPES)}")
+        return v
+
+    @field_validator("types")
+    @classmethod
+    def _valid_types(cls, v: dict) -> dict:
+        bad = [k for k in v if k not in _CTA_LINKED_TYPES]
+        if bad:
+            raise ValueError(
+                f"types keys must be among {list(_CTA_LINKED_TYPES)} "
+                "(book_demo uses booking_url; reply has no link)"
+            )
+        return v
+
+
 class SiteCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     url: str = Field(..., min_length=1, max_length=500)
@@ -74,6 +135,8 @@ class SiteOut(BaseModel):
     # Owner's demo/meeting booking link, rendered into drafts via
     # {{booking_link}}. Additive + optional; None = not configured.
     booking_url: str | None = None
+    # Structured CTA set (signal-creative-cta). Additive + optional.
+    cta_config: dict | None = None
     consent_mode: str
     created_at: datetime
 
@@ -123,6 +186,9 @@ class SiteUpdate(BaseModel):
     benchmark_contribution_enabled: bool | None = None
     # Demo/meeting booking link. Validated below — see validate_booking_url.
     booking_url: str | None = None
+    # Structured CTA set. ``{}`` (or a config with no default and no types)
+    # clears it. Site-host URL rule enforced in the router.
+    cta_config: CtaConfig | None = None
 
     @field_validator("booking_url")
     @classmethod

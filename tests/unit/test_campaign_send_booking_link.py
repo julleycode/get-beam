@@ -69,13 +69,15 @@ async def _run_send(monkeypatch, *, booking_url: str | None) -> dict:
     member_result = MagicMock()
     member_result.all.return_value = [("vid-1",)]
     site_result = MagicMock()
-    # (Site.url, Site.name, User.full_name, User.email, Site.booking_url)
+    # (Site.url, Site.name, User.full_name, User.email, Site.booking_url,
+    #  Site.cta_config)
     site_result.first.return_value = (
         _SITE_URL,
         "Site",
         "Owner",
         "owner@site.example",
         booking_url,
+        None,  # cta_config
     )
     iv_result = MagicMock()
     iv_result.scalar_one_or_none.return_value = _emailable_iv()

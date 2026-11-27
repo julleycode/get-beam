@@ -418,6 +418,19 @@ async def update_site(
     # security contract, since nothing downstream escapes this value.
     if body.booking_url is not None:
         site.booking_url = body.booking_url
+    # Structured CTA set (signal-creative-cta). Site-host types must stay on
+    # the site's own host — the same check /c/ re-runs at redirect time.
+    if body.cta_config is not None:
+        from apps.api.routers.click import safe_dest
+
+        for cta_type, entry in body.cta_config.types.items():
+            if safe_dest(entry.url, site.url) != entry.url:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"cta_config.types.{cta_type}.url must be on the site's own host",
+                )
+        cfg = body.cta_config.model_dump(exclude_none=True)
+        site.cta_config = cfg if (cfg.get("default") or cfg.get("types")) else None
 
     # Identity co-op opt-in (AC-10). Turning it ON requires accepting the exact
     # currently-pinned terms, and the acceptance row is written in the SAME

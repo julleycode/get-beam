@@ -1497,6 +1497,18 @@ class Settings(BaseSettings):
     # the identity co-op's `contribution_enabled` (purpose limitation).
     campaign_benchmark_enabled: bool = False
 
+    # ─── Signal-aware creative + structured CTA types (signal-creative-cta) ───
+    # signal_creative_enabled: the campaign planner picks ONE deterministic
+    # creative angle per segment (job change / pricing intent / AI referral /
+    # ICP fit / repeat visit / general) and tells the model to write for it.
+    # cta_types_enabled: the planner may pick a per-touchpoint cta_type from the
+    # site's configured CTA set; the send path renders {{cta_link}} as a /c/
+    # click link carrying ct=, and /c/ records one cta_click_events row per hit.
+    # Both default OFF — flag-off planner prompt, send body and /c/ behavior are
+    # byte-identical to before. MUST be declared here (`extra: ignore`).
+    signal_creative_enabled: bool = False
+    cta_types_enabled: bool = False
+
     # ─── Engage outcome capture (Phase 1) ───
     # Master flag for the two new outcome-capture jobs (reply-back correlation
     # sweep + public-metrics poller). Default OFF: both make outward READ calls

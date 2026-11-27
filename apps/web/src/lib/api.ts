@@ -52,6 +52,7 @@ import type {
   SiteKpis,
   SiteTimeseries,
   SiteStats,
+  CtaClickCounts,
   CostSummary,
   ApiKeyInfo,
   CrmConnection,
@@ -782,6 +783,11 @@ class ApiClient {
     return this.request<CampaignStats>(
       `/api/v1/campaigns/${siteId}/${campaignId}/stats`
     );
+  }
+
+  /** Per-CTA-type click counts (click-level, not conversions). */
+  async getCtaClickCounts(siteId: string) {
+    return this.request<CtaClickCounts>(`/api/v1/campaigns/${siteId}/cta-clicks`);
   }
 
   // ── Conversion outcomes ──

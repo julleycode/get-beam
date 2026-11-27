@@ -168,6 +168,8 @@ export interface Site {
    * configured, in which case the token resolves to an empty string.
    */
   booking_url?: string | null;
+  /** Structured CTA set (book_demo reuses booking_url). null = not configured. */
+  cta_config?: CtaConfig | null;
   /** Cookie-consent mode emitted into the pixel snippet: off | eu | all | cmp. */
   consent_mode: ConsentMode;
   /** Optional — backend SiteOut may not return it; callers fall back to "unknown". */
@@ -187,6 +189,21 @@ export interface SiteUpdate {
   internal_damping_enabled: boolean;
   consent_mode: ConsentMode;
   booking_url: string;
+  cta_config: CtaConfig;
+}
+
+// ── Structured CTA types (signal-creative-cta) ────────────
+export type CtaType = "book_demo" | "free_trial" | "pricing_page" | "resource" | "reply";
+/** Types with their own stored URL (https, on the site's own host). */
+export type CtaLinkedType = "free_trial" | "pricing_page" | "resource";
+
+export interface CtaConfig {
+  default?: CtaType | null;
+  types?: Partial<Record<CtaLinkedType, { url: string; label?: string | null }>>;
+}
+
+export interface CtaClickCounts {
+  counts: Partial<Record<CtaType, number>>;
 }
 
 // ── Agent gateway (agent-facing site content) ─────────────
