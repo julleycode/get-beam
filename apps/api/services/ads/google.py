@@ -745,4 +745,3 @@ def mock_google_report() -> list[dict]:
             "metrics": {"impressions": imp, "clicks": clk, "conversions": conv},
         })
     return [{"results": results}]
-

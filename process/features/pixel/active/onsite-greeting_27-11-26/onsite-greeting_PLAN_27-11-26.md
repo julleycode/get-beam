@@ -246,4 +246,3 @@ Next Step: ENTER EXECUTE MODE for process/features/pixel/active/onsite-greeting_
 - D3 (G5 container): per orchestrator instruction, G5 used a throwaway database inside the existing local Postgres (created/dropped via asyncpg) instead of a disposable container.
 - D4 (per-site limit value): the plan named a per-site limit but no number; 600/min under scope `site_greeting`, applied only when the limiter is enabled.
 - D5 (mock net): mock-mode "Acme" applies only to TEST-NET-3 `203.0.113.0/24`, after all gates (E8).
-

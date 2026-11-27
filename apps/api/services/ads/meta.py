@@ -712,4 +712,3 @@ def mock_meta_report() -> tuple[list[dict], dict]:
         creatives[ad_id] = {"creative": {"title": title, "body": f"{title} with Beam.",
                                          "link_url": f"https://example.com{path}"}}
     return [{"data": data}], creatives
-
