@@ -1,0 +1,6 @@
+iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_status	loop_status	notes
+0	2026-11-27T00:00	9	0	9	0	n/a	baseline	full PVL pass 1 (outer-pvl): CONDITIONAL, 7 supplement gaps
+1	2026-11-27T00:00	7	0	9	7	n/a	CONTINUE	supplement cycle 1 applied 7/7; 2 stale decision-summary lines; revalidate
+2	2026-11-27T00:00	9	0	9	9	flat	CONTINUE	cycle 2 (after body restore): 9 applied; revalidate from V1
+3	2026-11-27T00:00	2	0	2	2	improving	CONTINUE	cycle 3 applied 2/2; revalidate from V1
+4	2026-11-27T00:00	0	0	0	0	converged	HALTED_SUCCESS	revalidate after cycle 3: Gate PASS; E10-E11

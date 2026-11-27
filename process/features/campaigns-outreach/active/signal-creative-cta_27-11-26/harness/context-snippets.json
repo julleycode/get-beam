@@ -1,0 +1,10 @@
+{
+  "snippets": [
+    {"file": "apps/api/routers/click.py", "lines": "click_redirect: settings.cta_types_enabled block", "description": "ct honored only with flag ON and a valid CtaType; otherwise the single Site.url select + safe_dest(u) path is unchanged", "content": "if settings.cta_types_enabled: cta = parse_cta_type(ct); if cta is not None: dest = await _cta_destination(...)"},
+    {"file": "apps/api/routers/click.py", "lines": "_cta_destination", "description": "Inserts one cta_click_events row (no PII), redirects to stored URL only; site-host types re-checked with safe_dest(stored, site_url)==stored; tp tenant-checked via campaign_id IN site's campaigns; _bid only on site host", "content": "stored = cta_url(cfg, cta, booking_url); if not stored: return legacy_dest; if is_site_host and safe_dest(stored, site_url) != stored: return legacy_dest"},
+    {"file": "apps/api/schemas/sites.py", "lines": "CtaTypeEntry / CtaConfig", "description": "Every CTA URL passes validate_booking_url + https; types keys limited to free_trial/pricing_page/resource; default must be a known CtaType", "content": "out = validate_booking_url(v); if not out or not out.startswith('https://'): raise ValueError"},
+    {"file": "apps/api/routers/sites.py", "lines": "update handler, cta_config block", "description": "Site-host rule enforced at write time (422 on foreign host)", "content": "if safe_dest(entry.url, site.url) != entry.url: raise HTTPException(422)"},
+    {"file": "apps/api/migrations/versions/e9c4a7d2f318_add_cta_config_and_cta_click_events.py", "lines": "upgrade/downgrade", "description": "Additive: nullable JSONB column + new table, FK sites.site_id ON DELETE CASCADE; clean downgrade", "content": "op.add_column('sites', cta_config JSONB nullable); op.create_table('cta_click_events', ...)"},
+    {"file": "apps/api/routers/campaigns.py", "lines": "get_cta_click_counts (declared above /{site_id}/{campaign_id})", "description": "verify_site_access tenant scope; counts only", "content": "await verify_site_access(db, site_id, user)"}
+  ]
+}

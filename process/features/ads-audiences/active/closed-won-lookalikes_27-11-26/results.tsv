@@ -1,0 +1,6 @@
+iteration	timestamp	gaps_found	fail_count	concern_count	applied	saturation_status	loop_status	notes
+0	2026-11-27T00:00	9	0	8	0	n/a	baseline	full PVL pass 1 (outer-pvl): CONDITIONAL 0 FAIL 8 CONCERN, 9 supplement gaps
+1	2026-11-27T00:00	9	0	8	9	n/a	CONTINUE	supplement cycle 1 applied 9/9; revalidate from V1
+2	2026-11-27T00:00	6	0	6	6	improving	CONTINUE	cycle 2 applied 6/6; revalidate
+3	2026-11-27T00:00	1	0	1	1	improving	CONTINUE	cycle 3 applied (N7 + get_lookalike_spec addition); revalidate
+4	2026-11-27T00:00	0	0	0	0	converged	HALTED_SUCCESS	revalidate after cycle 3: Gate PASS; E7 spec-in-segment_id replaces get_lookalike_spec

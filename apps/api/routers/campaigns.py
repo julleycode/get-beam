@@ -110,6 +110,12 @@ async def create_campaign_from_segment(
     )
     visitor_ids = [row[0] for row in members_result.all()]
 
+    # Company exclusion list: planner input never sees excluded visitors.
+    if settings.company_exclusion_enabled and visitor_ids:
+        from apps.api.services.company_exclusion import filter_visitor_ids
+
+        visitor_ids = await filter_visitor_ids(db, site_id, visitor_ids, "campaign_planner")
+
     profiles: list[dict] = []
     if visitor_ids:
         visitors_result = await db.execute(
@@ -712,6 +718,12 @@ async def _resolve_linkedin_targets(
         )
     )
     visitor_ids = [r[0] for r in member_rows.all()]
+
+    # Company exclusion list: drop excluded visitors BEFORE the loop.
+    if settings.company_exclusion_enabled and visitor_ids:
+        from apps.api.services.company_exclusion import filter_visitor_ids
+
+        visitor_ids = await filter_visitor_ids(db, site_id, visitor_ids, "linkedin_outreach")
 
     urls: list[str] = []
     skipped_no_linkedin = 0

@@ -55,6 +55,7 @@ from apps.api.models.paid_request import PaidRequest  # noqa: F401 — register 
 from apps.api.routers import events, visitors, segments, campaigns, exports, sites, auth, api_keys
 from apps.api.routers import social_auth, drafts, feed, social_accounts, companies, feature_requests, demo, onboarding
 from apps.api.routers import billing, engagement, waitlist, unsubscribe, webhooks, blog, privacy
+from apps.api.routers import exclusions as exclusions_router
 from apps.api.routers import known_contacts, costs, ai, dashboard, crm, changelog, click, open_pixel
 from apps.api.routers import email_sender_oauth, outcomes, referrals, agents, ads
 from apps.api.routers import ingest_health
@@ -520,6 +521,7 @@ app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(events.router, prefix="/api/v1/events", tags=["events"])
 app.include_router(sites.router, prefix="/api/v1/sites", tags=["sites"])
 app.include_router(known_contacts.router, prefix="/api/v1/sites", tags=["known-contacts"])
+app.include_router(exclusions_router.router, prefix="/api/v1/sites", tags=["exclusions"])
 app.include_router(ingest_health.router, prefix="/api/v1/sites", tags=["ingest-health"])
 # Imported contacts (Phase 4) — distinct surface from known-contacts above:
 # creates contactable identities, not a hash-only exclusion list.

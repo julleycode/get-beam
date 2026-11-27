@@ -1,5 +1,8 @@
 import type { CanaryResponse } from "@/lib/canary-format";
 import type {
+  ExclusionImportResult,
+  ExclusionReason,
+  SiteExclusion,
   KnownUploadResult,
   ImportContactsResult,
   ImportedContactList,
@@ -1725,6 +1728,56 @@ class ApiClient {
       `/api/v1/sites/${siteId}/known-contacts`,
       { method: "DELETE" }
     );
+  }
+
+  // ── Company exclusion list (customers / competitors) ───────────────────
+  async listExclusions(siteId: string) {
+    return this.request<SiteExclusion[]>(`/api/v1/sites/${siteId}/exclusions`);
+  }
+
+  async createExclusion(
+    siteId: string,
+    body: { domain: string; reason: ExclusionReason; company_name?: string; note?: string },
+  ) {
+    return this.request<SiteExclusion>(`/api/v1/sites/${siteId}/exclusions`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async deleteExclusion(siteId: string, id: string) {
+    return this.request<void>(`/api/v1/sites/${siteId}/exclusions/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  async importExclusions(siteId: string, file: File): Promise<ExclusionImportResult> {
+    // Multipart — bypass the JSON request helper (browser sets the boundary).
+    const form = new FormData();
+    form.append("file", file);
+    const send = (token: string | null) =>
+      fetch(`${API_BASE}/api/v1/sites/${siteId}/exclusions/import`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: form,
+      });
+    let res = await send(this.getToken());
+    if (res.status === 401 && this.clerkTokenGetter) {
+      try {
+        const fresh = await this.clerkTokenGetter();
+        if (fresh) {
+          this.setClerkToken(fresh);
+          res = await send(fresh);
+        }
+      } catch {
+        // fall through to the error handling below
+      }
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Import failed: ${res.status}`);
+    }
+    return res.json() as Promise<ExclusionImportResult>;
   }
 
   // ── Imported contacts (Phase 4) ────────────────────────────────────────

@@ -867,7 +867,14 @@ export default function VisitorsPage() {
                           AI research
                         </span>
                       )}
-                      {v.is_known && (
+                      {v.excluded_reason ? (
+                        <span
+                          className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+                          title="This company is on your exclusion list. No outreach, exports, or ad pushes."
+                        >
+                          Excluded ({v.excluded_reason})
+                        </span>
+                      ) : v.is_known && (
                         <span
                           className="shrink-0 rounded bg-success-muted px-1.5 py-0.5 text-[10px] font-medium text-success"
                           title="In your uploaded known-contacts list"

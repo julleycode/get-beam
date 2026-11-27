@@ -11,6 +11,7 @@ from sqlalchemy.orm import joinedload
 
 import structlog
 
+from apps.api.config import settings
 from apps.api.dependencies import get_current_user
 from apps.api.models.database import get_db
 from apps.api.models.draft import Draft, DraftStatus, DraftType
@@ -36,6 +37,7 @@ from apps.api.services.ai_reply import (
     _count_voice_examples,
 )
 from apps.api.services.sender import SocialTokenExpiredError, send_draft
+from apps.api.services.company_exclusion import CompanyExcludedError, draft_is_company_excluded
 
 router = APIRouter(tags=["drafts"])
 
@@ -277,6 +279,10 @@ async def approve_draft(
         raise HTTPException(status_code=404, detail="Draft not found")
     if draft.status != DraftStatus.pending:
         raise HTTPException(status_code=400, detail="Can only approve pending drafts")
+    # Company exclusion list: refuse before approve/commit, sibling auto-reject
+    # and voice example, so the draft stays pending.
+    if settings.company_exclusion_enabled and await draft_is_company_excluded(db, draft):
+        raise HTTPException(status_code=409, detail="company_excluded")
 
     draft.status = DraftStatus.approved
     await db.commit()
@@ -294,6 +300,8 @@ async def approve_draft(
         success = await send_draft(db, draft)
     except SocialTokenExpiredError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except CompanyExcludedError as exc:
+        raise HTTPException(status_code=409, detail="company_excluded") from exc
     await db.refresh(draft)
 
     if success:
@@ -365,6 +373,8 @@ async def retry_draft(
         raise HTTPException(status_code=404, detail="Draft not found")
     if draft.status != DraftStatus.failed:
         raise HTTPException(status_code=400, detail="Can only retry failed drafts")
+    if settings.company_exclusion_enabled and await draft_is_company_excluded(db, draft):
+        raise HTTPException(status_code=409, detail="company_excluded")
 
     # Re-approve so send_draft's status guard passes, then re-send.
     draft.status = DraftStatus.approved
@@ -375,6 +385,8 @@ async def retry_draft(
         success = await send_draft(db, draft)
     except SocialTokenExpiredError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except CompanyExcludedError as exc:
+        raise HTTPException(status_code=409, detail="company_excluded") from exc
     await db.refresh(draft)
 
     if success:
