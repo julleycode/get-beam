@@ -436,6 +436,13 @@ async def update_site(
                 )
         cfg = body.cta_config.model_dump(exclude_none=True)
         site.cta_config = cfg if (cfg.get("default") or cfg.get("types")) else None
+    # On-site greeting (onsite-greeting). Template text/cta_url validated in
+    # GreetingTemplates ({company} only, <=200 chars, https-only cta_url).
+    if body.greeting_enabled is not None:
+        site.greeting_enabled = body.greeting_enabled
+    if body.greeting_templates is not None:
+        tpl = body.greeting_templates.model_dump(exclude_none=True)
+        site.greeting_templates = tpl if tpl.get("default") else None
 
     # Identity co-op opt-in (AC-10). Turning it ON requires accepting the exact
     # currently-pinned terms, and the acceptance row is written in the SAME

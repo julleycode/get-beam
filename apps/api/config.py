@@ -1532,6 +1532,13 @@ class Settings(BaseSettings):
     signal_creative_enabled: bool = False
     cta_types_enabled: bool = False
 
+    # ─── On-site company greeting (onsite-greeting, gap #5) ───
+    # Global kill switch for GET /api/v1/greeting. Default OFF: the endpoint
+    # always answers {"show": false}. A site ALSO needs sites.greeting_enabled.
+    # Production enable preconditions (trusted_proxy_hops, prod ip_org ingest +
+    # ip_org_lookup_enabled) are in the onsite-greeting plan. MUST be declared.
+    onsite_greeting_enabled: bool = False
+
     # ─── Account rollup (account-measurement, gap #14) ───
     # Read-only per-company-domain rollup API + Accounts dashboard. Default OFF:
     # both /api/v1/accounts routes return 404. MUST be declared (`extra: ignore`).

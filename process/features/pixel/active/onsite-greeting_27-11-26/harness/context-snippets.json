@@ -1,0 +1,30 @@
+{
+  "task": "onsite-greeting (gap #5) \u2014 company-level on-site greeting, flag OFF",
+  "snippets": [
+    {
+      "file": "apps/api/services/greeting.py",
+      "description": "decide_greeting: flag \u2192 site \u2192 Origin \u2192 visitor (do_not_resolve/bot/abuse) \u2192 privacy relay \u2192 cached ip_privacy \u2192 ip_org org-only name; only greeting_company:{ip} cached"
+    },
+    {
+      "file": "apps/api/routers/greeting.py",
+      "description": "GET /api/v1/greeting: 30/min per IP + 600/min per-site (scope site_greeting), Cache-Control no-store, logs site_id/show/reason only, fail-closed on exception"
+    },
+    {
+      "file": "apps/api/main.py",
+      "description": "_PIXEL_PATHS += /api/v1/greeting, /pixel/greeting.js (wildcard ACAO, no credentials); /pixel/greeting.js static route"
+    },
+    {
+      "file": "apps/api/schemas/sites.py",
+      "description": "GreetingTemplate: text <=200, {company} only, no <>; cta_url via validate_https_url (validate_booking_url + https-only); extra=forbid (no by_industry)"
+    },
+    {
+      "file": "apps/api/migrations/versions/a2d6e8f41c93_add_site_greeting.py",
+      "description": "adds sites.greeting_enabled (bool, server_default false) + greeting_templates (jsonb null); down_revision f7d1b3c84e29"
+    },
+    {
+      "file": "apps/pixel/src/tracker.js",
+      "description": "gL(): loads greeting.js only if !OPTOUT && consentDecision=='g' && data-greeting=='on'; called at init (when not consent-blocked) and from decideConsent('g')"
+    }
+  ],
+  "contract": "Validate Contract (outer-pvl, Gate: PASS) inline in plan; E1\u2013E11"
+}

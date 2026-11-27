@@ -93,3 +93,42 @@ export function fixture(name: string, query = ""): string {
 export async function settle(page: Page, ms = 300): Promise<void> {
   await page.waitForTimeout(ms);
 }
+
+export interface GreetingStub {
+  /** number of times greeting.js was requested */
+  scriptLoads: () => number;
+  /** every /api/v1/greeting request URL */
+  apiCalls: string[];
+}
+
+/**
+ * On-site greeting harness (onsite-greeting). Serves the UNMINIFIED
+ * src/greeting.js for any `**\/pixel/greeting.js` request (the tracker loads it
+ * from data-api, which the static server does not host) and stubs
+ * `**\/api/v1/greeting` with the given status/body. Call BEFORE navigating.
+ */
+export async function interceptGreeting(
+  page: Page,
+  body: Record<string, unknown> = { show: true, template_id: "default", text: "Welcome, Acme team!", cta_url: null },
+  status = 200,
+): Promise<GreetingStub> {
+  const fs = await import("fs");
+  const path = await import("path");
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "greeting.js"), "utf8");
+  let loads = 0;
+  const apiCalls: string[] = [];
+  await page.route("**/pixel/greeting.js*", async (route: Route) => {
+    loads++;
+    await route.fulfill({ status: 200, contentType: "application/javascript", body: src });
+  });
+  await page.route("**/api/v1/greeting*", async (route: Route, request: Request) => {
+    apiCalls.push(request.url());
+    await route.fulfill({
+      status,
+      contentType: "application/json",
+      headers: { "access-control-allow-origin": "*", "cache-control": "no-store" },
+      body: JSON.stringify(body),
+    });
+  });
+  return { scriptLoads: () => loads, apiCalls };
+}

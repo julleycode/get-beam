@@ -609,15 +609,14 @@
   else scanIframes();
   try{window.addEventListener("load",scanIframes);}catch(e){}
 
-  // Referenced by flush() (hoisted). Blocks sending while a gated visitor has
-  // not decided yet — the pageview still queues in _rta_q, just isn't flushed.
+  // Used by flush() (hoisted): gated + undecided → events queue, never flush.
   function consentBlocked() { return GATED && consentDecision == null; }
 
   function decideConsent(v) {
     setCookie(CONSENT_KEY, v, COOKIE_DAYS);
     lsSet(CONSENT_KEY, v);
     consentDecision = v;
-    if (v === "g") { flush(); }           // accept → send everything queued
+    if (v === "g") { flush(); gL(); }     // accept → send everything queued
     else { OPTOUT = true; lsDel(QUEUE_KEY); queue = []; } // decline → drop, send nothing
   }
 
@@ -657,7 +656,8 @@
     host.appendChild(b);
   }
 
-  if (consentBlocked()) showConsentBanner();
+  if (consentBlocked()) showConsentBanner(); else gL();
+  function gL(){if(!OPTOUT&&consentDecision=="g"&&script.dataset.greeting=="on"){var s=document.createElement("script");s.src=API_URL+"/pixel/greeting.js?"+new URLSearchParams({s:SITE_ID,v:visitorId});document.head.append(s)}}
 
   trackPageview();
 

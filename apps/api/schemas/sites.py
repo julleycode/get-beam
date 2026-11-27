@@ -101,6 +101,51 @@ class CtaConfig(BaseModel):
         return v
 
 
+def validate_https_url(v: str | None) -> str | None:
+    """``validate_booking_url`` plus https-only (it allows http today)."""
+    out = validate_booking_url(v)
+    if out is not None and not out.startswith("https://"):
+        raise ValueError("url must be an absolute https URL")
+    return out
+
+
+GREETING_TEXT_MAX = 200
+_GREETING_PLACEHOLDER = "{company}"
+
+
+class GreetingTemplate(BaseModel):
+    """One owner greeting template. ``{company}`` is the ONLY placeholder."""
+
+    text: str = Field(..., min_length=1, max_length=GREETING_TEXT_MAX)
+    cta_url: str | None = None
+
+    @field_validator("text")
+    @classmethod
+    def _valid_text(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("greeting text must not be empty")
+        if any(c in v for c in "<>"):
+            raise ValueError("greeting text must not contain < or >")
+        rest = v.replace(_GREETING_PLACEHOLDER, "")
+        if "{" in rest or "}" in rest:
+            raise ValueError("greeting text may only use the {company} placeholder")
+        return v
+
+    @field_validator("cta_url")
+    @classmethod
+    def _valid_cta(cls, v: str | None) -> str | None:
+        return validate_https_url(v)
+
+
+class GreetingTemplates(BaseModel):
+    """v1: default template only (no per-industry templates — U4)."""
+
+    model_config = {"extra": "forbid"}
+
+    default: GreetingTemplate | None = None
+
+
 class SiteCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     url: str = Field(..., min_length=1, max_length=500)
@@ -137,6 +182,9 @@ class SiteOut(BaseModel):
     booking_url: str | None = None
     # Structured CTA set (signal-creative-cta). Additive + optional.
     cta_config: dict | None = None
+    # On-site greeting (onsite-greeting). Additive; default OFF.
+    greeting_enabled: bool = False
+    greeting_templates: dict | None = None
     consent_mode: str
     created_at: datetime
 
@@ -144,6 +192,7 @@ class SiteOut(BaseModel):
         "internal_damping_enabled",
         "contribution_enabled",
         "benchmark_contribution_enabled",
+        "greeting_enabled",
         mode="before",
     )
     @classmethod
@@ -189,6 +238,9 @@ class SiteUpdate(BaseModel):
     # Structured CTA set. ``{}`` (or a config with no default and no types)
     # clears it. Site-host URL rule enforced in the router.
     cta_config: CtaConfig | None = None
+    # On-site greeting opt-in + owner copy. ``{}`` clears the templates.
+    greeting_enabled: bool | None = None
+    greeting_templates: GreetingTemplates | None = None
 
     @field_validator("booking_url")
     @classmethod

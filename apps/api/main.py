@@ -65,6 +65,7 @@ from apps.api.routers import request_logs
 from apps.api.routers import agent_profile, agent_gateway, agent_mcp
 from apps.api.routers import paid
 from apps.api.routers import accounts
+from apps.api.routers import greeting as greeting_router
 from apps.api.services.x402_seller import redact_payment_headers, setup_gate, teardown_gate
 from apps.api.jobs.scheduler import start_scheduler, stop_scheduler
 from apps.api.services.pii_encryption_hooks import register_pii_encryption_hooks
@@ -196,7 +197,8 @@ class PixelCORSMiddleware:
     """
 
     _INGEST_PATH = "/api/v1/events/ingest"
-    _PIXEL_PATHS = {_INGEST_PATH, "/pixel/tracker.js"}
+    # greeting: wildcard origin, NO credentials (onsite-greeting U2).
+    _PIXEL_PATHS = {_INGEST_PATH, "/pixel/tracker.js", "/pixel/greeting.js", "/api/v1/greeting"}
 
     def __init__(self, app):
         self.app = app
@@ -520,6 +522,7 @@ app.add_middleware(RequestResponseLogMiddleware)
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(events.router, prefix="/api/v1/events", tags=["events"])
+app.include_router(greeting_router.router, prefix="/api/v1/greeting", tags=["greeting"])
 app.include_router(sites.router, prefix="/api/v1/sites", tags=["sites"])
 app.include_router(known_contacts.router, prefix="/api/v1/sites", tags=["known-contacts"])
 app.include_router(exclusions_router.router, prefix="/api/v1/sites", tags=["exclusions"])
@@ -635,6 +638,28 @@ async def serve_pixel() -> Response:
         _pixel_js_cache = pixel_path.read_text() if pixel_path.exists() else "// pixel not found"
     return Response(
         content=_pixel_js_cache,
+        media_type="application/javascript",
+        headers={"Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*"},
+    )
+
+
+_greeting_js_cache: str | None = None
+
+
+@app.get("/pixel/greeting.js")
+async def serve_greeting_js() -> Response:
+    """Lazy on-site greeting snippet (onsite-greeting). Loaded by tracker.js only
+    when data-greeting="on" AND consent granted AND no GPC/DNT."""
+    global _greeting_js_cache
+    if _greeting_js_cache is None:
+        import pathlib
+        pixel_dir = pathlib.Path(__file__).parent.parent / "pixel" / "src"
+        minified = pixel_dir / "greeting.min.js"
+        source = pixel_dir / "greeting.js"
+        path = minified if minified.exists() else source
+        _greeting_js_cache = path.read_text() if path.exists() else "// greeting not found"
+    return Response(
+        content=_greeting_js_cache,
         media_type="application/javascript",
         headers={"Cache-Control": "public, max-age=3600", "Access-Control-Allow-Origin": "*"},
     )
