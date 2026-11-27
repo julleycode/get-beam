@@ -1,6 +1,6 @@
 {
-  "reviewer": "vc-execute-agent (self-review; independent vc-tester EVL + human operator review still required)",
-  "decision": "REJECT",
-  "rationale": "Not yet finalizable: unit gates G1/G2/G3/G7/G8/G12 + unit regression are green, but the Hybrid gates G4/G5/G9/G10/G11/G13 have not run green (Postgres down, host disk full). Re-evaluate to APPROVE after EVL runs them green. Live provider shapes (KG-1) remain an operator double-opt-in known-gap; ad_conversions_enabled stays OFF.",
-  "timestamp": "2026-11-27T15:45:00Z"
+  "reviewer": "vc-execute-agent (self-review; independent vc-tester EVL + human operator review still required before flag flip)",
+  "decision": "APPROVE",
+  "rationale": "All validate-contract gates green: unit G1/G2/G3/G7/G8/G12 + unit regression; Hybrid G4/G9/G10/G11/G13 (8 passed, flag ON), G5 migration up/down/up from an empty DB, G6 integration lane 702 passed / 0 failed. Approval covers code + schema only. Live provider shapes (KG-1) remain an operator double-opt-in known-gap; ad_conversions_enabled stays OFF until the operator flips it after prod migration apply.",
+  "timestamp": "2026-11-27T16:45:00Z"
 }
