@@ -218,6 +218,19 @@ async def send_draft(db: AsyncSession, draft: Draft) -> bool:
         logger.warning("send_draft_not_approved", draft_id=str(draft.id))
         return False
 
+    # Company exclusion list: refuse BEFORE any status mutation (typed error,
+    # not False — False would surface a misleading "reconnect" 502).
+    from apps.api.config import settings as _settings
+
+    if _settings.company_exclusion_enabled:
+        from apps.api.services.company_exclusion import (
+            CompanyExcludedError,
+            draft_is_company_excluded,
+        )
+
+        if await draft_is_company_excluded(db, draft):
+            raise CompanyExcludedError("company_excluded")
+
     # Get the content to send (user-edited takes priority)
     content = draft.edited_content or draft.ai_content
 

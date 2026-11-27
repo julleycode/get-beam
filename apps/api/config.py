@@ -401,6 +401,13 @@ class Settings(BaseSettings):
     # same posture as agent_detection_enabled / company_graph_enabled.
     candidate_outreach_enabled: bool = False
 
+    # ─── Company exclusion list (campaigns-outreach, 27-11-26) ───
+    # Per-site customer/competitor domain list. ON: matching visitors are
+    # skipped at send, export/ads/CRM push, LinkedIn targets, segmentation,
+    # planner input, auto-drafts and draft approve/retry (409). They stay
+    # visible (badged). OFF: zero new queries on every touched path.
+    company_exclusion_enabled: bool = False
+
     # ─── Fingerprint v2 fallback (WS3, per-site Check 2) ───
     # Check 2 (per-site fingerprint match) historically selected ONE column —
     # fingerprint_v3 when the visitor carried an fp3, else fingerprint (fp2) —

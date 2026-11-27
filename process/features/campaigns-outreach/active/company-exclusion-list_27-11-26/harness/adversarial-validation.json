@@ -1,0 +1,13 @@
+{
+  "scenarios": [
+    {"scenario": "Tenant B reads/writes/deletes/imports tenant A's exclusion list", "ruled_out": true, "rationale": "verify_site_access on every route (404); delete WHERE site_id AND id. Proven by test_crud_foreign_site_404."},
+    {"scenario": "Owner adds gmail.com or co.uk, excluding (or probing) everyone", "ruled_out": true, "rationale": "validate_exclusion_domain rejects freemail, public suffixes and <2-label entries (G1 + test_crud_rejects_freemail_and_suffix); matcher parent walk never yields a bare TLD."},
+    {"scenario": "Oversized CSV exhausts memory", "ruled_out": true, "rationale": "file.read(MAX+1) caps bytes at 1MB+1 then 413; row cap 5000 (test_crud_import_too_large_413, test_csv_row_cap)."},
+    {"scenario": "Suffix spoof: acme.com.evil.io matches acme.com", "ruled_out": true, "rationale": "match is exact on the label-suffix walk; unit test asserts no match."},
+    {"scenario": "Excluded person reached via merged/secondary visitor id", "ruled_out": true, "rationale": "excluded_visitor_ids evaluates the canonical_visitor_id group (test_flag_on_helper_and_merged)."},
+    {"scenario": "Approving an excluded draft auto-rejects siblings / saves voice example / leaves draft approved", "ruled_out": true, "rationale": "409 raised before status change, sibling reject and voice save (test_flag_on_approve_excluded_draft_409 asserts still pending, send not called)."},
+    {"scenario": "Domains/emails leak into logs", "ruled_out": true, "rationale": "single log event carries site_id/surface/count only (test_should_log_counts_only); CRUD logs counts only."},
+    {"scenario": "Flag OFF silently changes behavior or queries", "ruled_out": true, "rationale": "every call is inside `if settings.company_exclusion_enabled`; G4 patches helpers to raise and asserts no SQL touched site_exclusions; G7 AST census."},
+    {"scenario": "New future caller bypasses guard", "ruled_out": false, "rationale": "G7 census fails on any un-reviewed caller of the guarded chokepoints, but callers of entirely new send paths are only caught by review."}
+  ]
+}

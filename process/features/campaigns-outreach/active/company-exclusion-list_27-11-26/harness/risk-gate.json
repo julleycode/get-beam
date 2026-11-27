@@ -1,0 +1,10 @@
+{
+  "task": "company-exclusion-list: per-site company/domain exclusion enforced at outreach chokepoints",
+  "planPath": "process/features/campaigns-outreach/active/company-exclusion-list_27-11-26/company-exclusion-list_PLAN_27-11-26.md",
+  "riskLevel": "high",
+  "riskClasses": ["schema/data migration", "public API or external contract changes"],
+  "mustStopBeforeFinalize": true,
+  "humanApprovalRequired": true,
+  "why": "New table + migration e8c4b2a7d913 (additive, FK ON DELETE CASCADE); new REST surface /api/v1/sites/{site_id}/exclusions; additive VisitorOut.excluded_reason; new 409 company_excluded on draft approve/retry (flag ON only). Flag company_exclusion_enabled default OFF.",
+  "approver": "pending human (user) — prod migration apply + flag flip are operator steps"
+}

@@ -1,0 +1,11 @@
+{
+  "task": "company-exclusion-list",
+  "snippets": [
+    {"file": "apps/api/migrations/versions/e8c4b2a7d913_add_site_exclusions.py", "description": "additive create_table site_exclusions, FK sites.site_id ON DELETE CASCADE, unique(site_id, domain); down_revision d3f8a2c61b47"},
+    {"file": "apps/api/routers/exclusions.py", "description": "every route calls verify_site_access (404 on foreign site); delete scoped by site_id+id; import reads at most 1MB+1 bytes"},
+    {"file": "apps/api/services/company_exclusion.py", "description": "validate_exclusion_domain rejects freemail/public-suffix/<2 labels; excluded_visitor_ids scopes every query by site_id; log_applied logs site_id+surface+count only"},
+    {"file": "apps/api/services/campaign_sender.py", "description": "flag-guarded one-shot lookup; per-row skip after suppression check; skipped_company_excluded present only with flag ON"},
+    {"file": "apps/api/routers/drafts.py", "description": "approve/retry: 409 before any status mutation; CompanyExcludedError from send_draft mapped to 409"},
+    {"file": "apps/api/services/sender.py", "description": "send_draft raises CompanyExcludedError after approved-status check, before any mutation"}
+  ]
+}

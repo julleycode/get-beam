@@ -6,6 +6,22 @@
  * unchanged for all importers.
  */
 
+export type ExclusionReason = "customer" | "competitor" | "other";
+
+export interface SiteExclusion {
+  id: string;
+  domain: string;
+  company_name: string | null;
+  reason: ExclusionReason | string;
+  note: string | null;
+  created_at: string | null;
+}
+
+export interface ExclusionImportResult {
+  upserted: number;
+  errors: { row: number; error: string }[];
+}
+
 export interface KnownUploadResult {
   inserted: number;
   skipped: number;
@@ -304,6 +320,8 @@ export interface Visitor {
   confidence_score?: number | null;
   is_known?: boolean;
   known_source?: string | null;
+  // Company exclusion list reason; null unless company_exclusion_enabled is ON.
+  excluded_reason?: string | null;
   conviction?: string | null;
   // Handoff Detection H2: strongest fetch↔click handoff link confidence
   // ("high"/"medium"), or null/undefined when none. PROBABILISTIC list-row pill.

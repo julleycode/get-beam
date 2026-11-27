@@ -1,0 +1,11 @@
+{
+  "scenarios": [
+    {"scenario": "Open redirect via /c/?ct=free_trial&u=https://evil.com", "ruled_out": true, "rationale": "With valid ct the destination is only the owner-stored URL; u is used only via the legacy safe_dest(u) fallback pinned to the site host. Unit test test_foreign_u_never_used."},
+    {"scenario": "Owner stores a foreign URL for a site-host type", "ruled_out": true, "rationale": "422 at write time and re-checked at redirect time; test_site_host_type_rechecked_at_redirect + integration 422 cases."},
+    {"scenario": "HTML injection via stored CTA URL/label into outbound email", "ruled_out": true, "rationale": "URLs pass validate_booking_url (rejects < > \" ' ) and whitespace) + https; labels reject the same chars; email embeds only the server-built /c/ wrapper."},
+    {"scenario": "Forged tp stamps clicked_at on another tenant's touchpoint", "ruled_out": true, "rationale": "tp must belong to a campaign of the path site_id; integration test_foreign_site_tp_ignored."},
+    {"scenario": "Encrypted _bid leaked to a third-party booking host", "ruled_out": true, "rationale": "_bid/_tp appended only for site-host CTA types; book_demo redirects to booking_url untouched."},
+    {"scenario": "PII in cta_click_events", "ruled_out": true, "rationale": "Only site_id, cta_type, campaign_id, timestamps; logs carry cta_type + site_id only."},
+    {"scenario": "Click-count inflation by anyone holding a site_id", "ruled_out": false, "rationale": "Accepted named residual (D): public endpoint, 120/min/IP rate limit; click-level counts, not conversions."}
+  ]
+}

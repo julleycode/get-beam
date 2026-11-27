@@ -180,6 +180,19 @@ async def run_segmentation(
     site_category: str,
     visitors: list[Visitor],
 ) -> list[Segment]:
+    # Company exclusion list: filter at entry (flag ON only) so the prompt AND
+    # the allowed-member set (input_ids below) both derive from the filtered
+    # list. Not inside build_visitor_profiles — /ai/ask must still see them.
+    if settings.company_exclusion_enabled and visitors:
+        from apps.api.services.company_exclusion import excluded_visitor_ids, log_applied
+
+        _excl = await excluded_visitor_ids(db, site_id, [v.visitor_id for v in visitors])
+        if _excl:
+            log_applied(site_id, "segmentation", len(_excl))
+            visitors = [v for v in visitors if v.visitor_id not in _excl]
+            if not visitors:
+                return []
+
     profiles = await build_visitor_profiles(db, site_id, visitors)
 
     # Visitor-controlled text (page URLs, bios, company names) is sanitized

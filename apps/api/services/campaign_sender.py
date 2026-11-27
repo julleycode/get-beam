@@ -273,6 +273,17 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
     if not visitor_ids:
         return summary
 
+    # Company exclusion list: one lookup per send, flag-guarded so flag OFF
+    # issues zero new queries and the summary keeps its exact old shape.
+    company_excluded: dict[str, str] = {}
+    if settings.company_exclusion_enabled:
+        from apps.api.services.company_exclusion import excluded_visitor_ids, log_applied
+
+        summary["skipped_company_excluded"] = 0
+        company_excluded = await excluded_visitor_ids(db, campaign.site_id, visitor_ids)
+        if company_excluded:
+            log_applied(campaign.site_id, "campaign_send", len(company_excluded))
+
     sender = EmailSender()
 
     # Site host for link decoration: every campaign link pointing at the customer's
@@ -384,6 +395,9 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
         # this path passes no db to EmailSender so _is_suppressed is bypassed).
         if await is_email_suppressed(db, iv.email, "do_not_email"):
             summary["skipped_suppressed"] += 1
+            continue
+        if company_excluded and vid in company_excluded:
+            summary["skipped_company_excluded"] += 1
             continue
 
         # Idempotency fast-path: skip visitors already emailed for this campaign.

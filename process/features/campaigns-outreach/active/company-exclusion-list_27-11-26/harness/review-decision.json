@@ -1,0 +1,13 @@
+{
+  "task": "company-exclusion-list",
+  "reviewer": "vc-execute-agent self-review (independent vc-tester EVL + human review still pending)",
+  "decision": "approved-with-concerns",
+  "blockingFindings": [],
+  "nonBlockingFindings": [
+    "G10 manual UI walk not run (Clerk harness gap).",
+    "Full integration lane regression interrupted by local Docker failure; re-run in EVL.",
+    "Prod migration e8c4b2a7d913 apply + flag flip are operator steps."
+  ],
+  "notes": "Flag company_exclusion_enabled stays OFF; flag-OFF path proven to issue no site_exclusions queries.",
+  "timestamp": "2026-11-27"
+}
