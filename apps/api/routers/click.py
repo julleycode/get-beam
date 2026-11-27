@@ -40,16 +40,130 @@ def _bare_host(netloc: str) -> str:
     return h[4:] if h.startswith("www.") else h
 
 
-def build_click_url(api_base: str, site_id: str, dest_url: str, email: str) -> str:
+def build_click_url(
+    api_base: str,
+    site_id: str,
+    dest_url: str,
+    email: str,
+    cta_type: str | None = None,
+    campaign_id: str | None = None,
+    touchpoint_id: str | None = None,
+) -> str:
     """Build one recipient's Beam click-tracking link. The email is carried as the
     opaque Fernet _bid token (never plaintext). The customer imports these per-
-    recipient links (or the token as an ESP profile property) into their ESP."""
+    recipient links (or the token as an ESP profile property) into their ESP.
+
+    Optional ``cta_type`` / ``campaign_id`` / ``touchpoint_id`` add ``ct=`` /
+    ``cid=`` / ``tp=`` (signal-creative-cta). With all three None the output is
+    byte-identical to before."""
     from urllib.parse import quote
 
     from apps.api.services.link_decorator import generate_bid
 
     token = generate_bid(email)
-    return f"{api_base.rstrip('/')}/c/{site_id}?t={token}&u={quote(dest_url, safe='')}"
+    url = f"{api_base.rstrip('/')}/c/{site_id}?t={token}&u={quote(dest_url, safe='')}"
+    if cta_type:
+        url += f"&ct={quote(cta_type, safe='')}"
+    if campaign_id:
+        url += f"&cid={quote(campaign_id, safe='')}"
+    if touchpoint_id:
+        url += f"&tp={quote(touchpoint_id, safe='')}"
+    return url
+
+
+def _parse_uuid(value: str | None):
+    import uuid
+
+    if not value:
+        return None
+    try:
+        return uuid.UUID(value)
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+async def _cta_destination(
+    db: AsyncSession,
+    site_id: str,
+    site_url: str,
+    cta,
+    campaign_id,
+    touchpoint_id,
+    email: str | None,
+    legacy_dest: str,
+) -> str:
+    """Flag-ON + valid ``ct`` only. Records one cta_click_events row, then
+    returns the owner-STORED URL for that type (never a query-string URL),
+    falling back to the legacy ``safe_dest(u)`` target when there is none."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import update
+
+    from apps.api.models.campaign import Campaign, CampaignTouchpoint
+    from apps.api.models.cta_click_event import CtaClickEvent
+    from apps.api.services.signal_angle import SITE_HOST_CTA_TYPES, cta_url
+
+    try:
+        db.add(CtaClickEvent(site_id=site_id, cta_type=cta.value, campaign_id=campaign_id))
+        await db.commit()
+        logger.info("cta_click_recorded", site_id=site_id, cta_type=cta.value)
+    except Exception as exc:
+        await db.rollback()
+        logger.warning("cta_click_record_failed", site_id=site_id, error=str(exc))
+
+    row = (
+        await db.execute(
+            select(Site.cta_config, Site.booking_url).where(Site.site_id == site_id)
+        )
+    ).first()
+    stored = cta_url(row[0] if row else None, cta, row[1] if row else None)
+    if not stored:
+        return legacy_dest
+    is_site_host = cta in SITE_HOST_CTA_TYPES
+    if is_site_host and safe_dest(stored, site_url) != stored:
+        return legacy_dest
+
+    tp_valid = False
+    if touchpoint_id is not None:
+        try:
+            site_campaign_ids = select(Campaign.id).where(Campaign.site_id == site_id)
+            tp_valid = (
+                await db.execute(
+                    select(CampaignTouchpoint.id).where(
+                        CampaignTouchpoint.id == touchpoint_id,
+                        CampaignTouchpoint.campaign_id.in_(site_campaign_ids),
+                    )
+                )
+            ).scalar_one_or_none() is not None
+            if tp_valid:
+                await db.execute(
+                    update(CampaignTouchpoint)
+                    .where(
+                        CampaignTouchpoint.id == touchpoint_id,
+                        CampaignTouchpoint.clicked_at.is_(None),
+                    )
+                    .values(clicked_at=datetime.now(timezone.utc).replace(tzinfo=None))
+                )
+                await db.commit()
+        except Exception as exc:
+            await db.rollback()
+            tp_valid = False
+            logger.warning("cta_click_tp_stamp_failed", site_id=site_id, error=str(exc))
+
+    # Restore the _bid/_tp params decorate_links would have added — only on the
+    # site's own host, so the encrypted token never leaks cross-domain.
+    if is_site_host and email:
+        from apps.api.services.link_decorator import decorate_links
+
+        return decorate_links(
+            stored,
+            email,
+            urlsplit(site_url).netloc,
+            touchpoint_id=str(touchpoint_id) if tp_valid else None,
+        )
+    if is_site_host and tp_valid:
+        return stored + ("&" if "?" in stored else "?") + f"_tp={touchpoint_id}"
+    return stored
 
 
 def svid_cookie_name(site_id: str) -> str:
@@ -95,6 +209,27 @@ async def click_redirect(
     email = email.strip().lower() if email else None
     if email and "@" not in email:
         email = None
+
+    # Structured CTA click (signal-creative-cta). Honored ONLY with the flag ON
+    # and a valid ct — otherwise ct/cid/tp are ignored and the query sequence is
+    # byte-identical to the legacy path.
+    from apps.api.config import settings
+
+    if settings.cta_types_enabled:
+        from apps.api.services.signal_angle import parse_cta_type
+
+        cta = parse_cta_type(request.query_params.get("ct"))
+        if cta is not None:
+            dest = await _cta_destination(
+                db,
+                site_id,
+                site_url,
+                cta,
+                _parse_uuid(request.query_params.get("cid")),
+                _parse_uuid(request.query_params.get("tp")),
+                email,
+                dest,
+            )
 
     # Bind the recipient's email to their Beam visitor. Reuse the durable per-site
     # cookie (P1): if they visited the pixel'd site before, we already know their

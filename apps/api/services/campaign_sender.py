@@ -11,6 +11,7 @@ recipient this:
 """
 
 import re
+import uuid
 from datetime import datetime, timezone
 from html import escape
 from urllib.parse import quote
@@ -100,6 +101,8 @@ def _tidy(text: str) -> str:
 # whitespace, so every ``_tidy`` rule is a no-op on it; the real URL is swapped
 # back in afterwards, byte-for-byte.
 _BOOKING_SENTINEL = "\x00BOOKINGLINK\x00"
+# Same trick for the resolved structured-CTA link (signal-creative-cta).
+_CTA_SENTINEL = "\x00CTALINK\x00"
 
 
 def _personalize(
@@ -108,6 +111,7 @@ def _personalize(
     company_name: str | None = None,
     sender_name: str | None = None,
     booking_url: str | None = None,
+    cta_link: str | None = None,
 ) -> str:
     """Fill campaign template placeholders.
 
@@ -128,6 +132,7 @@ def _personalize(
     company = (company_name or "").strip() or "your company"
     sender = (sender_name or "").strip() or "The Beam Team"
     booking = (booking_url or "").strip()
+    cta = (cta_link or "").strip()
 
     out = (
         text.replace("{{first_name}}", first)
@@ -145,9 +150,16 @@ def _personalize(
         "{booking_link}", booking_repl
     )
 
+    # {{cta_link}} / {cta_link}: same sentinel pattern; empty when unset or
+    # when cta_types_enabled is OFF (the caller then passes None).
+    cta_repl = _CTA_SENTINEL if cta else ""
+    out = out.replace("{{cta_link}}", cta_repl).replace("{cta_link}", cta_repl)
+
     out = _tidy(out)
     if booking:
         out = out.replace(_BOOKING_SENTINEL, booking)
+    if cta:
+        out = out.replace(_CTA_SENTINEL, cta)
     return out
 
 
@@ -192,6 +204,7 @@ def _compose_generic(
     text: str,
     sender_name: str | None = None,
     booking_url: str | None = None,
+    cta_link: str | None = None,
 ) -> str:
     """Generic composition for an unconfirmed (candidate-tier) recipient.
 
@@ -205,7 +218,7 @@ def _compose_generic(
     here identically to the verified branch — otherwise every candidate /
     anonymous recipient would silently lose the booking link.
     """
-    return _personalize(text, None, None, sender_name, booking_url)
+    return _personalize(text, None, None, sender_name, booking_url, cta_link)
 
 
 def _compose_for_recipient(
@@ -218,6 +231,7 @@ def _compose_for_recipient(
     visitor_id: str | None = None,
     resolution_provider: str | None = None,
     booking_url: str | None = None,
+    cta_link: str | None = None,
 ) -> tuple[str, str]:
     """Send-time personalization gate — returns ``(subject, body_html)``.
 
@@ -228,14 +242,14 @@ def _compose_for_recipient(
     if is_verified_identity(identity_status):
         _assert_personalization_allowed(identity_status, visitor_id, resolution_provider)
         subject = _personalize(
-            subject_tpl, full_name, company_name, sender_name, booking_url
+            subject_tpl, full_name, company_name, sender_name, booking_url, cta_link
         )
         body = _personalize(
-            body_tpl, full_name, company_name, sender_name, booking_url
+            body_tpl, full_name, company_name, sender_name, booking_url, cta_link
         )
     else:
-        subject = _compose_generic(subject_tpl, sender_name, booking_url)
-        body = _compose_generic(body_tpl, sender_name, booking_url)
+        subject = _compose_generic(subject_tpl, sender_name, booking_url, cta_link)
+        body = _compose_generic(body_tpl, sender_name, booking_url, cta_link)
     return subject, body.replace("\n", "<br/>")
 
 
@@ -300,8 +314,14 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
             # booking_url is appended LAST on purpose: site_row[0..3] are
             # consumed positionally just below, so inserting a column mid-list
             # would silently rebind site_name / sender_name / owner_email.
+            # cta_config (signal-creative-cta) is appended LAST for the same reason.
             select(
-                Site.url, Site.name, User.full_name, User.email, Site.booking_url
+                Site.url,
+                Site.name,
+                User.full_name,
+                User.email,
+                Site.booking_url,
+                Site.cta_config,
             )
             .outerjoin(User, User.id == Site.user_id)
             .where(Site.site_id == campaign.site_id)
@@ -319,6 +339,18 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
     # compose helpers a unit test can call directly).
     booking_url = (site_row[4] if site_row else None) or None
     site_host = urlsplit(site_url or "").netloc or None
+
+    # Structured CTA (signal-creative-cta). Flag OFF → cta_dest stays None and
+    # {{cta_link}} renders empty: zero change to the flag-OFF send body.
+    cta_dest: str | None = None
+    cta_value: str | None = None
+    if settings.cta_types_enabled:
+        from apps.api.services.signal_angle import cta_url, resolve_cta
+
+        cta_config = (site_row[5] if site_row and len(site_row) > 5 else None) or None
+        cta_choice = resolve_cta(cta_config, touchpoint.get("cta_type"), booking_url)
+        cta_dest = cta_url(cta_config, cta_choice, booking_url)
+        cta_value = cta_choice.value
 
     # If the site owner connected their Gmail, send FROM their address (no "via
     # sendgrid.info"). None → send via Beam/SendGrid as before. Resolved once;
@@ -436,6 +468,31 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
         # already fetched) — exactly one query per recipient that gets this far.
         identity_status = await _identity_status()
 
+        # Pre-assign the touchpoint id (C1) so the per-recipient CTA link can
+        # carry tp= before the row is flushed; CampaignTouchpoint(id=tp_id)
+        # below honors it. An IntegrityError loser just discards the id.
+        tp_id = uuid.uuid4()
+        cta_link: str | None = None
+        if cta_dest:
+            from apps.api.routers.click import build_click_url
+
+            try:
+                # Wrapped as /c/ on the API host, so decorate_links skips it;
+                # /c/ restores _bid/_tp on site-host targets.
+                cta_link = build_click_url(
+                    settings.api_base_url,
+                    campaign.site_id,
+                    cta_dest,
+                    iv.email,
+                    cta_type=cta_value,
+                    campaign_id=str(campaign.id),
+                    touchpoint_id=str(tp_id),
+                )
+            except Exception:
+                # generate_bid raises without ENCRYPTION_KEY — render empty,
+                # exactly like decorate_links degrades.
+                cta_link = None
+
         # Identity-honesty gate: only a CONFIRMED ("identified") recipient is
         # addressed by name/company. Candidate-tier graph guesses get generic copy.
         subject, body_html = _compose_for_recipient(
@@ -448,6 +505,7 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
             visitor_id=vid,
             resolution_provider=iv.resolution_provider,
             booking_url=booking_url,
+            cta_link=cta_link,
         )
 
         # Claim the recipient by inserting the touchpoint BEFORE sending. This
@@ -460,6 +518,7 @@ async def send_campaign_emails(db: AsyncSession, campaign: Campaign) -> dict:
         # flush blocks here until we commit (→ their IntegrityError) or roll back
         # (→ they proceed).
         tp_row = CampaignTouchpoint(
+            id=tp_id,
             campaign_id=campaign.id,
             visitor_id=vid,
             channel="email",

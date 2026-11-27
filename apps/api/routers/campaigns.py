@@ -170,6 +170,29 @@ async def create_campaign_from_segment(
     return CampaignOut.model_validate(campaign)
 
 
+# Declared ABOVE /{site_id}/{campaign_id} so "cta-clicks" is not captured as a
+# campaign id (signal-creative-cta).
+@router.get("/{site_id}/cta-clicks")
+async def get_cta_click_counts(
+    site_id: str,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Per-CTA-type click counts from cta_click_events. Click-level only —
+    not conversions. Site.user_id-scoped (404 on a foreign site)."""
+    from apps.api.models.cta_click_event import CtaClickEvent
+
+    await verify_site_access(db, site_id, user)
+    rows = (
+        await db.execute(
+            select(CtaClickEvent.cta_type, func.count())
+            .where(CtaClickEvent.site_id == site_id)
+            .group_by(CtaClickEvent.cta_type)
+        )
+    ).all()
+    return {"counts": {cta_type: int(n) for cta_type, n in rows}}
+
+
 @router.get("/{site_id}/{campaign_id}", response_model=CampaignOut)
 async def get_campaign(
     site_id: str,
@@ -476,11 +499,24 @@ async def test_send_campaign(
     # preview renders exactly what a real send would.
     site_row = (
         await db.execute(
-            select(Site.name, Site.booking_url).where(Site.site_id == site_id)
+            select(Site.name, Site.booking_url, Site.cta_config).where(
+                Site.site_id == site_id
+            )
         )
     ).first()
     site_name = (site_row[0] if site_row else None) or "Beam"
     booking_url = (site_row[1] if site_row else None) or None
+    # Structured CTA (signal-creative-cta): the preview shows the stored
+    # destination UNWRAPPED (no /c/ click link — a test click must not record
+    # attribution). None when the flag is OFF → {{cta_link}} renders empty.
+    preview_cta_link = None
+    if settings.cta_types_enabled:
+        from apps.api.services.signal_angle import cta_url, resolve_cta
+
+        _cfg = site_row[2] if site_row and len(site_row) > 2 else None
+        preview_cta_link = cta_url(
+            _cfg, resolve_cta(_cfg, touchpoint.get("cta_type"), booking_url), booking_url
+        )
 
     # Sample recipient values so the preview renders fully (no raw
     # {{placeholders}}); [Your Name] resolves to the admin running the test.
@@ -488,12 +524,22 @@ async def test_send_campaign(
     sample_company = "Acme Inc"
     sender_name = user.full_name or None
     subject = "[TEST] " + _personalize(
-        touchpoint["subject"], sample_name, sample_company, sender_name, booking_url
+        touchpoint["subject"],
+        sample_name,
+        sample_company,
+        sender_name,
+        booking_url,
+        preview_cta_link,
     )
     # Links are NOT click-decorated here: a test click must not create
     # VisitorEmail rows or tracking state for the admin's own address.
     body_html = _personalize(
-        touchpoint["body"], sample_name, sample_company, sender_name, booking_url
+        touchpoint["body"],
+        sample_name,
+        sample_company,
+        sender_name,
+        booking_url,
+        preview_cta_link,
     ).replace("\n", "<br/>")
 
     # Preview through the SAME channel a real send would use: the owner's

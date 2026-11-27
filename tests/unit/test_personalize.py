@@ -12,6 +12,23 @@ def test_fills_first_and_company_and_signature():
     assert "{{" not in out and "[Your Name]" not in out
 
 
+def test_cta_link_both_brace_forms_resolve():
+    url = "https://api.example/c/s1?t=x&ct=free_trial&tp=abc"
+    out = _personalize("Try {{cta_link}} or {cta_link}.", "Dan", None, None, None, url)
+    assert out == f"Try {url} or {url}."
+
+
+def test_cta_link_renders_empty_when_unset():
+    out = _personalize("Start: {{cta_link}} / {cta_link}", "Dan", None, None, None, None)
+    assert "cta_link" not in out and "None" not in out
+    assert out.startswith("Start:")
+
+
+def test_cta_link_with_bracket_survives_tidy():
+    url = "https://acme.com/[team]/trial"
+    assert url in _personalize("Go {{cta_link}}", "Dan", None, None, None, url)
+
+
 def test_fallbacks_when_data_missing():
     out = _personalize("Hi {{first_name}} at {{company_name}}.", None, None, None)
     assert "Hi there at your company." in out

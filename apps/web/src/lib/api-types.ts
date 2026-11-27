@@ -184,6 +184,8 @@ export interface Site {
    * configured, in which case the token resolves to an empty string.
    */
   booking_url?: string | null;
+  /** Structured CTA set (book_demo reuses booking_url). null = not configured. */
+  cta_config?: CtaConfig | null;
   /** Cookie-consent mode emitted into the pixel snippet: off | eu | all | cmp. */
   consent_mode: ConsentMode;
   /** Optional — backend SiteOut may not return it; callers fall back to "unknown". */
@@ -203,6 +205,79 @@ export interface SiteUpdate {
   internal_damping_enabled: boolean;
   consent_mode: ConsentMode;
   booking_url: string;
+  cta_config: CtaConfig;
+}
+
+// ── Structured CTA types (signal-creative-cta) ────────────
+export type CtaType = "book_demo" | "free_trial" | "pricing_page" | "resource" | "reply";
+/** Types with their own stored URL (https, on the site's own host). */
+export type CtaLinkedType = "free_trial" | "pricing_page" | "resource";
+
+export interface CtaConfig {
+  default?: CtaType | null;
+  types?: Partial<Record<CtaLinkedType, { url: string; label?: string | null }>>;
+}
+
+export interface CtaClickCounts {
+  counts: Partial<Record<CtaType, number>>;
+}
+
+// ── Account rollup (account-measurement) — counts only, no PII ──
+export type AccountSort =
+  | "last_seen"
+  | "visitors"
+  | "identified"
+  | "sessions"
+  | "pricing"
+  | "touched"
+  | "clicks"
+  | "conversions";
+
+export interface AccountRow {
+  domain: string;
+  company_name: string | null;
+  industry: string | null;
+  employee_count: string | null;
+  visitors: number;
+  identified_people: number;
+  sessions: number;
+  pageviews: number;
+  pricing_visitors: number;
+  touched: number;
+  clicks: number;
+  conversions: number;
+  demo_bookings: number;
+  /** Always null today — see known_gaps. */
+  replies: number | null;
+  /** Always null today — see known_gaps. */
+  pipeline_value_cents: number | null;
+  last_seen: string | null;
+}
+
+export interface AccountListResponse {
+  accounts: AccountRow[];
+  total: number;
+  page: number;
+  page_size: number;
+  days: number;
+  sort: AccountSort;
+  definitions: Record<string, string>;
+  known_gaps: string[];
+}
+
+export interface AccountCampaign {
+  campaign_id: string;
+  name: string;
+  touched: number;
+  clicks: number;
+  conversions: number;
+}
+
+export interface AccountDetail extends AccountRow {
+  days: number;
+  campaigns: AccountCampaign[];
+  definitions: Record<string, string>;
+  known_gaps: string[];
 }
 
 // ── Agent gateway (agent-facing site content) ─────────────

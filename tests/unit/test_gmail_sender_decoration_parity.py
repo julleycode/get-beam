@@ -81,14 +81,15 @@ async def _run_send(monkeypatch, *, gmail_connected: bool) -> str:
     member_result = MagicMock()
     member_result.all.return_value = [("vid-1",)]
     site_result = MagicMock()
-    # 5-tuple: the send-path select is
-    # (Site.url, Site.name, User.full_name, User.email, Site.booking_url).
+    # 6-tuple: the send-path select is (Site.url, Site.name, User.full_name,
+    # User.email, Site.booking_url, Site.cta_config).
     site_result.first.return_value = (
         _SITE_URL,
         "Site",
         "Owner",
         "owner@site.example",
         None,
+        None,  # cta_config
     )
     iv_result = MagicMock()
     iv_result.scalar_one_or_none.return_value = _emailable_iv()
@@ -160,8 +161,13 @@ async def test_gmail_and_sendgrid_receive_identical_decorated_body(monkeypatch):
 
     # Fernet ciphertext is nondeterministic (random IV), so the raw _bid/unsub
     # tokens differ per call even for the same email — normalize them away and
-    # compare the structure that must match.
-    norm = lambda h: re.sub(r"(_bid=|\?t=)[^&\"'>]+", r"\1<TOKEN>", h)  # noqa: E731
+    # compare the structure that must match. The touchpoint id is pre-assigned
+    # per send (uuid4, signal-creative-cta C1), so normalize it too.
+    norm = lambda h: re.sub(  # noqa: E731
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        "<UUID>",
+        re.sub(r"(_bid=|\?t=)[^&\"'>]+", r"\1<TOKEN>", h),
+    )
 
     # The Gmail branch appends the unsubscribe footer on top of the shared
     # composed body; everything before that must be identical.

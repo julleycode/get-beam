@@ -217,6 +217,102 @@ async def _measured_stats_note(db: AsyncSession, site_id: str) -> str:
     return _MEASURED_STATS_NOTE.format(lines=lines, caveat=OPEN_RATE_CAVEAT)
 
 
+_ANGLE_NOTE = """
+## Creative angle (chosen for you — do not change it)
+Angle: {angle}
+{guidance}
+Write every touchpoint for this angle. Include "signal_angle": "{angle}" at the
+top level of the JSON.
+"""
+
+_CTA_NOTE = """
+## Call to action
+Each email touchpoint must include "cta_type", one of: {allowed}.
+Write the copy toward that action. For any type other than "reply", place the
+bare token {{{{cta_link}}}} where the link belongs (never inside an <a> tag) —
+it resolves to the site's own tracked link for that action. For "reply", ask
+for a reply and do not use {{{{cta_link}}}}.
+"""
+
+
+async def _signal_creative_inputs(
+    db: AsyncSession, segment: Segment, visitor_profiles: list[dict]
+) -> tuple[str, dict | None, str | None, str | None]:
+    """Server-side angle + CTA inputs (signal-creative-cta). Only called when a
+    flag is ON, so the flag-OFF query sequence is unchanged.
+
+    Returns (prompt_addition, cta_config, booking_url, angle). The angle is computed
+    from the RAW profiles (before sanitize_profiles); icp_fit is read only when
+    BOTH icp_fit_enabled and signal_creative_enabled are ON.
+    """
+    from apps.api.services.signal_angle import (
+        ANGLE_GUIDANCE,
+        available_cta_types,
+        dominant_signal,
+    )
+
+    addition = ""
+    angle_value: str | None = None
+    if settings.signal_creative_enabled:
+        icp_fits = None
+        if settings.icp_fit_enabled:
+            from apps.api.models.visitor import Visitor
+
+            vids = [str(p.get("visitor_id")) for p in visitor_profiles if p.get("visitor_id")]
+            icp_fits = {}
+            if vids:
+                rows = (
+                    await db.execute(
+                        select(Visitor.visitor_id, Visitor.icp_fit).where(
+                            Visitor.site_id == segment.site_id,
+                            Visitor.visitor_id.in_(vids),
+                        )
+                    )
+                ).all()
+                icp_fits = {vid: fit for vid, fit in rows}
+        angle = dominant_signal(visitor_profiles, icp_fits)
+        angle_value = angle.value
+        addition += _ANGLE_NOTE.format(angle=angle.value, guidance=ANGLE_GUIDANCE[angle])
+
+    cta_config: dict | None = None
+    booking_url: str | None = None
+    if settings.cta_types_enabled:
+        row = (
+            await db.execute(
+                select(Site.cta_config, Site.booking_url).where(
+                    Site.site_id == segment.site_id
+                )
+            )
+        ).first()
+        cta_config = (row[0] if row else None) or None
+        booking_url = (row[1] if row else None) or None
+        allowed = ", ".join(
+            f'"{t.value}"' for t in available_cta_types(cta_config, booking_url)
+        )
+        addition += _CTA_NOTE.format(allowed=allowed)
+    return addition, cta_config, booking_url, angle_value
+
+
+def _apply_signal_creative(
+    plan: dict,
+    cta_config: dict | None,
+    booking_url: str | None,
+    angle_value: str | None,
+) -> None:
+    """Deterministic post-parse coercion: signal_angle is the server's choice,
+    and every email touchpoint's cta_type is coerced to an available type."""
+    if angle_value is not None:
+        plan["signal_angle"] = angle_value
+    if settings.cta_types_enabled:
+        from apps.api.services.signal_angle import resolve_cta
+
+        for tp in plan.get("touchpoints", []):
+            if tp.get("channel") == "email":
+                tp["cta_type"] = resolve_cta(
+                    cta_config, tp.get("cta_type"), booking_url
+                ).value
+
+
 def _validate_plan(parsed: dict) -> str | None:
     """Shape check driving the JSON repair retry (None = usable)."""
     touchpoints = parsed.get("touchpoints")
@@ -276,6 +372,16 @@ async def plan_campaign(
     prompt += _generic_copy_note(visitor_profiles)
     prompt += await _measured_stats_note(db, segment.site_id)
 
+    signal_flags_on = settings.signal_creative_enabled or settings.cta_types_enabled
+    cta_config: dict | None = None
+    booking_url: str | None = None
+    angle_value: str | None = None
+    if signal_flags_on:
+        addition, cta_config, booking_url, angle_value = await _signal_creative_inputs(
+            db, segment, visitor_profiles
+        )
+        prompt += addition
+
     if not settings.gemini_api_key:
         raise RuntimeError(
             "GEMINI_API_KEY is not configured — cannot plan campaign"
@@ -325,6 +431,8 @@ async def plan_campaign(
         plan["touchpoints"] = []
     else:
         plan["touchpoints"] = [tp for tp in touchpoints if isinstance(tp, dict)]
+    if signal_flags_on:
+        _apply_signal_creative(plan, cta_config, booking_url, angle_value)
 
     campaign = Campaign(
         site_id=segment.site_id,
